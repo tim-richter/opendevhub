@@ -60,6 +60,11 @@ export function parseUpOutput(result: RunResult, fallbackFolder: string): UpResu
   );
 }
 
+export interface PortConfig {
+  forwardPorts: unknown[];
+  portsAttributes: Record<string, unknown>;
+}
+
 export interface ContainerInfo {
   id: string;
   running: boolean;
@@ -92,6 +97,29 @@ export class Containers {
     if (opts.rebuild) args.push("--remove-existing-container");
     const result = await this.run("devcontainer", args, { timeoutMs: UP_TIMEOUT_MS, onLine: opts.onLine });
     return parseUpOutput(result, `/workspaces/${path.basename(project.path)}`);
+  }
+
+  async readConfiguration(project: Project): Promise<PortConfig> {
+    const r = await this.run(
+      "devcontainer",
+      ["read-configuration", ...this.idArgs(project), "--include-merged-configuration"],
+      { timeoutMs: 60_000 },
+    );
+    if (r.exitCode !== 0) {
+      throw new CommandError(`devcontainer read-configuration failed (exit ${r.exitCode})`, tailLines(r.stderr));
+    }
+    let parsed: { configuration?: Record<string, unknown>; mergedConfiguration?: Record<string, unknown> };
+    try {
+      parsed = JSON.parse(r.stdout.trim()) as typeof parsed;
+    } catch {
+      throw new CommandError("devcontainer read-configuration returned invalid JSON", tailLines(r.stdout));
+    }
+    const cfg = parsed.mergedConfiguration ?? parsed.configuration ?? {};
+    const attrs = cfg.portsAttributes;
+    return {
+      forwardPorts: Array.isArray(cfg.forwardPorts) ? cfg.forwardPorts : [],
+      portsAttributes: attrs && typeof attrs === "object" ? (attrs as Record<string, unknown>) : {},
+    };
   }
 
   async inspect(containerId: string): Promise<ContainerInfo | undefined> {

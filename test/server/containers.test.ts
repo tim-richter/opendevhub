@@ -111,3 +111,38 @@ describe("Containers", () => {
     expect(calls[0].opts?.timeoutMs).toBe(30_000);
   });
 });
+
+describe("Containers.readConfiguration", () => {
+  it("runs read-configuration with the id label and merged config, preferring mergedConfiguration", async () => {
+    const stdout = JSON.stringify({
+      configuration: { forwardPorts: [1] },
+      mergedConfiguration: { forwardPorts: [3000, "db:5432"], portsAttributes: { "3000": { label: "web" } } },
+    });
+    const { run, calls } = fakeRunner(() => ({ stdout }));
+    const cfg = await new Containers(run).readConfiguration(project);
+    expect(calls[0].args).toEqual([
+      "read-configuration",
+      "--workspace-folder",
+      "/src/demo",
+      "--id-label",
+      `${LABEL}=demo-1a2b3c`,
+      "--include-merged-configuration",
+    ]);
+    expect(calls[0].opts?.timeoutMs).toBe(60_000);
+    expect(cfg).toEqual({ forwardPorts: [3000, "db:5432"], portsAttributes: { "3000": { label: "web" } } });
+  });
+
+  it("falls back to configuration and defaults missing fields", async () => {
+    const { run } = fakeRunner(() => ({ stdout: JSON.stringify({ configuration: { forwardPorts: [8080] } }) }));
+    expect(await new Containers(run).readConfiguration(project)).toEqual({ forwardPorts: [8080], portsAttributes: {} });
+    const empty = fakeRunner(() => ({ stdout: "{}" }));
+    expect(await new Containers(empty.run).readConfiguration(project)).toEqual({ forwardPorts: [], portsAttributes: {} });
+  });
+
+  it("throws CommandError on failure or invalid output", async () => {
+    const failed = fakeRunner(() => ({ exitCode: 1, stderr: "Dev container config not found" }));
+    await expect(new Containers(failed.run).readConfiguration(project)).rejects.toBeInstanceOf(CommandError);
+    const garbage = fakeRunner(() => ({ stdout: "not json" }));
+    await expect(new Containers(garbage.run).readConfiguration(project)).rejects.toThrow(/invalid JSON/);
+  });
+});
