@@ -26,6 +26,18 @@ function sendPage(res: ServerResponse, status: number, title: string, message: s
   res.end(html);
 }
 
+// The Host header is validated by classifyHost before proxyRequest/proxyUpgrade run. A request
+// carrying an Origin header that doesn't match that Host is a cross-site request (e.g. a page on
+// another site submitting a form or opening a WebSocket to us) and must be rejected before we
+// touch the upstream — otherwise upstreamHeaders() below would silently rewrite Origin and the
+// cross-site request would sail through as if it were same-origin.
+function isCrossSite(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  const host = req.headers.host ?? "";
+  return origin.toLowerCase() !== `http://${host.toLowerCase()}`;
+}
+
 function upstreamHeaders(req: IncomingMessage, target: ProxyTarget): OutgoingHttpHeaders {
   const origin = `http://${target.host}:${target.port}`;
   const headers: OutgoingHttpHeaders = { ...req.headers };
@@ -42,6 +54,11 @@ export function proxyRequest(
   resolve: ResolveTarget,
   dashboardUrl: string,
 ): void {
+  if (isCrossSite(req)) {
+    res.writeHead(403, { "content-type": "text/plain" });
+    res.end("Forbidden: cross-site request blocked");
+    return;
+  }
   const target = resolve(projectId);
   if (!target) {
     sendPage(res, 503, "Project not running", "Start it from the dashboard, then reload this page.", dashboardUrl);
@@ -54,6 +71,7 @@ export function proxyRequest(
       for (const [k, v] of Object.entries(upRes.headers)) {
         if (v !== undefined && !DROPPED_RESPONSE_HEADERS.has(k)) headers[k] = v;
       }
+      headers["x-frame-options"] = "SAMEORIGIN";
       res.writeHead(upRes.statusCode ?? 502, headers);
       res.flushHeaders();
       upRes.pipe(res);
@@ -74,6 +92,10 @@ export function proxyUpgrade(
   projectId: string,
   resolve: ResolveTarget,
 ): void {
+  if (isCrossSite(req)) {
+    socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    return;
+  }
   const target = resolve(projectId);
   if (!target) {
     socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");

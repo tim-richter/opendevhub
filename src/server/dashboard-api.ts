@@ -32,6 +32,25 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   const { store, orchestrator } = deps;
   const app = new Hono();
 
+  // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
+  // blocks cross-site state-changing requests (e.g. a form on another page POSTing to our
+  // actions) — safe methods are exempt since they don't mutate state and top-level navigations
+  // don't send an Origin header at all.
+  app.use("*", async (c, next) => {
+    c.header("X-Frame-Options", "DENY");
+    const method = c.req.method;
+    if (method !== "GET" && method !== "HEAD") {
+      const origin = c.req.header("origin");
+      if (origin) {
+        const host = c.req.header("host") ?? "";
+        if (origin.toLowerCase() !== `http://${host.toLowerCase()}`) {
+          return c.text("Forbidden: cross-site request blocked", 403);
+        }
+      }
+    }
+    await next();
+  });
+
   app.get("/api/projects", (c) => c.json(store.snapshot()));
 
   app.post("/api/projects/rescan", async (c) => {

@@ -59,6 +59,32 @@ describe("dashboard API", () => {
     expect((await app.request(`/api/projects/x/start`, { method: "POST" })).status).toBe(404);
   });
 
+  it("rejects cross-site POST actions with a mismatched Origin", async () => {
+    const { app, orchestrator } = setup();
+    const res = await app.request(`/api/projects/${project.id}/start`, {
+      method: "POST",
+      headers: { origin: "http://evil.example", host: "localhost:7777" },
+    });
+    expect(res.status).toBe(403);
+    expect(orchestrator.start).not.toHaveBeenCalled();
+  });
+
+  it("allows same-origin POST actions (Origin matches Host)", async () => {
+    const { app, orchestrator } = setup();
+    const res = await app.request(`/api/projects/${project.id}/start`, {
+      method: "POST",
+      headers: { origin: "http://localhost:7777", host: "localhost:7777" },
+    });
+    expect(res.status).toBe(202);
+    expect(orchestrator.start).toHaveBeenCalledWith(project.id);
+  });
+
+  it("sets X-Frame-Options: DENY on responses", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/projects");
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+  });
+
   it("refuses actions while preflight has errors", async () => {
     const { app, store, orchestrator } = setup();
     store.setPreflight({ errors: ["Docker daemon is not reachable"] });

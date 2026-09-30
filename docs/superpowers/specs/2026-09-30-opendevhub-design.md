@@ -250,6 +250,17 @@ known directory (the workspace folder in MVP).
   (SSE must not be buffered). Forward WebSocket upgrades (PTY).
 - Project not running → an opendevhub HTML page "Project not running — start it
   from the dashboard" with a link back.
+- **Origin check:** the `Host` check above stops DNS rebinding, but not a normal
+  cross-site request from another page in the browser — and rewriting `Origin` for
+  the upstream (above) would otherwise make such a request look same-origin to
+  opencode. So before anything else: if the request carries an `Origin` header and
+  it is not exactly `http://` + the (already-validated) `Host` header, reject with
+  `403` (plain-text body for HTTP, a bare `403 Forbidden` status line for a
+  WebSocket upgrade) instead of proxying. Requests with no `Origin` header (e.g.
+  top-level navigations) are allowed through. Only after this check passes do we
+  rewrite `Origin` for the upstream. Proxied HTTP responses also get
+  `X-Frame-Options: SAMEORIGIN` forced on the way out, overriding any value the
+  upstream sent.
 
 ### 5.6 Dashboard API (Host = localhost)
 
@@ -266,6 +277,13 @@ known directory (the workspace folder in MVP).
 
 Lifecycle actions on the same project are serialised (a per-project mutex);
 a second request while one is in flight returns `409`.
+
+**Origin check:** every non-`GET`/`HEAD` request (the action routes above) whose
+`Origin` header is present and not exactly `http://` + the request's `Host`
+header is rejected with `403`, blocking cross-site requests (e.g. a form on
+another site posting to `/api/projects/:id/start`). `GET`/`HEAD` and requests
+with no `Origin` header pass through. All dashboard responses also carry
+`X-Frame-Options: DENY` so the dashboard can't be framed by another site.
 
 ### 5.7 Dashboard UI
 

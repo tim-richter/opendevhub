@@ -30,6 +30,9 @@ beforeEach(async () => {
       let n = 0;
       req.on("data", (c: Buffer) => (n += c.length));
       req.on("end", () => res.end(String(n)));
+    } else if (req.url === "/xfo") {
+      res.writeHead(200, { "x-frame-options": "ALLOW-FROM http://evil.example" });
+      res.end("ok");
     } else {
       res.writeHead(404);
       res.end();
@@ -59,13 +62,29 @@ afterEach(async () => {
 
 describe("proxyRequest", () => {
   it("injects basic auth and rewrites host and origin", async () => {
-    const res = await fetch(`${proxyUrl}/echo`, { headers: { authorization: "Bearer user-token", origin: "http://demo.localhost:7777" } });
+    const res = await fetch(`${proxyUrl}/echo`, { headers: { authorization: "Bearer user-token", origin: proxyUrl } });
     const body = await res.json();
     expect(body).toEqual({
       host: `127.0.0.1:${target!.port}`,
       authorization: basicAuth("pw"),
       origin: `http://127.0.0.1:${target!.port}`,
     });
+  });
+
+  it("allows same-origin POST requests (Origin matches Host)", async () => {
+    const res = await fetch(`${proxyUrl}/upload`, { method: "POST", headers: { origin: proxyUrl }, body: "hi" });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects cross-site POST requests with a mismatched Origin", async () => {
+    const res = await fetch(`${proxyUrl}/echo`, { method: "POST", headers: { origin: "http://evil.example" } });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+  });
+
+  it("sets X-Frame-Options: SAMEORIGIN on proxied responses, overriding the upstream's own value", async () => {
+    const res = await fetch(`${proxyUrl}/xfo`, { headers: { origin: proxyUrl } });
+    expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
   });
 
   it("strips www-authenticate so browsers never show a login dialog", async () => {
@@ -113,5 +132,18 @@ describe("proxyUpgrade", () => {
     ws.send("hi");
     await expect.poll(() => messages).toEqual([`auth:${basicAuth("pw")}`, "echo:hi"]);
     ws.close();
+  });
+
+  it("rejects cross-site websocket upgrades with a mismatched Origin", async () => {
+    const ws = new WebSocket(`${proxyUrl.replace("http", "ws")}/pty`, { headers: { origin: "http://evil.example" } });
+    const status = await new Promise<number>((resolve, reject) => {
+      ws.on("unexpected-response", (_req, res) => {
+        resolve(res.statusCode ?? 0);
+        ws.terminate();
+      });
+      ws.on("open", () => reject(new Error("connection should have been rejected")));
+      ws.on("error", () => {});
+    });
+    expect(status).toBe(403);
   });
 });

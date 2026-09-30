@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   build: { outDir: "../../dist/web", emptyOutDir: true },
   server: {
-    proxy: { "/api": { target: "http://localhost:7777", changeOrigin: true } },
+    proxy: {
+      "/api": { target: "http://localhost:7777", changeOrigin: true, headers: { origin: "http://localhost:7777" } },
+    },
   },
 });
