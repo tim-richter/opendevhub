@@ -35,6 +35,7 @@ export function App() {
       .catch((err: Error) => setActionError(err.message))
       .finally(() => setScanning(false));
   };
+  const onLoadLogs = (projectId: string) => loadLogs(projectId).catch((err: Error) => setActionError(err.message));
 
   return (
     <main className="app">
@@ -76,7 +77,7 @@ export function App() {
               logs={logs[view.project.id]}
               highlight={highlight}
               onAction={(a) => void act(view.project.id, a)}
-              onLoadLogs={() => void loadLogs(view.project.id)}
+              onLoadLogs={() => void onLoadLogs(view.project.id)}
             />
           ))}
         </ul>
