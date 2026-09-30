@@ -1,0 +1,5 @@
+{
+  "name": "opendevhub-e2e",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "npm i -g @opencode/cli@2"
+}
