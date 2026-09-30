@@ -1,0 +1,37 @@
+{
+  "name": "opendevhub",
+  "version": "0.1.0",
+  "description": "Local dashboard to orchestrate opencode v2 agents running in devcontainers",
+  "type": "module",
+  "bin": { "opendevhub": "dist/bin.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "tsx src/server/bin.ts --no-open",
+    "dev:web": "vite",
+    "build": "vite build && tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "OPENDEVHUB_E2E=1 vitest run -c vitest.e2e.config.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.3",
+    "hono": "^4.13.12",
+    "open": "^11.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.3",
+    "ws": "^8.22.0"
+  }
+}
