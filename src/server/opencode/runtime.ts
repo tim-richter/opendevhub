@@ -7,6 +7,34 @@ export const OPENCODE_PORT = 4096;
 const LOG_FILE = "/tmp/opendevhub-opencode.log";
 const KILL_SERVER = "pkill -f 'opencode [s]erve' || true";
 
+// `devcontainer exec` does not read shell rc files, so the installer's PATH entry
+// (added to .bashrc/.zshrc) is invisible. Check PATH, the usual install dirs, then
+// ask bash/zsh (login and plain interactive, since bash -l skips .bashrc); print the first absolute path to an executable.
+const RESOLVE_BINARY = `
+check() { case "$1" in /*) [ -x "$1" ] && { echo "$1"; exit 0; } ;; esac; }
+check "$(command -v opencode 2>/dev/null)"
+check "$HOME/.opencode/bin/opencode"
+check "$HOME/.local/bin/opencode"
+check "$HOME/.bun/bin/opencode"
+for sh in bash zsh; do
+  command -v "$sh" >/dev/null 2>&1 || continue
+  for flags in -lic -ic; do
+    check "$("$sh" "$flags" 'command -v opencode' 2>/dev/null < /dev/null | grep '^/' | tail -n 1)"
+  done
+done
+exit 1
+`;
+const SEARCHED = "PATH, ~/.opencode/bin, ~/.local/bin, ~/.bun/bin and bash/zsh login shells";
+
+/** Last line of the output that is an absolute path to an `opencode` binary (shells may print noise). */
+export function parseBinaryPath(output: string): string | undefined {
+  return output
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^\/\S*\/opencode$/.test(l))
+    .at(-1);
+}
+
 export function parseOpencodeVersion(output: string): string | undefined {
   return output.match(/(\d+)\.(\d+)\.(\d+)/)?.[0];
 }
@@ -54,25 +82,30 @@ export class OpencodeRuntime {
     }
 
     const { containers } = this.deps;
-    const versionRun = await containers.exec(project, ["opencode", "--version"]);
-    if (versionRun.exitCode !== 0) {
+    const resolved = await containers.exec(project, ["sh", "-c", RESOLVE_BINARY]);
+    const binary = resolved.exitCode === 0 ? parseBinaryPath(resolved.stdout) : undefined;
+    if (!binary) {
       throw new CommandError(
-        "opencode is not installed in the devcontainer (expected opencode v2 on PATH)",
-        tailLines(versionRun.stderr + versionRun.stdout),
+        `opencode v2 not found in the devcontainer (searched ${SEARCHED})`,
+        tailLines(resolved.stderr),
       );
+    }
+    const versionRun = await containers.exec(project, [binary, "--version"]);
+    if (versionRun.exitCode !== 0) {
+      throw new CommandError(`failed to run ${binary} --version`, tailLines(versionRun.stderr + versionRun.stdout));
     }
     const version = parseOpencodeVersion(versionRun.stdout);
     if (!version || Number(version.split(".")[0]) < 2) {
       throw new CommandError(`opencode ${version ?? "(unknown version)"} found, but opendevhub requires opencode v2`);
     }
-    args.onLine(`opencode ${version} found in container`);
+    args.onLine(`opencode ${version} found at ${binary}`);
 
     const password = this.deps.generatePassword?.() ?? randomBytes(32).toString("base64url");
     const port = this.deps.port ?? OPENCODE_PORT;
     await containers.exec(project, ["sh", "-c", KILL_SERVER]);
     const script =
       `cd ${shellQuote(args.workspaceFolder)} && ` +
-      `nohup opencode serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
+      `nohup ${shellQuote(binary)} serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
     const launch = await containers.exec(project, ["sh", "-c", script], { env: { OPENCODE_PASSWORD: password } });
     if (launch.exitCode !== 0) {
       throw new CommandError("failed to launch opencode serve", tailLines(launch.stderr + launch.stdout));

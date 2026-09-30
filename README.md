@@ -12,7 +12,7 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 - Linux (macOS support is planned)
 - Docker, and the devcontainer CLI: `npm i -g @devcontainers/cli`
 - Node.js 20 or newer
-- opencode v2 installed in each project's devcontainer. For example, add `"postCreateCommand": "npm i -g @opencode/cli@2"` to the project's devcontainer.json.
+- opencode v2 installed in each project's devcontainer, either with `npm i -g @opencode/cli@2` (for example in `postCreateCommand`) or with the official installer (`curl -fsSL https://opencode.ai/install | bash`). opendevhub looks for the binary on `PATH`, in `~/.opencode/bin`, `~/.local/bin` and `~/.bun/bin`, and in the `PATH` that bash or zsh set up from their startup files.
 - LLM provider credentials available inside the container (via `containerEnv`, `remoteEnv` or mounts). opendevhub does not manage credentials.
 
 ## Usage

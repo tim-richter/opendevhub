@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { OpencodeClient } from "../../src/server/opencode/client";
-import { OpencodeRuntime, parseOpencodeVersion } from "../../src/server/opencode/runtime";
+import { OpencodeRuntime, parseBinaryPath, parseOpencodeVersion } from "../../src/server/opencode/runtime";
 import type { Project } from "../../src/shared/types";
 import { type Call, fakeRunner } from "../helpers/fake-runner";
 import { type FakeOpencode, startFakeOpencode } from "../helpers/fake-opencode";
@@ -13,8 +13,14 @@ beforeEach(async () => {
 });
 afterEach(() => fake.close());
 
-function runtimeWith(versionOutput: { exitCode?: number; stdout?: string }) {
-  const { run, calls } = fakeRunner((c: Call) => (c.args.includes("--version") ? versionOutput : {}));
+type Output = { exitCode?: number; stdout?: string };
+const BIN = "/home/node/.opencode/bin/opencode";
+const isResolve = (c: Call) => c.args.at(-1)?.includes("command -v opencode") ?? false;
+
+function runtimeWith(versionOutput: Output, resolveOutput: Output = { stdout: `${BIN}\n` }) {
+  const { run, calls } = fakeRunner((c: Call) =>
+    isResolve(c) ? resolveOutput : c.args.includes("--version") ? versionOutput : {},
+  );
   const runtime = new OpencodeRuntime({
     containers: new Containers(run),
     clientFor: (ep) => new OpencodeClient(ep),
@@ -35,12 +41,48 @@ describe("parseOpencodeVersion", () => {
   ])("%s -> %s", (input, expected) => expect(parseOpencodeVersion(input)).toBe(expected));
 });
 
+describe("parseBinaryPath", () => {
+  it.each([
+    [`${BIN}\n`, BIN],
+    ["Welcome to zsh!\n[oh-my-zsh] update available\n/usr/local/bin/opencode\n", "/usr/local/bin/opencode"],
+    ["opencode: aliased to foo\n", undefined],
+    ["", undefined],
+  ])("%j -> %s", (input, expected) => expect(parseBinaryPath(input)).toBe(expected));
+});
+
 describe("OpencodeRuntime.ensureRunning", () => {
+  it("searches PATH, the installer dirs and bash/zsh login shells for the binary", async () => {
+    const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
+    await runtime.ensureRunning(project, args);
+    const script = calls.find(isResolve)?.args.at(-1) ?? "";
+    for (const needle of ["command -v opencode", "$HOME/.opencode/bin/opencode", "$HOME/.local/bin/opencode", "$HOME/.bun/bin/opencode", "-lic", "-ic"]) {
+      expect(script).toContain(needle);
+    }
+    expect(script).toMatch(/for sh in bash zsh/);
+  });
+
+  it("uses the resolved absolute path for --version and serve", async () => {
+    const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
+    await runtime.ensureRunning(project, args);
+    expect(calls.find((c) => c.args.at(-1) === "--version")?.args.slice(-2)).toEqual([BIN, "--version"]);
+    const launch = calls.find((c) => c.args.at(-1)?.includes("serve --hostname 0.0.0.0"));
+    expect(launch?.args.at(-1)).toContain(`nohup '${BIN}' serve`);
+  });
+
+  it("accepts a binary found only via a noisy zsh login shell", async () => {
+    const { runtime, calls } = runtimeWith(
+      { stdout: "opencode v2.0.20" },
+      { stdout: "[oh-my-zsh] Would you like to update? [Y/n]\n/opt/tools/opencode\n" },
+    );
+    await runtime.ensureRunning(project, args);
+    expect(calls.find((c) => c.args.at(-1) === "--version")?.args.at(-2)).toBe("/opt/tools/opencode");
+  });
+
   it("launches opencode serve with the generated password and waits for health", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20\n" });
     const res = await runtime.ensureRunning(project, args);
     expect(res).toEqual({ password: "pw", version: "2.0.20" });
-    const launch = calls.find((c) => c.args.at(-1)?.includes("opencode serve --hostname 0.0.0.0"));
+    const launch = calls.find((c) => c.args.at(-1)?.includes("serve --hostname 0.0.0.0"));
     expect(launch?.args).toEqual(expect.arrayContaining(["--remote-env", "OPENCODE_PASSWORD=pw", "sh", "-c"]));
     expect(launch?.args.at(-1)).toContain(`--port ${fake.port}`);
     expect(launch?.args.at(-1)).toContain("cd '/workspaces/demo'");
@@ -54,9 +96,17 @@ describe("OpencodeRuntime.ensureRunning", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("fails clearly when opencode is missing", async () => {
-    const { runtime } = runtimeWith({ exitCode: 127, stdout: "" });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/not installed/);
+  it("fails clearly, listing the searched locations, when opencode is not found", async () => {
+    const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" }, { exitCode: 1, stdout: "" });
+    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(
+      /opencode v2 not found in the devcontainer.*PATH.*~\/\.opencode\/bin.*bash\/zsh/,
+    );
+    expect(calls.some((c) => c.args.at(-1) === "--version")).toBe(false);
+  });
+
+  it("fails clearly when the found binary cannot report its version", async () => {
+    const { runtime } = runtimeWith({ exitCode: 126, stdout: "" });
+    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(`failed to run ${BIN} --version`);
   });
 
   it("rejects opencode v1", async () => {
@@ -65,7 +115,9 @@ describe("OpencodeRuntime.ensureRunning", () => {
   });
 
   it("times out when the server never becomes healthy", async () => {
-    const { run } = fakeRunner((c) => (c.args.includes("--version") ? { stdout: "2.0.20" } : {}));
+    const { run } = fakeRunner((c) =>
+      isResolve(c) ? { stdout: BIN } : c.args.includes("--version") ? { stdout: "2.0.20" } : {},
+    );
     const runtime = new OpencodeRuntime({
       containers: new Containers(run),
       clientFor: (ep) => new OpencodeClient(ep),
