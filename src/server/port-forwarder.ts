@@ -3,14 +3,19 @@ import type { ForwardedPort } from "../shared/types";
 import type { PortSpec } from "./ports";
 
 interface Forward {
-  server: net.Server;
+  servers: net.Server[];
   sockets: Set<net.Socket>;
 }
 
 export interface PortForwarderOptions {
+  /** Defaults to 127.0.0.1, in which case ::1 is bound too (browsers resolve `localhost` to ::1 first). */
   bindHost?: string;
   maxOffset?: number;
   logIntervalMs?: number;
+}
+
+function closeServers(servers: net.Server[]): Promise<void> {
+  return Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(() => resolve())))).then(() => {});
 }
 
 function listen(server: net.Server, port: number, host: string): Promise<NodeJS.ErrnoException | undefined> {
@@ -57,7 +62,7 @@ export class PortForwarder {
         (f) =>
           new Promise<void>((resolve) => {
             for (const s of f.sockets) s.destroy();
-            f.server.close(() => resolve());
+            void closeServers(f.servers).then(resolve);
           }),
       ),
     );
@@ -78,7 +83,7 @@ export class PortForwarder {
     const logIntervalMs = this.opts.logIntervalMs ?? 30_000;
     let lastLog = -Infinity;
 
-    const server = net.createServer({ allowHalfOpen: true }, (client) => {
+    const handleClient = (client: net.Socket) => {
       const upstream = net.connect({ host: targetHost, port: spec.containerPort, allowHalfOpen: true });
       sockets.add(client);
       sockets.add(upstream);
@@ -94,27 +99,47 @@ export class PortForwarder {
         const now = Date.now();
         if (now - lastLog >= logIntervalMs) {
           lastLog = now;
-          onLog(`ports: ${spec.containerPort}: ${err.message}`);
+          const hint =
+            (err as NodeJS.ErrnoException).code === "ECONNREFUSED"
+              ? " (is the app listening on 0.0.0.0 inside the container? apps bound to localhost there are not reachable)"
+              : "";
+          onLog(`ports: ${spec.containerPort}: ${err.message}${hint}`);
         }
         destroy();
       });
       upstream.on("close", destroy);
       client.pipe(upstream);
       upstream.pipe(client);
-    });
+    };
+    const newServer = () => net.createServer({ allowHalfOpen: true }, handleClient);
 
     const bindHost = this.opts.bindHost ?? "127.0.0.1";
+    // ::1 is bound best-effort alongside the default: if another app holds the port there,
+    // `localhost:<port>` would reach that app instead, so the port counts as taken.
+    const extraHosts = this.opts.bindHost === undefined ? ["::1"] : [];
     const last = Math.min(65535, spec.containerPort + (this.opts.maxOffset ?? 100));
     for (let port = spec.containerPort; port <= last; port++) {
-      const err = await listen(server, port, bindHost);
-      if (!err) {
-        server.on("error", () => {});
-        list.push({ server, sockets });
-        return { status: "forwarded", containerPort: spec.containerPort, ...labelled, hostPort: port };
+      const main = newServer();
+      const err = await listen(main, port, bindHost);
+      if (err?.code === "EADDRINUSE") continue;
+      if (err) return { status: "failed", containerPort: spec.containerPort, ...labelled, reason: err.message };
+      const servers = [main];
+      let taken = false;
+      for (const host of extraHosts) {
+        const extra = newServer();
+        const extraErr = await listen(extra, port, host);
+        if (!extraErr) servers.push(extra);
+        else if (extraErr.code === "EADDRINUSE") taken = true;
+        // any other error (e.g. IPv6 disabled): serve IPv4 only
+        if (taken) break;
       }
-      if (err.code !== "EADDRINUSE") {
-        return { status: "failed", containerPort: spec.containerPort, ...labelled, reason: err.message };
+      if (taken) {
+        await closeServers(servers);
+        continue;
       }
+      for (const server of servers) server.on("error", () => {});
+      list.push({ servers, sockets });
+      return { status: "forwarded", containerPort: spec.containerPort, ...labelled, hostPort: port };
     }
     return {
       status: "failed",

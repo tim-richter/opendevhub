@@ -31,9 +31,9 @@ async function blocker(port: number): Promise<void> {
   await listen(server, port, "127.0.0.1");
 }
 
-function roundTrip(port: number, message: string): Promise<string> {
+function roundTrip(port: number, message: string, host = "127.0.0.1"): Promise<string> {
   return new Promise((resolve, reject) => {
-    const socket = net.connect(port, "127.0.0.1", () => socket.write(message));
+    const socket = net.connect(port, host, () => socket.write(message));
     socket.once("data", (d) => {
       resolve(d.toString());
       socket.destroy();
@@ -80,6 +80,25 @@ describe("PortForwarder", () => {
     expect(hostPort(b)).toBeGreaterThan(port);
   });
 
+  it("also listens on ::1, so http://localhost:<port> reaches the forward", async () => {
+    forwarder = new PortForwarder();
+    const port = await echoUpstream();
+    const [result] = await forwarder.open("p1", "127.0.0.2", [{ containerPort: port }]);
+    expect(hostPort(result)).toBe(port);
+    expect(await roundTrip(port, "v6", "::1")).toBe("echo:v6");
+  });
+
+  it("treats a port held by another app on ::1 as taken", async () => {
+    forwarder = new PortForwarder();
+    const port = await echoUpstream();
+    const hostApp = net.createServer();
+    servers.push(hostApp);
+    await listen(hostApp, port, "::1");
+    const [result] = await forwarder.open("p1", "127.0.0.2", [{ containerPort: port }]);
+    expect(hostPort(result)).toBeGreaterThan(port);
+    expect(await roundTrip(hostPort(result), "x", "::1")).toBe("echo:x");
+  });
+
   it("reports failed when no candidate is free", async () => {
     forwarder = new PortForwarder({ maxOffset: 0 });
     const port = await echoUpstream();
@@ -106,6 +125,7 @@ describe("PortForwarder", () => {
     await closedOrReset(hostPort(result));
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatch(new RegExp(`^ports: ${port}: `));
+    expect(logs[0]).toMatch(/is the app listening on 0\.0\.0\.0/);
     const upstream = net.createServer((s) => s.on("data", (d) => s.write("late:" + d.toString())));
     servers.push(upstream);
     await listen(upstream, port, "127.0.0.2");
