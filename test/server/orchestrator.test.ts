@@ -23,7 +23,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
       o.onLine("building image");
       return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo" };
     }),
-    inspect: vi.fn(async (): Promise<ContainerInfo | undefined> => running),
+    inspect: vi.fn(async (_id?: string): Promise<ContainerInfo | undefined> => running),
     listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
     stop: vi.fn(async () => {}),
   };
@@ -201,7 +201,7 @@ describe("Orchestrator", () => {
     await orch.start(project.id);
     await orch.start(project2.id);
 
-    containers.inspect.mockImplementation(async (id: string) => {
+    containers.inspect.mockImplementation(async (id?: string) => {
       if (id === "c1") throw new Error("docker inspect failed");
       return { ...running, id: "c2", running: false };
     });
@@ -218,7 +218,7 @@ describe("Orchestrator", () => {
 
     let resolveInspect!: (v: ContainerInfo | undefined) => void;
     containers.inspect.mockImplementationOnce(() => new Promise((resolve) => (resolveInspect = resolve)));
-    let resolveEnsure!: (v: { password: string; version?: string }) => void;
+    let resolveEnsure!: (v: { password: string; version: string }) => void;
     runtime.ensureRunning.mockImplementationOnce(() => new Promise((resolve) => (resolveEnsure = resolve)));
 
     const refreshP = orch.refreshContainers();
