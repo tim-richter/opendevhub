@@ -15,7 +15,7 @@ export interface StoreOptions {
   persist: (state: PersistedState) => void;
 }
 
-const DURABLE_KEYS = ["containerId", "password", "workspaceFolder"] as const;
+const DURABLE_KEYS = ["containerId", "password", "workspaceFolder", "relayToken"] as const;
 
 function defaultRuntime(projectId: ProjectId): ProjectRuntime {
   return { projectId, containerState: "stopped", opencode: "absent" };
@@ -88,7 +88,7 @@ export class StateStore {
       roots: this.roots,
       preflight: this.preflightState,
       projects: this.projects().map((project) => {
-        const { password: _password, ...runtime } = this.runtime(project.id);
+        const { password: _password, relayToken: _relayToken, ...runtime } = this.runtime(project.id);
         return {
           project,
           runtime,
@@ -107,8 +107,13 @@ export class StateStore {
   private save(): void {
     const projects: Record<ProjectId, PersistedRuntime> = {};
     for (const [id, r] of this.runtimes) {
-      if (r.containerId || r.password || r.workspaceFolder) {
-        projects[id] = { containerId: r.containerId, password: r.password, workspaceFolder: r.workspaceFolder };
+      if (r.containerId || r.password || r.workspaceFolder || r.relayToken) {
+        projects[id] = {
+          containerId: r.containerId,
+          password: r.password,
+          workspaceFolder: r.workspaceFolder,
+          relayToken: r.relayToken,
+        };
       }
     }
     this.opts.persist({ projects });

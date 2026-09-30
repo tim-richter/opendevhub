@@ -12,6 +12,7 @@ export interface PersistedRuntime {
   containerId?: string;
   password?: string;
   workspaceFolder?: string;
+  relayToken?: string;
 }
 
 export interface PersistedState {

@@ -6,6 +6,8 @@ import type { OpencodeClient } from "../../src/server/opencode/client";
 import { BusyError, NotFoundError, Orchestrator } from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
+import type { ForwardTarget } from "../../src/server/port-forwarder";
+import type { RelayStatus } from "../../src/server/relay/runtime";
 import type { ForwardedPort } from "../../src/shared/types";
 import type { Project } from "../../src/shared/types";
 
@@ -38,19 +40,30 @@ function setup(persisted: PersistedState = { projects: {} }) {
     ensureRunning: vi.fn(async (_p: Project, _a: { password?: string }) => ({ password: "pw", version: "2.0.20" })),
     stopServer: vi.fn(async () => {}),
     isHealthy: vi.fn(async () => true),
+    resolveBinary: vi.fn(async (_p?: Project): Promise<string | undefined> => "/usr/local/bin/opencode"),
   };
   const forwarder = {
-    open: vi.fn(async (_id: string, _host: string, ports: PortSpec[], _onLog?: (l: string) => void) =>
+    open: vi.fn(async (_id: string, _target: ForwardTarget, ports: PortSpec[], _onLog?: (l: string) => void) =>
       ports.map((p): ForwardedPort => ({ status: "forwarded", containerPort: p.containerPort, label: p.label, hostPort: p.containerPort })),
     ),
     close: vi.fn(async (_id: string) => {}),
     closeAll: vi.fn(async () => {}),
+  };
+  const relay = {
+    ensureRunning: vi.fn(
+      async (_p: Project, _a: { ip: string; token: string; binary?: string }): Promise<RelayStatus> => ({
+        status: "active",
+        via: "bun",
+      }),
+    ),
+    stop: vi.fn(async (_p?: Project) => {}),
   };
   const orch = new Orchestrator({
     store,
     containers,
     runtime,
     forwarder,
+    relay,
     clientFor: () => ({}) as OpencodeClient,
     roots: () => ["/src"],
     scan: async () => [project],
@@ -60,7 +73,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder };
+  return { store, containers, runtime, orch, monitors, forwarder, relay };
 }
 
 describe("Orchestrator", () => {
@@ -275,7 +288,7 @@ describe("Orchestrator", () => {
     const { store, orch, forwarder } = setup();
     await orch.rescan();
     await orch.start(project.id);
-    expect(forwarder.open).toHaveBeenCalledWith(project.id, "172.17.0.9", [{ containerPort: 3000, label: "web" }], expect.any(Function));
+    expect(forwarder.open).toHaveBeenCalledWith(project.id, expect.objectContaining({ host: "172.17.0.9" }), [{ containerPort: 3000, label: "web" }], expect.any(Function));
     expect(store.runtime(project.id).ports).toEqual([
       { status: "forwarded", containerPort: 3000, label: "web", hostPort: 3000 },
       { status: "skipped", entry: "db:5432", reason: "service hosts are not supported yet" },
@@ -332,7 +345,7 @@ describe("Orchestrator", () => {
     await orch.rebuild(project.id);
     expect(forwarder.close).toHaveBeenCalledWith(project.id);
     expect(forwarder.close.mock.invocationCallOrder[0]).toBeLessThan(forwarder.open.mock.invocationCallOrder[1]);
-    expect(forwarder.open.mock.calls[1][1]).toBe("172.17.0.42");
+    expect(forwarder.open.mock.calls[1][1].host).toBe("172.17.0.42");
   });
 
   it("adopt forwards ports of running containers only", async () => {
@@ -340,7 +353,7 @@ describe("Orchestrator", () => {
     containers.listManaged.mockResolvedValueOnce([running]);
     await orch.rescan();
     await orch.adopt();
-    expect(forwarder.open).toHaveBeenCalledWith(project.id, "172.17.0.9", [{ containerPort: 3000, label: "web" }], expect.any(Function));
+    expect(forwarder.open).toHaveBeenCalledWith(project.id, expect.objectContaining({ host: "172.17.0.9" }), [{ containerPort: 3000, label: "web" }], expect.any(Function));
     expect(store.runtime(project.id).ports).toHaveLength(2);
 
     const stopped = setup();
@@ -364,5 +377,44 @@ describe("Orchestrator", () => {
     const { orch, forwarder } = setup();
     await orch.shutdown();
     expect(forwarder.closeAll).toHaveBeenCalled();
+  });
+  it("starts the relay before forwarding and forwards through it", async () => {
+    const { store, relay, forwarder, orch } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    const token = store.runtime(project.id).relayToken!;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(relay.ensureRunning).toHaveBeenCalledWith(project, { ip: "172.17.0.9", token, binary: "/usr/local/bin/opencode" });
+    expect(relay.ensureRunning.mock.invocationCallOrder[0]).toBeLessThan(forwarder.open.mock.invocationCallOrder[0]);
+    expect(forwarder.open.mock.calls[0][1]).toEqual({ host: "172.17.0.9", relay: { port: 4097, token } });
+    expect(store.runtime(project.id).relay).toBe("active");
+    expect(orch.logLines(project.id)).toContain("relay: active (bun)");
+  });
+
+  it("forwards directly and still starts when the relay is unavailable", async () => {
+    const { store, relay, forwarder, orch } = setup();
+    relay.ensureRunning.mockResolvedValueOnce({ status: "unavailable", reason: "no relay runtime" });
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(forwarder.open.mock.calls[0][1]).toEqual({ host: "172.17.0.9" });
+    expect(store.runtime(project.id)).toMatchObject({ relay: "unavailable", opencode: "healthy", error: undefined });
+    expect(orch.logLines(project.id)).toContain("relay: unavailable (no relay runtime)");
+  });
+
+  it("reuses the persisted relay token across restarts and adoption", async () => {
+    const { relay, containers, orch } = setup({ projects: { [project.id]: { password: "pw", relayToken: "kept" } } });
+    containers.listManaged.mockResolvedValueOnce([running]);
+    await orch.rescan();
+    await orch.adopt();
+    expect(relay.ensureRunning.mock.calls[0][1].token).toBe("kept");
+  });
+
+  it("stop stops the relay and clears the relay status", async () => {
+    const { store, relay, orch } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    await orch.stop(project.id);
+    expect(relay.stop).toHaveBeenCalledWith(project);
+    expect(store.runtime(project.id).relay).toBeUndefined();
   });
 });

@@ -26,9 +26,11 @@ export interface ProjectRuntime {
   workspaceFolder?: string;
   error?: string;
   ports?: ForwardedPort[];
+  relayToken?: string;
+  relay?: "active" | "unavailable";
 }
 
-export type PublicRuntime = Omit<ProjectRuntime, "password">;
+export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
 
 export type SessionStatus = "idle" | "running" | "needs-permission" | "needs-answer";
 

@@ -9,6 +9,7 @@ import { OpencodeClient, basicAuth } from "../../src/server/opencode/client";
 import { OPENCODE_PORT, OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
+import { RelayRuntime } from "../../src/server/relay/runtime";
 import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
 import type { Project } from "../../src/shared/types";
@@ -39,7 +40,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const containers = new Containers(spawnRunner);
     const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
     const runtime = new OpencodeRuntime({ containers, clientFor });
-    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), clientFor, roots: () => [], scan: async () => [project] });
+    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), clientFor, roots: () => [], scan: async () => [project] });
     orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
     await orch.rescan();

@@ -12,6 +12,7 @@ import { OpencodeClient } from "./opencode/client";
 import { OPENCODE_PORT, OpencodeRuntime } from "./opencode/runtime";
 import { Orchestrator } from "./orchestrator";
 import { PortForwarder } from "./port-forwarder";
+import { RelayRuntime } from "./relay/runtime";
 import { preflight } from "./preflight";
 import { startServer } from "./server";
 import { StateStore } from "./state";
@@ -92,6 +93,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     containers,
     runtime,
     forwarder: new PortForwarder(),
+    relay: new RelayRuntime({ containers }),
     clientFor,
     roots: () => config.roots,
     scan: (roots) => scanRoots(roots),

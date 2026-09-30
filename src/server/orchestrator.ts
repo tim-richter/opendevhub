@@ -5,8 +5,9 @@ import { LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import type { OpencodeClient, OpencodeEndpoint } from "./opencode/client";
 import type { OpencodeRuntime } from "./opencode/runtime";
-import type { PortForwarder } from "./port-forwarder";
+import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
+import { RELAY_PORT, type RelayRuntime, generateRelayToken } from "./relay/runtime";
 import type { StateStore } from "./state";
 
 export class BusyError extends Error {
@@ -25,7 +26,11 @@ export class NotFoundError extends Error {
 
 export type ContainersPort = Pick<Containers, "up" | "inspect" | "listManaged" | "stop" | "readConfiguration">;
 export type ForwarderPort = Pick<PortForwarder, "open" | "close" | "closeAll">;
-export type RuntimePort = Pick<OpencodeRuntime, "ensureRunning" | "stopServer" | "isHealthy" | "endpoint">;
+export type RuntimePort = Pick<
+  OpencodeRuntime,
+  "ensureRunning" | "stopServer" | "isHealthy" | "endpoint" | "resolveBinary"
+>;
+export type RelayPort = Pick<RelayRuntime, "ensureRunning" | "stop">;
 export interface MonitorHandle {
   start(): void;
   stop(): void;
@@ -36,6 +41,7 @@ export interface OrchestratorDeps {
   containers: ContainersPort;
   runtime: RuntimePort;
   forwarder: ForwarderPort;
+  relay: RelayPort;
   clientFor: (ep: OpencodeEndpoint) => OpencodeClient;
   roots: () => string[];
   scan: (roots: string[]) => Promise<Project[]>;
@@ -100,7 +106,10 @@ export class Orchestrator {
       const rt = store.runtime(p.id);
       store.updateRuntime(p.id, { containerState: "stopping", error: undefined });
       try {
-        if (rt.containerState === "running") await runtime.stopServer(p).catch(() => {});
+        if (rt.containerState === "running") {
+          await runtime.stopServer(p).catch(() => {});
+          await this.deps.relay.stop(p).catch(() => {});
+        }
         if (rt.containerId) await containers.stop(rt.containerId);
         store.updateRuntime(p.id, { containerState: "stopped", opencode: "absent", containerIp: undefined });
         store.setSessions(p.id, []);
@@ -126,7 +135,10 @@ export class Orchestrator {
         continue;
       }
       store.updateRuntime(id, { containerId: info.id, containerIp: info.ip, containerState: "running" });
-      if (info.ip) await this.forwardPorts(store.project(id)!, info.ip);
+      if (info.ip) {
+        const adopted = store.project(id)!;
+        await this.forwardPorts(adopted, await this.startRelay(adopted, info.ip));
+      }
       const rt = store.runtime(id);
       if (info.ip && rt.password && (await runtime.isHealthy(runtime.endpoint(info.ip, rt.password)))) {
         store.updateRuntime(id, { opencode: "healthy", error: undefined });
@@ -192,7 +204,7 @@ export class Orchestrator {
         containerState: "running",
         opencode: "starting",
       });
-      await this.forwardPorts(project, info.ip);
+      await this.forwardPorts(project, await this.startRelay(project, info.ip));
       await this.launchOpencode(project, rebuild ? undefined : store.runtime(project.id).password);
     } catch (err) {
       this.fail(project.id, err);
@@ -221,7 +233,7 @@ export class Orchestrator {
     return this.deps.store.runtime(project.id).workspaceFolder ?? `/workspaces/${path.basename(project.path)}`;
   }
 
-  private async forwardPorts(project: Project, ip: string): Promise<void> {
+  private async forwardPorts(project: Project, target: ForwardTarget): Promise<void> {
     const { store, containers, forwarder } = this.deps;
     let config: PortConfig;
     try {
@@ -234,7 +246,7 @@ export class Orchestrator {
     }
     const { ports, skipped } = parseForwardPorts(config.forwardPorts, config.portsAttributes);
     for (const s of skipped) this.log(project.id, `ports: skipped ${s.entry} (${s.reason})`);
-    const opened = await forwarder.open(project.id, ip, ports, (line) => this.log(project.id, line));
+    const opened = await forwarder.open(project.id, target, ports, (line) => this.log(project.id, line));
     for (const f of opened) {
       if (f.status === "forwarded") this.log(project.id, `ports: ${f.containerPort} → localhost:${f.hostPort}`);
       else if (f.status === "failed") this.log(project.id, `ports: ${f.containerPort} not forwarded (${f.reason})`);
@@ -243,9 +255,28 @@ export class Orchestrator {
     store.updateRuntime(project.id, { ports: [...opened, ...skippedPorts] });
   }
 
+  private async startRelay(project: Project, ip: string): Promise<ForwardTarget> {
+    const { store, runtime, relay } = this.deps;
+    let token = store.runtime(project.id).relayToken;
+    if (!token) {
+      token = generateRelayToken();
+      store.updateRuntime(project.id, { relayToken: token });
+    }
+    const binary = await runtime.resolveBinary(project).catch(() => undefined);
+    const result = await relay.ensureRunning(project, { ip, token, binary });
+    if (result.status === "active") {
+      this.log(project.id, `relay: active (${result.via})`);
+      store.updateRuntime(project.id, { relay: "active" });
+      return { host: ip, relay: { port: RELAY_PORT, token } };
+    }
+    this.log(project.id, `relay: unavailable (${result.reason})`);
+    store.updateRuntime(project.id, { relay: "unavailable" });
+    return { host: ip };
+  }
+
   private async closePorts(id: ProjectId): Promise<void> {
     await this.deps.forwarder.close(id);
-    this.deps.store.updateRuntime(id, { ports: undefined });
+    this.deps.store.updateRuntime(id, { ports: undefined, relay: undefined });
   }
 
   private startMonitor(id: ProjectId): void {

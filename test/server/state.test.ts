@@ -66,4 +66,13 @@ describe("StateStore", () => {
     store.setProjects([p("b")]);
     expect(store.snapshot().projects.map((v) => v.project.id)).toEqual(["b"]);
   });
+  it("persists relayToken and never exposes it in snapshots", () => {
+    const { store, saved } = make();
+    store.setProjects([p("a")]);
+    store.updateRuntime("a", { relayToken: "relay-secret", relay: "active" });
+    expect(saved.at(-1)?.projects.a).toMatchObject({ relayToken: "relay-secret" });
+    const snap = JSON.stringify(store.snapshot());
+    expect(snap).not.toContain("relay-secret");
+    expect(store.snapshot().projects[0].runtime.relay).toBe("active");
+  });
 });
