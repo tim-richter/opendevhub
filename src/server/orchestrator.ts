@@ -10,6 +10,8 @@ import { parseForwardPorts } from "./ports";
 import { RELAY_PORT, type RelayRuntime, generateRelayToken } from "./relay/runtime";
 import type { StateStore } from "./state";
 
+const RELAY_RECOVERY_INTERVAL_MS = 30_000;
+
 export class BusyError extends Error {
   constructor(id: string) {
     super(`another action is already running for ${id}`);
@@ -53,6 +55,7 @@ export class Orchestrator {
   private readonly monitors = new Map<ProjectId, MonitorHandle>();
   private readonly logs = new Map<ProjectId, LogBuffer>();
   private readonly logListeners = new Set<(projectId: ProjectId, line: string) => void>();
+  private readonly relayRecoveries = new Map<ProjectId, number>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -91,6 +94,9 @@ export class Orchestrator {
       this.stopMonitor(p.id);
       this.deps.store.updateRuntime(p.id, { opencode: "starting", error: undefined });
       try {
+        const relayWasActive = rt.relay === "active";
+        const target = await this.startRelay(p, rt.containerIp);
+        if (target.relay && !relayWasActive) await this.forwardPorts(p, target);
         await this.launchOpencode(p, undefined);
       } catch (err) {
         this.fail(p.id, err);
@@ -246,7 +252,9 @@ export class Orchestrator {
     }
     const { ports, skipped } = parseForwardPorts(config.forwardPorts, config.portsAttributes);
     for (const s of skipped) this.log(project.id, `ports: skipped ${s.entry} (${s.reason})`);
-    const opened = await forwarder.open(project.id, target, ports, (line) => this.log(project.id, line));
+    const opened = await forwarder.open(project.id, target, ports, (line) => this.log(project.id, line), {
+      onRelayUnreachable: () => void this.recoverRelay(project.id),
+    });
     for (const f of opened) {
       if (f.status === "forwarded") this.log(project.id, `ports: ${f.containerPort} → localhost:${f.hostPort}`);
       else if (f.status === "failed") this.log(project.id, `ports: ${f.containerPort} not forwarded (${f.reason})`);
@@ -272,6 +280,20 @@ export class Orchestrator {
     this.log(project.id, `relay: unavailable (${result.reason})`);
     store.updateRuntime(project.id, { relay: "unavailable" });
     return { host: ip };
+  }
+
+  /** A forwarded connection found the relay gone: mark it and relaunch in the background (at most every 30 s). */
+  private async recoverRelay(id: ProjectId): Promise<void> {
+    const now = Date.now();
+    if (now - (this.relayRecoveries.get(id) ?? -Infinity) < RELAY_RECOVERY_INTERVAL_MS) return;
+    this.relayRecoveries.set(id, now);
+    const { store } = this.deps;
+    const project = store.project(id);
+    const rt = store.runtime(id);
+    if (!project || this.busy.has(id) || rt.containerState !== "running" || !rt.containerIp) return;
+    store.updateRuntime(id, { relay: "unavailable" });
+    this.log(id, "relay: unreachable, relaunching");
+    await this.startRelay(project, rt.containerIp).catch(() => {});
   }
 
   private async closePorts(id: ProjectId): Promise<void> {

@@ -3,6 +3,11 @@ import type { ForwardedPort } from "../shared/types";
 import type { PortSpec } from "./ports";
 import { RelayError, openRelayConnection } from "./relay/client";
 
+export interface ForwardEvents {
+  /** Called whenever a connection finds the relay unreachable and falls back to the direct route. */
+  onRelayUnreachable?: () => void;
+}
+
 export interface ForwardTarget {
   host: string;
   relay?: { port: number; token: string };
@@ -50,12 +55,13 @@ export class PortForwarder {
     target: ForwardTarget,
     ports: PortSpec[],
     onLog: (line: string) => void = () => {},
+    events: ForwardEvents = {},
   ): Promise<ForwardedPort[]> {
     await this.close(projectId);
     const list: Forward[] = [];
     this.forwards.set(projectId, list);
     const results: ForwardedPort[] = [];
-    for (const spec of ports) results.push(await this.openOne(spec, target, list, onLog));
+    for (const spec of ports) results.push(await this.openOne(spec, target, list, onLog, events));
     return results;
   }
 
@@ -83,6 +89,7 @@ export class PortForwarder {
     target: ForwardTarget,
     list: Forward[],
     onLog: (line: string) => void,
+    events: ForwardEvents,
   ): Promise<ForwardedPort> {
     const labelled = spec.label === undefined ? {} : { label: spec.label };
     const sockets = new Set<net.Socket>();
@@ -159,6 +166,7 @@ export class PortForwarder {
             return;
           }
           if (client.destroyed) return;
+          events.onRelayUnreachable?.();
           logLimited(`ports: ${spec.containerPort}: relay unreachable (${err.message}), connecting directly`);
           direct();
         },

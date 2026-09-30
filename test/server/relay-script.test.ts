@@ -77,6 +77,12 @@ describe("RELAY_SCRIPT", () => {
     expect(await talk(header)).toBe("");
   });
 
+  it("closes silently after 5 s without a complete header", async () => {
+    const started = Date.now();
+    expect(await talk("secret 80")).toBe("");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(4900);
+  }, 10_000);
+
   it("exits with an error when the token is missing", () => {
     const r = spawnSync(process.execPath, ["-e", RELAY_SCRIPT], {
       env: { ...process.env, ODH_RELAY_TOKEN: "", ODH_RELAY_PORT: "0" },

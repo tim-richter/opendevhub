@@ -43,7 +43,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
     resolveBinary: vi.fn(async (_p?: Project): Promise<string | undefined> => "/usr/local/bin/opencode"),
   };
   const forwarder = {
-    open: vi.fn(async (_id: string, _target: ForwardTarget, ports: PortSpec[], _onLog?: (l: string) => void) =>
+    open: vi.fn(async (_id: string, _target: ForwardTarget, ports: PortSpec[], _onLog?: (l: string) => void, _events?: { onRelayUnreachable?: () => void }) =>
       ports.map((p): ForwardedPort => ({ status: "forwarded", containerPort: p.containerPort, label: p.label, hostPort: p.containerPort })),
     ),
     close: vi.fn(async (_id: string) => {}),
@@ -255,6 +255,8 @@ describe("Orchestrator", () => {
     await refreshP;
     expect(store.runtime(project.id).containerState).toBe("running");
 
+    // restartOpencode ensures the relay before launching opencode, so wait for the launch call.
+    await vi.waitFor(() => expect(runtime.ensureRunning).toHaveBeenCalledTimes(2));
     resolveEnsure({ password: "pw", version: "2.0.20" });
     await restartP;
     expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "healthy" });
@@ -288,7 +290,7 @@ describe("Orchestrator", () => {
     const { store, orch, forwarder } = setup();
     await orch.rescan();
     await orch.start(project.id);
-    expect(forwarder.open).toHaveBeenCalledWith(project.id, expect.objectContaining({ host: "172.17.0.9" }), [{ containerPort: 3000, label: "web" }], expect.any(Function));
+    expect(forwarder.open).toHaveBeenCalledWith(project.id, expect.objectContaining({ host: "172.17.0.9" }), [{ containerPort: 3000, label: "web" }], expect.any(Function), expect.any(Object));
     expect(store.runtime(project.id).ports).toEqual([
       { status: "forwarded", containerPort: 3000, label: "web", hostPort: 3000 },
       { status: "skipped", entry: "db:5432", reason: "service hosts are not supported yet" },
@@ -353,7 +355,7 @@ describe("Orchestrator", () => {
     containers.listManaged.mockResolvedValueOnce([running]);
     await orch.rescan();
     await orch.adopt();
-    expect(forwarder.open).toHaveBeenCalledWith(project.id, expect.objectContaining({ host: "172.17.0.9" }), [{ containerPort: 3000, label: "web" }], expect.any(Function));
+    expect(forwarder.open).toHaveBeenCalledWith(project.id, expect.objectContaining({ host: "172.17.0.9" }), [{ containerPort: 3000, label: "web" }], expect.any(Function), expect.any(Object));
     expect(store.runtime(project.id).ports).toHaveLength(2);
 
     const stopped = setup();
@@ -416,5 +418,33 @@ describe("Orchestrator", () => {
     await orch.stop(project.id);
     expect(relay.stop).toHaveBeenCalledWith(project);
     expect(store.runtime(project.id).relay).toBeUndefined();
+  });
+
+  it("relaunches the relay in the background when the forwarder finds it unreachable (rate-limited)", async () => {
+    const { store, relay, forwarder, orch } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    const events = forwarder.open.mock.calls[0][4]!;
+    relay.ensureRunning.mockResolvedValueOnce({ status: "unavailable", reason: "bun: gone" });
+    events.onRelayUnreachable!();
+    await vi.waitFor(() => expect(relay.ensureRunning).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.runtime(project.id).relay).toBe("unavailable"));
+    expect(orch.logLines(project.id)).toContain("relay: unreachable, relaunching");
+    events.onRelayUnreachable!();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(relay.ensureRunning).toHaveBeenCalledTimes(2);
+  });
+
+  it("restart opencode also ensures the relay and re-forwards when it comes back", async () => {
+    const { store, relay, forwarder, orch } = setup();
+    relay.ensureRunning.mockResolvedValueOnce({ status: "unavailable", reason: "no relay runtime" });
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(forwarder.open.mock.calls[0][1]).toEqual({ host: "172.17.0.9" });
+    await orch.restartOpencode(project.id);
+    expect(relay.ensureRunning).toHaveBeenCalledTimes(2);
+    expect(forwarder.open).toHaveBeenCalledTimes(2);
+    expect(forwarder.open.mock.calls[1][1]).toMatchObject({ relay: { port: 4097 } });
+    expect(store.runtime(project.id).relay).toBe("active");
   });
 });

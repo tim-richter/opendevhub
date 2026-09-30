@@ -223,15 +223,20 @@ describe("PortForwarder", () => {
       await relay.stop();
       const port = await echoUpstream();
       const logs: string[] = [];
+      let unreachable = 0;
       forwarder = new PortForwarder({ logIntervalMs: 60_000 });
       const [result] = await forwarder.open(
         "p1",
         { host: "127.0.0.2", relay: { port: relay.port, token: "secret" } },
         [{ containerPort: port }],
         (l) => logs.push(l),
+        { onRelayUnreachable: () => (unreachable += 1) },
       );
       expect(await roundTrip(hostPort(result), "d")).toBe("echo:d");
+      expect(await roundTrip(hostPort(result), "e")).toBe("echo:e");
+      expect(logs).toHaveLength(1);
       expect(logs[0]).toMatch(new RegExp(`^ports: ${port}: relay unreachable \\(.+\\), connecting directly$`));
+      expect(unreachable).toBe(2);
     });
   });
 });
