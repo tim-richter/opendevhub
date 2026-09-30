@@ -109,7 +109,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return { host: rt.containerIp, port: OPENCODE_PORT, password: rt.password };
     },
   });
-  const refresh = setInterval(() => void orchestrator.refreshContainers(), 10_000);
+  const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);
 
   console.log(`opendevhub running at ${server.url}`);
   for (const e of store.preflight().errors) console.warn(`warning: ${e}`);

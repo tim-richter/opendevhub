@@ -185,6 +185,50 @@ describe("Orchestrator", () => {
     expect(monitors[0].stopped).toBe(true);
   });
 
+  it("refreshContainers keeps checking other projects when inspect rejects for one", async () => {
+    const project2: Project = { ...project, id: "demo2-def456" };
+    const { store, containers, orch } = setup();
+    containers.up.mockImplementation(async (p: Project) => ({
+      containerId: p.id === project.id ? "c1" : "c2",
+      remoteWorkspaceFolder: "/workspaces/demo",
+    }));
+    await orch.rescan();
+    store.setProjects([project, project2]);
+    await orch.start(project.id);
+    await orch.start(project2.id);
+
+    containers.inspect.mockImplementation(async (id: string) => {
+      if (id === "c1") throw new Error("docker inspect failed");
+      return { ...running, id: "c2", running: false };
+    });
+
+    await expect(orch.refreshContainers()).resolves.toBeUndefined();
+    expect(store.runtime(project.id).containerState).toBe("running");
+    expect(store.runtime(project2.id).containerState).toBe("stopped");
+  });
+
+  it("refreshContainers does not overwrite state set by a lifecycle action started while inspect is in flight", async () => {
+    const { store, containers, runtime, orch } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+
+    let resolveInspect!: (v: ContainerInfo | undefined) => void;
+    containers.inspect.mockImplementationOnce(() => new Promise((resolve) => (resolveInspect = resolve)));
+    let resolveEnsure!: (v: { password: string; version?: string }) => void;
+    runtime.ensureRunning.mockImplementationOnce(() => new Promise((resolve) => (resolveEnsure = resolve)));
+
+    const refreshP = orch.refreshContainers();
+    const restartP = orch.restartOpencode(project.id); // marks the project busy synchronously
+
+    resolveInspect({ ...running, running: false });
+    await refreshP;
+    expect(store.runtime(project.id).containerState).toBe("running");
+
+    resolveEnsure({ password: "pw", version: "2.0.20" });
+    await restartP;
+    expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "healthy" });
+  });
+
   it("monitor health updates opencode state; sessions flow into the store", async () => {
     const { store, orch, monitors } = setup();
     await orch.rescan();

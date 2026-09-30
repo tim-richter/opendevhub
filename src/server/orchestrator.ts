@@ -135,11 +135,18 @@ export class Orchestrator {
     for (const p of store.projects()) {
       const rt = store.runtime(p.id);
       if (this.busy.has(p.id) || rt.containerState !== "running" || !rt.containerId) continue;
-      const info = await containers.inspect(rt.containerId);
-      if (info?.running) continue;
-      this.stopMonitor(p.id);
-      store.updateRuntime(p.id, { containerState: "stopped", opencode: "absent", containerIp: undefined });
-      store.setSessions(p.id, []);
+      try {
+        const info = await containers.inspect(rt.containerId);
+        // A lifecycle action (start/stop/rebuild/...) may have started while inspect() was in
+        // flight; if so it owns the project's state now, so don't race it with a stale write.
+        if (this.busy.has(p.id)) continue;
+        if (info?.running) continue;
+        this.stopMonitor(p.id);
+        store.updateRuntime(p.id, { containerState: "stopped", opencode: "absent", containerIp: undefined });
+        store.setSessions(p.id, []);
+      } catch {
+        // One project's docker inspect failing shouldn't stop the others from refreshing.
+      }
     }
   }
 
