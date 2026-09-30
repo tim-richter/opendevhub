@@ -41,7 +41,7 @@ export async function startRelay(token = "tok") {
     output: () => out,
     stop: () =>
       new Promise<void>((resolve) => {
-        if (child.exitCode !== null) return resolve();
+        if (child.exitCode !== null || child.signalCode !== null) return resolve();
         child.once("exit", () => resolve());
         child.kill("SIGTERM");
       }),

@@ -1,6 +1,12 @@
 import net from "node:net";
 import type { ForwardedPort } from "../shared/types";
 import type { PortSpec } from "./ports";
+import { RelayError, openRelayConnection } from "./relay/client";
+
+export interface ForwardTarget {
+  host: string;
+  relay?: { port: number; token: string };
+}
 
 interface Forward {
   servers: net.Server[];
@@ -41,7 +47,7 @@ export class PortForwarder {
 
   async open(
     projectId: string,
-    targetHost: string,
+    target: ForwardTarget,
     ports: PortSpec[],
     onLog: (line: string) => void = () => {},
   ): Promise<ForwardedPort[]> {
@@ -49,7 +55,7 @@ export class PortForwarder {
     const list: Forward[] = [];
     this.forwards.set(projectId, list);
     const results: ForwardedPort[] = [];
-    for (const spec of ports) results.push(await this.openOne(spec, targetHost, list, onLog));
+    for (const spec of ports) results.push(await this.openOne(spec, target, list, onLog));
     return results;
   }
 
@@ -74,7 +80,7 @@ export class PortForwarder {
 
   private async openOne(
     spec: PortSpec,
-    targetHost: string,
+    target: ForwardTarget,
     list: Forward[],
     onLog: (line: string) => void,
   ): Promise<ForwardedPort> {
@@ -83,33 +89,80 @@ export class PortForwarder {
     const logIntervalMs = this.opts.logIntervalMs ?? 30_000;
     let lastLog = -Infinity;
 
+    const logLimited = (line: string) => {
+      const now = Date.now();
+      if (now - lastLog >= logIntervalMs) {
+        lastLog = now;
+        onLog(line);
+      }
+    };
+
     const handleClient = (client: net.Socket) => {
-      const upstream = net.connect({ host: targetHost, port: spec.containerPort, allowHalfOpen: true });
+      // Paused until an upstream is ready, so bytes sent before the relay answers are not lost.
+      client.pause();
       sockets.add(client);
-      sockets.add(upstream);
+      let upstream: net.Socket | undefined;
       const destroy = () => {
         client.destroy();
-        upstream.destroy();
+        upstream?.destroy();
         sockets.delete(client);
-        sockets.delete(upstream);
+        if (upstream) sockets.delete(upstream);
       };
       client.on("error", destroy);
       client.on("close", destroy);
-      upstream.on("error", (err) => {
-        const now = Date.now();
-        if (now - lastLog >= logIntervalMs) {
-          lastLog = now;
+
+      const pipe = (socket: net.Socket, rest?: Buffer) => {
+        if (client.destroyed) {
+          socket.destroy();
+          return;
+        }
+        upstream = socket;
+        sockets.add(socket);
+        socket.on("error", destroy);
+        socket.on("close", destroy);
+        if (rest?.length) client.write(rest);
+        client.pipe(socket);
+        socket.pipe(client);
+        client.resume();
+        socket.resume();
+      };
+
+      const direct = () => {
+        const socket = net.connect({ host: target.host, port: spec.containerPort, allowHalfOpen: true });
+        const onConnectError = (err: NodeJS.ErrnoException) => {
           const hint =
-            (err as NodeJS.ErrnoException).code === "ECONNREFUSED"
+            err.code === "ECONNREFUSED"
               ? " (is the app listening on 0.0.0.0 inside the container? apps bound to localhost there are not reachable)"
               : "";
-          onLog(`ports: ${spec.containerPort}: ${err.message}${hint}`);
-        }
-        destroy();
-      });
-      upstream.on("close", destroy);
-      client.pipe(upstream);
-      upstream.pipe(client);
+          logLimited(`ports: ${spec.containerPort}: ${err.message}${hint}`);
+          socket.destroy();
+          destroy();
+        };
+        socket.once("error", onConnectError);
+        socket.once("connect", () => {
+          socket.off("error", onConnectError);
+          pipe(socket);
+        });
+      };
+
+      if (!target.relay) return direct();
+      openRelayConnection({ host: target.host, ...target.relay }, spec.containerPort).then(
+        ({ socket, rest }) => pipe(socket, rest),
+        (err: Error) => {
+          if (err instanceof RelayError) {
+            logLimited(
+              err.code === "ECONNREFUSED"
+                ? `ports: ${spec.containerPort}: nothing is listening on port ${spec.containerPort} inside the container`
+                : `ports: ${spec.containerPort}: relay could not connect (${err.code})`,
+            );
+            destroy();
+            return;
+          }
+          if (client.destroyed) return;
+          logLimited(`ports: ${spec.containerPort}: relay unreachable (${err.message}), connecting directly`);
+          direct();
+        },
+      );
     };
     const newServer = () => net.createServer({ allowHalfOpen: true }, handleClient);
 
