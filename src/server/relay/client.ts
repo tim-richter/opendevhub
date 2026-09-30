@@ -1,0 +1,74 @@
+import net from "node:net";
+
+export interface RelayTarget {
+  host: string;
+  port: number;
+  token: string;
+}
+
+export class RelayError extends Error {
+  constructor(readonly code: string) {
+    super(`relay: ${code}`);
+    this.name = "RelayError";
+  }
+}
+
+function handshake(
+  target: RelayTarget,
+  line: string,
+  timeoutMs: number,
+): Promise<{ socket: net.Socket; reply: string; rest: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: target.host, port: target.port, allowHalfOpen: true });
+    let buf = Buffer.alloc(0);
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off("data", onData);
+      socket.off("error", fail);
+      socket.off("close", onClose);
+    };
+    const fail = (err: Error) => {
+      cleanup();
+      socket.destroy();
+      reject(err);
+    };
+    const onClose = () => fail(new Error("relay closed the connection"));
+    const onData = (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      const nl = buf.indexOf(10);
+      if (nl === -1) {
+        if (buf.length > 256) fail(new Error("relay sent an oversized reply"));
+        return;
+      }
+      cleanup();
+      socket.pause();
+      resolve({ socket, reply: buf.subarray(0, nl).toString("utf8").trim(), rest: buf.subarray(nl + 1) });
+    };
+    const timer = setTimeout(() => fail(new Error("relay handshake timed out")), timeoutMs);
+    socket.on("data", onData);
+    socket.on("error", fail);
+    socket.on("close", onClose);
+    socket.once("connect", () => socket.write(line));
+  });
+}
+
+export async function pingRelay(target: RelayTarget, timeoutMs = 1000): Promise<boolean> {
+  try {
+    const { socket, reply } = await handshake(target, `${target.token} ping\n`, timeoutMs);
+    socket.destroy();
+    return reply === "PONG";
+  } catch {
+    return false;
+  }
+}
+
+export async function openRelayConnection(
+  target: RelayTarget,
+  port: number,
+  timeoutMs = 5000,
+): Promise<{ socket: net.Socket; rest: Buffer }> {
+  const { socket, reply, rest } = await handshake(target, `${target.token} ${port}\n`, timeoutMs);
+  if (reply === "OK") return { socket, rest };
+  socket.destroy();
+  throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
+}
