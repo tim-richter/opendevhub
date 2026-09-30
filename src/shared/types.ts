@@ -10,6 +10,11 @@ export interface Project {
 export type ContainerState = "stopped" | "starting" | "running" | "stopping" | "error";
 export type OpencodeState = "absent" | "starting" | "healthy" | "unhealthy";
 
+export type ForwardedPort =
+  | { status: "forwarded"; containerPort: number; label?: string; hostPort: number }
+  | { status: "failed"; containerPort: number; label?: string; reason: string }
+  | { status: "skipped"; entry: string; reason: string };
+
 export interface ProjectRuntime {
   projectId: ProjectId;
   containerId?: string;
@@ -20,6 +25,7 @@ export interface ProjectRuntime {
   password?: string;
   workspaceFolder?: string;
   error?: string;
+  ports?: ForwardedPort[];
 }
 
 export type PublicRuntime = Omit<ProjectRuntime, "password">;
