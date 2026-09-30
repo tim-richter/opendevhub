@@ -6,6 +6,7 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 - Starts, stops and rebuilds one devcontainer per project and runs `opencode serve` inside it.
 - Shows live session status (running, idle, needs permission, question waiting) and sends browser notifications.
 - Opens each project's opencode web UI at `http://<project>.localhost:7777`, already authenticated.
+- Forwards the ports listed in each project's `forwardPorts` to `localhost` on your machine while the project runs, using the next free port if one is taken. The dashboard shows each mapping as a link.
 
 ## Requirements
 
@@ -38,6 +39,8 @@ npm run build           # dist/bin.js + dist/web
 
 ## Known limitations
 
+- `forwardPorts` entries that name another compose service (for example `"db:5432"`) are not forwarded yet.
+- Forwarded ports are only open while opendevhub is running.
 - Linux only: the proxy connects to each container's bridge IP directly.
 - Containers using `--network=host` are not supported.
 - The opencode password is passed through `devcontainer exec --remote-env`, so other users on the same machine can see it in the process list while the command runs.

@@ -47,6 +47,20 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const rt = store.runtime(project.id);
     expect(rt.error).toBeUndefined();
     expect(rt).toMatchObject({ containerState: "running", opencode: "healthy" });
+    // A server backgrounded from postStartCommand does not outlive the lifecycle command under the
+    // devcontainer CLI, so start it the same way opendevhub starts opencode.
+    await containers.exec(project, [
+      "sh",
+      "-c",
+      "nohup node -e \"require('http').createServer((q, r) => r.end('e2e-web-ok')).listen(8080)\" < /dev/null > /tmp/odh-e2e-web.log 2>&1 &",
+    ]);
+    const web = rt.ports?.find((p) => p.status === "forwarded" && p.containerPort === 8080);
+    expect(web).toMatchObject({ status: "forwarded", containerPort: 8080, label: "e2e web" });
+    const webPort = web?.status === "forwarded" ? web.hostPort : 0;
+    await vi.waitFor(
+      async () => expect(await (await fetch(`http://127.0.0.1:${webPort}/`)).text()).toBe("e2e-web-ok"),
+      { timeout: 15_000, interval: 500 },
+    );
 
     const ep = runtime.endpoint(rt.containerIp!, rt.password!);
     const created = await fetch(`${ep.baseUrl}/api/session`, {
@@ -72,6 +86,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     await server.close();
 
     await orch.stop(project.id);
+    expect(store.runtime(project.id).ports).toBeUndefined();
+    await expect(fetch(`http://127.0.0.1:${webPort}/`)).rejects.toThrow();
     expect(store.runtime(project.id).containerState).toBe("stopped");
     await orch.shutdown();
   });
