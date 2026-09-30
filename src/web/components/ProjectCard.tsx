@@ -82,7 +82,7 @@ export function ProjectCard(props: {
         </button>
       </div>
 
-      {runtime.ports && runtime.ports.length > 0 && <PortsRow ports={runtime.ports} />}
+      {runtime.ports && runtime.ports.length > 0 && <PortsRow ports={runtime.ports} relay={runtime.relay} />}
 
       {runtime.error && <p className="error-text">{runtime.error}</p>}
 

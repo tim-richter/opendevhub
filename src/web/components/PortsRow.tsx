@@ -1,6 +1,6 @@
 import type { ForwardedPort } from "../../shared/types";
 
-export function PortsRow({ ports }: { ports: ForwardedPort[] }) {
+export function PortsRow({ ports, relay }: { ports: ForwardedPort[]; relay?: "active" | "unavailable" }) {
   return (
     <ul className="ports" aria-label="Forwarded ports">
       {ports.map((p) => {
@@ -28,6 +28,18 @@ export function PortsRow({ ports }: { ports: ForwardedPort[] }) {
           </li>
         );
       })}
+      {relay && (
+        <li
+          className="muted"
+          title={
+            relay === "active"
+              ? "Connections go through a relay inside the container, so apps bound to localhost there are reachable"
+              : "No relay in the container; only apps listening on 0.0.0.0 are reachable (see the project log)"
+          }
+        >
+          {relay === "active" ? "via relay" : "direct"}
+        </li>
+      )}
     </ul>
   );
 }

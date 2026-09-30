@@ -48,12 +48,14 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const rt = store.runtime(project.id);
     expect(rt.error).toBeUndefined();
     expect(rt).toMatchObject({ containerState: "running", opencode: "healthy" });
+    expect(rt.relay).toBe("active");
     // A server backgrounded from postStartCommand does not outlive the lifecycle command under the
-    // devcontainer CLI, so start it the same way opendevhub starts opencode.
+    // devcontainer CLI, so start it the same way opendevhub starts opencode. It binds the container's
+    // loopback only, so it is reachable from the host only through the relay.
     await containers.exec(project, [
       "sh",
       "-c",
-      "nohup node -e \"require('http').createServer((q, r) => r.end('e2e-web-ok')).listen(8080)\" < /dev/null > /tmp/odh-e2e-web.log 2>&1 &",
+      "nohup node -e \"require('http').createServer((q, r) => r.end('e2e-web-ok')).listen(8080, '127.0.0.1')\" < /dev/null > /tmp/odh-e2e-web.log 2>&1 &",
     ]);
     const web = rt.ports?.find((p) => p.status === "forwarded" && p.containerPort === 8080);
     expect(web).toMatchObject({ status: "forwarded", containerPort: 8080, label: "e2e web" });

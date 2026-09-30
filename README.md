@@ -41,7 +41,7 @@ npm run build           # dist/bin.js + dist/web
 
 - `forwardPorts` entries that name another compose service (for example `"db:5432"`) are not forwarded yet.
 - Forwarded ports are only open while opendevhub is running.
-- Forwarded apps must listen on `0.0.0.0` inside the container (for example `vite --host`). Apps bound only to the container's `localhost` refuse the connection; the project log explains this when it happens.
+- Forwarded ports go through a small relay that opendevhub starts inside the container, so apps bound to the container's `localhost` work too. The relay runs on the opencode binary (Bun mode) or `node`; if neither can run it, forwarding connects directly and only apps listening on `0.0.0.0` are reachable (the project log says so).
 - Linux only: the proxy connects to each container's bridge IP directly.
 - Containers using `--network=host` are not supported.
 - The opencode password is passed through `devcontainer exec --remote-env`, so other users on the same machine can see it in the process list while the command runs.
