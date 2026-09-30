@@ -11,6 +11,7 @@ import { spawnRunner } from "./exec";
 import { OpencodeClient } from "./opencode/client";
 import { OPENCODE_PORT, OpencodeRuntime } from "./opencode/runtime";
 import { Orchestrator } from "./orchestrator";
+import { PortForwarder } from "./port-forwarder";
 import { preflight } from "./preflight";
 import { startServer } from "./server";
 import { StateStore } from "./state";
@@ -90,6 +91,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     store,
     containers,
     runtime,
+    forwarder: new PortForwarder(),
     clientFor,
     roots: () => config.roots,
     scan: (roots) => scanRoots(roots),
@@ -117,7 +119,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(refresh);
-    orchestrator.shutdown();
+    await orchestrator.shutdown();
     await server.close();
     process.exit(0);
   };

@@ -5,6 +5,8 @@ import type { MonitorOptions } from "../../src/server/monitor";
 import type { OpencodeClient } from "../../src/server/opencode/client";
 import { BusyError, NotFoundError, Orchestrator } from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
+import type { PortSpec } from "../../src/server/ports";
+import type { ForwardedPort } from "../../src/shared/types";
 import type { Project } from "../../src/shared/types";
 
 const project: Project = {
@@ -26,6 +28,10 @@ function setup(persisted: PersistedState = { projects: {} }) {
     inspect: vi.fn(async (_id?: string): Promise<ContainerInfo | undefined> => running),
     listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
     stop: vi.fn(async () => {}),
+    readConfiguration: vi.fn(async (_p?: Project) => ({
+      forwardPorts: [3000, "db:5432"] as unknown[],
+      portsAttributes: { "3000": { label: "web" } } as Record<string, unknown>,
+    })),
   };
   const runtime = {
     endpoint: (ip: string, password: string) => ({ baseUrl: `http://${ip}:4096`, password }),
@@ -33,10 +39,18 @@ function setup(persisted: PersistedState = { projects: {} }) {
     stopServer: vi.fn(async () => {}),
     isHealthy: vi.fn(async () => true),
   };
+  const forwarder = {
+    open: vi.fn(async (_id: string, _host: string, ports: PortSpec[], _onLog?: (l: string) => void) =>
+      ports.map((p): ForwardedPort => ({ status: "forwarded", containerPort: p.containerPort, label: p.label, hostPort: p.containerPort })),
+    ),
+    close: vi.fn(async (_id: string) => {}),
+    closeAll: vi.fn(async () => {}),
+  };
   const orch = new Orchestrator({
     store,
     containers,
     runtime,
+    forwarder,
     clientFor: () => ({}) as OpencodeClient,
     roots: () => ["/src"],
     scan: async () => [project],
@@ -46,7 +60,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors };
+  return { store, containers, runtime, orch, monitors, forwarder };
 }
 
 describe("Orchestrator", () => {
@@ -256,5 +270,99 @@ describe("Orchestrator", () => {
     expect(seen).toContain("line 599");
     expect(orch.logLines(project.id)).toHaveLength(500);
     expect(orch.logLines(project.id)[0]).not.toBe("line 0");
+  });
+  it("forwards configured ports on start, including skipped entries in runtime.ports", async () => {
+    const { store, orch, forwarder } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(forwarder.open).toHaveBeenCalledWith(project.id, "172.17.0.9", [{ containerPort: 3000, label: "web" }], expect.any(Function));
+    expect(store.runtime(project.id).ports).toEqual([
+      { status: "forwarded", containerPort: 3000, label: "web", hostPort: 3000 },
+      { status: "skipped", entry: "db:5432", reason: "service hosts are not supported yet" },
+    ]);
+    expect(orch.logLines(project.id)).toContain("ports: 3000 → localhost:3000");
+    expect(orch.logLines(project.id)).toContain("ports: skipped db:5432 (service hosts are not supported yet)");
+  });
+
+  it("forwards ports before launching opencode, so they survive an opencode failure", async () => {
+    const { store, runtime, orch, forwarder } = setup();
+    runtime.ensureRunning.mockRejectedValueOnce(new CommandError("opencode 1.18.31 found, but opendevhub requires opencode v2"));
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(forwarder.open).toHaveBeenCalled();
+    expect(store.runtime(project.id).ports).toHaveLength(2);
+    expect(store.runtime(project.id).opencode).toBe("unhealthy");
+  });
+
+  it("still starts when the devcontainer config cannot be read", async () => {
+    const { store, containers, orch, forwarder } = setup();
+    containers.readConfiguration.mockRejectedValueOnce(new CommandError("devcontainer read-configuration failed (exit 1)"));
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(forwarder.open).not.toHaveBeenCalled();
+    expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "healthy", ports: [], error: undefined });
+    expect(orch.logLines(project.id)).toContain(
+      "ports: could not read devcontainer configuration: devcontainer read-configuration failed (exit 1)",
+    );
+  });
+
+  it("logs failed forwards without touching the project error", async () => {
+    const { store, orch, forwarder } = setup();
+    forwarder.open.mockResolvedValueOnce([{ status: "failed", containerPort: 3000, label: "web", reason: "no free host port in 3000–3100" }]);
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(store.runtime(project.id).error).toBeUndefined();
+    expect(orch.logLines(project.id)).toContain("ports: 3000 not forwarded (no free host port in 3000–3100)");
+  });
+
+  it("stop closes the forwards and clears runtime.ports", async () => {
+    const { store, orch, forwarder } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    await orch.stop(project.id);
+    expect(forwarder.close).toHaveBeenCalledWith(project.id);
+    expect(store.runtime(project.id).ports).toBeUndefined();
+  });
+
+  it("rebuild closes old forwards and reopens against the new container IP", async () => {
+    const { containers, orch, forwarder } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    containers.inspect.mockResolvedValue({ ...running, ip: "172.17.0.42" });
+    await orch.rebuild(project.id);
+    expect(forwarder.close).toHaveBeenCalledWith(project.id);
+    expect(forwarder.close.mock.invocationCallOrder[0]).toBeLessThan(forwarder.open.mock.invocationCallOrder[1]);
+    expect(forwarder.open.mock.calls[1][1]).toBe("172.17.0.42");
+  });
+
+  it("adopt forwards ports of running containers only", async () => {
+    const { store, containers, orch, forwarder } = setup({ projects: { [project.id]: { password: "pw" } } });
+    containers.listManaged.mockResolvedValueOnce([running]);
+    await orch.rescan();
+    await orch.adopt();
+    expect(forwarder.open).toHaveBeenCalledWith(project.id, "172.17.0.9", [{ containerPort: 3000, label: "web" }], expect.any(Function));
+    expect(store.runtime(project.id).ports).toHaveLength(2);
+
+    const stopped = setup();
+    stopped.containers.listManaged.mockResolvedValueOnce([{ ...running, running: false }]);
+    await stopped.orch.rescan();
+    await stopped.orch.adopt();
+    expect(stopped.forwarder.open).not.toHaveBeenCalled();
+  });
+
+  it("refreshContainers closes forwards of containers that went away", async () => {
+    const { store, containers, orch, forwarder } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    containers.inspect.mockResolvedValueOnce({ ...running, running: false });
+    await orch.refreshContainers();
+    expect(forwarder.close).toHaveBeenCalledWith(project.id);
+    expect(store.runtime(project.id).ports).toBeUndefined();
+  });
+
+  it("shutdown closes all forwards", async () => {
+    const { orch, forwarder } = setup();
+    await orch.shutdown();
+    expect(forwarder.closeAll).toHaveBeenCalled();
   });
 });

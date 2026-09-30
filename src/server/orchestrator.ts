@@ -1,10 +1,12 @@
 import path from "node:path";
-import type { Project, ProjectId } from "../shared/types";
-import { CommandError, type ContainerInfo, type Containers } from "./containers";
+import type { ForwardedPort, Project, ProjectId } from "../shared/types";
+import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
 import { LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import type { OpencodeClient, OpencodeEndpoint } from "./opencode/client";
 import type { OpencodeRuntime } from "./opencode/runtime";
+import type { PortForwarder } from "./port-forwarder";
+import { parseForwardPorts } from "./ports";
 import type { StateStore } from "./state";
 
 export class BusyError extends Error {
@@ -21,7 +23,8 @@ export class NotFoundError extends Error {
   }
 }
 
-export type ContainersPort = Pick<Containers, "up" | "inspect" | "listManaged" | "stop">;
+export type ContainersPort = Pick<Containers, "up" | "inspect" | "listManaged" | "stop" | "readConfiguration">;
+export type ForwarderPort = Pick<PortForwarder, "open" | "close" | "closeAll">;
 export type RuntimePort = Pick<OpencodeRuntime, "ensureRunning" | "stopServer" | "isHealthy" | "endpoint">;
 export interface MonitorHandle {
   start(): void;
@@ -32,6 +35,7 @@ export interface OrchestratorDeps {
   store: StateStore;
   containers: ContainersPort;
   runtime: RuntimePort;
+  forwarder: ForwarderPort;
   clientFor: (ep: OpencodeEndpoint) => OpencodeClient;
   roots: () => string[];
   scan: (roots: string[]) => Promise<Project[]>;
@@ -64,9 +68,10 @@ export class Orchestrator {
   }
 
   rebuild(id: ProjectId): Promise<void> {
-    return this.exclusive(id, (p) => {
+    return this.exclusive(id, async (p) => {
       this.stopMonitor(p.id);
-      return this.bringUp(p, true);
+      await this.closePorts(p.id);
+      await this.bringUp(p, true);
     });
   }
 
@@ -91,6 +96,7 @@ export class Orchestrator {
     return this.exclusive(id, async (p) => {
       const { store, runtime, containers } = this.deps;
       this.stopMonitor(p.id);
+      await this.closePorts(p.id);
       const rt = store.runtime(p.id);
       store.updateRuntime(p.id, { containerState: "stopping", error: undefined });
       try {
@@ -120,6 +126,7 @@ export class Orchestrator {
         continue;
       }
       store.updateRuntime(id, { containerId: info.id, containerIp: info.ip, containerState: "running" });
+      if (info.ip) await this.forwardPorts(store.project(id)!, info.ip);
       const rt = store.runtime(id);
       if (info.ip && rt.password && (await runtime.isHealthy(runtime.endpoint(info.ip, rt.password)))) {
         store.updateRuntime(id, { opencode: "healthy", error: undefined });
@@ -142,6 +149,7 @@ export class Orchestrator {
         if (this.busy.has(p.id)) continue;
         if (info?.running) continue;
         this.stopMonitor(p.id);
+        await this.closePorts(p.id);
         store.updateRuntime(p.id, { containerState: "stopped", opencode: "absent", containerIp: undefined });
         store.setSessions(p.id, []);
       } catch {
@@ -150,8 +158,9 @@ export class Orchestrator {
     }
   }
 
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     for (const id of [...this.monitors.keys()]) this.stopMonitor(id);
+    await this.deps.forwarder.closeAll();
   }
 
   private exclusive(id: ProjectId, fn: (project: Project) => Promise<void>): Promise<void> {
@@ -183,6 +192,7 @@ export class Orchestrator {
         containerState: "running",
         opencode: "starting",
       });
+      await this.forwardPorts(project, info.ip);
       await this.launchOpencode(project, rebuild ? undefined : store.runtime(project.id).password);
     } catch (err) {
       this.fail(project.id, err);
@@ -209,6 +219,33 @@ export class Orchestrator {
 
   private workspaceFolder(project: Project): string {
     return this.deps.store.runtime(project.id).workspaceFolder ?? `/workspaces/${path.basename(project.path)}`;
+  }
+
+  private async forwardPorts(project: Project, ip: string): Promise<void> {
+    const { store, containers, forwarder } = this.deps;
+    let config: PortConfig;
+    try {
+      config = await containers.readConfiguration(project);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log(project.id, `ports: could not read devcontainer configuration: ${message}`);
+      store.updateRuntime(project.id, { ports: [] });
+      return;
+    }
+    const { ports, skipped } = parseForwardPorts(config.forwardPorts, config.portsAttributes);
+    for (const s of skipped) this.log(project.id, `ports: skipped ${s.entry} (${s.reason})`);
+    const opened = await forwarder.open(project.id, ip, ports, (line) => this.log(project.id, line));
+    for (const f of opened) {
+      if (f.status === "forwarded") this.log(project.id, `ports: ${f.containerPort} → localhost:${f.hostPort}`);
+      else if (f.status === "failed") this.log(project.id, `ports: ${f.containerPort} not forwarded (${f.reason})`);
+    }
+    const skippedPorts: ForwardedPort[] = skipped.map((s) => ({ status: "skipped", entry: s.entry, reason: s.reason }));
+    store.updateRuntime(project.id, { ports: [...opened, ...skippedPorts] });
+  }
+
+  private async closePorts(id: ProjectId): Promise<void> {
+    await this.deps.forwarder.close(id);
+    this.deps.store.updateRuntime(id, { ports: undefined });
   }
 
   private startMonitor(id: ProjectId): void {
