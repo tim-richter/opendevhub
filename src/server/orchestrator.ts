@@ -167,6 +167,10 @@ export class Orchestrator {
     store.updateRuntime(project.id, { containerState: "starting", opencode: "absent", error: undefined });
     try {
       const up = await containers.up(project, { rebuild, onLine: (l) => this.log(project.id, l) });
+      // Record the container id as soon as `up` succeeds, before the running/IP checks below can
+      // throw — otherwise a container that came up but failed those checks has no containerId on
+      // record, and Stop has nothing to stop.
+      store.updateRuntime(project.id, { containerId: up.containerId });
       const info = await containers.inspect(up.containerId);
       if (!info?.running) throw new CommandError("container is not running after devcontainer up");
       if (!info.ip) {

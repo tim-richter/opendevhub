@@ -88,12 +88,16 @@ describe("Orchestrator", () => {
     expect(orch.logLines(project.id)).toContain("tail line");
   });
 
-  it("rejects containers without a bridge IP", async () => {
+  it("rejects containers without a bridge IP but still records the container id so Stop can clean it up", async () => {
     const { store, containers, orch } = setup();
     containers.inspect.mockResolvedValueOnce({ id: "c1", running: true, projectId: project.id });
     await orch.rescan();
     await orch.start(project.id);
+    expect(store.runtime(project.id)).toMatchObject({ containerState: "error", containerId: "c1" });
     expect(store.runtime(project.id).error).toMatch(/host networking/);
+
+    await orch.stop(project.id);
+    expect(containers.stop).toHaveBeenCalledWith("c1");
   });
 
   it("keeps the container running but marks opencode unhealthy when launch fails", async () => {
