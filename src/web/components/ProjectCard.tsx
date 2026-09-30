@@ -25,6 +25,9 @@ export function ProjectCard(props: {
   const { project, runtime, sessions, openUrl } = view;
   const [showLogs, setShowLogs] = useState(false);
   const running = runtime.containerState === "running";
+  // Show Stop whenever there's a container to stop, even if it's in "error" state (e.g. a
+  // failed `docker stop` left it running) — otherwise the user has no way to retry.
+  const canStop = Boolean(runtime.containerId) && runtime.containerState !== "stopped";
   const transitioning =
     runtime.containerState === "starting" || runtime.containerState === "stopping" || runtime.opencode === "starting";
   const canOpen = running && runtime.opencode === "healthy";
@@ -49,7 +52,7 @@ export function ProjectCard(props: {
       </div>
 
       <div className="actions">
-        {running ? (
+        {canStop ? (
           <button disabled={locked} onClick={() => onAction("stop")}>Stop</button>
         ) : (
           <button disabled={locked} onClick={() => onAction("start")}>Start</button>
