@@ -1,5 +1,5 @@
 import http from "node:http";
-import type { AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { basicAuth } from "../../src/server/opencode/client";
@@ -145,5 +145,36 @@ describe("proxyUpgrade", () => {
       ws.on("error", () => {});
     });
     expect(status).toBe(403);
+  });
+
+  it("survives a client socket reset while the upstream never answers (no process crash)", async () => {
+    const realTarget = target!;
+    const blackhole = net.createServer(() => {
+      // accept the TCP connection but never write an HTTP response
+    });
+    const blackholePort = await new Promise<number>((resolve) => {
+      blackhole.listen(0, "127.0.0.1", () => resolve((blackhole.address() as AddressInfo).port));
+    });
+    target = { host: "127.0.0.1", port: blackholePort, password: "pw" };
+
+    const proxyPort = (proxy.address() as AddressInfo).port;
+    const client = net.connect(proxyPort, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    client.write(
+      `GET /pty HTTP/1.1\r\nHost: 127.0.0.1:${proxyPort}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n` +
+        `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+    );
+    await new Promise((r) => setTimeout(r, 200));
+    client.resetAndDestroy();
+    await new Promise((r) => setTimeout(r, 200));
+
+    target = realTarget;
+    const res = await fetch(`${proxyUrl}/echo`, { headers: { origin: proxyUrl } });
+    expect(res.status).toBe(200);
+
+    blackhole.close();
   });
 });

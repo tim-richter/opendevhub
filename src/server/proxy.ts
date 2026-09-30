@@ -11,6 +11,7 @@ export interface ProxyTarget {
 export type ResolveTarget = (projectId: string) => ProxyTarget | undefined;
 
 const DROPPED_RESPONSE_HEADERS = new Set(["www-authenticate", "connection", "keep-alive"]);
+const UPSTREAM_UPGRADE_TIMEOUT_MS = 10_000;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -107,6 +108,18 @@ export function proxyUpgrade(
     method: req.method,
     path: req.url,
     headers: upstreamHeaders(req, target),
+    timeout: UPSTREAM_UPGRADE_TIMEOUT_MS,
+  });
+  // Node hijacks `socket` for the upgrade and strips the server's own error handling from it, so
+  // without a listener attached right away — before any async work — a client-side ECONNRESET
+  // while the upstream is still pending/connecting has nowhere to go and crashes the process.
+  // (upstream.destroy() also tears down its socket once the upgrade has happened, since that
+  // socket is the same object as upstream.socket throughout.)
+  socket.on("error", () => upstream.destroy());
+  socket.on("close", () => upstream.destroy());
+  upstream.on("timeout", () => {
+    upstream.destroy();
+    if (!socket.destroyed) socket.end("HTTP/1.1 504 Gateway Timeout\r\n\r\n");
   });
   upstream.on("upgrade", (upRes, upSocket, upHead) => {
     const lines = ["HTTP/1.1 101 Switching Protocols"];
@@ -116,8 +129,6 @@ export function proxyUpgrade(
     if (head.length) upSocket.write(head);
     upSocket.pipe(socket).pipe(upSocket);
     upSocket.on("error", () => socket.destroy());
-    socket.on("error", () => upSocket.destroy());
-    socket.on("close", () => upSocket.destroy());
   });
   upstream.on("response", (upRes) => {
     socket.end(`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage}\r\n\r\n`);
