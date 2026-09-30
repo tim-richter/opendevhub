@@ -69,3 +69,7 @@ button.link { border: none; background: none; color: var(--accent); padding-inli
 @media (max-width: 36rem) {
   .session { grid-template-columns: auto 1fr; }
 }
+.ports { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 13px; }
+.ports a { color: var(--accent); text-decoration: none; }
+.ports a:hover { text-decoration: underline; }
+.ports li.muted { cursor: help; }

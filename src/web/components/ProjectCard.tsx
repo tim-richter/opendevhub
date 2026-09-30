@@ -3,6 +3,7 @@ import type { ContainerState, ProjectView } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import type { Action } from "../api";
 import { LogPanel } from "./LogPanel";
+import { PortsRow } from "./PortsRow";
 import { SessionRow } from "./SessionRow";
 
 const STATE_LABEL: Record<ContainerState, string> = {
@@ -80,6 +81,8 @@ export function ProjectCard(props: {
           {showLogs ? "Hide logs" : "Logs"}
         </button>
       </div>
+
+      {runtime.ports && runtime.ports.length > 0 && <PortsRow ports={runtime.ports} />}
 
       {runtime.error && <p className="error-text">{runtime.error}</p>}
 
