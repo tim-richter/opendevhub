@@ -129,3 +129,12 @@ describe("OpencodeRuntime.ensureRunning", () => {
     await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/did not become healthy/);
   });
 });
+
+describe("OpencodeRuntime.resolveBinary", () => {
+  it("returns the resolved path or undefined", async () => {
+    const found = runtimeWith({ stdout: "opencode v2.0.20" });
+    expect(await found.runtime.resolveBinary(project)).toBe(BIN);
+    const missing = runtimeWith({ stdout: "opencode v2.0.20" }, { exitCode: 1, stdout: "" });
+    expect(await missing.runtime.resolveBinary(project)).toBeUndefined();
+  });
+});

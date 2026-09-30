@@ -68,6 +68,11 @@ export class OpencodeRuntime {
     }
   }
 
+  async resolveBinary(project: Project): Promise<string | undefined> {
+    const resolved = await this.deps.containers.exec(project, ["sh", "-c", RESOLVE_BINARY]);
+    return resolved.exitCode === 0 ? parseBinaryPath(resolved.stdout) : undefined;
+  }
+
   async ensureRunning(
     project: Project,
     args: { ip: string; password?: string; workspaceFolder: string; onLine: (line: string) => void },
@@ -82,14 +87,8 @@ export class OpencodeRuntime {
     }
 
     const { containers } = this.deps;
-    const resolved = await containers.exec(project, ["sh", "-c", RESOLVE_BINARY]);
-    const binary = resolved.exitCode === 0 ? parseBinaryPath(resolved.stdout) : undefined;
-    if (!binary) {
-      throw new CommandError(
-        `opencode v2 not found in the devcontainer (searched ${SEARCHED})`,
-        tailLines(resolved.stderr),
-      );
-    }
+    const binary = await this.resolveBinary(project);
+    if (!binary) throw new CommandError(`opencode v2 not found in the devcontainer (searched ${SEARCHED})`);
     const versionRun = await containers.exec(project, [binary, "--version"]);
     if (versionRun.exitCode !== 0) {
       throw new CommandError(`failed to run ${binary} --version`, tailLines(versionRun.stderr + versionRun.stdout));
