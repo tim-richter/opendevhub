@@ -76,6 +76,7 @@ describe("Containers", () => {
       id: "abc123",
       running: true,
       ip: "172.17.0.5",
+      network: "bridge",
       projectId: "demo-1a2b3c",
     });
     const missing = fakeRunner(() => ({ exitCode: 1, stderr: "No such container" }));

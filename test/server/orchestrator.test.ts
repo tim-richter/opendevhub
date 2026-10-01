@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { PersistedState } from "../../src/server/config";
 import { CommandError, type ContainerInfo } from "../../src/server/containers";
 import type { MonitorOptions } from "../../src/server/monitor";
+import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
 import type { OpencodeClient } from "../../src/server/opencode/client";
-import { BusyError, NotFoundError, Orchestrator } from "../../src/server/orchestrator";
+import { BusyError, type NetworkPort, NotFoundError, Orchestrator } from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
 import type { ForwardTarget } from "../../src/server/port-forwarder";
@@ -19,7 +20,7 @@ const project: Project = {
 };
 const running: ContainerInfo = { id: "c1", running: true, ip: "172.17.0.9", projectId: project.id };
 
-function setup(persisted: PersistedState = { projects: {} }) {
+function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPort, projects = [project]) {
   const store = new StateStore({ port: 7777, persisted, persist: () => {} });
   const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean }> = [];
   const containers = {
@@ -36,7 +37,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
     })),
   };
   const runtime = {
-    endpoint: (ip: string, password: string) => ({ baseUrl: `http://${ip}:4096`, password }),
+    endpoint: (a: HostPort, password: string) => ({ baseUrl: `http://${a.host}:${a.port}`, password }),
     ensureRunning: vi.fn(async (_p: Project, _a: { password?: string }) => ({ password: "pw", version: "2.0.20" })),
     stopServer: vi.fn(async () => {}),
     isHealthy: vi.fn(async () => true),
@@ -51,7 +52,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
   };
   const relay = {
     ensureRunning: vi.fn(
-      async (_p: Project, _a: { ip: string; token: string; binary?: string }): Promise<RelayStatus> => ({
+      async (_p: Project, _a: { address: HostPort; token: string; binary?: string }): Promise<RelayStatus> => ({
         status: "active",
         via: "bun",
       }),
@@ -64,9 +65,10 @@ function setup(persisted: PersistedState = { projects: {} }) {
     runtime,
     forwarder,
     relay,
+    network,
     clientFor: () => ({}) as OpencodeClient,
     roots: () => ["/src"],
-    scan: async () => [project],
+    scan: async () => projects,
     monitorFactory: (opts) => {
       const m = { opts, started: false, stopped: false, start() { m.started = true; }, stop() { m.stopped = true; } };
       monitors.push(m);
@@ -82,7 +84,7 @@ describe("Orchestrator", () => {
     await orch.rescan();
     await orch.start(project.id);
     expect(containers.up.mock.calls[0][1].rebuild).toBe(false);
-    expect(runtime.ensureRunning.mock.calls[0][1]).toMatchObject({ ip: "172.17.0.9", workspaceFolder: "/workspaces/demo" });
+    expect(runtime.ensureRunning.mock.calls[0][1]).toMatchObject({ address: { host: "172.17.0.9", port: 4096 }, workspaceFolder: "/workspaces/demo" });
     expect(store.runtime(project.id)).toMatchObject({
       containerState: "running",
       opencode: "healthy",
@@ -386,9 +388,13 @@ describe("Orchestrator", () => {
     await orch.start(project.id);
     const token = store.runtime(project.id).relayToken!;
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(relay.ensureRunning).toHaveBeenCalledWith(project, { ip: "172.17.0.9", token, binary: "/usr/local/bin/opencode" });
+    expect(relay.ensureRunning).toHaveBeenCalledWith(project, {
+      address: { host: "172.17.0.9", port: 4097 },
+      token,
+      binary: "/usr/local/bin/opencode",
+    });
     expect(relay.ensureRunning.mock.invocationCallOrder[0]).toBeLessThan(forwarder.open.mock.invocationCallOrder[0]);
-    expect(forwarder.open.mock.calls[0][1]).toEqual({ host: "172.17.0.9", relay: { port: 4097, token } });
+    expect(forwarder.open.mock.calls[0][1]).toEqual({ host: "172.17.0.9", relay: { host: "172.17.0.9", port: 4097, token } });
     expect(store.runtime(project.id).relay).toBe("active");
     expect(orch.logLines(project.id)).toContain("relay: active (bun)");
   });
@@ -446,5 +452,132 @@ describe("Orchestrator", () => {
     expect(forwarder.open).toHaveBeenCalledTimes(2);
     expect(forwarder.open.mock.calls[1][1]).toMatchObject({ relay: { port: 4097 } });
     expect(store.runtime(project.id).relay).toBe("active");
+  });
+
+  describe("through the gateway route", () => {
+    function gatewayNetwork() {
+      const dial: Dial = vi.fn(async () => {
+        throw new Error("not used");
+      });
+      const routes: Array<Route & { closed: boolean }> = [];
+      const network = {
+        route: vi.fn(async (c: RouteContainer, onLog: (l: string) => void) => {
+          onLog(`network: container IP ${c.ip} is not reachable from this machine, using the gateway container`);
+          const route = {
+            kind: "gateway" as const,
+            opencode: { host: "127.0.0.1", port: 50001 },
+            relay: { host: "127.0.0.1", port: 50002 },
+            dial,
+            closed: false,
+            close: async () => {
+              route.closed = true;
+            },
+          };
+          routes.push(route);
+          return route;
+        }),
+      };
+      return { network, routes, dial };
+    }
+
+    it("reaches opencode and the relay through the route's addresses, and forwards with its dial", async () => {
+      const { network, dial } = gatewayNetwork();
+      const { store, runtime, relay, forwarder, orch, monitors } = setup(undefined, network);
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(network.route).toHaveBeenCalledWith(
+        { id: "c1", ip: "172.17.0.9", network: undefined },
+        expect.any(Function),
+      );
+      expect(relay.ensureRunning.mock.calls[0][1].address).toEqual({ host: "127.0.0.1", port: 50002 });
+      expect(runtime.ensureRunning.mock.calls[0][1]).toMatchObject({ address: { host: "127.0.0.1", port: 50001 } });
+      const token = store.runtime(project.id).relayToken!;
+      expect(forwarder.open.mock.calls[0][1]).toEqual({
+        host: "172.17.0.9",
+        dial,
+        relay: { host: "127.0.0.1", port: 50002, token },
+      });
+      expect(orch.opencodeAddress(project.id)).toEqual({ host: "127.0.0.1", port: 50001 });
+      expect(monitors[0].opts.client).toBeDefined();
+      expect(orch.logLines(project.id)).toContain(
+        "network: container IP 172.17.0.9 is not reachable from this machine, using the gateway container",
+      );
+      expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "healthy" });
+    });
+
+    it("passes the container's network to the route", async () => {
+      const { network } = gatewayNetwork();
+      const { containers, orch } = setup(undefined, network);
+      containers.inspect.mockResolvedValue({ ...running, network: "demo_default" });
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(network.route.mock.calls[0][0]).toEqual({ id: "c1", ip: "172.17.0.9", network: "demo_default" });
+    });
+
+    it("forwards with the dial alone when the relay is unavailable", async () => {
+      const { network, dial } = gatewayNetwork();
+      const { relay, forwarder, orch } = setup(undefined, network);
+      relay.ensureRunning.mockResolvedValueOnce({ status: "unavailable", reason: "no relay runtime" });
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(forwarder.open.mock.calls[0][1]).toEqual({ host: "172.17.0.9", dial });
+    });
+
+    it("closes the route on stop, on rebuild and on shutdown", async () => {
+      const { network, routes } = gatewayNetwork();
+      const { orch } = setup(undefined, network);
+      await orch.rescan();
+      await orch.start(project.id);
+      await orch.rebuild(project.id);
+      expect(routes.map((r) => r.closed)).toEqual([true, false]);
+      await orch.stop(project.id);
+      expect(routes[1].closed).toBe(true);
+      expect(orch.opencodeAddress(project.id)).toBeUndefined();
+      await orch.start(project.id);
+      await orch.shutdown();
+      expect(routes[2].closed).toBe(true);
+    });
+
+    it("closes the route when the container stops outside opendevhub", async () => {
+      const { network, routes } = gatewayNetwork();
+      const { containers, orch } = setup(undefined, network);
+      await orch.rescan();
+      await orch.start(project.id);
+      containers.inspect.mockResolvedValueOnce({ ...running, running: false });
+      await orch.refreshContainers();
+      expect(routes[0].closed).toBe(true);
+    });
+
+    it("fails start, with the container still running, when the gateway cannot be set up", async () => {
+      const { network } = gatewayNetwork();
+      network.route.mockRejectedValueOnce(new CommandError("docker run failed for the gateway container", ["pull access denied"]));
+      const { store, runtime, orch } = setup(undefined, network);
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(store.runtime(project.id)).toMatchObject({
+        containerState: "running",
+        opencode: "unhealthy",
+        error: "docker run failed for the gateway container",
+      });
+      expect(orch.logLines(project.id)).toContain("pull access denied");
+      expect(runtime.ensureRunning).not.toHaveBeenCalled();
+    });
+
+    it("adopt checks health through the route and keeps adopting when one route fails", async () => {
+      const { network } = gatewayNetwork();
+      const other: Project = { ...project, id: "other-000000", name: "other", path: "/src/other" };
+      const { store, containers, runtime, orch } = setup(
+        { projects: { [project.id]: { password: "pw" }, [other.id]: { password: "pw" } } },
+        network,
+        [project, other],
+      );
+      network.route.mockRejectedValueOnce(new Error("gateway down"));
+      containers.listManaged.mockResolvedValueOnce([running, { ...running, id: "c2", projectId: other.id }]);
+      await orch.rescan();
+      await orch.adopt();
+      expect(store.runtime(project.id)).toMatchObject({ containerState: "running", error: "gateway down" });
+      expect(runtime.isHealthy).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:50001", password: "pw" });
+      expect(store.runtime(other.id)).toMatchObject({ containerState: "running", opencode: "healthy" });
+    });
   });
 });

@@ -31,7 +31,7 @@ function runtimeWith(versionOutput: Output, resolveOutput: Output = { stdout: `$
   });
   return { runtime, calls };
 }
-const args = { ip: "127.0.0.1", workspaceFolder: "/workspaces/demo", onLine: () => {} };
+const args = () => ({ address: { host: "127.0.0.1", port: fake.port }, workspaceFolder: "/workspaces/demo", onLine: () => {} });
 
 describe("parseOpencodeVersion", () => {
   it.each([
@@ -53,7 +53,7 @@ describe("parseBinaryPath", () => {
 describe("OpencodeRuntime.ensureRunning", () => {
   it("searches PATH, the installer dirs and bash/zsh login shells for the binary", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
-    await runtime.ensureRunning(project, args);
+    await runtime.ensureRunning(project, args());
     const script = calls.find(isResolve)?.args.at(-1) ?? "";
     for (const needle of ["command -v opencode", "$HOME/.opencode/bin/opencode", "$HOME/.local/bin/opencode", "$HOME/.bun/bin/opencode", "-lic", "-ic"]) {
       expect(script).toContain(needle);
@@ -63,7 +63,7 @@ describe("OpencodeRuntime.ensureRunning", () => {
 
   it("uses the resolved absolute path for --version and serve", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
-    await runtime.ensureRunning(project, args);
+    await runtime.ensureRunning(project, args());
     expect(calls.find((c) => c.args.at(-1) === "--version")?.args.slice(-2)).toEqual([BIN, "--version"]);
     const launch = calls.find((c) => c.args.at(-1)?.includes("serve --hostname 0.0.0.0"));
     expect(launch?.args.at(-1)).toContain(`nohup '${BIN}' serve`);
@@ -74,13 +74,13 @@ describe("OpencodeRuntime.ensureRunning", () => {
       { stdout: "opencode v2.0.20" },
       { stdout: "[oh-my-zsh] Would you like to update? [Y/n]\n/opt/tools/opencode\n" },
     );
-    await runtime.ensureRunning(project, args);
+    await runtime.ensureRunning(project, args());
     expect(calls.find((c) => c.args.at(-1) === "--version")?.args.at(-2)).toBe("/opt/tools/opencode");
   });
 
   it("launches opencode serve with the generated password and waits for health", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20\n" });
-    const res = await runtime.ensureRunning(project, args);
+    const res = await runtime.ensureRunning(project, args());
     expect(res).toEqual({ password: "pw", version: "2.0.20" });
     const launch = calls.find((c) => c.args.at(-1)?.includes("serve --hostname 0.0.0.0"));
     expect(launch?.args).toEqual(expect.arrayContaining(["--remote-env", "OPENCODE_PASSWORD=pw", "sh", "-c"]));
@@ -91,14 +91,14 @@ describe("OpencodeRuntime.ensureRunning", () => {
 
   it("is idempotent when the server already answers with the given password", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
-    const res = await runtime.ensureRunning(project, { ...args, password: "pw" });
+    const res = await runtime.ensureRunning(project, { ...args(), password: "pw" });
     expect(res).toEqual({ password: "pw", version: "2.0.20" });
     expect(calls).toHaveLength(0);
   });
 
   it("fails clearly, listing the searched locations, when opencode is not found", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" }, { exitCode: 1, stdout: "" });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(
+    await expect(runtime.ensureRunning(project, args())).rejects.toThrow(
       /opencode v2 not found in the devcontainer.*PATH.*~\/\.opencode\/bin.*bash\/zsh/,
     );
     expect(calls.some((c) => c.args.at(-1) === "--version")).toBe(false);
@@ -106,12 +106,12 @@ describe("OpencodeRuntime.ensureRunning", () => {
 
   it("fails clearly when the found binary cannot report its version", async () => {
     const { runtime } = runtimeWith({ exitCode: 126, stdout: "" });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(`failed to run ${BIN} --version`);
+    await expect(runtime.ensureRunning(project, args())).rejects.toThrow(`failed to run ${BIN} --version`);
   });
 
   it("rejects opencode v1", async () => {
     const { runtime } = runtimeWith({ stdout: "1.18.31" });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/requires opencode v2/);
+    await expect(runtime.ensureRunning(project, args())).rejects.toThrow(/requires opencode v2/);
   });
 
   it("times out when the server never becomes healthy", async () => {
@@ -126,7 +126,7 @@ describe("OpencodeRuntime.ensureRunning", () => {
       healthIntervalMs: 20,
       generatePassword: () => "wrong-password",
     });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/did not become healthy/);
+    await expect(runtime.ensureRunning(project, args())).rejects.toThrow(/did not become healthy/);
   });
 });
 

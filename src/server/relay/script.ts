@@ -1,6 +1,8 @@
 /**
  * Runs inside the container (Bun via `BUN_BE_BUN=1 <opencode> -e`, or Node) and relays TCP from
  * 0.0.0.0:$ODH_RELAY_PORT to the container's loopback. Protocol: see the container relay spec §3.
+ * With ODH_RELAY_REMOTE=1 it is the gateway (see gateway.ts) and also accepts `<token> <ip> <port>`,
+ * connecting to that IP instead of loopback.
  * Constraints: CommonJS, node:net/node:crypto only, no single quotes (it is shell-quoted as one arg).
  */
 export const RELAY_SCRIPT = `/*odh-relay*/
@@ -9,6 +11,7 @@ const net = require("node:net");
 const crypto = require("node:crypto");
 const token = process.env.ODH_RELAY_TOKEN || "";
 const port = Number(process.env.ODH_RELAY_PORT || "4097");
+const remote = process.env.ODH_RELAY_REMOTE === "1";
 if (!token) {
   console.error("odh-relay: ODH_RELAY_TOKEN is not set");
   process.exit(2);
@@ -18,8 +21,7 @@ function tokenOk(candidate) {
   const b = Buffer.from(candidate);
   return b.length === expected.length && crypto.timingSafeEqual(b, expected);
 }
-function connectLocal(target, done) {
-  const hosts = ["127.0.0.1", "::1"];
+function connectTo(hosts, target, done) {
   const codes = [];
   const attempt = (i) => {
     if (i >= hosts.length) {
@@ -58,12 +60,15 @@ const server = net.createServer({ allowHalfOpen: true }, (client) => {
     client.pause();
     const parts = buf.subarray(0, nl).toString("utf8").trim().split(" ");
     const rest = buf.subarray(nl + 1);
-    if (parts.length !== 2 || !tokenOk(parts[0])) return client.destroy();
-    if (parts[1] === "ping") return client.end("PONG\\n");
-    if (!/^[0-9]+$/.test(parts[1])) return client.destroy();
-    const target = Number(parts[1]);
+    if (parts.length < 2 || parts.length > (remote ? 3 : 2) || !tokenOk(parts[0])) return client.destroy();
+    if (parts.length === 2 && parts[1] === "ping") return client.end("PONG\\n");
+    const hosts = parts.length === 3 ? [parts[1]] : ["127.0.0.1", "::1"];
+    if (parts.length === 3 && !net.isIP(parts[1])) return client.destroy();
+    const portArg = parts[parts.length - 1];
+    if (!/^[0-9]+$/.test(portArg)) return client.destroy();
+    const target = Number(portArg);
     if (target < 1 || target > 65535) return client.destroy();
-    connectLocal(target, (code, upstream) => {
+    connectTo(hosts, target, (code, upstream) => {
       if (code) return client.end("ERR " + code + "\\n");
       if (client.destroyed) return upstream.destroy();
       const close = () => {

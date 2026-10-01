@@ -69,6 +69,8 @@ export interface ContainerInfo {
   id: string;
   running: boolean;
   ip?: string;
+  /** Name of the Docker network `ip` belongs to. */
+  network?: string;
   projectId?: string;
 }
 
@@ -79,10 +81,13 @@ export function parseInspect(json: string): ContainerInfo {
     Config?: { Labels?: Record<string, string> | null };
     NetworkSettings?: { Networks?: Record<string, { IPAddress?: string }> };
   };
-  const ip = Object.values(c.NetworkSettings?.Networks ?? {})
-    .map((n) => n.IPAddress)
-    .find((a): a is string => !!a);
-  return { id: c.Id, running: c.State?.Running === true, ip, projectId: c.Config?.Labels?.[LABEL] };
+  const [network, ip] =
+    Object.entries(c.NetworkSettings?.Networks ?? {})
+      .map(([name, n]) => [name, n.IPAddress] as const)
+      .find(([, a]) => !!a) ?? [];
+  const info: ContainerInfo = { id: c.Id, running: c.State?.Running === true, ip, projectId: c.Config?.Labels?.[LABEL] };
+  if (network) info.network = network;
+  return info;
 }
 
 export class Containers {

@@ -1,5 +1,6 @@
 import net from "node:net";
 import type { ForwardedPort } from "../shared/types";
+import type { Dial } from "./network";
 import type { PortSpec } from "./ports";
 import { RelayError, openRelayConnection } from "./relay/client";
 
@@ -9,8 +10,12 @@ export interface ForwardEvents {
 }
 
 export interface ForwardTarget {
+  /** Container IP, for direct connections to the app when the relay is not used. */
   host: string;
-  relay?: { port: number; token: string };
+  /** Replaces the direct connection to `host` (the gateway route sets it). */
+  dial?: Dial;
+  /** `host` defaults to the target's. */
+  relay?: { host?: string; port: number; token: string };
 }
 
 interface Forward {
@@ -134,14 +139,24 @@ export class PortForwarder {
         socket.resume();
       };
 
+      const refusedHint =
+        " (is the app listening on 0.0.0.0 inside the container? apps bound to localhost there are not reachable)";
       const direct = () => {
+        if (target.dial) {
+          target.dial(spec.containerPort).then(
+            (socket) => pipe(socket),
+            (err: Error) => {
+              const code = err instanceof RelayError ? err.code : undefined;
+              const hint = code === "ECONNREFUSED" ? refusedHint : "";
+              logLimited(`ports: ${spec.containerPort}: ${code ?? err.message}${hint}`);
+              destroy();
+            },
+          );
+          return;
+        }
         const socket = net.connect({ host: target.host, port: spec.containerPort, allowHalfOpen: true });
         const onConnectError = (err: NodeJS.ErrnoException) => {
-          const hint =
-            err.code === "ECONNREFUSED"
-              ? " (is the app listening on 0.0.0.0 inside the container? apps bound to localhost there are not reachable)"
-              : "";
-          logLimited(`ports: ${spec.containerPort}: ${err.message}${hint}`);
+          logLimited(`ports: ${spec.containerPort}: ${err.message}${err.code === "ECONNREFUSED" ? refusedHint : ""}`);
           socket.destroy();
           destroy();
         };
@@ -153,7 +168,7 @@ export class PortForwarder {
       };
 
       if (!target.relay) return direct();
-      openRelayConnection({ host: target.host, ...target.relay }, spec.containerPort).then(
+      openRelayConnection({ ...target.relay, host: target.relay.host ?? target.host }, spec.containerPort).then(
         ({ socket, rest }) => pipe(socket, rest),
         (err: Error) => {
           if (err instanceof RelayError) {

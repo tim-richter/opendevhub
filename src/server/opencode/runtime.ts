@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Project } from "../../shared/types";
 import { CommandError, type Containers, tailLines } from "../containers";
+import type { HostPort } from "../network";
 import type { OpencodeClient, OpencodeEndpoint } from "./client";
 
 export const OPENCODE_PORT = 4096;
@@ -55,8 +56,9 @@ export interface RuntimeDeps {
 export class OpencodeRuntime {
   constructor(private readonly deps: RuntimeDeps) {}
 
-  endpoint(ip: string, password: string): OpencodeEndpoint {
-    return { baseUrl: `http://${ip}:${this.deps.port ?? OPENCODE_PORT}`, password };
+  /** `address` is where the host reaches opencode (see Route), not necessarily the container port. */
+  endpoint(address: HostPort, password: string): OpencodeEndpoint {
+    return { baseUrl: `http://${address.host}:${address.port}`, password };
   }
 
   async isHealthy(ep: OpencodeEndpoint): Promise<boolean> {
@@ -75,11 +77,11 @@ export class OpencodeRuntime {
 
   async ensureRunning(
     project: Project,
-    args: { ip: string; password?: string; workspaceFolder: string; onLine: (line: string) => void },
+    args: { address: HostPort; password?: string; workspaceFolder: string; onLine: (line: string) => void },
   ): Promise<{ password: string; version: string }> {
     if (args.password) {
       try {
-        const info = await this.deps.clientFor(this.endpoint(args.ip, args.password)).info();
+        const info = await this.deps.clientFor(this.endpoint(args.address, args.password)).info();
         return { password: args.password, version: info.version };
       } catch {
         // not running or different password: relaunch below
@@ -111,7 +113,7 @@ export class OpencodeRuntime {
     }
     args.onLine(`launched opencode serve on port ${port}; waiting for health`);
 
-    const ep = this.endpoint(args.ip, password);
+    const ep = this.endpoint(args.address, password);
     const deadline = Date.now() + (this.deps.healthTimeoutMs ?? 30_000);
     while (Date.now() < deadline) {
       if (await this.isHealthy(ep)) return { password, version };

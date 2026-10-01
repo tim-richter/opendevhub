@@ -4,9 +4,11 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { spawnRunner } from "../../src/server/exec";
+import { Gateway } from "../../src/server/gateway";
 import { projectId } from "../../src/server/ids";
+import { Network, parseRouteMode } from "../../src/server/network";
 import { OpencodeClient, basicAuth } from "../../src/server/opencode/client";
-import { OPENCODE_PORT, OpencodeRuntime } from "../../src/server/opencode/runtime";
+import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
 import { RelayRuntime } from "../../src/server/relay/runtime";
@@ -40,7 +42,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const containers = new Containers(spawnRunner);
     const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
     const runtime = new OpencodeRuntime({ containers, clientFor });
-    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), clientFor, roots: () => [], scan: async () => [project] });
+    // OPENDEVHUB_ROUTE=gateway runs the same test through the gateway container (the macOS path).
+    const network = new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) });
+    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, clientFor, roots: () => [], scan: async () => [project] });
     orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
     await orch.rescan();
@@ -65,7 +69,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
       { timeout: 15_000, interval: 500 },
     );
 
-    const ep = runtime.endpoint(rt.containerIp!, rt.password!);
+    const address = orch.opencodeAddress(project.id)!;
+    const ep = runtime.endpoint(address, rt.password!);
     const created = await fetch(`${ep.baseUrl}/api/session`, {
       method: "POST",
       headers: { authorization: basicAuth(ep.password), "content-type": "application/json" },
@@ -80,7 +85,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const server = await startServer({
       port: 0,
       app: new Hono(),
-      resolveTarget: () => ({ host: rt.containerIp!, port: OPENCODE_PORT, password: rt.password! }),
+      resolveTarget: () => ({ ...address, password: rt.password! }),
     });
     const info = await getViaHost(server.port, `${project.id}.localhost:${server.port}`, "/api/info");
     expect(JSON.parse(info).version).toMatch(/^2\./);

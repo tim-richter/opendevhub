@@ -83,6 +83,60 @@ describe("RELAY_SCRIPT", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(4900);
   }, 10_000);
 
+  it("rejects the gateway form `<token> <ip> <port>` unless started in remote mode", async () => {
+    const port = await echoOn("127.0.0.1");
+    expect(await talk(`secret 127.0.0.1 ${port}\n`, "hi")).toBe("");
+  });
+
+  describe("in remote (gateway) mode", () => {
+    let gateway: Relay;
+    beforeEach(async () => {
+      gateway = await startRelay("secret", { ODH_RELAY_REMOTE: "1" });
+    });
+    afterEach(() => gateway.stop());
+
+    function talkGateway(header: string, payload = "", until?: RegExp): Promise<string> {
+      return new Promise((resolve) => {
+        const socket = net.connect(gateway.port, "127.0.0.1", () => socket.write(header + payload));
+        let got = "";
+        socket.on("data", (d) => {
+          got += d.toString();
+          if (until?.test(got)) {
+            socket.destroy();
+            resolve(got);
+          }
+        });
+        socket.on("close", () => resolve(got));
+        socket.on("error", () => resolve(got));
+      });
+    }
+
+    it("pipes to the named IP", async () => {
+      const port = await echoOn("127.0.0.1");
+      expect(await talkGateway(`secret 127.0.0.1 ${port}\n`, "hi", /echo:hi/)).toBe("OK\necho:hi");
+    });
+
+    it("still answers ping and the loopback form", async () => {
+      const port = await echoOn("127.0.0.1");
+      expect(await talkGateway("secret ping\n")).toBe("PONG\n");
+      expect(await talkGateway(`secret ${port}\n`, "lo", /echo:lo/)).toBe("OK\necho:lo");
+    });
+
+    it("reports ECONNREFUSED for the named IP", async () => {
+      const port = await freePort();
+      expect(await talkGateway(`secret 127.0.0.1 ${port}\n`)).toBe("ERR ECONNREFUSED\n");
+    });
+
+    it.each([
+      ["host names", "secret localhost 80\n"],
+      ["wrong token", "nope 127.0.0.1 80\n"],
+      ["bad port", "secret 127.0.0.1 0\n"],
+      ["extra fields", "secret 127.0.0.1 80 x\n"],
+    ])("closes silently on %s", async (_name, header) => {
+      expect(await talkGateway(header)).toBe("");
+    });
+  });
+
   it("exits with an error when the token is missing", () => {
     const r = spawnSync(process.execPath, ["-e", RELAY_SCRIPT], {
       env: { ...process.env, ODH_RELAY_TOKEN: "", ODH_RELAY_PORT: "0" },
