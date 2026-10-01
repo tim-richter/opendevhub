@@ -4,11 +4,20 @@ import type { ForwardedPort, ProjectView } from "../../shared/types";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { LogPanel } from "../components/LogPanel";
+import { OpenInMenu } from "../components/OpenInMenu";
 import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
 import { SessionList } from "../components/SessionList";
 import { Count, STATE_LABEL, StatusDot } from "../components/Status";
 import { useDash } from "../DashboardContext";
-import { compareSessions, matches, needsAttention, projectCounts, projectTone, type SessionEntry } from "../derive";
+import {
+  compareSessions,
+  matches,
+  needsAttention,
+  projectCounts,
+  projectTone,
+  type SessionEntry,
+  workspaceFolderOf,
+} from "../derive";
 import { NotFound } from "./NotFound";
 
 const IDLE_LIMIT = 8;
@@ -48,6 +57,7 @@ export function ProjectPage() {
         <div className="head-actions">
           <StartStopButton view={view} />
           <OpenButton view={view} />
+          <OpenInMenu view={view} directory={workspaceFolderOf(view)} hostPath={project.path} />
           <MoreMenu view={view} />
         </div>
       </header>
@@ -58,6 +68,9 @@ export function ProjectPage() {
         <NavLink to={base} end>
           Sessions <Count n={c.attention} tone="attention" />
           {c.attention === 0 && <Count n={view.sessions.length} tone="muted" />}
+        </NavLink>
+        <NavLink to={`${base}/worktrees`}>
+          Worktrees <Count n={runtime.worktrees?.length ?? 0} tone="muted" />
         </NavLink>
         <NavLink to={`${base}/ports`}>
           Ports <Count n={portCount} tone="muted" />
@@ -84,7 +97,7 @@ export function ProjectSessions() {
     () =>
       [...view.sessions]
         .sort(compareSessions)
-        .filter((s) => matches(query, s.title))
+        .filter((s) => matches(query, s.title, s.directory))
         .map((session) => ({ session, view })),
     [view, query],
   );

@@ -13,6 +13,7 @@ export interface PersistedRuntime {
   password?: string;
   workspaceFolder?: string;
   relayToken?: string;
+  remoteUser?: string;
 }
 
 export interface PersistedState {

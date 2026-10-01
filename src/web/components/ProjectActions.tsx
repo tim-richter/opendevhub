@@ -57,13 +57,10 @@ export function StartStopButton({ view, compact }: { view: ProjectView; compact?
   );
 }
 
-export function MoreMenu({ view }: { view: ProjectView }) {
-  const { act, snapshot } = useDash();
-  const blocked = (snapshot?.preflight.errors.length ?? 0) > 0;
-  const { locked, running } = projectFlags(view, blocked);
+/** Open/close state for a popup menu that closes on outside click or Escape. */
+export function useMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const id = view.project.id;
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +79,15 @@ export function MoreMenu({ view }: { view: ProjectView }) {
     setOpen(false);
     fn();
   };
+  return { open, setOpen, ref, run };
+}
+
+export function MoreMenu({ view }: { view: ProjectView }) {
+  const { act, snapshot } = useDash();
+  const blocked = (snapshot?.preflight.errors.length ?? 0) > 0;
+  const { locked, running } = projectFlags(view, blocked);
+  const { open, setOpen, ref, run } = useMenu();
+  const id = view.project.id;
 
   return (
     <div className="menu" ref={ref}>

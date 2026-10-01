@@ -7,6 +7,8 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 - Shows live session status (running, idle, needs permission, question waiting) and sends browser notifications.
 - Opens each project's opencode web UI at `http://<project>.localhost:7777`, already authenticated.
 - Overview page puts sessions that need you first; each project has its own page with Sessions, Ports and Logs tabs. Press `Ctrl/⌘ K` to jump to any project or session.
+- Creates git worktrees for parallel agent sessions in a folder next to the project (`~/code/demo.worktrees/<branch>`), mounted into the container, so you can open and edit them on your machine. See [Worktrees](#worktrees).
+- "Open in…" menu for the project and each worktree: attaches VS Code to the container, or opens the checkout in VS Code, Cursor, Zed, JetBrains IDEs, Neovide or Neovim in your terminal. Only editors found on your machine are listed.
 - Forwards the ports listed in each project's `forwardPorts` to `localhost` on your machine while the project runs, using the next free port if one is taken. The dashboard shows each mapping as a link.
 
 ## Requirements
@@ -36,6 +38,18 @@ On Linux with a native Docker engine, opendevhub connects to each container's IP
 | `OPENDEVHUB_ROUTE` | `auto` (default) probes each container IP; `direct` or `gateway` forces a route. On macOS, `auto` only goes direct when something already answers on the container IP, so OrbStack users who want to skip the gateway can set `direct`. |
 | `OPENDEVHUB_GATEWAY_IMAGE` | Image for the gateway container (default `node:22-alpine`; it needs `node` on `PATH`). |
 
+## Worktrees
+
+When opendevhub starts a container it bind-mounts `<project>.worktrees` (created next to the project) at `<workspaceFolder>.worktrees` in the container. The project's **Worktrees** tab creates a branch and worktree there with `git worktree add` inside the container, and can start an opencode session in it straight away.
+
+- Because the folder sits next to the checkout on both sides, worktrees are created with `--relative-paths`, so git works in them on your machine too. This needs git 2.48 or newer on your machine and in the container, and the workspace folder must have the same name as the project folder (the default `/workspaces/<name>`). Otherwise opendevhub falls back to absolute links: the files are still on your machine, but git commands in the worktree only work inside the container.
+- Relative links set `extensions.relativeWorktrees` in the repository. Tools built on libgit2 (some git GUIs and editor git integrations) can't open such a repository yet. Set `OPENDEVHUB_RELATIVE_WORKTREES=0` to always use absolute links.
+- Containers created before this feature don't have the mount. The Worktrees tab offers a rebuild.
+- Worktrees that opencode or a shell create elsewhere in the container are listed too, but they only exist inside the container. VS Code can still attach to them.
+- Sessions running in a worktree are tagged with its branch, and their permission requests and questions show up like any other session's.
+
+Editors are launched by the opendevhub process, so it needs your desktop session's environment (`DISPLAY`/`WAYLAND_DISPLAY`). Neovim opens in `$TERMINAL`, or the first of kitty, ghostty, wezterm, alacritty, foot, gnome-terminal, konsole or xfce4-terminal it finds. Attaching VS Code needs the Dev Containers extension.
+
 ## Development
 
 ```bash
@@ -57,4 +71,5 @@ On macOS, the port forwarder tests use `127.0.0.2` and `127.0.0.3`, which macOS 
 - Forwarded ports go through a small relay that opendevhub starts inside the container, so apps bound to the container's `localhost` work too. The relay runs on the opencode binary (Bun mode) or `node`; if neither can run it, forwarding connects directly and only apps listening on `0.0.0.0` are reachable (the project log says so).
 - `http://<project>.localhost:7777` relies on the browser resolving subdomains of `localhost` to loopback, as Chrome and Firefox do.
 - Containers using `--network=host` are not supported.
+- Worktree folder paths containing a comma can't be mounted (Docker's `--mount` syntax).
 - The opencode password is passed through `devcontainer exec --remote-env`, so other users on the same machine can see it in the process list while the command runs.

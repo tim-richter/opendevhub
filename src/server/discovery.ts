@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Project } from "../shared/types";
 import { projectId } from "./ids";
+import { WORKTREES_SUFFIX } from "./worktrees";
 
 const SPEC_CANDIDATES = [path.join(".devcontainer", "devcontainer.json"), ".devcontainer.json"];
 const SKIP_DIRS = new Set(["node_modules"]);
@@ -43,6 +44,8 @@ export async function scanRoots(
     }
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+      // Worktrees opendevhub keeps next to a project carry its devcontainer.json too; they aren't projects.
+      if (entry.name.endsWith(WORKTREES_SUFFIX)) continue;
       await visit(path.join(dir, entry.name), depth + 1);
     }
   }

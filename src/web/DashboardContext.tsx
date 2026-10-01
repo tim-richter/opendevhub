@@ -19,6 +19,8 @@ interface DashboardContextValue {
   scanning: boolean;
   error: string | undefined;
   dismissError: () => void;
+  /** Shows a failed request in the error banner. */
+  report: (err: unknown) => void;
   permission: Permission;
   requestPermission: () => void;
 }
@@ -44,7 +46,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     document.title = attention > 0 ? `(${attention}) opendevhub` : "opendevhub";
   }, [attention]);
 
-  const fail = useCallback((err: Error) => setError(err.message), []);
+  const fail = useCallback((err: unknown) => setError(err instanceof Error ? err.message : String(err)), []);
   const act = useCallback(
     (projectId: string, action: Action) =>
       void postAction(projectId, action).then(() => setError(undefined), fail),
@@ -70,10 +72,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       scanning,
       error,
       dismissError: () => setError(undefined),
+      report: fail,
       permission,
       requestPermission: () => void Notification.requestPermission().then(setPermission),
     }),
-    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission],
+    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, fail],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import open from "open";
 import { configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
 import { Containers } from "./containers";
+import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
 import { spawnRunner } from "./exec";
@@ -18,6 +19,7 @@ import { RelayRuntime } from "./relay/runtime";
 import { preflight } from "./preflight";
 import { startServer } from "./server";
 import { StateStore } from "./state";
+import { Worktrees } from "./worktrees";
 
 const USAGE = `Usage: opendevhub [--root <dir>]... [--port <n>] [--no-open]
 
@@ -102,6 +104,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const containers = new Containers(spawnRunner);
   const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
   const runtime = new OpencodeRuntime({ containers, clientFor });
+  const editors = new EditorLauncher(await detectEditors(pathWhich()));
+  store.setEditors(editors.list());
   const orchestrator = new Orchestrator({
     store,
     containers,
@@ -112,6 +116,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       mode: routeMode,
       gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
     }),
+    worktrees: new Worktrees({
+      containers,
+      run: spawnRunner,
+      relativeLinks: process.env.OPENDEVHUB_RELATIVE_WORKTREES !== "0",
+    }),
+    editors,
     clientFor,
     roots: () => config.roots,
     scan: (roots) => scanRoots(roots),

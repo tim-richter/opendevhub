@@ -39,6 +39,12 @@ describe("scanRoots", () => {
     expect((await scanRoots([root])).map((p) => p.name)).toEqual(["a"]);
   });
 
+  it("does not treat worktrees kept next to a project as projects", async () => {
+    mk("a/.devcontainer", "devcontainer.json");
+    mk("a.worktrees/feature-x/.devcontainer", "devcontainer.json");
+    expect((await scanRoots([root])).map((p) => p.name)).toEqual(["a"]);
+  });
+
   it("treats the root itself as a project when it has a spec", async () => {
     mk(".devcontainer", "devcontainer.json");
     expect((await scanRoots([root])).map((p) => p.path)).toEqual([root]);

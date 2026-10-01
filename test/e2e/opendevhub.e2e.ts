@@ -3,6 +3,7 @@ import path from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
+import { EditorLauncher } from "../../src/server/editors";
 import { spawnRunner } from "../../src/server/exec";
 import { Gateway } from "../../src/server/gateway";
 import { projectId } from "../../src/server/ids";
@@ -14,6 +15,7 @@ import { PortForwarder } from "../../src/server/port-forwarder";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
+import { Worktrees } from "../../src/server/worktrees";
 import type { Project } from "../../src/shared/types";
 
 const fixture = path.resolve("test/e2e/fixture");
@@ -44,7 +46,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const runtime = new OpencodeRuntime({ containers, clientFor });
     // OPENDEVHUB_ROUTE=gateway runs the same test through the gateway container (the macOS path).
     const network = new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) });
-    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, clientFor, roots: () => [], scan: async () => [project] });
+    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), editors: new EditorLauncher([]), clientFor, roots: () => [], scan: async () => [project] });
     orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
     await orch.rescan();

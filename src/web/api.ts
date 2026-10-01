@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, LogEvent } from "../shared/types";
+import type { DashboardSnapshot, LogEvent, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -10,6 +10,39 @@ async function failure(res: Response, what: string): Promise<Error> {
 export async function postAction(projectId: string, action: Action): Promise<void> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/${action}`, { method: "POST" });
   if (!res.ok) throw await failure(res, action);
+}
+
+async function postJson<T>(projectId: string, route: string, body: unknown, what: string): Promise<T> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/${route}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await failure(res, what);
+  return (await res.json()) as T;
+}
+
+export function createWorktree(
+  projectId: string,
+  req: { branch: string; base?: string; startSession?: boolean },
+): Promise<{ worktree: Worktree; sessionId?: string }> {
+  return postJson(projectId, "worktrees", req, "create worktree");
+}
+
+export function removeWorktree(projectId: string, path: string, force: boolean): Promise<unknown> {
+  return postJson(projectId, "worktrees/remove", { path, force }, "remove worktree");
+}
+
+export function refreshWorktrees(projectId: string): Promise<{ worktrees: Worktree[] }> {
+  return postJson(projectId, "worktrees/refresh", {}, "refresh worktrees");
+}
+
+export async function startSession(projectId: string, directory: string, title?: string): Promise<string> {
+  return (await postJson<{ sessionId: string }>(projectId, "sessions", { directory, title }, "start session")).sessionId;
+}
+
+export function openInEditor(projectId: string, editor: string, directory: string): Promise<unknown> {
+  return postJson(projectId, "open", { editor, directory }, "open editor");
 }
 
 export async function rescan(): Promise<DashboardSnapshot> {

@@ -36,6 +36,13 @@ describe("OpencodeClient", () => {
     expect((await client.forms("/w/other")).map((f) => f.id)).toEqual(["frm_1"]);
   });
 
+  it("creates a session in a given directory", async () => {
+    const created = await client.createSession("/workspaces/demo.worktrees/x", "feature/x");
+    expect(created).toMatchObject({ title: "feature/x", location: { directory: "/workspaces/demo.worktrees/x" } });
+    expect(fake.state.sessions[0].id).toBe(created.id);
+    expect(fake.requests).toContain("POST /api/session");
+  });
+
   it("streams parsed SSE events, skipping comments, until aborted", async () => {
     const events: OpencodeEvent[] = [];
     const ac = new AbortController();

@@ -10,6 +10,8 @@ export interface FakeState {
   permissions: Record<string, RawPermissionRequest[]>;
   forms: Record<string, RawForm[]>;
   fail: boolean;
+  /** Emulates opencode's default page size for `GET /api/session`. */
+  listLimit?: number;
 }
 
 export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
@@ -49,7 +51,23 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
       case "/api/info":
         return json({ version: state.version, pid: 1, urls: [], paths: {} });
       case "/api/session":
-        return json({ data: state.sessions, cursor: {} });
+        if (req.method === "POST") {
+          let raw = "";
+          req.on("data", (c: Buffer) => (raw += c.toString("utf8")));
+          req.on("end", () => {
+            const body = JSON.parse(raw) as { title?: string; location: { directory: string } };
+            const created: RawSession = {
+              id: `ses_created${state.sessions.length}`,
+              title: body.title,
+              time: { created: 2, updated: 2 },
+              location: body.location,
+            };
+            state.sessions.unshift(created);
+            json({ data: created });
+          });
+          return;
+        }
+        return json({ data: state.sessions.slice(0, state.listLimit), cursor: {} });
       case "/api/session/active":
         return json({ data: Object.fromEntries(state.active.map((id) => [id, { type: "running" }])) });
       case "/api/permission/request":
@@ -63,9 +81,13 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
         sseClients.add(res);
         req.on("close", () => sseClients.delete(res));
         return;
-      default:
+      default: {
+        const one = url.pathname.match(/^\/api\/session\/(ses[^/]+)$/);
+        const found = one && state.sessions.find((s) => s.id === one[1]);
+        if (found) return json({ data: found });
         res.writeHead(404);
         res.end();
+      }
     }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

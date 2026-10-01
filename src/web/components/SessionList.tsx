@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { useNow } from "../DashboardContext";
-import { relativeTime, type SessionEntry } from "../derive";
+import { relativeTime, type SessionEntry, worktreeLabel } from "../derive";
 import { Icon } from "./Icon";
 import { SessionBadge } from "./Status";
 
@@ -10,14 +10,21 @@ export function SessionRow(props: {
   session: SessionSummary;
   openUrl: string;
   project?: { id: string; name: string };
+  /** Set when the session works in a worktree rather than the main checkout. */
+  worktree?: string;
   highlighted?: boolean;
   now: number;
 }) {
-  const { session, openUrl, project, highlighted, now } = props;
+  const { session, openUrl, project, worktree, highlighted, now } = props;
   return (
     <li className={`row session status-row-${session.status}${highlighted ? " highlight" : ""}`} id={`session-${session.id}`}>
       <SessionBadge status={session.status} />
-      <span className="session-title" title={session.title}>
+      <span className="session-title" title={worktree ? `${session.title} — worktree ${worktree}` : session.title}>
+        {worktree && (
+          <span className="chip">
+            <Icon name="branch" size={11} /> {worktree}
+          </span>
+        )}
         {session.title || "Untitled session"}
       </span>
       {project && (
@@ -46,6 +53,7 @@ export function SessionList(props: { entries: SessionEntry[]; showProject?: bool
           session={session}
           openUrl={view.openUrl}
           project={props.showProject ? { id: view.project.id, name: view.project.name } : undefined}
+          worktree={worktreeLabel(view, session.directory)}
           highlighted={session.id === props.highlight}
           now={now}
         />
