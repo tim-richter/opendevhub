@@ -1,5 +1,6 @@
 import type {
   DashboardSnapshot,
+  EditorInfo,
   Preflight,
   Project,
   ProjectId,
@@ -15,7 +16,7 @@ export interface StoreOptions {
   persist: (state: PersistedState) => void;
 }
 
-const DURABLE_KEYS = ["containerId", "password", "workspaceFolder", "relayToken"] as const;
+const DURABLE_KEYS = ["containerId", "password", "workspaceFolder", "relayToken", "remoteUser"] as const;
 
 function defaultRuntime(projectId: ProjectId): ProjectRuntime {
   return { projectId, containerState: "stopped", opencode: "absent" };
@@ -28,6 +29,7 @@ export class StateStore {
   private listeners = new Set<() => void>();
   private roots: string[] = [];
   private preflightState: Preflight = { errors: [] };
+  private editorList: EditorInfo[] = [];
 
   constructor(private readonly opts: StoreOptions) {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
@@ -79,6 +81,11 @@ export class StateStore {
     this.emit();
   }
 
+  setEditors(editors: EditorInfo[]): void {
+    this.editorList = editors;
+    this.emit();
+  }
+
   preflight(): Preflight {
     return this.preflightState;
   }
@@ -87,6 +94,7 @@ export class StateStore {
     return {
       roots: this.roots,
       preflight: this.preflightState,
+      editors: this.editorList,
       projects: this.projects().map((project) => {
         const { password: _password, relayToken: _relayToken, ...runtime } = this.runtime(project.id);
         return {
@@ -113,6 +121,7 @@ export class StateStore {
           password: r.password,
           workspaceFolder: r.workspaceFolder,
           relayToken: r.relayToken,
+          ...(r.remoteUser ? { remoteUser: r.remoteUser } : {}),
         };
       }
     }

@@ -3,12 +3,14 @@ import type { PersistedState } from "../../src/server/config";
 import { CommandError, type ContainerInfo } from "../../src/server/containers";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { OpencodeClient } from "../../src/server/opencode/client";
-import { BusyError, NotFoundError, Orchestrator } from "../../src/server/orchestrator";
+import { BusyError, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
 import type { ForwardTarget } from "../../src/server/port-forwarder";
 import type { RelayStatus } from "../../src/server/relay/runtime";
-import type { ForwardedPort } from "../../src/shared/types";
+import type { OpenTarget } from "../../src/server/editors";
+import { type AddWorktreeArgs, InvalidRequestError } from "../../src/server/worktrees";
+import type { ForwardedPort, Worktree, WorktreeRoot } from "../../src/shared/types";
 import type { Project } from "../../src/shared/types";
 
 const project: Project = {
@@ -17,16 +19,29 @@ const project: Project = {
   path: "/src/demo",
   devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
 };
-const running: ContainerInfo = { id: "c1", running: true, ip: "172.17.0.9", projectId: project.id };
+const running: ContainerInfo = {
+  id: "c1",
+  name: "demo_c1",
+  running: true,
+  ip: "172.17.0.9",
+  projectId: project.id,
+  binds: { "/workspaces/demo": "/src/demo", "/workspaces/demo.worktrees": "/src/demo.worktrees" },
+};
 
 function setup(persisted: PersistedState = { projects: {} }) {
   const store = new StateStore({ port: 7777, persisted, persist: () => {} });
   const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean }> = [];
   const containers = {
-    up: vi.fn(async (_p: Project, o: { rebuild: boolean; onLine: (l: string) => void }) => {
-      o.onLine("building image");
-      return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo" };
-    }),
+    up: vi.fn(
+      async (
+        _p: Project,
+        o: { rebuild: boolean; onLine: (l: string) => void; mounts?: string[] },
+      ): Promise<{ containerId: string; remoteWorkspaceFolder: string; remoteUser?: string }> => {
+        o.onLine("building image");
+        return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo", remoteUser: "node" };
+      },
+    ),
+    workspaceFolder: vi.fn(async (_p?: Project): Promise<string | undefined> => "/workspaces/demo"),
     inspect: vi.fn(async (_id?: string): Promise<ContainerInfo | undefined> => running),
     listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
     stop: vi.fn(async () => {}),
@@ -58,13 +73,28 @@ function setup(persisted: PersistedState = { projects: {} }) {
     ),
     stop: vi.fn(async (_p?: Project) => {}),
   };
+  const worktrees = {
+    list: vi.fn(async (_p: Project, _ws: string, _root?: WorktreeRoot): Promise<Worktree[]> => []),
+    add: vi.fn(async (_p: Project, a: AddWorktreeArgs): Promise<Worktree> => ({
+      path: `${a.root.container}/${a.branch.replace(/\//g, "-")}`,
+      hostPath: `${a.root.host}/${a.branch.replace(/\//g, "-")}`,
+      branch: a.branch,
+    })),
+    remove: vi.fn(async (_p: Project, _ws: string, _path: string, _force: boolean) => {}),
+  };
+  const editors = { open: vi.fn(async (_id: string, _t: OpenTarget) => {}) };
+  const client = { createSession: vi.fn(async (directory: string) => ({ id: "ses_new", location: { directory } })) };
+  const mkdir = vi.fn(async (_dir: string) => {});
   const orch = new Orchestrator({
     store,
     containers,
     runtime,
     forwarder,
     relay,
-    clientFor: () => ({}) as OpencodeClient,
+    worktrees,
+    editors,
+    mkdir,
+    clientFor: () => client as unknown as OpencodeClient,
     roots: () => ["/src"],
     scan: async () => [project],
     monitorFactory: (opts) => {
@@ -73,7 +103,7 @@ function setup(persisted: PersistedState = { projects: {} }) {
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, mkdir };
 }
 
 describe("Orchestrator", () => {
@@ -446,5 +476,139 @@ describe("Orchestrator", () => {
     expect(forwarder.open).toHaveBeenCalledTimes(2);
     expect(forwarder.open.mock.calls[1][1]).toMatchObject({ relay: { port: 4097 } });
     expect(store.runtime(project.id).relay).toBe("active");
+  });
+
+  describe("worktrees", () => {
+    const wtPath = "/workspaces/demo.worktrees/feature-x";
+    const known: Worktree = { path: wtPath, hostPath: "/src/demo.worktrees/feature-x", branch: "feature/x" };
+
+    it("mounts a host folder next to the project, created before up", async () => {
+      const { store, containers, mkdir, orch } = setup();
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(mkdir).toHaveBeenCalledWith("/src/demo.worktrees");
+      expect(containers.up.mock.calls[0][1].mounts).toEqual([
+        "type=bind,source=/src/demo.worktrees,target=/workspaces/demo.worktrees",
+      ]);
+      expect(store.runtime(project.id)).toMatchObject({
+        containerName: "demo_c1",
+        remoteUser: "node",
+        worktreeRoot: { host: "/src/demo.worktrees", container: "/workspaces/demo.worktrees", mounted: true },
+      });
+    });
+
+    it("uses the configured workspace folder for the mount target", async () => {
+      const { containers, orch } = setup();
+      containers.workspaceFolder.mockResolvedValueOnce("/code/demo");
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(containers.up.mock.calls[0][1].mounts?.[0]).toMatch(/target=\/code\/demo\.worktrees$/);
+    });
+
+    it("still starts when the folder can't be created, and flags a container without the mount", async () => {
+      const { store, containers, mkdir, orch } = setup();
+      mkdir.mockRejectedValueOnce(new Error("EACCES"));
+      containers.inspect.mockResolvedValue({ ...running, binds: {} });
+      await orch.rescan();
+      await orch.start(project.id);
+      expect(containers.up.mock.calls[0][1].mounts).toEqual([]);
+      expect(store.runtime(project.id)).toMatchObject({ containerState: "running", worktreeRoot: { mounted: false } });
+      expect(orch.logLines(project.id).join("\n")).toMatch(/EACCES[\s\S]*rebuild it to enable worktrees/);
+      await expect(orch.createWorktree(project.id, { branch: "x" })).rejects.toBeInstanceOf(UnavailableError);
+    });
+
+    it("lists worktrees on start and on adopt", async () => {
+      const { store, worktrees, containers, orch } = setup({ projects: { [project.id]: { password: "pw", workspaceFolder: "/workspaces/demo" } } });
+      worktrees.list.mockResolvedValue([known]);
+      containers.listManaged.mockResolvedValue([running]);
+      await orch.rescan();
+      await orch.adopt();
+      expect(worktrees.list.mock.calls[0][2]).toMatchObject({ mounted: true });
+      expect(store.runtime(project.id).worktrees).toEqual([known]);
+    });
+
+    it("creates a worktree, refreshes the list and starts a session in it", async () => {
+      const { store, worktrees, client, orch } = setup();
+      await orch.rescan();
+      await orch.start(project.id);
+      worktrees.list.mockResolvedValue([known]);
+      const res = await orch.createWorktree(project.id, { branch: " feature/x ", base: " ", startSession: true });
+      expect(worktrees.add.mock.calls[0][1]).toMatchObject({ branch: "feature/x", base: undefined, workspaceFolder: "/workspaces/demo" });
+      expect(client.createSession).toHaveBeenCalledWith(res.worktree.path, "feature/x");
+      expect(res.sessionId).toBe("ses_new");
+      expect(store.runtime(project.id).worktrees).toEqual([known]);
+    });
+
+    it("validates input and needs a running container", async () => {
+      const { orch } = setup();
+      await orch.rescan();
+      expect(() => orch.createWorktree(project.id, { branch: "a b" })).toThrow(InvalidRequestError);
+      expect(() => orch.createWorktree(project.id, { branch: "ok" })).toThrow(UnavailableError);
+      expect(() => orch.createWorktree("nope", { branch: "ok" })).toThrow(NotFoundError);
+    });
+
+    it("runs one git operation at a time per project", async () => {
+      const { worktrees, orch } = setup();
+      await orch.rescan();
+      await orch.start(project.id);
+      let release!: () => void;
+      worktrees.add.mockImplementationOnce(
+        (_p, a) => new Promise((r) => (release = () => r({ path: `${a.root.container}/x`, branch: "x" }))),
+      );
+      const first = orch.createWorktree(project.id, { branch: "x" });
+      expect(() => orch.createWorktree(project.id, { branch: "y" })).toThrow(BusyError);
+      await vi.waitFor(() => expect(release).toBeDefined());
+      release();
+      await first;
+    });
+
+    it("only removes, opens and starts sessions in the workspace or known worktrees", async () => {
+      const { store, worktrees, editors, orch } = setup();
+      await orch.rescan();
+      await orch.start(project.id);
+      store.updateRuntime(project.id, { worktrees: [known] });
+      await expect(orch.removeWorktree(project.id, "/etc", true)).rejects.toThrow(InvalidRequestError);
+      await expect(orch.startSession(project.id, "/tmp")).rejects.toThrow(InvalidRequestError);
+      expect(() => orch.openInEditor(project.id, "zed", "/home")).toThrow(InvalidRequestError);
+
+      await orch.openInEditor(project.id, "zed", wtPath);
+      expect(editors.open).toHaveBeenLastCalledWith("zed", {
+        containerPath: wtPath,
+        hostPath: "/src/demo.worktrees/feature-x",
+        containerName: "demo_c1",
+      });
+      await orch.openInEditor(project.id, "zed", "/workspaces/demo");
+      expect(editors.open.mock.calls.at(-1)?.[1].hostPath).toBe("/src/demo");
+
+      worktrees.list.mockResolvedValue([]);
+      await orch.removeWorktree(project.id, wtPath, false);
+      expect(worktrees.remove).toHaveBeenCalledWith(project, "/workspaces/demo", wtPath, false);
+      expect(store.runtime(project.id).worktrees).toEqual([]);
+    });
+
+    it("opens host editors on a stopped project, without a container to attach to", async () => {
+      const { store, editors, orch } = setup();
+      await orch.rescan();
+      store.updateRuntime(project.id, { containerName: "demo_c1", worktrees: [known] });
+      await orch.openInEditor(project.id, "zed", wtPath);
+      expect(editors.open.mock.calls[0][1]).toEqual({ containerPath: wtPath, hostPath: known.hostPath, containerName: undefined });
+    });
+
+    it("watches worktree directories and refreshes when a session shows up in an unknown one", async () => {
+      const { store, worktrees, monitors, orch } = setup();
+      await orch.rescan();
+      await orch.start(project.id);
+      store.updateRuntime(project.id, { worktrees: [known] });
+      expect(monitors[0].opts.extraDirectories?.()).toEqual([wtPath]);
+      const calls = worktrees.list.mock.calls.length;
+      const session = (directory: string) => ({ id: directory, projectId: project.id, title: "t", directory, updatedAt: 1, status: "idle" as const });
+      monitors[0].opts.onSessions([session("/workspaces/demo"), session(wtPath)]);
+      expect(worktrees.list.mock.calls.length).toBe(calls);
+      monitors[0].opts.onSessions([session("/home/node/.local/share/opencode/worktree/p/y")]);
+      await vi.waitFor(() => expect(worktrees.list.mock.calls.length).toBe(calls + 1));
+      monitors[0].opts.onSessions([session("/home/node/.local/share/opencode/worktree/p/y")]);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(worktrees.list.mock.calls.length).toBe(calls + 1);
+    });
   });
 });

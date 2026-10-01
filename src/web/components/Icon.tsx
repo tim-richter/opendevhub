@@ -12,6 +12,9 @@ const PATHS = {
   play: "M7 4l13 8-13 8z",
   stop: "M6 6h12v12H6z",
   chevron: "M9 6l6 6-6 6",
+  "chevron-down": "M6 9l6 6 6-6",
+  branch: "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9",
+  plus: "M12 5v14M5 12h14",
   close: "M6 6l12 12M18 6L6 18",
 } as const;
 

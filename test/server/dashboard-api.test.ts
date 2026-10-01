@@ -3,7 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createDashboardApp, type DashboardOrchestrator } from "../../src/server/dashboard-api";
-import { BusyError, NotFoundError } from "../../src/server/orchestrator";
+import { CommandError } from "../../src/server/containers";
+import { EditorUnavailableError } from "../../src/server/editors";
+import { BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
+import { InvalidRequestError } from "../../src/server/worktrees";
 import { StateStore } from "../../src/server/state";
 import type { Project } from "../../src/shared/types";
 
@@ -21,6 +24,11 @@ function setup(webDir?: string) {
     rescan: vi.fn(async () => {}),
     logLines: vi.fn(() => ["a", "b"]),
     onLog: vi.fn(() => () => {}),
+    refreshWorktrees: vi.fn(async () => []),
+    createWorktree: vi.fn(async () => ({ worktree: { path: "/workspaces/demo.worktrees/x", branch: "x" } })),
+    removeWorktree: vi.fn(async () => {}),
+    startSession: vi.fn(async () => "ses_1"),
+    openInEditor: vi.fn(async () => {}),
   } satisfies DashboardOrchestrator;
   return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
 }
@@ -57,6 +65,44 @@ describe("dashboard API", () => {
       throw new NotFoundError("x");
     });
     expect((await app.request(`/api/projects/x/start`, { method: "POST" })).status).toBe(404);
+  });
+
+  it("worktree routes pass the JSON body and return the result", async () => {
+    const { app, orchestrator } = setup();
+    const post = (route: string, body: unknown) =>
+      app.request(`/api/projects/${project.id}/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const created = await post("worktrees", { branch: "x", base: "main", startSession: true });
+    expect(created.status).toBe(200);
+    expect(orchestrator.createWorktree).toHaveBeenCalledWith(project.id, { branch: "x", base: "main", startSession: true });
+    expect(await created.json()).toMatchObject({ worktree: { branch: "x" } });
+    await post("worktrees/remove", { path: "/p", force: "yes" });
+    expect(orchestrator.removeWorktree).toHaveBeenCalledWith(project.id, "/p", false);
+    expect(await (await post("sessions", { directory: "/d" })).json()).toEqual({ sessionId: "ses_1" });
+    expect(await (await post("open", { editor: "zed", directory: "/d" })).json()).toEqual({ ok: true });
+    expect(orchestrator.openInEditor).toHaveBeenCalledWith(project.id, "zed", "/d");
+    expect((await post("worktrees/refresh", {})).status).toBe(200);
+  });
+
+  it.each([
+    [new InvalidRequestError("bad"), 400],
+    [new EditorUnavailableError("no"), 400],
+    [new NotFoundError("x"), 404],
+    [new BusyError("x"), 409],
+    [new UnavailableError("stopped"), 412],
+    [new CommandError("git worktree failed: fatal"), 422],
+    [new Error("boom"), 500],
+  ])("maps %s to %i with its message", async (err, status) => {
+    const { app, orchestrator } = setup();
+    orchestrator.openInEditor.mockImplementationOnce(() => {
+      throw err;
+    });
+    const res = await app.request(`/api/projects/${project.id}/open`, { method: "POST" });
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual({ error: err.message });
   });
 
   it("rejects cross-site POST actions with a mismatched Origin", async () => {
