@@ -1,5 +1,5 @@
 import type { SessionSummary } from "../shared/types";
-import type { OpencodeClient } from "./opencode/client";
+import type { OpencodeClient, RawSession } from "./opencode/client";
 import { deriveSessions } from "./status";
 
 export interface MonitorOptions {
@@ -16,6 +16,7 @@ export interface MonitorOptions {
 
 const RELEVANT_EVENT = /^(session|permission|form)\./;
 const FAILURES_BEFORE_UNHEALTHY = 3;
+const MAX_SESSION_LOOKUPS = 20;
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -84,15 +85,42 @@ export class Monitor {
         client.permissionRequests(directory),
         client.forms(directory),
       ]);
+      const flagged = [...active, ...permissions.map((p) => p.sessionID), ...forms.map((f) => f.sessionID)];
+      const all = await this.withMissing(sessions, flagged);
       if (this.stopped) return;
       this.failures = 0;
       this.opts.onHealth(true);
-      this.opts.onSessions(deriveSessions(projectId, { sessions, active, permissions, forms }));
+      this.opts.onSessions(deriveSessions(projectId, { sessions: all, active, permissions, forms }));
     } catch {
       if (this.stopped) return;
       this.failures += 1;
       if (this.failures >= FAILURES_BEFORE_UNHEALTHY) this.opts.onHealth(false);
     }
+  }
+
+  /**
+   * `/api/session` returns only the newest 50 sessions, subagents included, so a session waiting on
+   * input (or its root) can fall outside it. Fetch those individually so their status isn't dropped.
+   */
+  private async withMissing(sessions: RawSession[], flagged: string[]): Promise<RawSession[]> {
+    const known = new Map(sessions.map((s) => [s.id, s]));
+    let lookups = 0;
+    for (const start of new Set(flagged)) {
+      const seen = new Set<string>();
+      let id: string | undefined = start;
+      while (id && !seen.has(id)) {
+        seen.add(id);
+        let session = known.get(id);
+        if (!session) {
+          if (lookups++ >= MAX_SESSION_LOOKUPS) break;
+          session = await this.opts.client.session(id).catch(() => undefined);
+          if (!session) break;
+          known.set(id, session);
+        }
+        id = session.parentID;
+      }
+    }
+    return known.size === sessions.length ? sessions : [...known.values()];
   }
 
   private schedule(): void {
