@@ -54,6 +54,26 @@ describe("Monitor", () => {
     await vi.waitFor(() => expect(latest?.[0].status).toBe("needs-permission"), { timeout: 2000 });
   });
 
+  it("fetches flagged sessions and their roots that fall outside the session list", async () => {
+    fake.state.sessions = [
+      rawSession("ses_new"),
+      rawSession("ses_child", { parentID: "ses_root" }),
+      rawSession("ses_root"),
+      rawSession("ses_asking"),
+    ];
+    fake.state.listLimit = 2;
+    fake.state.permissions["/workspaces/demo"] = [{ id: "per_1", sessionID: "ses_child", action: "bash" }];
+    fake.state.forms["/workspaces/demo"] = [{ id: "frm_1", sessionID: "ses_asking", title: "Which db?" }];
+    start();
+    await vi.waitFor(() =>
+      expect(latest?.map((s) => [s.id, s.status])).toEqual([
+        ["ses_root", "needs-permission"],
+        ["ses_asking", "needs-answer"],
+        ["ses_new", "idle"],
+      ]),
+    );
+  });
+
   it("ignores irrelevant events", async () => {
     start();
     await vi.waitFor(() => expect(latest).toEqual([]));

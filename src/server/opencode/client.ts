@@ -70,6 +70,10 @@ export class OpencodeClient {
     return (await this.get<{ data: RawSession[] }>("/api/session")).data;
   }
 
+  async session(id: string): Promise<RawSession> {
+    return (await this.get<{ data: RawSession }>(`/api/session/${encodeURIComponent(id)}`)).data;
+  }
+
   async active(): Promise<Set<string>> {
     const r = await this.get<{ data: Record<string, unknown> }>("/api/session/active");
     return new Set(Object.keys(r.data));
