@@ -1,14 +1,28 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { LogEvent } from "../shared/types";
-import { BusyError, NotFoundError, type Orchestrator } from "./orchestrator";
+import { CommandError } from "./containers";
+import { EditorUnavailableError } from "./editors";
+import { BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
+import { InvalidRequestError } from "./worktrees";
 import type { StateStore } from "./state";
 
 export type DashboardOrchestrator = Pick<
   Orchestrator,
-  "start" | "stop" | "rebuild" | "restartOpencode" | "rescan" | "logLines" | "onLog"
+  | "start"
+  | "stop"
+  | "rebuild"
+  | "restartOpencode"
+  | "rescan"
+  | "logLines"
+  | "onLog"
+  | "refreshWorktrees"
+  | "createWorktree"
+  | "removeWorktree"
+  | "startSession"
+  | "openInEditor"
 >;
 
 export interface DashboardDeps {
@@ -27,6 +41,20 @@ const CONTENT_TYPES: Record<string, string> = {
   ".json": "application/json",
   ".woff2": "font/woff2",
 };
+
+/** Maps the errors request handlers can expect to a status; anything else is a 500. */
+function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 {
+  if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError) return 400;
+  if (err instanceof NotFoundError) return 404;
+  if (err instanceof BusyError) return 409;
+  if (err instanceof UnavailableError) return 412;
+  if (err instanceof CommandError) return 422;
+  return 500;
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
   const { store, orchestrator } = deps;
@@ -80,6 +108,44 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       }
     });
   }
+
+  // Worktrees, sessions and editors answer with a result, so these wait for the work to finish.
+  const json = async (c: Context, fn: (id: string, body: Record<string, unknown>) => Promise<unknown>) => {
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await c.req.json();
+      if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+    } catch {
+      // no or invalid body: handlers validate the fields they need
+    }
+    try {
+      return c.json((await fn(c.req.param("id") ?? "", body)) ?? { ok: true });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  };
+
+  app.post("/api/projects/:id/worktrees/refresh", (c) =>
+    json(c, async (id) => ({ worktrees: await orchestrator.refreshWorktrees(id) })),
+  );
+  app.post("/api/projects/:id/worktrees", (c) =>
+    json(c, (id, b) =>
+      orchestrator.createWorktree(id, {
+        branch: str(b.branch) ?? "",
+        base: str(b.base),
+        startSession: b.startSession === true,
+      }),
+    ),
+  );
+  app.post("/api/projects/:id/worktrees/remove", (c) =>
+    json(c, (id, b) => orchestrator.removeWorktree(id, str(b.path) ?? "", b.force === true)),
+  );
+  app.post("/api/projects/:id/sessions", (c) =>
+    json(c, async (id, b) => ({ sessionId: await orchestrator.startSession(id, str(b.directory) ?? "", str(b.title)) })),
+  );
+  app.post("/api/projects/:id/open", (c) =>
+    json(c, (id, b) => orchestrator.openInEditor(id, str(b.editor) ?? "", str(b.directory) ?? "")),
+  );
 
   app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));
 

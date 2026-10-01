@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DashboardSnapshot, SessionStatus } from "../../src/shared/types";
+import type { DashboardSnapshot, ProjectView, SessionStatus } from "../../src/shared/types";
 import {
   allSessions,
   attentionCounts,
@@ -9,12 +9,17 @@ import {
   projectCounts,
   projectTone,
   relativeTime,
+  containerShellCommand,
+  shellQuote,
+  workspaceFolderOf,
+  worktreeLabel,
 } from "../../src/web/derive";
 
 function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
   return {
     roots: [],
     preflight: { errors: [] },
+  editors: [],
     projects: [
       {
         project: { id: "p", name: "demo", path: "/p", devcontainerPath: "/p/x" },
@@ -110,5 +115,38 @@ describe("matches", () => {
     expect(matches("", "x")).toBe(true);
     expect(matches("API", "my-api", undefined)).toBe(true);
     expect(matches("nope", "my-api")).toBe(false);
+  });
+});
+
+describe("worktree helpers", () => {
+  const view = (runtime: Partial<ProjectView["runtime"]> = {}): ProjectView => ({
+    project: { id: "demo-1", name: "demo", path: "/src/demo", devcontainerPath: "/x" },
+    runtime: { projectId: "demo-1", containerState: "running", opencode: "healthy", ...runtime },
+    sessions: [],
+    openUrl: "http://demo-1.localhost:7777/",
+  });
+
+  it("falls back to /workspaces/<name> before the first start", () => {
+    expect(workspaceFolderOf(view())).toBe("/workspaces/demo");
+    expect(workspaceFolderOf(view({ workspaceFolder: "/code/demo" }))).toBe("/code/demo");
+  });
+
+  it("labels worktree sessions by branch, else by folder", () => {
+    const v = view({ worktrees: [{ path: "/workspaces/demo.worktrees/feature-x", branch: "feature/x" }] });
+    expect(worktreeLabel(v, "/workspaces/demo")).toBeUndefined();
+    expect(worktreeLabel(v, "/workspaces/demo.worktrees/feature-x")).toBe("feature/x");
+    expect(worktreeLabel(v, "/home/node/.local/share/opencode/worktree/p/y")).toBe("y");
+  });
+
+  it("quotes only what needs quoting", () => {
+    expect(shellQuote("/src/demo.worktrees/feature-x")).toBe("/src/demo.worktrees/feature-x");
+    expect(shellQuote("/my dir/it's")).toBe(`'/my dir/it'\\''s'`);
+  });
+
+  it("builds a docker exec into the checkout as the remote user", () => {
+    expect(containerShellCommand(view(), "/w")).toBeUndefined();
+    expect(containerShellCommand(view({ containerName: "demo_c1", remoteUser: "node" }), "/workspaces/demo")).toBe(
+      "docker exec -it -u node -w /workspaces/demo demo_c1 sh -c 'command -v bash >/dev/null && exec bash -l || exec sh -l'",
+    );
   });
 });

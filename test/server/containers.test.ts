@@ -14,7 +14,13 @@ const okUp =
   '{"outcome":"success","containerId":"abc123","remoteUser":"node","remoteWorkspaceFolder":"/workspaces/demo"}\n';
 const inspectJson = JSON.stringify({
   Id: "abc123",
+  Name: "/eager_demo",
   State: { Running: true },
+  Mounts: [
+    { Type: "bind", Source: "/src/demo", Destination: "/workspaces/demo" },
+    { Type: "bind", Source: "/src/demo.worktrees", Destination: "/workspaces/demo.worktrees" },
+    { Type: "volume", Source: "/var/lib/docker/volumes/x", Destination: "/vscode" },
+  ],
   Config: { Labels: { [LABEL]: "demo-1a2b3c" } },
   NetworkSettings: { Networks: { bridge: { IPAddress: "172.17.0.5" } } },
 });
@@ -25,6 +31,7 @@ describe("parseUpOutput", () => {
     expect(parseUpOutput({ ...base, stdout: okUp }, "/fallback")).toEqual({
       containerId: "abc123",
       remoteWorkspaceFolder: "/workspaces/demo",
+      remoteUser: "node",
     });
   });
   it("throws the devcontainer error message with stderr tail", () => {
@@ -74,9 +81,11 @@ describe("Containers", () => {
     const ok = fakeRunner(() => ({ stdout: inspectJson + "\n" }));
     expect(await new Containers(ok.run).inspect("abc123")).toEqual({
       id: "abc123",
+      name: "eager_demo",
       running: true,
       ip: "172.17.0.5",
       projectId: "demo-1a2b3c",
+      binds: { "/workspaces/demo": "/src/demo", "/workspaces/demo.worktrees": "/src/demo.worktrees" },
     });
     const missing = fakeRunner(() => ({ exitCode: 1, stderr: "No such container" }));
     expect(await new Containers(missing.run).inspect("nope")).toBeUndefined();
@@ -109,6 +118,23 @@ describe("Containers", () => {
       "--version",
     ]);
     expect(calls[0].opts?.timeoutMs).toBe(30_000);
+  });
+});
+
+describe("Containers mounts and workspace folder", () => {
+  it("up adds each extra mount", async () => {
+    const { run, calls } = fakeRunner(() => ({ stdout: okUp }));
+    await new Containers(run).up(project, { rebuild: true, onLine: () => {}, mounts: ["type=bind,source=/a,target=/b"] });
+    expect(calls[0].args.slice(-3)).toEqual(["--remove-existing-container", "--mount", "type=bind,source=/a,target=/b"]);
+  });
+
+  it("reads the planned workspace folder from read-configuration", async () => {
+    const stdout = JSON.stringify({ configuration: {}, workspace: { workspaceFolder: "/workspaces/demo" } });
+    const { run, calls } = fakeRunner(() => ({ stdout }));
+    expect(await new Containers(run).workspaceFolder(project)).toBe("/workspaces/demo");
+    expect(calls[0].args).not.toContain("--include-merged-configuration");
+    expect(await new Containers(fakeRunner(() => ({ exitCode: 1 })).run).workspaceFolder(project)).toBeUndefined();
+    expect(await new Containers(fakeRunner(() => ({ stdout: "not json" })).run).workspaceFolder(project)).toBeUndefined();
   });
 });
 

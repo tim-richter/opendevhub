@@ -124,3 +124,29 @@ export function matches(query: string, ...fields: (string | undefined)[]): boole
   if (!q) return true;
   return fields.some((f) => f?.toLowerCase().includes(q));
 }
+
+/** Where the project is checked out inside its container (mirrors the server's fallback). */
+export function workspaceFolderOf(view: ProjectView): string {
+  const base = view.project.path.split("/").filter(Boolean).at(-1) ?? "";
+  return view.runtime.workspaceFolder ?? `/workspaces/${base}`;
+}
+
+/** A short name for the worktree a session works in; undefined for the main checkout. */
+export function worktreeLabel(view: ProjectView, directory: string): string | undefined {
+  if (directory === workspaceFolderOf(view)) return undefined;
+  const wt = view.runtime.worktrees?.find((w) => w.path === directory);
+  return wt?.branch ?? directory.split("/").filter(Boolean).at(-1) ?? directory;
+}
+
+export function shellQuote(value: string): string {
+  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** A shell inside the container at `directory`, as the dev container's user, preferring bash. */
+export function containerShellCommand(view: ProjectView, directory: string): string | undefined {
+  const { containerName, remoteUser } = view.runtime;
+  if (!containerName) return undefined;
+  const user = remoteUser ? ` -u ${shellQuote(remoteUser)}` : "";
+  const shell = "command -v bash >/dev/null && exec bash -l || exec sh -l";
+  return `docker exec -it${user} -w ${shellQuote(directory)} ${shellQuote(containerName)} sh -c ${shellQuote(shell)}`;
+}

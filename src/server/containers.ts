@@ -27,6 +27,7 @@ export function tailLines(text: string, n = 20): string[] {
 export interface UpResult {
   containerId: string;
   remoteWorkspaceFolder: string;
+  remoteUser?: string;
 }
 
 export function parseUpOutput(result: RunResult, fallbackFolder: string): UpResult {
@@ -46,6 +47,7 @@ export function parseUpOutput(result: RunResult, fallbackFolder: string): UpResu
         containerId: parsed.containerId,
         remoteWorkspaceFolder:
           typeof parsed.remoteWorkspaceFolder === "string" ? parsed.remoteWorkspaceFolder : fallbackFolder,
+        ...(typeof parsed.remoteUser === "string" ? { remoteUser: parsed.remoteUser } : {}),
       };
     }
     if (typeof parsed.outcome === "string") {
@@ -67,22 +69,36 @@ export interface PortConfig {
 
 export interface ContainerInfo {
   id: string;
+  name?: string;
   running: boolean;
   ip?: string;
   projectId?: string;
+  /** Bind mount targets inside the container, keyed by target with their host source. */
+  binds?: Record<string, string>;
 }
 
 export function parseInspect(json: string): ContainerInfo {
   const c = JSON.parse(json) as {
     Id: string;
+    Name?: string;
     State?: { Running?: boolean };
+    Mounts?: { Type?: string; Source?: string; Destination?: string }[] | null;
     Config?: { Labels?: Record<string, string> | null };
     NetworkSettings?: { Networks?: Record<string, { IPAddress?: string }> };
   };
   const ip = Object.values(c.NetworkSettings?.Networks ?? {})
     .map((n) => n.IPAddress)
     .find((a): a is string => !!a);
-  return { id: c.Id, running: c.State?.Running === true, ip, projectId: c.Config?.Labels?.[LABEL] };
+  const binds: Record<string, string> = {};
+  for (const m of c.Mounts ?? []) if (m.Type === "bind" && m.Source && m.Destination) binds[m.Destination] = m.Source;
+  return {
+    id: c.Id,
+    name: c.Name?.replace(/^\//, ""),
+    running: c.State?.Running === true,
+    ip,
+    projectId: c.Config?.Labels?.[LABEL],
+    binds,
+  };
 }
 
 export class Containers {
@@ -92,9 +108,14 @@ export class Containers {
     return ["--workspace-folder", project.path, "--id-label", `${LABEL}=${project.id}`];
   }
 
-  async up(project: Project, opts: { rebuild: boolean; onLine: (line: string) => void }): Promise<UpResult> {
+  async up(
+    project: Project,
+    opts: { rebuild: boolean; onLine: (line: string) => void; mounts?: string[] },
+  ): Promise<UpResult> {
     const args = ["up", ...this.idArgs(project)];
     if (opts.rebuild) args.push("--remove-existing-container");
+    // Only applied when the container is created; an existing container keeps its mounts.
+    for (const m of opts.mounts ?? []) args.push("--mount", m);
     const result = await this.run("devcontainer", args, { timeoutMs: UP_TIMEOUT_MS, onLine: opts.onLine });
     return parseUpOutput(result, `/workspaces/${path.basename(project.path)}`);
   }
@@ -120,6 +141,19 @@ export class Containers {
       forwardPorts: Array.isArray(cfg.forwardPorts) ? cfg.forwardPorts : [],
       portsAttributes: attrs && typeof attrs === "object" ? (attrs as Record<string, unknown>) : {},
     };
+  }
+
+  /** The workspace folder `up` will use, read before the container exists (undefined if it can't be read). */
+  async workspaceFolder(project: Project): Promise<string | undefined> {
+    const r = await this.run("devcontainer", ["read-configuration", ...this.idArgs(project)], { timeoutMs: 60_000 });
+    if (r.exitCode !== 0) return undefined;
+    try {
+      const parsed = JSON.parse(r.stdout.trim()) as { workspace?: { workspaceFolder?: unknown } };
+      const folder = parsed.workspace?.workspaceFolder;
+      return typeof folder === "string" && folder.startsWith("/") ? folder : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async inspect(containerId: string): Promise<ContainerInfo | undefined> {

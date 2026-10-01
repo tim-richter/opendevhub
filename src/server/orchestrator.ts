@@ -1,6 +1,8 @@
+import fs from "node:fs/promises";
 import path from "node:path";
-import type { ForwardedPort, Project, ProjectId } from "../shared/types";
+import type { ForwardedPort, Project, ProjectId, Worktree, WorktreeRoot } from "../shared/types";
 import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
+import type { EditorLauncher } from "./editors";
 import { LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import type { OpencodeClient, OpencodeEndpoint } from "./opencode/client";
@@ -9,6 +11,7 @@ import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
 import { RELAY_PORT, type RelayRuntime, generateRelayToken } from "./relay/runtime";
 import type { StateStore } from "./state";
+import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeRoot } from "./worktrees";
 
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
 
@@ -19,6 +22,14 @@ export class BusyError extends Error {
   }
 }
 
+/** The request is fine but the project can't serve it right now (container stopped, mount missing…). */
+export class UnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnavailableError";
+  }
+}
+
 export class NotFoundError extends Error {
   constructor(id: string) {
     super(`unknown project ${id}`);
@@ -26,7 +37,12 @@ export class NotFoundError extends Error {
   }
 }
 
-export type ContainersPort = Pick<Containers, "up" | "inspect" | "listManaged" | "stop" | "readConfiguration">;
+export type ContainersPort = Pick<
+  Containers,
+  "up" | "inspect" | "listManaged" | "stop" | "readConfiguration" | "workspaceFolder"
+>;
+export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
+export type EditorsPort = Pick<EditorLauncher, "open">;
 export type ForwarderPort = Pick<PortForwarder, "open" | "close" | "closeAll">;
 export type RuntimePort = Pick<
   OpencodeRuntime,
@@ -36,6 +52,7 @@ export type RelayPort = Pick<RelayRuntime, "ensureRunning" | "stop">;
 export interface MonitorHandle {
   start(): void;
   stop(): void;
+  reconcile?(): unknown;
 }
 
 export interface OrchestratorDeps {
@@ -44,6 +61,10 @@ export interface OrchestratorDeps {
   runtime: RuntimePort;
   forwarder: ForwarderPort;
   relay: RelayPort;
+  worktrees: WorktreesPort;
+  editors: EditorsPort;
+  /** Creates the host worktrees folder before `up` mounts it (defaults to a recursive mkdir). */
+  mkdir?: (dir: string) => Promise<void>;
   clientFor: (ep: OpencodeEndpoint) => OpencodeClient;
   roots: () => string[];
   scan: (roots: string[]) => Promise<Project[]>;
@@ -56,6 +77,9 @@ export class Orchestrator {
   private readonly logs = new Map<ProjectId, LogBuffer>();
   private readonly logListeners = new Set<(projectId: ProjectId, line: string) => void>();
   private readonly relayRecoveries = new Map<ProjectId, number>();
+  private readonly gitBusy = new Set<ProjectId>();
+  /** Session directories already looked up as possible worktrees, so an unknown one triggers one refresh. */
+  private readonly seenDirectories = new Map<ProjectId, Set<string>>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -140,11 +164,16 @@ export class Orchestrator {
         store.updateRuntime(id, { containerId: info.id, containerState: "stopped", opencode: "absent" });
         continue;
       }
-      store.updateRuntime(id, { containerId: info.id, containerIp: info.ip, containerState: "running" });
-      if (info.ip) {
-        const adopted = store.project(id)!;
-        await this.forwardPorts(adopted, await this.startRelay(adopted, info.ip));
-      }
+      const adopted = store.project(id)!;
+      store.updateRuntime(id, {
+        containerId: info.id,
+        containerName: info.name,
+        containerIp: info.ip,
+        containerState: "running",
+        worktreeRoot: this.detectWorktreeRoot(adopted, this.workspaceFolder(adopted), info),
+      });
+      if (info.ip) await this.forwardPorts(adopted, await this.startRelay(adopted, info.ip));
+      await this.refreshWorktreesQuietly(adopted);
       const rt = store.runtime(id);
       if (info.ip && rt.password && (await runtime.isHealthy(runtime.endpoint(info.ip, rt.password)))) {
         store.updateRuntime(id, { opencode: "healthy", error: undefined });
@@ -176,9 +205,172 @@ export class Orchestrator {
     }
   }
 
+  /** Re-reads `git worktree list` in the container. */
+  refreshWorktrees(id: ProjectId): Promise<Worktree[]> {
+    return this.withGit(id, async (p) => {
+      const ws = this.workspaceFolder(p);
+      const list = await this.deps.worktrees.list(p, ws, this.deps.store.runtime(id).worktreeRoot);
+      this.deps.store.updateRuntime(id, { worktrees: list });
+      return list;
+    });
+  }
+
+  createWorktree(
+    id: ProjectId,
+    req: { branch: string; base?: string; startSession?: boolean },
+  ): Promise<{ worktree: Worktree; sessionId?: string }> {
+    const branch = validateBranch(req.branch);
+    const base = req.base?.trim() || undefined;
+    return this.withGit(id, async (p) => {
+      const rt = this.deps.store.runtime(id);
+      const root = rt.worktreeRoot;
+      if (!root?.mounted) {
+        throw new UnavailableError(
+          "this container was created before opendevhub mounted a worktrees folder — rebuild the container to enable worktrees",
+        );
+      }
+      const ws = this.workspaceFolder(p);
+      const worktree = await this.deps.worktrees.add(p, {
+        workspaceFolder: ws,
+        root,
+        branch,
+        base,
+        onLine: (l) => this.log(id, l),
+      });
+      const list = await this.deps.worktrees.list(p, ws, root).catch(() => [...(rt.worktrees ?? []), worktree]);
+      this.deps.store.updateRuntime(id, { worktrees: list });
+      if (!req.startSession) return { worktree };
+      const sessionId = await this.startSession(id, worktree.path, branch).catch((err: unknown) => {
+        this.log(id, `worktree: could not start a session: ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
+      });
+      return { worktree, sessionId };
+    });
+  }
+
+  removeWorktree(id: ProjectId, worktreePath: string, force: boolean): Promise<void> {
+    return this.withGit(id, async (p) => {
+      const known = this.deps.store.runtime(id).worktrees ?? [];
+      if (!known.some((w) => w.path === worktreePath)) throw new InvalidRequestError(`unknown worktree ${worktreePath}`);
+      const ws = this.workspaceFolder(p);
+      await this.deps.worktrees.remove(p, ws, worktreePath, force);
+      this.log(id, `worktree: removed ${worktreePath}`);
+      const list = await this.deps.worktrees
+        .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
+        .catch(() => known.filter((w) => w.path !== worktreePath));
+      this.deps.store.updateRuntime(id, { worktrees: list });
+    });
+  }
+
+  /** Starts an opencode session in the workspace or one of its worktrees and returns its id. */
+  async startSession(id: ProjectId, directory: string, title?: string): Promise<string> {
+    this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const rt = this.deps.store.runtime(id);
+    if (rt.containerState !== "running" || rt.opencode !== "healthy" || !rt.containerIp || !rt.password) {
+      throw new UnavailableError("opencode is not running — start the project first");
+    }
+    const client = this.deps.clientFor(this.deps.runtime.endpoint(rt.containerIp, rt.password));
+    const session = await client.createSession(directory, title);
+    this.monitors.get(id)?.reconcile?.();
+    return session.id;
+  }
+
+  /** Opens the workspace or a worktree in an editor on this machine. */
+  openInEditor(id: ProjectId, editorId: string, directory: string): Promise<void> {
+    const project = this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const rt = this.deps.store.runtime(id);
+    const hostPath =
+      directory === this.workspaceFolder(project)
+        ? project.path
+        : rt.worktrees?.find((w) => w.path === directory)?.hostPath;
+    return this.deps.editors.open(editorId, {
+      containerPath: directory,
+      hostPath,
+      containerName: rt.containerState === "running" ? rt.containerName : undefined,
+    });
+  }
+
   async shutdown(): Promise<void> {
     for (const id of [...this.monitors.keys()]) this.stopMonitor(id);
     await this.deps.forwarder.closeAll();
+  }
+
+  private requireProject(id: ProjectId): Project {
+    const project = this.deps.store.project(id);
+    if (!project) throw new NotFoundError(id);
+    return project;
+  }
+
+  /** Only the workspace and worktrees git reports may be opened — never an arbitrary path from a request. */
+  private checkDirectory(id: ProjectId, directory: string): void {
+    const project = this.requireProject(id);
+    if (directory === this.workspaceFolder(project)) return;
+    if (this.deps.store.runtime(id).worktrees?.some((w) => w.path === directory)) return;
+    throw new InvalidRequestError(`${directory} is neither the workspace nor a known worktree`);
+  }
+
+  /** Git work in the container: needs it running, and runs one at a time per project. */
+  private withGit<T>(id: ProjectId, fn: (project: Project) => Promise<T>): Promise<T> {
+    const project = this.requireProject(id);
+    if (this.busy.has(id) || this.gitBusy.has(id)) throw new BusyError(id);
+    if (this.deps.store.runtime(id).containerState !== "running") {
+      throw new UnavailableError("the container is not running — start the project first");
+    }
+    this.gitBusy.add(id);
+    return fn(project).finally(() => this.gitBusy.delete(id));
+  }
+
+  /** Creates the host worktrees folder so `up` can mount it next to the workspace. */
+  private async worktreeMounts(project: Project): Promise<string[]> {
+    const planned = (await this.deps.containers.workspaceFolder(project).catch(() => undefined)) ?? this.workspaceFolder(project);
+    const root = worktreeRoot(project.path, planned, false);
+    try {
+      await (this.deps.mkdir ?? ((dir) => fs.mkdir(dir, { recursive: true }).then(() => {})))(root.host);
+      return [mountArg(root)];
+    } catch (err) {
+      this.log(project.id, `worktrees: could not create ${root.host}: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+  }
+
+  private detectWorktreeRoot(project: Project, workspaceFolder: string, info: ContainerInfo): WorktreeRoot {
+    const root = worktreeRoot(project.path, workspaceFolder, false);
+    const source = info.binds?.[root.container];
+    if (source === undefined) {
+      this.log(project.id, "worktrees: this container has no worktrees mount — rebuild it to enable worktrees");
+      return root;
+    }
+    return { ...root, host: source, mounted: true };
+  }
+
+  private async refreshWorktreesQuietly(project: Project): Promise<void> {
+    if (this.gitBusy.has(project.id)) return;
+    this.gitBusy.add(project.id);
+    try {
+      const rt = this.deps.store.runtime(project.id);
+      const list = await this.deps.worktrees.list(project, this.workspaceFolder(project), rt.worktreeRoot);
+      this.deps.store.updateRuntime(project.id, { worktrees: list });
+    } catch (err) {
+      this.log(project.id, `worktrees: could not list: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.gitBusy.delete(project.id);
+    }
+  }
+
+  /** A session in a directory we don't know is probably in a worktree created elsewhere (opencode, a shell). */
+  private noticeDirectories(id: ProjectId, directories: string[]): void {
+    const project = this.deps.store.project(id);
+    if (!project || this.busy.has(id)) return;
+    const seen = this.seenDirectories.get(id) ?? new Set<string>();
+    this.seenDirectories.set(id, seen);
+    const ws = this.workspaceFolder(project);
+    const known = new Set((this.deps.store.runtime(id).worktrees ?? []).map((w) => w.path));
+    const fresh = directories.filter((d) => d !== ws && !known.has(d) && !seen.has(d));
+    if (fresh.length === 0) return;
+    for (const d of fresh) seen.add(d);
+    void this.refreshWorktreesQuietly(project);
   }
 
   private exclusive(id: ProjectId, fn: (project: Project) => Promise<void>): Promise<void> {
@@ -193,7 +385,8 @@ export class Orchestrator {
     const { store, containers } = this.deps;
     store.updateRuntime(project.id, { containerState: "starting", opencode: "absent", error: undefined });
     try {
-      const up = await containers.up(project, { rebuild, onLine: (l) => this.log(project.id, l) });
+      const mounts = await this.worktreeMounts(project);
+      const up = await containers.up(project, { rebuild, onLine: (l) => this.log(project.id, l), mounts });
       // Record the container id as soon as `up` succeeds, before the running/IP checks below can
       // throw — otherwise a container that came up but failed those checks has no containerId on
       // record, and Stop has nothing to stop.
@@ -205,12 +398,16 @@ export class Orchestrator {
       }
       store.updateRuntime(project.id, {
         containerId: up.containerId,
+        containerName: info.name,
         containerIp: info.ip,
+        remoteUser: up.remoteUser,
         workspaceFolder: up.remoteWorkspaceFolder,
+        worktreeRoot: this.detectWorktreeRoot(project, up.remoteWorkspaceFolder, info),
         containerState: "running",
         opencode: "starting",
       });
       await this.forwardPorts(project, await this.startRelay(project, info.ip));
+      await this.refreshWorktreesQuietly(project);
       await this.launchOpencode(project, rebuild ? undefined : store.runtime(project.id).password);
     } catch (err) {
       this.fail(project.id, err);
@@ -311,7 +508,11 @@ export class Orchestrator {
       client: clientFor(runtime.endpoint(rt.containerIp!, rt.password!)),
       projectId: id,
       directory: this.workspaceFolder(project),
-      onSessions: (sessions) => store.setSessions(id, sessions),
+      extraDirectories: () => (store.runtime(id).worktrees ?? []).map((w) => w.path),
+      onSessions: (sessions) => {
+        store.setSessions(id, sessions);
+        this.noticeDirectories(id, [...new Set(sessions.map((s) => s.directory))]);
+      },
       onHealth: (healthy) => {
         if (store.runtime(id).opencode === "starting") return;
         store.updateRuntime(id, { opencode: healthy ? "healthy" : "unhealthy" });

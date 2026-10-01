@@ -62,6 +62,26 @@ export class OpencodeClient {
     return (await res.json()) as T;
   }
 
+  /** Starts a session whose working directory is `directory` (the workspace or one of its worktrees). */
+  async createSession(directory: string, title?: string): Promise<RawSession> {
+    const path = "/api/session";
+    const res = await this.fetchImpl(this.ep.baseUrl + path, {
+      method: "POST",
+      headers: {
+        authorization: basicAuth(this.ep.password),
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-opencode-directory": directory,
+      },
+      body: JSON.stringify({ ...(title ? { title } : {}), location: { directory } }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new OpencodeHttpError(res.status, path);
+    const body = (await res.json()) as { data?: RawSession } & Partial<RawSession>;
+    // Accept both the `{ data }` envelope used by the list routes and a bare session.
+    return (body.data ?? body) as RawSession;
+  }
+
   info(): Promise<{ version: string }> {
     return this.get("/api/info");
   }
