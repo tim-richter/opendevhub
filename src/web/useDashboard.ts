@@ -17,7 +17,7 @@ export function useDashboard() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot>();
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<Record<string, string[]>>({});
-  const [highlight, setHighlight] = useState<string>();
+  const [highlight, setHighlight] = useState<Notice>();
   const previous = useRef<DashboardSnapshot | undefined>(undefined);
 
   useEffect(
@@ -25,7 +25,7 @@ export function useDashboard() {
       subscribe({
         onSnapshot: (next) => {
           for (const notice of diffForNotifications(previous.current, next)) {
-            showNotification(notice, () => setHighlight(notice.sessionId));
+            showNotification(notice, () => setHighlight(notice));
           }
           previous.current = next;
           setSnapshot(next);
@@ -42,5 +42,5 @@ export function useDashboard() {
     setLogs((all) => ({ ...all, [projectId]: lines }));
   }, []);
 
-  return { snapshot, connected, logs, loadLogs, highlight };
+  return { snapshot, connected, logs, loadLogs, highlight, setHighlight };
 }
