@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardSnapshot, SessionStatus } from "../../src/shared/types";
-import { attentionCounts, diffForNotifications, relativeTime } from "../../src/web/derive";
+import {
+  allSessions,
+  attentionCounts,
+  compareSessions,
+  diffForNotifications,
+  matches,
+  projectCounts,
+  projectTone,
+  relativeTime,
+} from "../../src/web/derive";
 
 function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
   return {
@@ -65,4 +74,41 @@ describe("relativeTime", () => {
     [now - 2 * 86_400_000, "2 d ago"],
     [now + 5000, "just now"],
   ])("%d", (ts, expected) => expect(relativeTime(ts, now)).toBe(expected));
+});
+
+describe("session ordering", () => {
+  it("puts attention first, then running, then idle, newest first within a group", () => {
+    const s = snap({ a: "idle", b: "running", c: "needs-answer", d: "idle" });
+    s.projects[0]!.sessions.find((x) => x.id === "d")!.updatedAt = 5;
+    expect(allSessions(s).map((e) => e.session.id)).toEqual(["c", "b", "d", "a"]);
+    expect([...s.projects[0]!.sessions].sort(compareSessions)[0]!.id).toBe("c");
+  });
+});
+
+describe("projectCounts / projectTone", () => {
+  it("counts sessions by bucket and only forwarded ports", () => {
+    const s = snap({ a: "needs-permission", b: "running", c: "idle", d: "idle" });
+    s.projects[0]!.runtime.ports = [
+      { status: "forwarded", containerPort: 3000, hostPort: 3000 },
+      { status: "failed", containerPort: 4000, reason: "x" },
+    ];
+    expect(projectCounts(s.projects[0]!)).toEqual({ attention: 1, running: 1, idle: 2, ports: 1 });
+  });
+
+  it("lets the worst signal win", () => {
+    const view = snap({ a: "running" }).projects[0]!;
+    expect(projectTone(view)).toBe("running");
+    expect(projectTone({ ...view, sessions: [] })).toBe("ok");
+    expect(projectTone({ ...view, runtime: { ...view.runtime, opencode: "unhealthy" } })).toBe("error");
+    expect(projectTone(snap({ a: "needs-answer" }).projects[0]!)).toBe("attention");
+    expect(projectTone({ ...view, sessions: [], runtime: { projectId: "p", containerState: "stopped", opencode: "absent" } })).toBe("off");
+  });
+});
+
+describe("matches", () => {
+  it("matches case-insensitively on any field and treats blank queries as a match", () => {
+    expect(matches("", "x")).toBe(true);
+    expect(matches("API", "my-api", undefined)).toBe(true);
+    expect(matches("nope", "my-api")).toBe(false);
+  });
 });

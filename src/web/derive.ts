@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, SessionStatus, SessionSummary } from "../shared/types";
+import type { DashboardSnapshot, ProjectView, SessionStatus, SessionSummary } from "../shared/types";
 
 export interface Notice {
   key: string;
@@ -58,4 +58,69 @@ export function relativeTime(ts: number, now = Date.now()): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
   return `${Math.round(hours / 24)} d ago`;
+}
+
+export function needsAttention(status: SessionStatus): boolean {
+  return status === "needs-permission" || status === "needs-answer";
+}
+
+const STATUS_RANK: Record<SessionStatus, number> = {
+  "needs-permission": 0,
+  "needs-answer": 0,
+  running: 1,
+  idle: 2,
+};
+
+/** Attention first, then running, then idle; most recently updated first within each. */
+export function compareSessions(a: SessionSummary, b: SessionSummary): number {
+  return STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.updatedAt - a.updatedAt;
+}
+
+export interface ProjectCounts {
+  attention: number;
+  running: number;
+  idle: number;
+  ports: number;
+}
+
+export function projectCounts(view: ProjectView): ProjectCounts {
+  const counts = { attention: 0, running: 0, idle: 0, ports: 0 };
+  for (const s of view.sessions) {
+    if (needsAttention(s.status)) counts.attention++;
+    else if (s.status === "running") counts.running++;
+    else counts.idle++;
+  }
+  counts.ports = view.runtime.ports?.filter((p) => p.status === "forwarded").length ?? 0;
+  return counts;
+}
+
+export type Tone = "attention" | "error" | "busy" | "running" | "ok" | "off";
+
+/** One colour for a project, worst signal wins. */
+export function projectTone(view: ProjectView): Tone {
+  const { runtime } = view;
+  if (view.sessions.some((s) => needsAttention(s.status))) return "attention";
+  if (runtime.containerState === "error" || runtime.opencode === "unhealthy") return "error";
+  if (runtime.containerState === "starting" || runtime.containerState === "stopping" || runtime.opencode === "starting")
+    return "busy";
+  if (view.sessions.some((s) => s.status === "running")) return "running";
+  if (runtime.containerState === "running") return "ok";
+  return "off";
+}
+
+export interface SessionEntry {
+  session: SessionSummary;
+  view: ProjectView;
+}
+
+export function allSessions(snapshot: DashboardSnapshot): SessionEntry[] {
+  const entries: SessionEntry[] = [];
+  for (const view of snapshot.projects) for (const session of view.sessions) entries.push({ session, view });
+  return entries.sort((a, b) => compareSessions(a.session, b.session));
+}
+
+export function matches(query: string, ...fields: (string | undefined)[]): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return fields.some((f) => f?.toLowerCase().includes(q));
 }

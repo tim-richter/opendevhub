@@ -6,6 +6,7 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 - Starts, stops and rebuilds one devcontainer per project and runs `opencode serve` inside it.
 - Shows live session status (running, idle, needs permission, question waiting) and sends browser notifications.
 - Opens each project's opencode web UI at `http://<project>.localhost:7777`, already authenticated.
+- Overview page puts sessions that need you first; each project has its own page with Sessions, Ports and Logs tabs. Press `Ctrl/⌘ K` to jump to any project or session.
 - Forwards the ports listed in each project's `forwardPorts` to `localhost` on your machine while the project runs, using the next free port if one is taken. The dashboard shows each mapping as a link.
 
 ## Requirements

@@ -3,9 +3,15 @@
   "version": "0.1.0",
   "description": "Local dashboard to orchestrate opencode v2 agents running in devcontainers",
   "type": "module",
-  "bin": { "opendevhub": "dist/bin.js" },
-  "files": ["dist"],
-  "engines": { "node": ">=20" },
+  "bin": {
+    "opendevhub": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx src/server/bin.ts --no-open",
     "dev:web": "vite",
@@ -27,6 +33,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-router": "^8.4.0",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
