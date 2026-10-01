@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ForwardedPort, Project, ProjectId, Worktree, WorktreeRoot } from "../shared/types";
 import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
 import type { EditorLauncher } from "./editors";
-import { LogBuffer } from "./log-buffer";
+import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import { type HostPort, type Network, type Route, type RouteContainer, directRoute } from "./network";
 import type { OpencodeClient, OpencodeEndpoint } from "./opencode/client";
@@ -569,7 +569,9 @@ export class Orchestrator {
     this.monitors.delete(id);
   }
 
-  private log(id: ProjectId, line: string): void {
+  private log(id: ProjectId, raw: string): void {
+    const line = cleanLogLine(raw);
+    if (!line) return;
     let buffer = this.logs.get(id);
     if (!buffer) {
       buffer = new LogBuffer();

@@ -1,30 +1,13 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { ProjectView } from "../../shared/types";
-import { sessionUrl } from "../../shared/urls";
 import { createWorktree, refreshWorktrees, removeWorktree, startSession } from "../api";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { OpenInMenu } from "../components/OpenInMenu";
-import { projectFlags } from "../components/ProjectActions";
+import { openSessionTab, projectFlags } from "../components/ProjectActions";
 import { useDash } from "../DashboardContext";
 import { workspaceFolderOf } from "../derive";
-
-/**
- * Opens a tab synchronously (inside the click) so popup blockers allow it, then points it at the
- * session once the server has created it.
- */
-async function openSessionTab(view: ProjectView, create: () => Promise<string | undefined>): Promise<void> {
-  const tab = window.open("about:blank", "_blank");
-  try {
-    const id = await create();
-    if (id && tab) tab.location.href = sessionUrl(view.openUrl, id);
-    else tab?.close();
-  } catch (err) {
-    tab?.close();
-    throw err;
-  }
-}
 
 export function ProjectWorktrees() {
   const view = useOutletContext<ProjectView>();

@@ -87,8 +87,12 @@ export class Monitor {
     const { client, projectId } = this.opts;
     try {
       const [sessions, active] = await Promise.all([client.sessions(), client.active()]);
+      // Per-directory lookups are best effort: opencode answers 500 for a directory missing in the
+      // container (e.g. a stale worktree), and that must not mark the whole server unhealthy.
       const perDirectory = await Promise.all(
-        this.directories(sessions).map((d) => Promise.all([client.permissionRequests(d), client.forms(d)])),
+        this.directories(sessions).map((d) =>
+          Promise.all([client.permissionRequests(d).catch(() => []), client.forms(d).catch(() => [])]),
+        ),
       );
       const permissions = uniqueById(perDirectory.flatMap(([p]) => p));
       const forms = uniqueById(perDirectory.flatMap(([, f]) => f));

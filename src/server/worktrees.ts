@@ -67,20 +67,21 @@ export function worktreeDirName(branch: string): string {
   return branch.replace(/\//g, "-");
 }
 
-/** Linked worktrees from `git worktree list --porcelain` (the main checkout and bare entries are dropped). */
+/** Linked worktrees from `git worktree list --porcelain` (the main checkout, bare and prunable entries are dropped). */
 export function parseWorktreeList(porcelain: string, root: WorktreeRoot | undefined): Worktree[] {
   const blocks = porcelain.split(/\n\s*\n/).filter((b) => b.trim());
   const out: Worktree[] = [];
   blocks.forEach((block, i) => {
     let wt: Worktree | undefined;
-    let bare = false;
+    let skip = false;
     for (const line of block.split("\n")) {
       if (line.startsWith("worktree ")) wt = { path: line.slice("worktree ".length) };
       else if (line.startsWith("HEAD ") && wt) wt.head = line.slice(5);
       else if (line.startsWith("branch ") && wt) wt.branch = line.slice(7).replace(/^refs\/heads\//, "");
-      else if (line === "bare") bare = true;
+      // Prunable worktrees no longer exist at their recorded path (e.g. one created on the host).
+      else if (line === "bare" || line === "prunable" || line.startsWith("prunable ")) skip = true;
     }
-    if (!wt || bare || i === 0) return;
+    if (!wt || skip || i === 0) return;
     if (root?.mounted) {
       const rel = path.posix.relative(root.container, wt.path);
       if (rel && !rel.startsWith("..") && !path.posix.isAbsolute(rel)) wt.hostPath = path.join(root.host, rel);

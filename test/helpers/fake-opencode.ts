@@ -10,6 +10,8 @@ export interface FakeState {
   permissions: Record<string, RawPermissionRequest[]>;
   forms: Record<string, RawForm[]>;
   fail: boolean;
+  /** Directories opencode can't open (missing in the container): their scoped routes answer 500. */
+  missingDirectories?: string[];
   /** Emulates opencode's default page size for `GET /api/session`. */
   listLimit?: number;
 }
@@ -43,6 +45,11 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     }
     const url = new URL(req.url ?? "/", "http://fake");
     const dir = (req.headers["x-opencode-directory"] as string | undefined) ?? state.cwd;
+    if (state.missingDirectories?.includes(dir)) {
+      res.writeHead(500);
+      res.end();
+      return;
+    }
     const json = (body: unknown) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(body));

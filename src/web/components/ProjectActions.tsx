@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProjectView } from "../../shared/types";
+import type { ProjectView, SessionSummary } from "../../shared/types";
+import { sessionUrl } from "../../shared/urls";
+import { startSession } from "../api";
 import { useDash } from "../DashboardContext";
+import { workspaceFolderOf } from "../derive";
 import { Icon } from "./Icon";
 
 export function projectFlags(view: ProjectView, blocked: boolean) {
@@ -21,16 +24,52 @@ export function projectFlags(view: ProjectView, blocked: boolean) {
   };
 }
 
+/**
+ * Opens a tab synchronously (inside the click) so popup blockers allow it, then points it at the
+ * session once the server has created it.
+ */
+export async function openSessionTab(view: ProjectView, create: () => Promise<string | undefined>): Promise<void> {
+  const tab = window.open("about:blank", "_blank");
+  try {
+    const id = await create();
+    if (id && tab) tab.location.href = sessionUrl(view.openUrl, id);
+    else tab?.close();
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
+}
+
+/**
+ * Opens the most recent session, or starts one in the workspace folder. opencode's home screen
+ * starts with an empty project list (kept in browser storage, out of our reach), so landing on a
+ * session spares the user from adding the workspace folder by hand.
+ */
 export function OpenButton({ view, compact }: { view: ProjectView; compact?: boolean }) {
+  const { report } = useDash();
+  const [starting, setStarting] = useState(false);
   const { canOpen } = projectFlags(view, false);
+  const latest = view.sessions.reduce<SessionSummary | undefined>(
+    (best, s) => (!best || s.updatedAt > best.updatedAt ? s : best),
+    undefined,
+  );
+  const enabled = canOpen && !starting;
   return (
     <a
-      className={`button primary${canOpen ? "" : " disabled"}${compact ? " small" : ""}`}
-      href={canOpen ? view.openUrl : undefined}
+      className={`button primary${enabled ? "" : " disabled"}${compact ? " small" : ""}`}
+      href={enabled ? (latest ? sessionUrl(view.openUrl, latest.id) : view.openUrl) : undefined}
       target="_blank"
       rel="noreferrer"
-      aria-disabled={!canOpen}
-      onClick={(e) => e.stopPropagation()}
+      aria-disabled={!enabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!enabled || latest) return;
+        e.preventDefault();
+        setStarting(true);
+        openSessionTab(view, () => startSession(view.project.id, workspaceFolderOf(view)))
+          .catch(report)
+          .finally(() => setStarting(false));
+      }}
     >
       {compact ? "Open" : "Open in opencode"} <Icon name="external" size={14} />
     </a>
