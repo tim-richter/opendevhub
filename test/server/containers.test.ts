@@ -84,6 +84,7 @@ describe("Containers", () => {
       name: "eager_demo",
       running: true,
       ip: "172.17.0.5",
+      network: "bridge",
       projectId: "demo-1a2b3c",
       binds: { "/workspaces/demo": "/src/demo", "/workspaces/demo.worktrees": "/src/demo.worktrees" },
     });

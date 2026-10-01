@@ -72,3 +72,23 @@ export async function openRelayConnection(
   socket.destroy();
   throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
 }
+
+/**
+ * Opens a connection to `host:port` through a relay running in gateway mode (ODH_RELAY_REMOTE=1).
+ * The socket is returned paused; bytes the upstream sent along with the OK are pushed back onto it,
+ * so it can be piped as is.
+ */
+export async function openGatewayConnection(
+  target: RelayTarget,
+  host: string,
+  port: number,
+  timeoutMs = 5000,
+): Promise<net.Socket> {
+  const { socket, reply, rest } = await handshake(target, `${target.token} ${host} ${port}\n`, timeoutMs);
+  if (reply !== "OK") {
+    socket.destroy();
+    throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
+  }
+  if (rest.length) socket.unshift(rest);
+  return socket;
+}

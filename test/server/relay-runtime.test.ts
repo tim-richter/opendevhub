@@ -5,7 +5,7 @@ import type { Project } from "../../src/shared/types";
 import { type Call, fakeRunner } from "../helpers/fake-runner";
 
 const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
-const args = { ip: "172.17.0.9", token: "tok", binary: "/home/node/.opencode/bin/opencode" };
+const args = { address: { host: "172.17.0.9", port: RELAY_PORT }, token: "tok", binary: "/home/node/.opencode/bin/opencode" };
 const script = (c: Call) => c.args.at(-1) ?? "";
 const isLaunch = (c: Call) => script(c).includes("odh-relay") && script(c).includes("nohup");
 
@@ -64,7 +64,7 @@ describe("RelayRuntime.ensureRunning", () => {
 
   it("skips Bun mode without a binary and reports when node is missing too", async () => {
     const { relay, calls } = setup({ hasNode: false, readyAfterLaunch: [] });
-    expect(await relay.ensureRunning(project, { ip: "172.17.0.9", token: "tok" })).toEqual({
+    expect(await relay.ensureRunning(project, { address: { host: "172.17.0.9", port: RELAY_PORT }, token: "tok" })).toEqual({
       status: "unavailable",
       reason: "no relay runtime: opencode Bun mode unavailable and node not found",
     });

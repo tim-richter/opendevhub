@@ -1,12 +1,20 @@
 import { randomBytes } from "node:crypto";
 import type { Project } from "../../shared/types";
 import type { Containers } from "../containers";
+import type { HostPort } from "../network";
 import { type RelayTarget, pingRelay } from "./client";
 import { RELAY_SCRIPT } from "./script";
 
 export const RELAY_PORT = 4097;
 const RELAY_LOG = "/tmp/opendevhub-relay.log";
 const KILL_RELAY = "pkill -f 'odh-[r]elay' || true";
+
+export interface RelayArgs {
+  /** Where the host reaches the relay (the container IP, or a gateway tunnel). */
+  address: HostPort;
+  token: string;
+  binary?: string;
+}
 
 export type RelayStatus =
   | { status: "active"; via: "existing" | "bun" | "node" }
@@ -31,7 +39,7 @@ export interface RelayRuntimeDeps {
 export class RelayRuntime {
   constructor(private readonly deps: RelayRuntimeDeps) {}
 
-  async ensureRunning(project: Project, args: { ip: string; token: string; binary?: string }): Promise<RelayStatus> {
+  async ensureRunning(project: Project, args: RelayArgs): Promise<RelayStatus> {
     try {
       return await this.start(project, args);
     } catch (err) {
@@ -43,10 +51,11 @@ export class RelayRuntime {
     await this.deps.containers.exec(project, ["sh", "-c", KILL_RELAY]);
   }
 
-  private async start(project: Project, args: { ip: string; token: string; binary?: string }): Promise<RelayStatus> {
+  private async start(project: Project, args: RelayArgs): Promise<RelayStatus> {
     const { containers } = this.deps;
     const port = this.deps.relayPort ?? RELAY_PORT;
-    const target: RelayTarget = { host: args.ip, port, token: args.token };
+    // `port` is where the relay listens in the container; `address` is where the host reaches it.
+    const target: RelayTarget = { ...args.address, token: args.token };
     if (await this.ping(target)) return { status: "active", via: "existing" };
 
     await containers.exec(project, ["sh", "-c", KILL_RELAY]);

@@ -13,10 +13,10 @@ export function freePort(host = "127.0.0.1"): Promise<number> {
   });
 }
 
-export async function startRelay(token = "tok") {
+export async function startRelay(token = "tok", env: Record<string, string> = {}) {
   const port = await freePort();
   const child = spawn(process.execPath, ["-e", RELAY_SCRIPT], {
-    env: { ...process.env, ODH_RELAY_PORT: String(port), ODH_RELAY_TOKEN: token },
+    env: { ...process.env, ODH_RELAY_PORT: String(port), ODH_RELAY_TOKEN: token, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let out = "";

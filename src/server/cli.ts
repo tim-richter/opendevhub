@@ -9,8 +9,10 @@ import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
 import { spawnRunner } from "./exec";
+import { Gateway } from "./gateway";
+import { Network, parseRouteMode } from "./network";
 import { OpencodeClient } from "./opencode/client";
-import { OPENCODE_PORT, OpencodeRuntime } from "./opencode/runtime";
+import { OpencodeRuntime } from "./opencode/runtime";
 import { Orchestrator } from "./orchestrator";
 import { PortForwarder } from "./port-forwarder";
 import { RelayRuntime } from "./relay/runtime";
@@ -24,7 +26,11 @@ const USAGE = `Usage: opendevhub [--root <dir>]... [--port <n>] [--no-open]
   -r, --root <dir>   Directory to scan for devcontainer projects (repeatable, saved)
   -p, --port <n>     Dashboard port (default 7777, saved)
       --no-open      Do not open the browser
-  -h, --help         Show this help`;
+  -h, --help         Show this help
+
+Environment:
+  OPENDEVHUB_ROUTE           auto (default), direct or gateway: how to reach containers
+  OPENDEVHUB_GATEWAY_IMAGE   Image for the gateway container (default node:22-alpine)`;
 
 export interface CliOptions {
   roots: string[];
@@ -74,6 +80,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(USAGE);
     return;
   }
+  let routeMode;
+  try {
+    routeMode = parseRouteMode(process.env.OPENDEVHUB_ROUTE);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exitCode = 2;
+    return;
+  }
 
   const dir = configDir();
   const saved = loadConfig(dir);
@@ -98,6 +112,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     runtime,
     forwarder: new PortForwarder(),
     relay: new RelayRuntime({ containers }),
+    network: new Network({
+      mode: routeMode,
+      gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
+    }),
     worktrees: new Worktrees({
       containers,
       run: spawnRunner,
@@ -119,8 +137,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     app,
     resolveTarget: (id) => {
       const rt = store.runtime(id);
-      if (rt.containerState !== "running" || !rt.containerIp || !rt.password) return undefined;
-      return { host: rt.containerIp, port: OPENCODE_PORT, password: rt.password };
+      const address = orchestrator.opencodeAddress(id);
+      if (rt.containerState !== "running" || !address || !rt.password) return undefined;
+      return { ...address, password: rt.password };
     },
   });
   const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);

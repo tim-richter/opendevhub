@@ -1,6 +1,7 @@
 import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { PortForwarder } from "../../src/server/port-forwarder";
+import { RelayError } from "../../src/server/relay/client";
 import type { ForwardedPort } from "../../src/shared/types";
 import { startRelay } from "../helpers/relay";
 
@@ -237,6 +238,66 @@ describe("PortForwarder", () => {
       expect(logs).toHaveLength(1);
       expect(logs[0]).toMatch(new RegExp(`^ports: ${port}: relay unreachable \\(.+\\), connecting directly$`));
       expect(unreachable).toBe(2);
+    });
+  });
+
+  describe("with a dial function (gateway route)", () => {
+    const dialTo = (host: string) => (port: number) =>
+      new Promise<net.Socket>((resolve, reject) => {
+        const s = net.connect(port, host);
+        s.once("connect", () => resolve(s));
+        s.once("error", reject);
+      });
+
+    it("uses it instead of connecting to the container IP", async () => {
+      const port = await echoUpstream();
+      forwarder = new PortForwarder();
+      // 192.0.2.1 is never routed: only the dial function can reach the app.
+      const [result] = await forwarder.open("p1", { host: "192.0.2.1", dial: dialTo("127.0.0.2") }, [{ containerPort: port }]);
+      expect(await roundTrip(hostPort(result), "g")).toBe("echo:g");
+    });
+
+    it("logs a refused port with the 0.0.0.0 hint and closes", async () => {
+      const logs: string[] = [];
+      forwarder = new PortForwarder({ logIntervalMs: 60_000 });
+      const [result] = await forwarder.open(
+        "p1",
+        { host: "192.0.2.1", dial: () => Promise.reject(new RelayError("ECONNREFUSED")) },
+        [{ containerPort: 45998 }],
+        (l) => logs.push(l),
+      );
+      await closedOrReset(hostPort(result));
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toMatch(/^ports: 45998: ECONNREFUSED \(is the app listening on 0\.0\.0\.0/);
+    });
+
+    it("falls back to it when the relay is unreachable", async () => {
+      const relay = await startRelay("secret");
+      await relay.stop();
+      const port = await echoUpstream("fb:");
+      forwarder = new PortForwarder({ logIntervalMs: 60_000 });
+      const [result] = await forwarder.open(
+        "p1",
+        { host: "192.0.2.1", dial: dialTo("127.0.0.2"), relay: { host: "127.0.0.1", port: relay.port, token: "secret" } },
+        [{ containerPort: port }],
+      );
+      expect(await roundTrip(hostPort(result), "z")).toBe("fb:z");
+    });
+
+    it("sends relay connections to the relay's own host", async () => {
+      const relay = await startRelay("secret");
+      try {
+        const port = await listenEcho("127.0.0.1", "rl:");
+        forwarder = new PortForwarder();
+        const [result] = await forwarder.open(
+          "p1",
+          { host: "192.0.2.1", dial: dialTo("127.0.0.2"), relay: { host: "127.0.0.1", port: relay.port, token: "secret" } },
+          [{ containerPort: port }],
+        );
+        expect(await roundTrip(hostPort(result), "r")).toBe("rl:r");
+      } finally {
+        await relay.stop();
+      }
     });
   });
 });

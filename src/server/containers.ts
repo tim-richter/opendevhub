@@ -72,6 +72,8 @@ export interface ContainerInfo {
   name?: string;
   running: boolean;
   ip?: string;
+  /** Name of the Docker network `ip` belongs to. */
+  network?: string;
   projectId?: string;
   /** Bind mount targets inside the container, keyed by target with their host source. */
   binds?: Record<string, string>;
@@ -86,12 +88,13 @@ export function parseInspect(json: string): ContainerInfo {
     Config?: { Labels?: Record<string, string> | null };
     NetworkSettings?: { Networks?: Record<string, { IPAddress?: string }> };
   };
-  const ip = Object.values(c.NetworkSettings?.Networks ?? {})
-    .map((n) => n.IPAddress)
-    .find((a): a is string => !!a);
+  const [network, ip] =
+    Object.entries(c.NetworkSettings?.Networks ?? {})
+      .map(([name, n]) => [name, n.IPAddress] as const)
+      .find(([, a]) => !!a) ?? [];
   const binds: Record<string, string> = {};
   for (const m of c.Mounts ?? []) if (m.Type === "bind" && m.Source && m.Destination) binds[m.Destination] = m.Source;
-  return {
+  const info: ContainerInfo = {
     id: c.Id,
     name: c.Name?.replace(/^\//, ""),
     running: c.State?.Running === true,
@@ -99,6 +102,8 @@ export function parseInspect(json: string): ContainerInfo {
     projectId: c.Config?.Labels?.[LABEL],
     binds,
   };
+  if (network) info.network = network;
+  return info;
 }
 
 export class Containers {
