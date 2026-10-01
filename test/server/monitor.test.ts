@@ -68,6 +68,17 @@ describe("Monitor", () => {
     );
   });
 
+  it("stays healthy when a worktree directory is missing in the container", async () => {
+    const stale = "/home/me/demo.worktrees/gone";
+    fake.state.sessions = [rawSession("ses_1")];
+    fake.state.missingDirectories = [stale];
+    fake.state.forms["/workspaces/demo"] = [{ id: "frm_1", sessionID: "ses_1", title: "Q" }];
+    start({ pollMs: 30, extraDirectories: () => [stale] });
+    await vi.waitFor(() => expect(latest?.[0].status).toBe("needs-answer"));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(health).not.toContain(false);
+  });
+
   it("fetches flagged sessions and their roots that fall outside the session list", async () => {
     fake.state.sessions = [
       rawSession("ses_new"),

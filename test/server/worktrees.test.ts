@@ -74,6 +74,16 @@ describe("parseWorktreeList", () => {
     ]);
   });
 
+  it("drops prunable worktrees", () => {
+    const stale = [
+      "worktree /workspaces/demo\nHEAD aaa\nbranch refs/heads/main\n",
+      "worktree /home/me/demo.worktrees/gone\nHEAD eee\nbranch refs/heads/gone\nprunable gitdir file points to non-existent location\n",
+      "worktree /workspaces/demo.worktrees/old\nHEAD fff\nbranch refs/heads/old\nprunable\n",
+      "",
+    ].join("\n");
+    expect(parseWorktreeList(stale, root)).toEqual([]);
+  });
+
   it("has no host paths when the folder isn't mounted", () => {
     expect(parseWorktreeList(porcelain, { ...root, mounted: false }).every((w) => !w.hostPath)).toBe(true);
   });
