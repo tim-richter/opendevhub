@@ -44,9 +44,14 @@ build step that takes 8 s and an `onCreateCommand` that takes 3 s.
 
 In real projects the image build is rarely the bottleneck: Docker's layer cache already makes
 it nearly free (row 2). Lifecycle commands are what's slow, for example `npm ci` or toolchain
-downloads in `onCreateCommand`. So the work has to happen in **skipping lifecycle commands
-safely** and **carrying workspace-local outputs** (`node_modules`), not in image caching alone.
-opencode's own startup (1–3 s, not measured here) comes on top.
+downloads in `onCreateCommand`. So the gain comes from **skipping the machine-level setup
+(`onCreateCommand`) safely**, not from caching the image. Workspace-level setup still runs
+for every task, through the project's own commands: opendevhub does not copy or clone
+dependency folders such as `node_modules`. opencode's own startup (1–3 s, not measured here)
+comes on top.
+
+Row 4 skipped `updateContentCommand` too. In the final design `updateContentCommand` runs for
+every task (see "Starting a task environment"), so add its runtime to that row.
 
 ### Verified CLI behaviour
 
@@ -62,9 +67,9 @@ These shaped the design. Each was reproduced against CLI 0.89.0.
 3. **Markers hold the container's creation time.** The CLI records "already ran" markers in
    the container data folder (`~/.devcontainer/.onCreateCommandMarker`, …), and each holds the
    container's `Created` time. A committed snapshot carries the old markers, so a new container
-   **re-runs `onCreate`**. If we write the new container's `Created` time into the `onCreate`
-   and `updateContent` markers before running user commands, those two are skipped and
-   `postCreate`/`postStart` still run. This mirrors Codespaces prebuild semantics.
+   **re-runs `onCreate`**. If we write the new container's `Created` time into a marker before
+   running user commands, that command is skipped and the rest still run. Verified with the
+   `onCreate` and `updateContent` markers together; the design stamps only `onCreate`.
 4. **`run-user-commands` needs the workspace pinned.** It has no
    `--mount-git-worktree-common-dir`, so it works out the wrong workspace folder unless the
    override config pins `workspaceFolder`.
@@ -116,14 +121,22 @@ interface Environment {
 - Limitation: a Dockerfile whose build context reaches outside `.devcontainer` (`"context": ".."`)
   can change without the key changing. This is documented, and **Rebuild** covers it.
 
-### Snapshot (per project and key)
+### Base image (per project and key, both modes)
+
+`devcontainer build --workspace-folder <task worktree> --image-name opendevhub/<projectId>:<key12>-base`.
+This builds only the image, Dockerfile and features included, with no container and no
+lifecycle commands. BuildKit's cache makes it nearly free when the main environment already
+built the same config. It is used directly in `image` mode and is the starting point of the
+snapshot.
+
+### Snapshot (per project and key, `snapshot` mode only)
 
 Built in the background the first time an isolated task needs a key with no snapshot yet. The
 UI shows "Preparing environment image…", and tasks queue behind it.
 
 1. Create a detached **template worktree** at the base commit:
    `<project>.worktrees/.odh-template-<key8>`. This keeps the prebuild from writing into the
-   main checkout while the main environment is using it.
+   main checkout while the main environment is using it. It's removed after step 3.
 2. `devcontainer up --workspace-folder <template> --id-label opendevhub.prebuild=<project>:<key8>
    --container-data-folder /tmp/.odh-devcontainer --prebuild`. This builds or reuses the image
    (BuildKit cache) and runs `onCreateCommand` and `updateContentCommand` only. opencode never
@@ -131,28 +144,37 @@ UI shows "Preparing environment image…", and tasks queue behind it.
 3. `docker stop`, then `docker commit --change 'LABEL opendevhub.prebuild=' <c> opendevhub/<projectId>:<key12>`,
    then `docker rm`.
 4. Record `{ key, ref, createdAt }` in `state.json`. Keep the last 3 keys per project and remove
-   older images and template worktrees.
+   older images.
 
-`warmStart: "image"` skips steps 1–3. Task environments then use the CLI-built image of the
-main environment (or of the task's own config), and every lifecycle command runs. This is the
-safe default when `onCreateCommand` writes into the workspace and nothing in `copy` covers it.
+The snapshot holds everything outside the workspace: system packages, global tools,
+toolchains, and package-manager caches in `$HOME` (`~/.npm`, `~/.cache/pip`, `~/.cargo`…).
+That last part means a task's own `npm ci` reinstalls from a warm cache without copying
+`node_modules`. Workspace files written by the prebuild stay in the template worktree and are
+discarded.
+
+### Warm-start modes
+
+| Mode | Task containers run | Correct when |
+| --- | --- | --- |
+| `image` (**default**) | Every lifecycle command, on the reused image | Always |
+| `snapshot` (opt-in) | `updateContentCommand`, `postCreateCommand`, `postStartCommand`; `onCreateCommand` is baked into the snapshot | `onCreateCommand` only sets up the machine and doesn't write into the workspace |
+
+This follows the devcontainer spec's own split: `onCreateCommand` is one-time setup of the
+container, and `updateContentCommand` runs "when new content is available", which describes
+every new worktree. A project that installs dependencies in `onCreateCommand` gets a worktree
+without them in `snapshot` mode. The README says so plainly: move workspace installs to
+`updateContentCommand` or `postCreateCommand` before turning `snapshot` on. opendevhub doesn't
+try to detect this.
 
 ### Starting a task environment
 
 1. **Worktree**: as today (`git worktree add` in the main container).
-2. **Copy workspace-local outputs**: for each path in `customizations.opendevhub.copy`
-   (default `[]`, e.g. `["node_modules"]`), copy it on the host from the template worktree to
-   the new one, using a copy-on-write clone where possible:
-   - `cp -a --reflink=auto` on Linux (instant on btrfs and xfs)
-   - `cp -cR` on macOS (APFS clonefile)
-   - a plain copy otherwise, with the size logged
-
-   This is skipped for `warmStart: "image"`. Caveat in the README: directories that embed their
-   own absolute path (Python venvs) break when moved. List `node_modules`, not `.venv`.
-3. **Override config** written to `~/.local/state/opendevhub/envs/<envId>/devcontainer.json`.
+2. **Override config** written to `~/.local/state/opendevhub/envs/<envId>/devcontainer.json`.
    It is the task worktree's resolved config with these changes:
-   - `image: <snapshot ref>`, with `build`, `dockerFile`, `dockerComposeFile` and `features`
-     removed, since they're baked into the image and its label
+   - `image`: the snapshot (in `snapshot` mode) or the CLI-built image for this key (in
+     `image` mode), with `build`, `dockerFile`, `dockerComposeFile` and `features` removed,
+     since they're baked into the image and its label. Pinning the image in `image` mode too
+     avoids leaving a `vsc-<folder>` tag behind for every worktree.
    - every lifecycle key except `initializeCommand` removed, since they come from the label
      (see "Verified CLI behaviour", item 2)
    - `workspaceMount`: the worktree's host path → `<ws>.worktrees/<dir>`
@@ -160,14 +182,13 @@ safe default when `onCreateCommand` writes into the workspace and nothing in `co
    - `mounts`: the original mounts plus `<project>/.git` → `<ws>/.git`
    - `runArgs`: `--name …` removed, since names can't repeat (logged)
 
-   If the task's own key differs from every snapshot (the branch changed `.devcontainer/`), the
-   snapshot is built for that key first. Only that task pays the build cost.
-4. `devcontainer up --override-config … --id-label … --container-data-folder /tmp/.odh-devcontainer --skip-post-create`
-5. Write the new container's `Created` time into the `onCreate` and `updateContent` markers
-   (snapshot mode only).
-6. `devcontainer run-user-commands` with the same override config. This runs `postCreate`,
-   `postStart` and dotfiles.
-7. Start opencode and the relay, open the route, forward ports, start the monitor. These are
+   If the task's own key differs from every built image or snapshot (the branch changed
+   `.devcontainer/`), that image is built first. Only that task pays the build cost.
+3. `devcontainer up --override-config … --id-label … --container-data-folder /tmp/.odh-devcontainer --skip-post-create`
+4. `snapshot` mode only: write the new container's `Created` time into the `onCreate` marker.
+5. `devcontainer run-user-commands` with the same override config. This runs the remaining
+   lifecycle commands and dotfiles.
+6. Start opencode and the relay, open the route, forward ports, start the monitor. These are
    the existing steps, run per environment.
 
 ## Rebuilding a single task
@@ -178,7 +199,7 @@ Each task environment's menu has these actions:
 | --- | --- | --- |
 | **Restart** | `docker stop` + `up` (existing container, `postStart` only) | opencode or the dev server got stuck |
 | **Recreate** | Remove the container, then the start steps 3–7 from the current snapshot. The worktree and its files are untouched. | Container state is broken (`$HOME`, installs, a failed `postCreate`; see "Verified CLI behaviour", item 5) |
-| **Rebuild image** | Build a snapshot from *this task's* config with `--build-no-cache` and the task's own `generation` bump, then **Recreate**. Other environments keep their image. | The task changed `.devcontainer/`, or the base image is stale |
+| **Rebuild image** | Build the base image (and the snapshot, in `snapshot` mode) from *this task's* config with `--no-cache`, under the task's own `generation` bump, then **Recreate**. Other environments keep their image. | The task changed `.devcontainer/`, or the base image is stale |
 
 The project-level **Rebuild** (existing) also bumps the project's `generation`. Running task
 environments keep their current image and get an **outdated** badge (their image key is no
@@ -229,7 +250,7 @@ automatically, so a running agent is never pulled out from under itself.
 - **Remove task**: export sessions, stop and remove the container, remove the opencode volume,
   remove the worktree (the existing confirmation flow), and optionally delete the branch.
 - **Garbage collection**: when opendevhub starts and after a rebuild, remove snapshot images
-  and template worktrees beyond the 3 most recent keys per project. Also remove dangling
+  beyond the 3 most recent keys per project, and any leftover template worktrees. Also remove dangling
   `vsc-*` tags of opendevhub-owned folders.
 
 ## Configuration
@@ -240,9 +261,8 @@ automatically, so a running agent is never pulled out from under itself.
 "customizations": {
   "opendevhub": {
     "isolation": "isolated",          // "shared" (default) | "isolated"
-    "warmStart": "snapshot",          // "snapshot" (default when isolated) | "image"
-    "copy": ["node_modules"],          // workspace-local outputs to clone into new worktrees
-    "keyFiles": ["package-lock.json"], // extra snapshot invalidation inputs
+    "warmStart": "image",             // "image" (default) | "snapshot"
+    "keyFiles": ["package-lock.json"], // extra image/snapshot invalidation inputs
     "idleStopMinutes": 30
   }
 }
@@ -290,7 +310,7 @@ project's setting.
 | --- | --- |
 | 1 | `Environment` refactor with `main` only: no behaviour change, all tests green |
 | 2 | Isolated task environments with `warmStart: "image"`: override config, `.git` mount, routes, monitor, ports |
-| 3 | Snapshots: template worktree, prebuild, commit, marker stamping, `copy` |
+| 3 | `snapshot` mode: template worktree, prebuild, commit, marker stamping, CLI version gate |
 | 4 | Restart, Recreate and Rebuild image per task; the outdated badge; idle stop; garbage collection |
 | 5 | Session export and import on removal; `maxRunningEnvs` |
 | 6 (later) | Docker Compose |
@@ -307,7 +327,7 @@ project's setting.
   assert which commands ran in which environment:
   - two isolated tasks run concurrently and each serves `forwardPorts: [3000]` on different
     host ports
-  - the warm start skips `onCreate` and `updateContent` but runs `postCreate`
+  - in `snapshot` mode, a task skips `onCreate` but runs `updateContent`, `postCreate` and `postStart`; in `image` mode it runs all of them
   - **Recreate** keeps the sessions
   - **Rebuild image** on one task leaves the other's image ID unchanged
   - a branch that changes `.devcontainer/` gets its own image
@@ -315,13 +335,24 @@ project's setting.
 
   Also add a smoke test for start time: a warm task environment is ready in under 10 s on CI.
 
-## Open questions
+## Dependency on CLI internals
 
-1. Marker stamping relies on how the CLI stores markers internally (creation time in
-   `~/.devcontainer/.*Marker`). Pin a tested CLI version range and fall back to
-   `warmStart: "image"` outside it, or upstream a `--skip-prebuild-commands` flag to
-   `devcontainers/cli`?
-2. Should the default `copy` source be the template worktree (consistent with the snapshot) or
-   the main checkout (likely newer)? This draft picks the template worktree.
-3. Should isolated environments share a Docker network per project (so tasks can reach each
-   other's services), or each use the default network? This draft uses the default.
+Marker stamping relies on how the CLI stores markers: the container's creation time in
+`<container data folder>/.<command>Marker`. Both of these happen:
+
+- **Version gate.** `snapshot` mode is enabled only for CLI versions the e2e suite has
+  verified, starting with 0.89.x. Preflight reads `devcontainer --version`. Outside the verified
+  range, `snapshot` falls back to `image`, with one line in the project log saying why. Bumping
+  the range is a one-line change after the e2e suite passes on the new version.
+- **Upstream.** Propose a `--skip-on-create` flag for `devcontainer up` and `run-user-commands`
+  in `devcontainers/cli`, mirroring the existing `--skip-post-create`, to use on containers
+  started from a `--prebuild` snapshot. Once it ships, the gate becomes "flag available → use
+  the flag, else stamp markers within the verified range, else `image`".
+
+## Decisions
+
+- No copying or cloning of dependency folders (`node_modules`, `.venv`, `target`). Workspace
+  setup is the project's own lifecycle commands, run per task, helped by the warm
+  package-manager caches in the snapshot.
+- Task environments use the default Docker network that `devcontainer up` gives them. There is
+  no shared per-project network; tasks don't reach each other's services.
