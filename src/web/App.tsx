@@ -5,6 +5,7 @@ import { Overview } from "./pages/Overview";
 import { ProjectLogs, ProjectPage, ProjectPorts, ProjectSessions } from "./pages/ProjectPage";
 import { ProjectReview } from "./pages/ProjectReview";
 import { ProjectWorktrees } from "./pages/ProjectWorktrees";
+import { ProjectTask } from "./pages/ProjectTask";
 import { SessionsPage } from "./pages/SessionsPage";
 
 export function App() {
@@ -18,6 +19,7 @@ export function App() {
           <Route path="worktrees" element={<ProjectWorktrees />} />
           <Route path="review" element={<ProjectReview />} />
           <Route path="review/:target" element={<ProjectReview />} />
+          <Route path="t/:task" element={<ProjectTask />} />
           <Route path="ports" element={<ProjectPorts />} />
           <Route path="logs" element={<ProjectLogs />} />
         </Route>
