@@ -1251,5 +1251,67 @@ describe("Orchestrator", () => {
       await orch.models(project.id);
       expect(client.models).toHaveBeenCalledTimes(3);
     });
+
+    const variant = (id: string, n: number, directory: string): SessionSummary => ({
+      id,
+      projectId: project.id,
+      title: `Fix · #${n}`,
+      directory,
+      updatedAt: n,
+      status: "idle",
+      task: { task: "tsk_1", variant: n, of: 3, title: "Fix" },
+    });
+
+    it("keeps one variant: discards the others without losing their metadata, then removes their worktrees and branches", async () => {
+      const { orch, client, worktrees, git, store } = await started();
+      const dirs = ["/workspaces/demo.worktrees/fix-1", "/workspaces/demo.worktrees/fix-2", "/workspaces/demo.worktrees/fix-3"];
+      store.updateRuntime(project.id, { worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })) });
+      store.setSessions(project.id, [
+        variant("s1", 1, dirs[0]),
+        variant("s2", 2, dirs[1]),
+        variant("s3", 3, dirs[2]),
+        { id: "other", projectId: project.id, title: "x", directory: dirs[2], updatedAt: 9, status: "idle" },
+      ]);
+      client.session.mockImplementation(async (sid: string) => ({
+        id: sid,
+        time: { created: 1, updated: 1 },
+        location: { directory: "/w" },
+        metadata: { keep: sid, opendevhub: { task: "tsk_1", variant: 1, of: 3, title: "Fix" } },
+      }));
+      worktrees.list.mockResolvedValueOnce([{ path: dirs[1], branch: "fix-2" }, { path: dirs[2], branch: "fix-3" }]);
+
+      const res = await orch.pickVariant(project.id, "tsk_1", "s2", true);
+
+      expect(res).toEqual({ discarded: ["s1", "s3"], removed: [dirs[0]], errors: [] });
+      expect(client.updateSession).toHaveBeenCalledWith(
+        "s1",
+        { metadata: { keep: "s1", opendevhub: { task: "tsk_1", variant: 1, of: 3, title: "Fix", discarded: true } } },
+        dirs[0],
+      );
+      expect(worktrees.remove).toHaveBeenCalledTimes(1); // fix-3 still hosts another session
+      expect(worktrees.remove).toHaveBeenCalledWith(project, "/workspaces/demo", dirs[0], true);
+      expect(git.deleteBranch).toHaveBeenCalledWith(project, "/workspaces/demo", "fix-1", true);
+      expect(store.runtime(project.id).worktrees?.map((w) => w.branch)).toEqual(["fix-2", "fix-3"]);
+    });
+
+    it("only discards when worktrees should stay, and reports what failed", async () => {
+      const { orch, client, worktrees, store } = await started();
+      store.setSessions(project.id, [variant("s1", 1, "/workspaces/demo"), variant("s2", 2, "/workspaces/demo")]);
+      client.updateSession.mockRejectedValueOnce(new Error("opencode down"));
+      expect(await orch.pickVariant(project.id, "tsk_1", "s2", false)).toEqual({ discarded: [], removed: [], errors: ["Fix · #1: opencode down"] });
+      expect(worktrees.remove).not.toHaveBeenCalled();
+      await expect(orch.pickVariant(project.id, "tsk_1", "nope", false)).rejects.toThrow(NotFoundError);
+    });
+
+    it("keeps going when one worktree can't be removed", async () => {
+      const { orch, worktrees, store } = await started();
+      const dirs = ["/workspaces/demo.worktrees/a", "/workspaces/demo.worktrees/b", "/workspaces/demo.worktrees/c"];
+      store.updateRuntime(project.id, { worktrees: dirs.map((path) => ({ path, branch: path.split("/").at(-1) })) });
+      store.setSessions(project.id, dirs.map((d, i) => variant(`s${i + 1}`, i + 1, d)));
+      worktrees.remove.mockRejectedValueOnce(new CommandError("git worktree failed: locked", ["fatal: locked"]));
+      const res = await orch.pickVariant(project.id, "tsk_1", "s3", true);
+      expect(res.removed).toEqual([dirs[1]]);
+      expect(res.errors).toEqual(["a: git worktree failed: locked"]);
+    });
   });
 });

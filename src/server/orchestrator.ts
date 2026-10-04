@@ -6,6 +6,7 @@ import type {
   ModelsInfo,
   PendingItems,
   PermissionDecision,
+  PickResult,
   Project,
   ProjectId,
   PublishInfo,
@@ -24,7 +25,7 @@ import type { EditorLauncher } from "./editors";
 import { deriveTitle, taskBranches, variantLabels, variantTitle } from "../shared/tasks";
 import { splitTitleBody } from "./forge";
 import { newTaskId } from "./ids";
-import { parseTaskRequest, toModelsInfo } from "./tasks";
+import { discardMetadata, parseTaskRequest, toModelsInfo } from "./tasks";
 import type { GitOps } from "./git";
 import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
@@ -444,6 +445,65 @@ export class Orchestrator {
       this.log(id, `task ${title}: started ${started} of ${of} variant${of === 1 ? "" : "s"}`);
       this.monitors.get(id)?.reconcile?.();
       return { task, variants: results };
+    });
+  }
+
+  /**
+   * Keeps one variant of a task. The others are marked discarded, which hides them; opencode replaces metadata as a
+   * whole, so each session's metadata is read and written back with `discarded` added. With `removeWorktrees`,
+   * their worktrees are removed with --force and their branches with -D, unless another session still uses one.
+   */
+  async pickVariant(id: ProjectId, task: string, keep: string, removeWorktrees: boolean): Promise<PickResult> {
+    this.requireProject(id);
+    const all = this.deps.store.sessionsOf(id);
+    const variants = all.filter((s) => s.task?.task === task);
+    if (!variants.some((s) => s.id === keep)) throw new NotFoundError(keep, "variant");
+    const client = this.opencodeClient(id);
+    const others = variants.filter((s) => s.id !== keep);
+    const result: PickResult = { discarded: [], removed: [], errors: [] };
+    const discard = async () => {
+      for (const s of others) {
+        try {
+          const raw = await client.session(s.id);
+          await client.updateSession(s.id, { metadata: discardMetadata(raw.metadata) }, s.directory);
+          result.discarded.push(s.id);
+        } catch (err) {
+          result.errors.push(`${s.title}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      this.monitors.get(id)?.reconcile?.();
+    };
+    if (!removeWorktrees) {
+      await discard();
+      return result;
+    }
+    return this.withGit(id, async (p) => {
+      await discard();
+      const ws = this.workspaceFolder(p);
+      const gone = others.filter((s) => result.discarded.includes(s.id));
+      const inUse = new Set(all.filter((s) => !gone.includes(s)).map((s) => s.directory));
+      const known = this.deps.store.runtime(id).worktrees ?? [];
+      const dirs = [...new Set(gone.map((s) => s.directory))].filter((d) => d !== ws && !inUse.has(d));
+      for (const dir of dirs) {
+        const wt = known.find((w) => w.path === dir);
+        if (!wt) continue;
+        try {
+          await this.deps.worktrees.remove(p, ws, dir, true);
+          if (wt.branch) await this.deps.git.deleteBranch(p, ws, wt.branch, true);
+          result.removed.push(dir);
+          this.log(id, `task: removed ${dir}${wt.branch ? ` and branch ${wt.branch}` : ""}`);
+        } catch (err) {
+          result.errors.push(`${wt.branch ?? dir}: ${err instanceof Error ? err.message : String(err)}`);
+          if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+        }
+      }
+      if (dirs.length > 0) {
+        const list = await this.deps.worktrees
+          .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
+          .catch(() => known.filter((w) => !result.removed.includes(w.path)));
+        this.deps.store.updateRuntime(id, { worktrees: list });
+      }
+      return result;
     });
   }
 

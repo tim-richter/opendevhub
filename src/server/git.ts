@@ -125,7 +125,8 @@ export class GitOps {
     );
   }
 
-  async deleteBranch(p: Project, workspace: string, branch: string): Promise<void> {
-    await this.git(p, workspace, ["branch", "-d", branch]);
+  /** `-d` refuses a branch that isn't merged; `force` (-D) is for branches the user chose to discard. */
+  async deleteBranch(p: Project, workspace: string, branch: string, force = false): Promise<void> {
+    await this.git(p, workspace, ["branch", force ? "-D" : "-d", branch]);
   }
 }

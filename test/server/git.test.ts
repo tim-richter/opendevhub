@@ -214,3 +214,15 @@ describe("localBranches", () => {
     expect((await ops.localBranches(project, repo)).sort()).toEqual(["feature/x", "main"]);
   });
 });
+
+describe("deleteBranch", () => {
+  it("deletes an unmerged branch only when forced", async () => {
+    git(repo, "checkout", "-q", "-b", "side");
+    write(repo, "s.txt", "s\n");
+    commitAll(repo, "side");
+    git(repo, "checkout", "-q", "main");
+    await expect(ops.deleteBranch(project, repo, "side")).rejects.toBeInstanceOf(CommandError);
+    await ops.deleteBranch(project, repo, "side", true);
+    expect(git(repo, "branch", "--list", "side").trim()).toBe("");
+  });
+});
