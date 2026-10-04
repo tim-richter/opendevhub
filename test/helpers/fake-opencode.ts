@@ -1,6 +1,16 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import type { RawForm, RawPermissionRequest, RawSession } from "../../src/server/opencode/client";
+import type { RawFileDiff, RawFileStatus, RawForm, RawPermissionRequest, RawSession } from "../../src/server/opencode/client";
+
+export interface FakeVcs {
+  current?: string;
+  default?: string;
+  /** "ambiguous" answers 503 like opencode does after a plain `git checkout -b`. */
+  base?: string | null | "ambiguous";
+  status?: RawFileStatus[];
+  /** Keyed by mode. */
+  diff?: Record<string, RawFileDiff[]>;
+}
 
 export interface FakeState {
   version: string;
@@ -22,6 +32,11 @@ export interface FakeState {
   settledForms?: string[];
   /** Answer errors with plain text instead of opencode's JSON. */
   plainErrors?: boolean;
+  vcs: Record<string, FakeVcs>;
+  diffQueries: Array<{ directory: string; mode: string; base?: string }>;
+  prompts: Array<{ sessionId: string; body: unknown; directory?: string }>;
+  generated?: string;
+  generateFails?: boolean;
 }
 
 export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
@@ -34,6 +49,9 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     forms: {},
     fail: false,
     replies: [],
+    vcs: {},
+    diffQueries: [],
+    prompts: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -115,6 +133,21 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
         return json({ location: { directory: dir }, data: state.permissions[dir] ?? [] });
       case "/api/form":
         return json({ location: { directory: dir }, data: state.forms[dir] ?? [] });
+      case "/api/vcs":
+        return json({ location: { directory: dir }, data: { branch: { current: state.vcs[dir]?.current, default: state.vcs[dir]?.default } } });
+      case "/api/vcs/base": {
+        const base = state.vcs[dir]?.base;
+        if (base === "ambiguous") return fail(503, "ServiceUnavailable", "Choose a review base");
+        return json({ location: { directory: dir }, data: base ? { name: base, ref: base, source: "reflog" } : null });
+      }
+      case "/api/vcs/status":
+        return json({ location: { directory: dir }, data: state.vcs[dir]?.status ?? [] });
+      case "/api/vcs/diff": {
+        const mode = url.searchParams.get("mode") ?? "working";
+        const base = url.searchParams.get("base") ?? undefined;
+        state.diffQueries.push({ directory: dir, mode, ...(base ? { base } : {}) });
+        return json({ location: { directory: dir }, data: state.vcs[dir]?.diff?.[mode] ?? [] });
+      }
       case "/api/event":
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
         res.write(`data: ${JSON.stringify({ type: "server.connected", data: {} })}\n\n`);
@@ -123,6 +156,22 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
         req.on("close", () => sseClients.delete(res));
         return;
       default: {
+        const sessionCall = url.pathname.match(/^\/api\/session\/([^/]+)\/(prompt|generate)$/);
+        if (sessionCall && req.method === "POST") {
+          let raw = "";
+          req.on("data", (c: Buffer) => (raw += c.toString("utf8")));
+          req.on("end", () => {
+            const body = raw ? JSON.parse(raw) : undefined;
+            const sessionId = decodeURIComponent(sessionCall[1]);
+            if (sessionCall[2] === "prompt") {
+              state.prompts.push({ sessionId, body, directory: req.headers["x-opencode-directory"] as string | undefined });
+              return json({ data: { id: "msg_1", sessionID: sessionId, type: "user" } });
+            }
+            if (state.generateFails) return fail(500, "GenerateError", "no model");
+            return json({ data: { text: state.generated ?? "chore: update" } });
+          });
+          return;
+        }
         const reply = url.pathname.match(/^\/api\/session\/([^/]+)\/(permission|form)\/([^/]+?)(\/reply)?$/);
         if (reply && (req.method === "POST" || req.method === "DELETE")) {
           let raw = "";

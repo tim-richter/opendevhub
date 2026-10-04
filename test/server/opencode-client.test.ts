@@ -113,4 +113,38 @@ describe("OpencodeClient", () => {
     expect(err).toMatchObject({ status: 404, tag: undefined });
     expect(isGone(err)).toBe(true);
   });
+  it("reads vcs info, base, status and diff for a directory", async () => {
+    fake.state.vcs["/w/x"] = {
+      current: "feature/x",
+      default: "main",
+      base: "develop",
+      status: [{ file: "a.ts", additions: 1, deletions: 0, status: "modified" }],
+      diff: { branch: [{ file: "a.ts", patch: "@@ -1 +1 @@\n-a\n+b\n", additions: 1, deletions: 1, status: "modified" }] },
+    };
+    expect(await client.vcsInfo("/w/x")).toEqual({ current: "feature/x", default: "main" });
+    expect(await client.vcsBase("/w/x")).toBe("develop");
+    expect(await client.vcsStatus("/w/x")).toHaveLength(1);
+    expect((await client.vcsDiff("/w/x", "branch", "develop")).map((f) => f.file)).toEqual(["a.ts"]);
+    expect(fake.state.diffQueries).toEqual([{ directory: "/w/x", mode: "branch", base: "develop" }]);
+  });
+
+  it("treats an ambiguous or missing base as unknown", async () => {
+    fake.state.vcs["/w/a"] = { base: "ambiguous" };
+    fake.state.vcs["/w/b"] = { base: null };
+    expect(await client.vcsBase("/w/a")).toBeUndefined();
+    expect(await client.vcsBase("/w/b")).toBeUndefined();
+  });
+
+  it("sends prompts, queued when asked, and generates text from a session", async () => {
+    await client.prompt("ses_1", "fix it", "queue", "/w/x");
+    await client.prompt("ses_2", "hello");
+    expect(fake.state.prompts).toEqual([
+      { sessionId: "ses_1", body: { text: "fix it", delivery: "queue" }, directory: "/w/x" },
+      { sessionId: "ses_2", body: { text: "hello" }, directory: undefined },
+    ]);
+    fake.state.generated = "feat: add login";
+    expect(await client.generate("ses_1", "write a message")).toBe("feat: add login");
+    fake.state.generateFails = true;
+    await expect(client.generate("ses_1", "x")).rejects.toBeInstanceOf(OpencodeHttpError);
+  });
 });

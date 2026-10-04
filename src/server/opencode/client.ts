@@ -30,6 +30,17 @@ export interface RawForm {
   fields?: FormField[];
 }
 
+export interface RawFileStatus {
+  file: string;
+  additions: number;
+  deletions: number;
+  status: "added" | "deleted" | "modified";
+}
+
+export interface RawFileDiff extends RawFileStatus {
+  patch: string;
+}
+
 export interface OpencodeEvent {
   type: string;
   location?: { directory: string };
@@ -73,6 +84,8 @@ export function basicAuth(password: string): string {
 }
 
 const REQUEST_TIMEOUT_MS = 5000;
+const DIFF_TIMEOUT_MS = 30_000;
+const GENERATE_TIMEOUT_MS = 60_000;
 
 export class OpencodeClient {
   constructor(
@@ -80,12 +93,12 @@ export class OpencodeClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  private async get<T>(path: string, directory?: string): Promise<T> {
+  private async get<T>(path: string, directory?: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     const headers: Record<string, string> = { authorization: basicAuth(this.ep.password), accept: "application/json" };
     if (directory) headers["x-opencode-directory"] = directory;
     const res = await this.fetchImpl(this.ep.baseUrl + path, {
       headers,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) throw new OpencodeHttpError(res.status, path);
     return (await res.json()) as T;
@@ -111,7 +124,13 @@ export class OpencodeClient {
     return (body.data ?? body) as RawSession;
   }
 
-  private async send(method: "POST" | "DELETE", path: string, body?: unknown, directory?: string): Promise<void> {
+  private async request(
+    method: "POST" | "DELETE",
+    path: string,
+    body?: unknown,
+    directory?: string,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<Response> {
     const headers: Record<string, string> = { authorization: basicAuth(this.ep.password), accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
     if (directory) headers["x-opencode-directory"] = directory;
@@ -119,12 +138,9 @@ export class OpencodeClient {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    if (res.ok) {
-      await res.text().catch(() => "");
-      return;
-    }
+    if (res.ok) return res;
     const err = (await res.json().catch(() => ({}))) as { _tag?: unknown; message?: unknown };
     throw new OpencodeHttpError(
       res.status,
@@ -132,6 +148,11 @@ export class OpencodeClient {
       typeof err._tag === "string" ? err._tag : undefined,
       typeof err.message === "string" ? err.message : undefined,
     );
+  }
+
+  private async send(method: "POST" | "DELETE", path: string, body?: unknown, directory?: string): Promise<void> {
+    const res = await this.request(method, path, body, directory);
+    await res.text().catch(() => "");
   }
 
   /** Answers a permission request; `sessionId` is the session that asked (may be a subagent). */
@@ -155,6 +176,41 @@ export class OpencodeClient {
     const path = `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}`;
     return this.send("DELETE", path, undefined, directory);
   }
+  async vcsInfo(directory: string): Promise<{ current?: string; default?: string }> {
+    return (await this.get<{ data: { branch: { current?: string; default?: string } } }>("/api/vcs", directory)).data.branch;
+  }
+
+  /** opencode's guess at the review base; undefined when it has none or can't tell (503 "Choose a review base"). */
+  async vcsBase(directory: string): Promise<string | undefined> {
+    try {
+      return (await this.get<{ data: { name: string } | null }>("/api/vcs/base", directory)).data?.name || undefined;
+    } catch (err) {
+      if (err instanceof OpencodeHttpError && err.status === 503) return undefined;
+      throw err;
+    }
+  }
+
+  async vcsStatus(directory: string): Promise<RawFileStatus[]> {
+    return (await this.get<{ data: RawFileStatus[] }>("/api/vcs/status", directory)).data;
+  }
+
+  async vcsDiff(directory: string, mode: "working" | "branch", base?: string): Promise<RawFileDiff[]> {
+    const query = new URLSearchParams({ mode, ...(base ? { base } : {}) });
+    return (await this.get<{ data: RawFileDiff[] }>(`/api/vcs/diff?${query}`, directory, DIFF_TIMEOUT_MS)).data;
+  }
+
+  /** Adds a user message; asynchronous on opencode's side. `queue` waits for a running agent to finish its turn. */
+  prompt(sessionId: string, text: string, delivery?: "queue" | "steer", directory?: string): Promise<void> {
+    return this.send("POST", `/api/session/${encodeURIComponent(sessionId)}/prompt`, { text, ...(delivery ? { delivery } : {}) }, directory);
+  }
+
+  /** Text generated from the session's context, without adding to its history. */
+  async generate(sessionId: string, prompt: string, directory?: string): Promise<string> {
+    const path = `/api/session/${encodeURIComponent(sessionId)}/generate`;
+    const res = await this.request("POST", path, { prompt }, directory, GENERATE_TIMEOUT_MS);
+    return ((await res.json()) as { data: { text: string } }).data.text;
+  }
+
 
   info(): Promise<{ version: string }> {
     return this.get("/api/info");
