@@ -10,6 +10,7 @@ import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
 import { spawnRunner } from "./exec";
 import { Gateway } from "./gateway";
+import { GitOps } from "./git";
 import { Network, parseRouteMode } from "./network";
 import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
@@ -116,6 +117,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       mode: routeMode,
       gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
     }),
+    git: new GitOps({ containers }),
     worktrees: new Worktrees({
       containers,
       run: spawnRunner,

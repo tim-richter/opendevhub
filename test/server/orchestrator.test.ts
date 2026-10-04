@@ -13,7 +13,7 @@ import type { RelayStatus } from "../../src/server/relay/runtime";
 import type { OpenTarget } from "../../src/server/editors";
 import { type AddWorktreeArgs, InvalidRequestError } from "../../src/server/worktrees";
 import type { ForwardedPort, Worktree, WorktreeRoot } from "../../src/shared/types";
-import type { PendingItems, Project, SessionSummary } from "../../src/shared/types";
+import type { PendingItems, Project, SessionSummary, UpdateResult } from "../../src/shared/types";
 
 const project: Project = {
   id: "demo-abc123",
@@ -85,11 +85,31 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     remove: vi.fn(async (_p: Project, _ws: string, _path: string, _force: boolean) => {}),
   };
   const editors = { open: vi.fn(async (_id: string, _t: OpenTarget) => {}) };
+  const git = {
+    currentBranch: vi.fn(async (_p: Project, dir: string): Promise<string | undefined> => (dir === "/workspaces/demo" ? "main" : "x")),
+    recordedBase: vi.fn(async (_p: Project, _dir: string, _b: string): Promise<string | undefined> => "main"),
+    aheadBehind: vi.fn(async (_p: Project, _dir: string, _base: string) => ({ ahead: 2, behind: 1 })),
+    isClean: vi.fn(async (_p: Project, _dir: string) => true),
+    isPushed: vi.fn(async (_p: Project, _dir: string, _b: string) => false),
+    commit: vi.fn(async (_p: Project, _dir: string, _m: string) => {}),
+    update: vi.fn(async (_p: Project, _dir: string, _base: string, strategy: "rebase" | "merge"): Promise<UpdateResult> => ({ strategy })),
+    mergeInto: vi.fn(async (_p: Project, _ws: string, _b: string, _ff: boolean) => {}),
+    deleteBranch: vi.fn(async (_p: Project, _ws: string, _b: string) => {}),
+  };
   const client = {
     createSession: vi.fn(async (directory: string) => ({ id: "ses_new", location: { directory } })),
     replyPermission: vi.fn(async (_sid: string, _rid: string, _reply: unknown, _dir?: string) => {}),
     replyForm: vi.fn(async (_sid: string, _fid: string, _answer: unknown, _dir?: string) => {}),
     cancelForm: vi.fn(async (_sid: string, _fid: string, _dir?: string) => {}),
+    vcsInfo: vi.fn(async (_dir: string) => ({ current: "x", default: "main" }) as { current?: string; default?: string }),
+    vcsBase: vi.fn(async (_dir: string): Promise<string | undefined> => undefined),
+    vcsStatus: vi.fn(async (_dir: string) => [] as { file: string }[]),
+    vcsDiff: vi.fn(async (_dir: string, _mode: string, _base?: string) => [
+      { file: "a.ts", patch: "@@ -1 +1 @@\n-a\n+b\n", additions: 1, deletions: 1, status: "modified" as const },
+      { file: "b.ts", patch: "@@ -0,0 +1 @@\n+c\n", additions: 1, deletions: 0, status: "added" as const },
+    ]),
+    prompt: vi.fn(async (_sid: string, _text: string, _delivery?: string, _dir?: string) => {}),
+    generate: vi.fn(async (_sid: string, _prompt: string, _dir?: string) => "feat: do things"),
   };
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
@@ -101,6 +121,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     relay,
     network,
     worktrees,
+    git,
     editors,
     mkdir,
     clientFor,
@@ -120,7 +141,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git };
 }
 
 function waiting(pending: PendingItems): SessionSummary {
@@ -858,6 +879,124 @@ describe("Orchestrator", () => {
       await orch.rescan();
       store.setSessions(project.id, [waiting({ permissions: [permission], forms: [] })]);
       await expect(orch.replyPermission(project.id, "per_1", { decision: "once" })).rejects.toThrow(UnavailableError);
+    });
+  });
+  describe("review", () => {
+    const wt = "/workspaces/demo.worktrees/x";
+    async function running() {
+      const s = setup();
+      await s.orch.rescan();
+      await s.orch.start(project.id);
+      s.store.updateRuntime(project.id, { worktrees: [{ path: wt, branch: "x" }] });
+      return s;
+    }
+
+    it("diffs a worktree against its recorded base", async () => {
+      const { orch, client, git } = await running();
+      git.isClean.mockImplementation(async (_p, dir) => dir === "/workspaces/demo");
+      client.vcsStatus.mockResolvedValueOnce([{ file: "a.ts" }]);
+      const r = await orch.review(project.id, wt);
+      expect(client.vcsDiff).toHaveBeenCalledWith(wt, "branch", "main");
+      expect(git.aheadBehind).toHaveBeenCalledWith(project, wt, "main");
+      expect(r).toMatchObject({
+        directory: wt,
+        branch: "x",
+        base: { name: "main", source: "config" },
+        mode: "branch",
+        ahead: 2,
+        behind: 1,
+        dirty: true,
+        pushed: false,
+        workspace: { branch: "main", clean: true },
+      });
+      expect(r.files.map((f) => f.file)).toEqual(["a.ts", "b.ts"]);
+    });
+
+    it("shows the main checkout's working copy when it is on its base", async () => {
+      const { orch, client, git } = await running();
+      git.recordedBase.mockResolvedValue(undefined);
+      const r = await orch.review(project.id, "/workspaces/demo");
+      expect(r.base).toEqual({ name: "main", source: "default" });
+      expect(client.vcsDiff).toHaveBeenCalledWith("/workspaces/demo", "working", undefined);
+    });
+
+    it("takes a base override, returns one file on request, and rejects option-like bases and unknown folders", async () => {
+      const { orch, client } = await running();
+      const r = await orch.review(project.id, wt, { base: "develop", file: "b.ts" });
+      expect(client.vcsDiff).toHaveBeenLastCalledWith(wt, "branch", "develop");
+      expect(r.base).toEqual({ name: "develop", source: "request" });
+      expect(r.files.map((f) => f.file)).toEqual(["b.ts"]);
+      await expect(orch.review(project.id, wt, { base: "--upload-pack=evil" })).rejects.toThrow(InvalidRequestError);
+      await expect(orch.review(project.id, "/etc")).rejects.toThrow(InvalidRequestError);
+    });
+
+    it("prompts a session, queued while it runs, and starts a session with a first prompt", async () => {
+      const { orch, client, store } = await running();
+      store.setSessions(project.id, [
+        { id: "ses_run", projectId: project.id, title: "t", directory: wt, updatedAt: 2, status: "running" },
+        { id: "ses_idle", projectId: project.id, title: "t", directory: wt, updatedAt: 1, status: "idle" },
+      ]);
+      await orch.promptSession(project.id, "ses_run", "fix it");
+      await orch.promptSession(project.id, "ses_idle", "fix it");
+      expect(client.prompt.mock.calls).toEqual([
+        ["ses_run", "fix it", "queue", wt],
+        ["ses_idle", "fix it", undefined, wt],
+      ]);
+      await expect(orch.promptSession(project.id, "ses_nope", "x")).rejects.toThrow(NotFoundError);
+      await expect(orch.promptSession(project.id, "ses_idle", "  ")).rejects.toThrow(InvalidRequestError);
+      const sid = await orch.startSession(project.id, wt, "Review", "please look");
+      expect(client.prompt).toHaveBeenLastCalledWith(sid, "please look", undefined, wt);
+    });
+
+    it("generates a commit message from the latest session, or returns an empty one", async () => {
+      const { orch, client, store } = await running();
+      expect(await orch.commitMessage(project.id, wt)).toBe("");
+      store.setSessions(project.id, [
+        { id: "ses_old", projectId: project.id, title: "t", directory: wt, updatedAt: 1, status: "idle" },
+        { id: "ses_new", projectId: project.id, title: "t", directory: wt, updatedAt: 5, status: "idle" },
+      ]);
+      expect(await orch.commitMessage(project.id, wt)).toBe("feat: do things");
+      expect(client.generate.mock.calls[0][0]).toBe("ses_new");
+      client.generate.mockRejectedValueOnce(new Error("no model"));
+      expect(await orch.commitMessage(project.id, wt)).toBe("");
+    });
+
+    it("commits, refusing an empty message or a clean checkout", async () => {
+      const { orch, git } = await running();
+      await expect(orch.commit(project.id, wt, "  ")).rejects.toThrow(InvalidRequestError);
+      await expect(orch.commit(project.id, wt, "feat: x")).rejects.toThrow(/nothing to commit/);
+      git.isClean.mockResolvedValue(false);
+      await orch.commit(project.id, wt, " feat: x ");
+      expect(git.commit).toHaveBeenCalledWith(project, wt, "feat: x");
+      expect(orch.logLines(project.id).join("\n")).toMatch(/review: commit/);
+    });
+
+    it("rebases an unpushed branch, merges a pushed one, and reports conflicts", async () => {
+      const { orch, git } = await running();
+      expect(await orch.updateFromBase(project.id, wt, "main")).toEqual({ strategy: "rebase" });
+      git.isPushed.mockResolvedValue(true);
+      git.update.mockResolvedValueOnce({ strategy: "merge", conflicts: ["a.ts"] });
+      expect(await orch.updateFromBase(project.id, wt, "main")).toEqual({ strategy: "merge", conflicts: ["a.ts"] });
+      expect(orch.logLines(project.id).join("\n")).toMatch(/conflicts in a\.ts; aborted/);
+      await expect(orch.updateFromBase(project.id, wt, "-x")).rejects.toThrow(InvalidRequestError);
+      git.isClean.mockResolvedValue(false);
+      await expect(orch.updateFromBase(project.id, wt, "main")).rejects.toThrow(/uncommitted/);
+    });
+
+    it("merges a clean worktree into a clean main checkout that is on the base", async () => {
+      const { orch, git } = await running();
+      expect(await orch.mergeIntoBase(project.id, wt, "main", false)).toEqual({ branch: "x" });
+      expect(git.mergeInto).toHaveBeenCalledWith(project, "/workspaces/demo", "x", false);
+      await expect(orch.mergeIntoBase(project.id, "/workspaces/demo", "main", false)).rejects.toThrow(/main checkout is the base/);
+      await expect(orch.mergeIntoBase(project.id, wt, "develop", false)).rejects.toThrow(/is on main, not develop/);
+      git.isClean.mockImplementation(async (_p, dir) => dir !== "/workspaces/demo");
+      await expect(orch.mergeIntoBase(project.id, wt, "main", true)).rejects.toThrow(/main checkout has uncommitted/);
+    });
+
+    it("removes a worktree and deletes its branch when asked", async () => {
+      const { orch, git } = await running();
+      await orch.removeWorktree(project.id, wt, false, true);
+      expect(git.deleteBranch).toHaveBeenCalledWith(project, "/workspaces/demo", "x");
     });
   });
 });

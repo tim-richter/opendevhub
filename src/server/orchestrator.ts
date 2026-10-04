@@ -7,11 +7,16 @@ import type {
   PermissionDecision,
   Project,
   ProjectId,
+  ReviewData,
+  SessionSummary,
+  UpdateResult,
   Worktree,
   WorktreeRoot,
 } from "../shared/types";
 import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
 import type { EditorLauncher } from "./editors";
+import type { GitOps } from "./git";
+import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import { type HostPort, type Network, type Route, type RouteContainer, directRoute } from "./network";
@@ -55,11 +60,17 @@ export class AlreadyAnsweredError extends Error {
   }
 }
 
+const COMMIT_PROMPT = "Write a conventional commit message for the uncommitted changes. Reply with the message only.";
+
 const DECISIONS: readonly string[] = ["once", "always", "reject"] satisfies PermissionDecision[];
 
 export type ContainersPort = Pick<
   Containers,
   "up" | "inspect" | "listManaged" | "stop" | "readConfiguration" | "workspaceFolder"
+>;
+export type GitPort = Pick<
+  GitOps,
+  "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;
@@ -83,6 +94,7 @@ export interface OrchestratorDeps {
   forwarder: ForwarderPort;
   relay: RelayPort;
   worktrees: WorktreesPort;
+  git: GitPort;
   editors: EditorsPort;
   /** Creates the host worktrees folder before `up` mounts it (defaults to a recursive mkdir). */
   mkdir?: (dir: string) => Promise<void>;
@@ -289,13 +301,17 @@ export class Orchestrator {
     });
   }
 
-  removeWorktree(id: ProjectId, worktreePath: string, force: boolean): Promise<void> {
+  removeWorktree(id: ProjectId, worktreePath: string, force: boolean, deleteBranch = false): Promise<void> {
     return this.withGit(id, async (p) => {
       const known = this.deps.store.runtime(id).worktrees ?? [];
-      if (!known.some((w) => w.path === worktreePath)) throw new InvalidRequestError(`unknown worktree ${worktreePath}`);
+      const target = known.find((w) => w.path === worktreePath);
+      if (!target) throw new InvalidRequestError(`unknown worktree ${worktreePath}`);
       const ws = this.workspaceFolder(p);
       await this.deps.worktrees.remove(p, ws, worktreePath, force);
       this.log(id, `worktree: removed ${worktreePath}`);
+      if (deleteBranch && target.branch) {
+        await this.gitAction(id, `delete branch ${target.branch}`, () => this.deps.git.deleteBranch(p, ws, target.branch!));
+      }
       const list = await this.deps.worktrees
         .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
         .catch(() => known.filter((w) => w.path !== worktreePath));
@@ -303,14 +319,125 @@ export class Orchestrator {
     });
   }
 
-  /** Starts an opencode session in the workspace or one of its worktrees and returns its id. */
-  async startSession(id: ProjectId, directory: string, title?: string): Promise<string> {
+  /** Starts an opencode session in the workspace or one of its worktrees, optionally with a first prompt, and returns its id. */
+  async startSession(id: ProjectId, directory: string, title?: string, prompt?: string): Promise<string> {
     this.requireProject(id);
     this.checkDirectory(id, directory);
     const client = this.opencodeClient(id);
     const session = await client.createSession(directory, title);
+    if (prompt?.trim()) await client.prompt(session.id, prompt, undefined, directory);
     this.monitors.get(id)?.reconcile?.();
     return session.id;
+  }
+
+  /** Sends a prompt to one of the project's sessions, queued behind the current turn when it is running. */
+  async promptSession(id: ProjectId, sessionId: string, text: string): Promise<void> {
+    this.requireProject(id);
+    if (!text.trim()) throw new InvalidRequestError("the prompt is empty");
+    const session = this.deps.store.sessionsOf(id).find((s) => s.id === sessionId);
+    if (!session) throw new NotFoundError(sessionId, "session");
+    await this.opencodeClient(id).prompt(sessionId, text, session.status === "running" ? "queue" : undefined, session.directory);
+    this.monitors.get(id)?.reconcile?.();
+  }
+
+  /** What changed in a checkout compared with its base, for the Review tab. */
+  async review(id: ProjectId, directory: string, opts: { base?: string; file?: string } = {}): Promise<ReviewData> {
+    const project = this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const request = opts.base?.trim() ? validateBranch(opts.base) : undefined;
+    const client = this.opencodeClient(id);
+    const { git } = this.deps;
+    const ws = this.workspaceFolder(project);
+    const branch = await git.currentBranch(project, directory);
+    const [config, opencodeBase, info] = await Promise.all([
+      branch ? git.recordedBase(project, directory, branch) : undefined,
+      client.vcsBase(directory).catch(() => undefined),
+      client.vcsInfo(directory).catch((): { default?: string } => ({})),
+    ]);
+    const base = resolveBase({ request, config, opencode: opencodeBase, defaultBranch: info.default });
+    const mode = diffMode(directory === ws, branch, base);
+    const [raw, status, counts, pushed, wsBranch, wsClean] = await Promise.all([
+      client.vcsDiff(directory, mode, mode === "branch" ? base?.name : undefined),
+      client.vcsStatus(directory),
+      base ? git.aheadBehind(project, directory, base.name).catch(() => ({ ahead: 0, behind: 0 })) : { ahead: 0, behind: 0 },
+      branch ? git.isPushed(project, directory, branch) : false,
+      git.currentBranch(project, ws),
+      git.isClean(project, ws),
+    ]);
+    const wanted = opts.file === undefined ? raw : raw.filter((f) => f.file === opts.file);
+    const { files, truncated } = toReviewFiles(wanted, opts.file === undefined ? PATCH_BUDGET_BYTES : Number.POSITIVE_INFINITY);
+    return {
+      directory,
+      ...(branch ? { branch } : {}),
+      ...(base ? { base } : {}),
+      mode,
+      ...counts,
+      dirty: status.length > 0,
+      pushed,
+      workspace: { ...(wsBranch ? { branch: wsBranch } : {}), clean: wsClean },
+      files,
+      ...(truncated ? { truncated } : {}),
+    };
+  }
+
+  /** A commit message suggested by the target's latest session; empty when there is none or it fails. */
+  async commitMessage(id: ProjectId, directory: string): Promise<string> {
+    this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const session = this.latestSession(id, directory);
+    if (!session) return "";
+    try {
+      return (await this.opencodeClient(id).generate(session.id, COMMIT_PROMPT, directory)).trim();
+    } catch {
+      return "";
+    }
+  }
+
+  async commit(id: ProjectId, directory: string, message: string): Promise<void> {
+    const msg = message.trim();
+    if (!msg) throw new InvalidRequestError("the commit message is empty");
+    this.checkDirectory(id, directory);
+    await this.withGit(id, async (p) => {
+      if (await this.deps.git.isClean(p, directory)) throw new InvalidRequestError("there is nothing to commit");
+      await this.gitAction(id, `commit in ${directory}`, () => this.deps.git.commit(p, directory, msg));
+    });
+  }
+
+  /** Rebases the target onto its base, or merges the base in when the branch was pushed. Conflicts are aborted. */
+  async updateFromBase(id: ProjectId, directory: string, base: string): Promise<UpdateResult> {
+    const ref = validateBranch(base);
+    this.checkDirectory(id, directory);
+    return this.withGit(id, async (p) => {
+      const { git } = this.deps;
+      const branch = await git.currentBranch(p, directory);
+      if (!branch) throw new InvalidRequestError(`${directory} is not on a branch`);
+      if (!(await git.isClean(p, directory))) throw new InvalidRequestError("commit or discard the uncommitted changes first");
+      const strategy = (await git.isPushed(p, directory, branch)) ? "merge" : "rebase";
+      const result = await this.gitAction(id, `${strategy} ${branch} with ${ref}`, () => git.update(p, directory, ref, strategy));
+      if (result.conflicts) this.log(id, `review: conflicts in ${result.conflicts.join(", ")}; aborted, nothing changed`);
+      return result;
+    });
+  }
+
+  /** Merges a worktree's branch into the main checkout, which must be clean and on the base. Does not push. */
+  async mergeIntoBase(id: ProjectId, directory: string, base: string, ffOnly: boolean): Promise<{ branch: string }> {
+    const ref = validateBranch(base);
+    this.checkDirectory(id, directory);
+    return this.withGit(id, async (p) => {
+      const { git } = this.deps;
+      const ws = this.workspaceFolder(p);
+      if (directory === ws) throw new InvalidRequestError("merge a worktree into its base; the main checkout is the base");
+      const branch = await git.currentBranch(p, directory);
+      if (!branch) throw new InvalidRequestError(`${directory} is not on a branch`);
+      if (!(await git.isClean(p, directory))) throw new InvalidRequestError(`${branch} has uncommitted changes; commit them first`);
+      const wsBranch = await git.currentBranch(p, ws);
+      if (wsBranch !== ref) throw new InvalidRequestError(`the main checkout is on ${wsBranch ?? "a detached HEAD"}, not ${ref}`);
+      if (!(await git.isClean(p, ws))) throw new InvalidRequestError("the main checkout has uncommitted changes");
+      await this.gitAction(id, `merge ${branch} into ${ref}${ffOnly ? " (fast-forward only)" : ""}`, () =>
+        git.mergeInto(p, ws, branch, ffOnly),
+      );
+      return { branch };
+    });
   }
 
   /** Answers a permission request the dashboard listed for this project. */
@@ -589,6 +716,26 @@ export class Orchestrator {
   private async closePorts(id: ProjectId): Promise<void> {
     await this.deps.forwarder.close(id);
     this.deps.store.updateRuntime(id, { ports: undefined, relay: undefined });
+  }
+
+  private latestSession(id: ProjectId, directory: string): SessionSummary | undefined {
+    return this.deps.store
+      .sessionsOf(id)
+      .filter((s) => s.directory === directory)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  }
+
+  /** Runs a review git action and writes its outcome (and git's last lines on failure) to the project log. */
+  private async gitAction<T>(id: ProjectId, what: string, fn: () => Promise<T>): Promise<T> {
+    try {
+      const result = await fn();
+      this.log(id, `review: ${what}`);
+      return result;
+    } catch (err) {
+      this.log(id, `review: ${what} failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+      throw err;
+    }
   }
 
   private opencodeClient(id: ProjectId): OpencodeClient {
