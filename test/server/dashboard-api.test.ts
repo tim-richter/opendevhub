@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createDashboardApp, type DashboardOrchestrator } from "../../src/server/dashboard-api";
 import { CommandError } from "../../src/server/containers";
 import { EditorUnavailableError } from "../../src/server/editors";
-import { BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
+import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { StateStore } from "../../src/server/state";
 import type { Project } from "../../src/shared/types";
@@ -29,6 +29,9 @@ function setup(webDir?: string) {
     removeWorktree: vi.fn(async () => {}),
     startSession: vi.fn(async () => "ses_1"),
     openInEditor: vi.fn(async () => {}),
+    replyPermission: vi.fn(async (_id: string, _rid: string, _reply: { decision: string; message?: string }) => {}),
+    replyForm: vi.fn(async (_id: string, _fid: string, _answer: unknown) => {}),
+    cancelForm: vi.fn(async (_id: string, _fid: string, _message?: string) => {}),
   } satisfies DashboardOrchestrator;
   return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
 }
@@ -180,5 +183,46 @@ describe("dashboard API", () => {
     const res = await app.request("/");
     expect(res.status).toBe(503);
     expect(await res.text()).toContain("npm run build");
+  });
+  describe("responding", () => {
+    const send = (app: ReturnType<typeof setup>["app"], method: string, route: string, body: unknown, origin?: string) =>
+      app.request(`/api/projects/${project.id}/${route}`, {
+        method,
+        headers: { "content-type": "application/json", host: "localhost:7777", ...(origin ? { origin } : {}) },
+        body: JSON.stringify(body),
+      });
+
+    it("forwards permission replies, form answers and dismissals", async () => {
+      const { app, orchestrator } = setup();
+      expect((await send(app, "POST", "permissions/per_1", { decision: "reject", message: "no" })).status).toBe(200);
+      expect(orchestrator.replyPermission).toHaveBeenCalledWith(project.id, "per_1", { decision: "reject", message: "no" });
+      expect((await send(app, "POST", "forms/frm_1", { answer: { db: "pg" } })).status).toBe(200);
+      expect(orchestrator.replyForm).toHaveBeenCalledWith(project.id, "frm_1", { db: "pg" });
+      expect((await send(app, "DELETE", "forms/frm_1", { message: "later" })).status).toBe(200);
+      expect(orchestrator.cancelForm).toHaveBeenCalledWith(project.id, "frm_1", "later");
+    });
+
+    it("maps unknown ids to 404, already answered to 409 and invalid answers to 400 with the message", async () => {
+      const { app, orchestrator } = setup();
+      orchestrator.replyPermission.mockRejectedValueOnce(new NotFoundError("per_x", "permission request"));
+      expect((await send(app, "POST", "permissions/per_x", { decision: "once" })).status).toBe(404);
+
+      orchestrator.replyPermission.mockRejectedValueOnce(new AlreadyAnsweredError());
+      const gone = await send(app, "POST", "permissions/per_1", { decision: "once" });
+      expect(gone.status).toBe(409);
+      expect(await gone.json()).toEqual({ error: "already answered" });
+
+      orchestrator.replyForm.mockRejectedValueOnce(new InvalidRequestError("db is required"));
+      const invalid = await send(app, "POST", "forms/frm_1", { answer: {} });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toEqual({ error: "db is required" });
+    });
+
+    it("blocks cross-site replies", async () => {
+      const { app, orchestrator } = setup();
+      const res = await send(app, "POST", "permissions/per_1", { decision: "once" }, "http://evil.example");
+      expect(res.status).toBe(403);
+      expect(orchestrator.replyPermission).not.toHaveBeenCalled();
+    });
   });
 });

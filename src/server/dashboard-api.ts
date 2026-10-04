@@ -5,7 +5,7 @@ import { streamSSE } from "hono/streaming";
 import type { LogEvent } from "../shared/types";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
-import { BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
+import { AlreadyAnsweredError, BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
 import { InvalidRequestError } from "./worktrees";
 import type { StateStore } from "./state";
 
@@ -23,6 +23,9 @@ export type DashboardOrchestrator = Pick<
   | "removeWorktree"
   | "startSession"
   | "openInEditor"
+  | "replyPermission"
+  | "replyForm"
+  | "cancelForm"
 >;
 
 export interface DashboardDeps {
@@ -46,7 +49,7 @@ const CONTENT_TYPES: Record<string, string> = {
 function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 {
   if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError) return 400;
   if (err instanceof NotFoundError) return 404;
-  if (err instanceof BusyError) return 409;
+  if (err instanceof BusyError || err instanceof AlreadyAnsweredError) return 409;
   if (err instanceof UnavailableError) return 412;
   if (err instanceof CommandError) return 422;
   return 500;
@@ -145,6 +148,20 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   );
   app.post("/api/projects/:id/open", (c) =>
     json(c, (id, b) => orchestrator.openInEditor(id, str(b.editor) ?? "", str(b.directory) ?? "")),
+  );
+
+  // Answers to what an agent is waiting on. The orchestrator only forwards ids it listed itself.
+  app.post("/api/projects/:id/permissions/:rid", (c) =>
+    json(c, (id, b) =>
+      orchestrator.replyPermission(id, c.req.param("rid") ?? "", {
+        decision: str(b.decision) ?? "",
+        ...(str(b.message) ? { message: str(b.message) } : {}),
+      }),
+    ),
+  );
+  app.post("/api/projects/:id/forms/:fid", (c) => json(c, (id, b) => orchestrator.replyForm(id, c.req.param("fid") ?? "", b.answer)));
+  app.delete("/api/projects/:id/forms/:fid", (c) =>
+    json(c, (id, b) => orchestrator.cancelForm(id, c.req.param("fid") ?? "", str(b.message))),
   );
 
   app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));
