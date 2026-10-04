@@ -15,7 +15,9 @@ const STRATEGY_LABEL: Record<PublishStrategy, string> = {
   branch: "Push a branch, then open the PR",
 };
 
-export function PublishPanel(props: { projectId: string; directory: string; data: ReviewData; baseName?: string; onPublished: () => void }) {
+export function PublishPanel(props: { projectId: string; directory: string; /** Undefined until the review loads: the panel holds its place, disabled. */
+  data: ReviewData | undefined;
+  baseName?: string; onPublished: () => void }) {
   const { projectId, directory, data } = props;
   const [info, setInfo] = useState<PublishInfo>();
   const [remote, setRemote] = useState<string>();
@@ -41,7 +43,11 @@ export function PublishPanel(props: { projectId: string; directory: string; data
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))),
     [projectId, directory],
   );
-  useEffect(() => void loadInfo(), [loadInfo, data.branch]);
+  const loaded = !!data;
+  const branch = data?.branch;
+  useEffect(() => {
+    if (loaded) void loadInfo();
+  }, [loadInfo, loaded, branch]);
   useEffect(() => setBase(props.baseName ?? ""), [props.baseName]);
 
   const openDialog = () => {
@@ -77,11 +83,11 @@ export function PublishPanel(props: { projectId: string; directory: string; data
       .finally(() => setBusy(false));
   };
 
-  const blocker = publishBlocker(data) ?? (info && info.remotes.length === 0 ? "This repository has no remote" : undefined);
+  const blocker = (data && publishBlocker(data)) ?? (info && info.remotes.length === 0 ? "This repository has no remote" : undefined);
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" disabled={!!blocker || busy || !info} title={blocker} onClick={openDialog}>
+        <Button variant="outline" disabled={!!blocker || busy || !data || !info} title={blocker} onClick={openDialog}>
           {info?.pr ? "Update PR…" : "Publish…"}
         </Button>
         {info?.pr && (

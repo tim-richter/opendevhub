@@ -23,11 +23,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { Choice } from "../components/Choice";
 import { Chip, diffFont, Empty, muted } from "../components/Page";
 import { PublishPanel } from "../components/PublishPanel";
+import { DiffLinesSkeleton, ReviewSkeleton } from "../components/Skeletons";
 import { workspaceFolderOf } from "../derive";
 import {
   acceptSuggestion,
@@ -243,6 +245,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2.5">
+        {!data && !error && <Skeleton className="h-5 w-32" />}
         {data?.branch && (
           <Chip>
             <GitBranchIcon /> {data.branch}
@@ -265,6 +268,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
             ))}
           </datalist>
         </form>
+        {!data && !error && <Skeleton className="h-4 w-44" />}
         {data && (
           <span className={muted} title={data.base ? `base from ${data.base.source}` : undefined}>
             {data.ahead} ahead · {data.behind} behind{data.dirty ? " · uncommitted changes" : ""}
@@ -302,7 +306,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         </Label>
       </section>
 
-      {data && <PublishPanel projectId={projectId} directory={directory} data={data} baseName={baseName} onPublished={load} />}
+      <PublishPanel projectId={projectId} directory={directory} data={data} baseName={baseName} onPublished={load} />
 
       {commitOpen && (
         <form className="flex flex-col gap-2" onSubmit={commit}>
@@ -432,6 +436,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         )}
       </section>
 
+      {!data && !error && <ReviewSkeleton />}
       {data && data.files.length === 0 && <p className={muted}>No changes compared with {baseName ?? "the last commit"}.</p>}
       {data && data.files.length > 0 && (
         <div className="grid items-start gap-4 md:grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
@@ -552,12 +557,13 @@ function FileDiff(props: {
       </header>
       {file.binary ? (
         <p className="px-3 py-2.5 text-sm text-muted-foreground">binary</p>
+      ) : loading ? (
+        <DiffLinesSkeleton />
       ) : (
         <p className="px-3 py-2.5">
           <Button
             variant="outline"
             size="sm"
-            disabled={loading}
             onClick={() => {
               setLoading(true);
               void props
@@ -566,7 +572,7 @@ function FileDiff(props: {
                 .finally(() => setLoading(false));
             }}
           >
-            {loading ? "Loading…" : "Load diff"}
+            Load diff
           </Button>
         </p>
       )}

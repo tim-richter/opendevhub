@@ -7,6 +7,7 @@ import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Empty, muted } from "../components/Page";
 import { SessionBadge } from "../components/Status";
 import { useDash } from "../DashboardContext";
@@ -19,7 +20,8 @@ export function ProjectTask() {
   const { task = "" } = useParams();
   const { report } = useDash();
   const sessions = taskSessions(view, task);
-  const [reviews, setReviews] = useState<Record<string, ReviewData>>({});
+  // null: the changes couldn't be read.
+  const [reviews, setReviews] = useState<Record<string, ReviewData | null>>({});
   const [picking, setPicking] = useState(false);
   const [notice, setNotice] = useState<string>();
   const mounted = useRef(true);
@@ -38,7 +40,7 @@ export function ProjectTask() {
     for (const s of sessions) {
       fetchReview(view.project.id, s.directory).then(
         (r) => live && setReviews((all) => ({ ...all, [s.directory]: r })),
-        () => {},
+        () => live && setReviews((all) => ({ ...all, [s.directory]: null })),
       );
     }
     return () => {
@@ -120,7 +122,7 @@ export function ProjectTask() {
               </header>
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm [&_dd]:truncate [&_dt]:text-muted-foreground">
                 <dt>Branch</dt>
-                <dd className="font-mono text-xs">{review?.branch ?? "—"}</dd>
+                <dd className="font-mono text-xs">{review === undefined ? <Skeleton className="h-4 w-24" /> : (review?.branch ?? "—")}</dd>
                 <dt>Cost</dt>
                 <dd>{formatCost(s.cost)}</dd>
                 <dt>Tokens</dt>
@@ -133,6 +135,8 @@ export function ProjectTask() {
                       <span className="text-destructive">−{stats.deletions}</span>
                       {review?.dirty ? <span className="text-muted-foreground"> · uncommitted</span> : null}
                     </>
+                  ) : review === undefined ? (
+                    <Skeleton className="h-4 w-32" />
                   ) : (
                     "—"
                   )}
