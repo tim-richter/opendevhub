@@ -1,12 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ForwardedPort, Project, ProjectId, Worktree, WorktreeRoot } from "../shared/types";
+import type {
+  FormAnswer,
+  ForwardedPort,
+  PendingItems,
+  PermissionDecision,
+  Project,
+  ProjectId,
+  Worktree,
+  WorktreeRoot,
+} from "../shared/types";
 import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
 import type { EditorLauncher } from "./editors";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import { type HostPort, type Network, type Route, type RouteContainer, directRoute } from "./network";
-import type { OpencodeClient, OpencodeEndpoint } from "./opencode/client";
+import { type OpencodeClient, type OpencodeEndpoint, isGone, isInvalidAnswer } from "./opencode/client";
 import type { OpencodeRuntime } from "./opencode/runtime";
 import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
@@ -32,11 +41,21 @@ export class UnavailableError extends Error {
 }
 
 export class NotFoundError extends Error {
-  constructor(id: string) {
-    super(`unknown project ${id}`);
+  constructor(id: string, what = "project") {
+    super(`unknown ${what} ${id}`);
     this.name = "NotFoundError";
   }
 }
+
+/** The permission request or form was already answered or cancelled, e.g. in the opencode tab. */
+export class AlreadyAnsweredError extends Error {
+  constructor() {
+    super("already answered");
+    this.name = "AlreadyAnsweredError";
+  }
+}
+
+const DECISIONS: readonly string[] = ["once", "always", "reject"] satisfies PermissionDecision[];
 
 export type ContainersPort = Pick<
   Containers,
@@ -288,15 +307,47 @@ export class Orchestrator {
   async startSession(id: ProjectId, directory: string, title?: string): Promise<string> {
     this.requireProject(id);
     this.checkDirectory(id, directory);
-    const rt = this.deps.store.runtime(id);
-    const route = this.routes.get(id);
-    if (rt.containerState !== "running" || rt.opencode !== "healthy" || !route || !rt.password) {
-      throw new UnavailableError("opencode is not running — start the project first");
-    }
-    const client = this.deps.clientFor(this.deps.runtime.endpoint(route.opencode, rt.password));
+    const client = this.opencodeClient(id);
     const session = await client.createSession(directory, title);
     this.monitors.get(id)?.reconcile?.();
     return session.id;
+  }
+
+  /** Answers a permission request the dashboard listed for this project. */
+  async replyPermission(id: ProjectId, requestId: string, reply: { decision: string; message?: string }): Promise<void> {
+    if (!DECISIONS.includes(reply.decision)) throw new InvalidRequestError(`invalid decision "${reply.decision}"`);
+    const decision = reply.decision as PermissionDecision;
+    await this.respond(
+      id,
+      "permission request",
+      requestId,
+      (p) => p.permissions.find((i) => i.id === requestId),
+      (client, item, dir) =>
+        client.replyPermission(item.sessionId, requestId, { decision, ...(reply.message ? { message: reply.message } : {}) }, dir),
+    );
+  }
+
+  /** Submits an answer to a form the dashboard listed for this project. */
+  async replyForm(id: ProjectId, formId: string, answer: unknown): Promise<void> {
+    if (!answer || typeof answer !== "object" || Array.isArray(answer)) throw new InvalidRequestError("answer must be an object");
+    await this.respond(
+      id,
+      "form",
+      formId,
+      (p) => p.forms.find((i) => i.id === formId),
+      (client, item, dir) => client.replyForm(item.sessionId, formId, answer as FormAnswer, dir),
+    );
+  }
+
+  /** Dismisses a form; the agent is told `message`. */
+  async cancelForm(id: ProjectId, formId: string, message?: string): Promise<void> {
+    await this.respond(
+      id,
+      "form",
+      formId,
+      (p) => p.forms.find((i) => i.id === formId),
+      (client, item, dir) => client.cancelForm(item.sessionId, formId, message, dir),
+    );
   }
 
   /** Opens the workspace or a worktree in an editor on this machine. */
@@ -538,6 +589,48 @@ export class Orchestrator {
   private async closePorts(id: ProjectId): Promise<void> {
     await this.deps.forwarder.close(id);
     this.deps.store.updateRuntime(id, { ports: undefined, relay: undefined });
+  }
+
+  private opencodeClient(id: ProjectId): OpencodeClient {
+    const rt = this.deps.store.runtime(id);
+    const route = this.routes.get(id);
+    if (rt.containerState !== "running" || rt.opencode !== "healthy" || !route || !rt.password) {
+      throw new UnavailableError("opencode is not running — start the project first");
+    }
+    return this.deps.clientFor(this.deps.runtime.endpoint(route.opencode, rt.password));
+  }
+
+  /**
+   * Forwards a reply for a pending item, but only for ids in the latest snapshot: the dashboard never relays
+   * ids it didn't list itself. Refreshes the snapshot afterwards, whatever happened.
+   */
+  private async respond<T extends { sessionId: string }>(
+    id: ProjectId,
+    what: string,
+    itemId: string,
+    find: (pending: PendingItems) => T | undefined,
+    send: (client: OpencodeClient, item: T, directory: string) => Promise<void>,
+  ): Promise<void> {
+    this.requireProject(id);
+    let found: { item: T; directory: string } | undefined;
+    for (const s of this.deps.store.sessionsOf(id)) {
+      const item = s.pending && find(s.pending);
+      if (item) {
+        found = { item, directory: s.directory };
+        break;
+      }
+    }
+    if (!found) throw new NotFoundError(itemId, what);
+    const client = this.opencodeClient(id);
+    try {
+      await send(client, found.item, found.directory);
+    } catch (err) {
+      if (isGone(err)) throw new AlreadyAnsweredError();
+      if (isInvalidAnswer(err)) throw new InvalidRequestError(err.detail ?? "opencode rejected the answer");
+      throw err;
+    } finally {
+      this.monitors.get(id)?.reconcile?.();
+    }
   }
 
   private startMonitor(id: ProjectId): void {

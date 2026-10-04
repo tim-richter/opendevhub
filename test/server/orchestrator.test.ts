@@ -4,7 +4,8 @@ import { CommandError, type ContainerInfo } from "../../src/server/containers";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
 import type { OpencodeClient, OpencodeEndpoint } from "../../src/server/opencode/client";
-import { BusyError, type NetworkPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
+import { AlreadyAnsweredError, BusyError, type NetworkPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
+import { OpencodeHttpError } from "../../src/server/opencode/client";
 import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
 import type { ForwardTarget } from "../../src/server/port-forwarder";
@@ -12,7 +13,7 @@ import type { RelayStatus } from "../../src/server/relay/runtime";
 import type { OpenTarget } from "../../src/server/editors";
 import { type AddWorktreeArgs, InvalidRequestError } from "../../src/server/worktrees";
 import type { ForwardedPort, Worktree, WorktreeRoot } from "../../src/shared/types";
-import type { Project } from "../../src/shared/types";
+import type { PendingItems, Project, SessionSummary } from "../../src/shared/types";
 
 const project: Project = {
   id: "demo-abc123",
@@ -31,7 +32,7 @@ const running: ContainerInfo = {
 
 function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPort, projects = [project]) {
   const store = new StateStore({ port: 7777, persisted, persist: () => {} });
-  const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean }> = [];
+  const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean; reconciled: number }> = [];
   const containers = {
     up: vi.fn(
       async (
@@ -84,7 +85,12 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     remove: vi.fn(async (_p: Project, _ws: string, _path: string, _force: boolean) => {}),
   };
   const editors = { open: vi.fn(async (_id: string, _t: OpenTarget) => {}) };
-  const client = { createSession: vi.fn(async (directory: string) => ({ id: "ses_new", location: { directory } })) };
+  const client = {
+    createSession: vi.fn(async (directory: string) => ({ id: "ses_new", location: { directory } })),
+    replyPermission: vi.fn(async (_sid: string, _rid: string, _reply: unknown, _dir?: string) => {}),
+    replyForm: vi.fn(async (_sid: string, _fid: string, _answer: unknown, _dir?: string) => {}),
+    cancelForm: vi.fn(async (_sid: string, _fid: string, _message?: string, _dir?: string) => {}),
+  };
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
   const orch = new Orchestrator({
@@ -101,13 +107,35 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     roots: () => ["/src"],
     scan: async () => projects,
     monitorFactory: (opts) => {
-      const m = { opts, started: false, stopped: false, start() { m.started = true; }, stop() { m.stopped = true; } };
+      const m = {
+        opts,
+        started: false,
+        stopped: false,
+        reconciled: 0,
+        start() { m.started = true; },
+        stop() { m.stopped = true; },
+        reconcile() { m.reconciled++; },
+      };
       monitors.push(m);
       return m;
     },
   });
   return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir };
 }
+
+function waiting(pending: PendingItems): SessionSummary {
+  return {
+    id: "ses_root",
+    projectId: project.id,
+    title: "Fix tests",
+    directory: "/workspaces/demo.worktrees/x",
+    updatedAt: 1,
+    status: "needs-permission",
+    pending,
+  };
+}
+const permission = { id: "per_1", sessionId: "ses_child", action: "bash", resources: ["npm test"] };
+const form = { id: "frm_1", sessionId: "ses_root", title: "Which DB?", fields: [] };
 
 describe("Orchestrator", () => {
   it("start brings up the container, launches opencode and starts a monitor", async () => {
@@ -753,6 +781,83 @@ describe("Orchestrator", () => {
       monitors[0].opts.onSessions([session("/home/node/.local/share/opencode/worktree/p/y")]);
       await new Promise((r) => setTimeout(r, 10));
       expect(worktrees.list.mock.calls.length).toBe(calls + 1);
+    });
+  });
+  describe("responding", () => {
+    async function running() {
+      const s = setup();
+      await s.orch.rescan();
+      await s.orch.start(project.id);
+      s.store.setSessions(project.id, [waiting({ permissions: [permission], forms: [form] })]);
+      return s;
+    }
+
+    it("replies as the asking subagent session, in the root session's directory, then reconciles", async () => {
+      const { orch, client, monitors } = await running();
+      await orch.replyPermission(project.id, "per_1", { decision: "always" });
+      expect(client.replyPermission).toHaveBeenCalledWith(
+        "ses_child",
+        "per_1",
+        { decision: "always" },
+        "/workspaces/demo.worktrees/x",
+      );
+      expect(monitors.at(-1)!.reconciled).toBe(1);
+    });
+
+    it("passes a reject reason through", async () => {
+      const { orch, client } = await running();
+      await orch.replyPermission(project.id, "per_1", { decision: "reject", message: "use pnpm" });
+      expect(client.replyPermission.mock.calls[0][2]).toEqual({ decision: "reject", message: "use pnpm" });
+    });
+
+    it("answers and cancels forms", async () => {
+      const { orch, client } = await running();
+      await orch.replyForm(project.id, "frm_1", { db: "postgres" });
+      expect(client.replyForm).toHaveBeenCalledWith("ses_root", "frm_1", { db: "postgres" }, "/workspaces/demo.worktrees/x");
+      await orch.cancelForm(project.id, "frm_1", "not needed");
+      expect(client.cancelForm).toHaveBeenCalledWith("ses_root", "frm_1", "not needed", "/workspaces/demo.worktrees/x");
+    });
+
+    it("only forwards ids it listed itself", async () => {
+      const { orch, client } = await running();
+      await expect(orch.replyPermission(project.id, "per_other", { decision: "once" })).rejects.toThrow(NotFoundError);
+      await expect(orch.replyForm(project.id, "per_1", {})).rejects.toThrow(NotFoundError);
+      await expect(orch.replyPermission("nope", "per_1", { decision: "once" })).rejects.toThrow(NotFoundError);
+      expect(client.replyPermission).not.toHaveBeenCalled();
+      expect(client.replyForm).not.toHaveBeenCalled();
+    });
+
+    it("validates the decision and the answer", async () => {
+      const { orch } = await running();
+      await expect(orch.replyPermission(project.id, "per_1", { decision: "yes" })).rejects.toThrow(InvalidRequestError);
+      await expect(orch.replyForm(project.id, "frm_1", ["a"])).rejects.toThrow(InvalidRequestError);
+      await expect(orch.replyForm(project.id, "frm_1", null)).rejects.toThrow(InvalidRequestError);
+    });
+
+    it("turns opencode's not-found and already-settled into AlreadyAnsweredError, and still reconciles", async () => {
+      const { orch, client, monitors } = await running();
+      client.replyPermission.mockRejectedValueOnce(new OpencodeHttpError(404, "/x"));
+      await expect(orch.replyPermission(project.id, "per_1", { decision: "once" })).rejects.toThrow(AlreadyAnsweredError);
+      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(400, "/x", "FormAlreadySettled"));
+      await expect(orch.replyForm(project.id, "frm_1", {})).rejects.toThrow(AlreadyAnsweredError);
+      expect(monitors.at(-1)!.reconciled).toBe(2);
+    });
+
+    it("surfaces opencode's message for an invalid answer, and keeps other failures as they are", async () => {
+      const { orch, client } = await running();
+      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(400, "/x", "FormInvalidAnswer", "db is required"));
+      await expect(orch.replyForm(project.id, "frm_1", {})).rejects.toThrow(
+        expect.objectContaining({ name: "InvalidRequestError", message: "db is required" }),
+      );
+      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(500, "/x"));
+      await expect(orch.replyForm(project.id, "frm_1", {})).rejects.toBeInstanceOf(OpencodeHttpError);
+    });
+
+    it("needs opencode running", async () => {
+      const { orch, store } = setup();
+      await orch.rescan();
+      store.setSessions(project.id, [waiting({ permissions: [permission], forms: [] })]);
+      await expect(orch.replyPermission(project.id, "per_1", { decision: "once" })).rejects.toThrow(UnavailableError);
     });
   });
 });

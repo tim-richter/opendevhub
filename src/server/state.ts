@@ -71,6 +71,10 @@ export class StateStore {
     this.emit();
   }
 
+  sessionsOf(id: ProjectId): SessionSummary[] {
+    return this.sessions.get(id) ?? [];
+  }
+
   setRoots(roots: string[]): void {
     this.roots = [...roots];
     this.emit();
