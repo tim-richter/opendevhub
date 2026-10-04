@@ -2,6 +2,7 @@ import { type FormEvent, Fragment, type KeyboardEvent, type ReactNode, useCallba
 import type { FormField, PendingForm, PendingPermission, PermissionDecision, ProjectView, SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { dismissForm, type ReplyOutcome, replyForm, replyPermission } from "../api";
+import { type CardAction, canTakeFocus, cardAction } from "../card-keys";
 import {
   buildAnswer,
   type FieldValue,
@@ -21,26 +22,34 @@ const RADIO_LIMIT = 5;
 
 type Item = { kind: "permission"; item: PendingPermission } | { kind: "form"; item: PendingForm };
 
-/** Keys belong to the card only while the card itself has focus, never while typing in one of its fields. */
-function ownKey(e: KeyboardEvent<HTMLElement>): boolean {
-  return e.target === e.currentTarget && !e.metaKey && !e.ctrlKey && !e.altKey;
+/**
+ * The card's shortcut keys. Keys only count while the card itself has focus (never while typing in one of
+ * its fields), and not while the card has just appeared. j/k move between cards and are handled here.
+ */
+function useCardKeys(onAction: (action: CardAction) => void) {
+  const mountedAt = useRef(Date.now());
+  return (e: KeyboardEvent<HTMLElement>) => {
+    const action = cardAction(
+      { key: e.key, repeat: e.repeat, onCard: e.target === e.currentTarget, modified: e.metaKey || e.ctrlKey || e.altKey },
+      mountedAt.current,
+      Date.now(),
+    );
+    if (!action) return;
+    e.preventDefault();
+    if (action === "next" || action === "prev") {
+      const cards = [...document.querySelectorAll<HTMLElement>(".pending-card")];
+      cards[cards.indexOf(e.currentTarget) + (action === "next" ? 1 : -1)]?.focus();
+    } else onAction(action);
+  };
 }
 
-/** j/k move between cards on the page. */
-function moveBetweenCards(e: KeyboardEvent<HTMLElement>): void {
-  if (e.key !== "j" && e.key !== "k") return;
-  e.preventDefault();
-  const cards = [...document.querySelectorAll<HTMLElement>(".pending-card")];
-  cards[cards.indexOf(e.currentTarget) + (e.key === "j" ? 1 : -1)]?.focus();
-}
-
-/** Focuses the card when it mounts, so answering one card by keyboard lands on the next. */
-function useAutoFocus(enabled: boolean) {
+/** Focuses the card when it mounts if the stack hands it focus, so answering by keyboard lands on the next card. */
+function useAutoFocus(takeFocus: () => boolean) {
   return useCallback(
     (el: HTMLElement | null) => {
-      if (enabled && el) el.focus();
+      if (el && takeFocus()) el.focus();
     },
-    [enabled],
+    [takeFocus],
   );
 }
 
@@ -63,8 +72,14 @@ function useReply(onDone: () => void) {
 export function PendingStack(props: { session: SessionSummary; view: ProjectView }) {
   const { session, view } = props;
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
-  const [focusNext, setFocusNext] = useState(false);
+  // One-shot: set when an item is answered while focus was in this stack; the next card claims it on mount.
+  const focusClaim = useRef(false);
   const stack = useRef<HTMLDivElement>(null);
+  const takeFocus = useCallback(() => {
+    const claimed = focusClaim.current;
+    focusClaim.current = false;
+    return claimed && canTakeFocus<Element>(document.activeElement, document.body, stack.current);
+  }, []);
   const items: Item[] = [
     ...(session.pending?.permissions ?? []).map((item) => ({ kind: "permission" as const, item })),
     ...(session.pending?.forms ?? []).map((item) => ({ kind: "form" as const, item })),
@@ -75,7 +90,7 @@ export function PendingStack(props: { session: SessionSummary; view: ProjectView
 
   const current = items[0];
   const done = () => {
-    setFocusNext(stack.current?.contains(document.activeElement) ?? false);
+    focusClaim.current = stack.current?.contains(document.activeElement) ?? false;
     setAnswered((prev) => new Set(prev).add(current.item.id));
   };
   return (
@@ -87,7 +102,7 @@ export function PendingStack(props: { session: SessionSummary; view: ProjectView
           projectId={view.project.id}
           sessionTitle={session.title}
           permission={current.item}
-          autoFocus={focusNext}
+          takeFocus={takeFocus}
           onDone={done}
         />
       ) : (
@@ -96,7 +111,7 @@ export function PendingStack(props: { session: SessionSummary; view: ProjectView
           projectId={view.project.id}
           form={current.item}
           openUrl={sessionUrl(view.openUrl, session.id)}
-          autoFocus={focusNext}
+          takeFocus={takeFocus}
           onDone={done}
         />
       )}
@@ -108,30 +123,21 @@ function PermissionCard(props: {
   projectId: string;
   sessionTitle: string;
   permission: PendingPermission;
-  autoFocus: boolean;
+  takeFocus: () => boolean;
   onDone: () => void;
 }) {
   const { permission: p } = props;
   const { busy, error, run } = useReply(props.onDone);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const ref = useAutoFocus(props.autoFocus);
+  const ref = useAutoFocus(props.takeFocus);
   const reply = (decision: PermissionDecision, message?: string) =>
     run(() => replyPermission(props.projectId, p.id, decision, message));
 
-  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (!ownKey(e)) return;
-    if (e.key === "Enter") {
-      e.preventDefault();
-      reply("once");
-    } else if (e.key === "a") {
-      e.preventDefault();
-      reply("always");
-    } else if (e.key === "r") {
-      e.preventDefault();
-      setRejecting(true);
-    } else moveBetweenCards(e);
-  };
+  const onKeyDown = useCardKeys((action) => {
+    if (action === "reject") setRejecting(true);
+    else reply(action === "always" ? "always" : "once");
+  });
 
   const shown = p.resources.slice(0, RESOURCE_LIMIT);
   return (
@@ -225,7 +231,7 @@ function DiffView({ patch }: { patch: string }) {
   );
 }
 
-function FormCard(props: { projectId: string; form: PendingForm; openUrl: string; autoFocus: boolean; onDone: () => void }) {
+function FormCard(props: { projectId: string; form: PendingForm; openUrl: string; takeFocus: () => boolean; onDone: () => void }) {
   const { form } = props;
   const { busy, error, run } = useReply(props.onDone);
   const [values, setValues] = useState<FormValues>(() => initialValues(form.fields));
@@ -233,10 +239,9 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState("");
-  const ref = useAutoFocus(props.autoFocus);
-  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (ownKey(e)) moveBetweenCards(e);
-  };
+  const ref = useAutoFocus(props.takeFocus);
+  // Forms only use j/k; Enter in a form field submits the form natively.
+  const onKeyDown = useCardKeys(() => {});
 
   if (!formSupported(form.fields)) {
     return (
