@@ -1306,7 +1306,9 @@ describe("Orchestrator", () => {
     it("removes nothing for variants in the main checkout, in unknown folders, or whose discard failed", async () => {
       const { orch, client, worktrees, git, store } = await started();
       const known = ["/workspaces/demo.worktrees/s3", "/workspaces/demo.worktrees/s4"];
-      store.updateRuntime(project.id, { worktrees: known.map((path) => ({ path, branch: path.split("/").at(-1) })) });
+      store.updateRuntime(project.id, {
+        worktrees: [{ path: "/workspaces/demo", branch: "main" }, ...known.map((path) => ({ path, branch: path.split("/").at(-1) }))],
+      });
       store.setSessions(project.id, [
         variant("s1", 1, "/workspaces/demo"),
         variant("s2", 2, "/workspaces/elsewhere"),
