@@ -110,6 +110,14 @@ export interface PendingItems {
   forms: PendingForm[];
 }
 
+export type UpdateStrategy = "rebase" | "merge";
+
+/** Result of "Update from base": `conflicts` lists files when it was aborted. */
+export interface UpdateResult {
+  strategy: UpdateStrategy;
+  conflicts?: string[];
+}
+
 export interface SessionSummary {
   id: string;
   projectId: ProjectId;
