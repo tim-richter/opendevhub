@@ -8,7 +8,7 @@ import { spawnRunner } from "../../src/server/exec";
 import { Gateway } from "../../src/server/gateway";
 import { projectId } from "../../src/server/ids";
 import { Network, parseRouteMode } from "../../src/server/network";
-import { OpencodeClient, basicAuth } from "../../src/server/opencode/client";
+import { OpencodeClient, basicAuth, isGone, isInvalidAnswer } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
@@ -83,6 +83,51 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
       () => expect(store.snapshot().projects[0].sessions.map((s) => s.title)).toContain("e2e session"),
       { timeout: 15_000 },
     );
+
+    // Respond inline: create real pending items through opencode's own endpoints, answer them through opendevhub.
+    const sid = store.snapshot().projects[0].sessions.find((s) => s.title === "e2e session")!.id;
+    const opencode = (method: string, route: string, body?: unknown) =>
+      fetch(`${ep.baseUrl}/api/session/${sid}${route}`, {
+        method,
+        headers: {
+          authorization: basicAuth(ep.password),
+          "content-type": "application/json",
+          "x-opencode-directory": rt.workspaceFolder!,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    const pendingOf = () => store.snapshot().projects[0].sessions.find((s) => s.id === sid)?.pending;
+
+    // opencode's default rules allow most actions outright; make this session ask.
+    expect((await opencode("PATCH", "", { permissions: [{ action: "*", resource: "*", effect: "ask" }] })).ok).toBe(true);
+    expect((await opencode("POST", "/permission", { action: "bash", resources: ["echo e2e"] })).ok).toBe(true);
+    await vi.waitFor(() => expect(pendingOf()?.permissions).toHaveLength(1), { timeout: 15_000 });
+    const rid = pendingOf()!.permissions[0].id;
+    await orch.replyPermission(project.id, rid, { decision: "once" });
+    await vi.waitFor(() => expect(pendingOf()?.permissions ?? []).toHaveLength(0), { timeout: 15_000 });
+    // Answering again straight at opencode is how "answered in another client" looks.
+    const direct = new OpencodeClient(ep);
+    const again = await direct.replyPermission(sid, rid, { decision: "once" }).catch((e: unknown) => e);
+    console.log("[e2e] second permission reply:", again);
+    expect(isGone(again)).toBe(true);
+
+    const fields = [{ key: "color", type: "string", options: [{ value: "red", label: "Red" }, { value: "blue", label: "Blue" }], required: true }];
+    expect((await opencode("POST", "/form", { title: "e2e question", fields })).ok).toBe(true);
+    await vi.waitFor(() => expect(pendingOf()?.forms).toHaveLength(1), { timeout: 15_000 });
+    const fid = pendingOf()!.forms[0].id;
+    const invalid = await direct.replyForm(sid, fid, {}).catch((e: unknown) => e);
+    console.log("[e2e] invalid form answer:", invalid);
+    expect(isInvalidAnswer(invalid)).toBe(true);
+    await orch.replyForm(project.id, fid, { color: "red" });
+    await vi.waitFor(() => expect(pendingOf()?.forms ?? []).toHaveLength(0), { timeout: 15_000 });
+    const settled = await direct.replyForm(sid, fid, { color: "blue" }).catch((e: unknown) => e);
+    console.log("[e2e] settled form reply:", settled);
+    expect(isGone(settled)).toBe(true);
+
+    expect((await opencode("POST", "/form", { title: "e2e dismissed", fields })).ok).toBe(true);
+    await vi.waitFor(() => expect(pendingOf()?.forms).toHaveLength(1), { timeout: 15_000 });
+    await orch.cancelForm(project.id, pendingOf()!.forms[0].id, "not needed");
+    await vi.waitFor(() => expect(pendingOf()).toBeUndefined(), { timeout: 15_000 });
 
     const server = await startServer({
       port: 0,
