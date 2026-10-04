@@ -14,6 +14,8 @@ export interface MonitorOptions {
   debounceMs?: number;
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  /** Clock for stamping when a pending item was first seen; tests pass their own. */
+  now?: () => number;
 }
 
 const RELEVANT_EVENT = /^(session|permission|form)\./;
@@ -51,6 +53,7 @@ export class Monitor {
   private stopped = false;
   private inFlight?: Promise<void>;
   private rerun = false;
+  private readonly firstSeen = new Map<string, number>();
 
   constructor(private readonly opts: MonitorOptions) {}
 
@@ -96,17 +99,28 @@ export class Monitor {
       );
       const permissions = uniqueById(perDirectory.flatMap(([p]) => p));
       const forms = uniqueById(perDirectory.flatMap(([, f]) => f));
+      this.stamp([...permissions, ...forms].map((i) => i.id));
       const flagged = [...active, ...permissions.map((p) => p.sessionID), ...forms.map((f) => f.sessionID)];
       const all = await this.withMissing(sessions, flagged);
       if (this.stopped) return;
       this.failures = 0;
       this.opts.onHealth(true);
-      this.opts.onSessions(deriveSessions(projectId, { sessions: all, active, permissions, forms }));
+      this.opts.onSessions(
+        deriveSessions(projectId, { sessions: all, active, permissions, forms, firstSeen: this.firstSeen }),
+      );
     } catch {
       if (this.stopped) return;
       this.failures += 1;
       if (this.failures >= FAILURES_BEFORE_UNHEALTHY) this.opts.onHealth(false);
     }
+  }
+
+  /** Remembers when each pending item first showed up, so the dashboard can list them oldest first. */
+  private stamp(ids: string[]): void {
+    const now = (this.opts.now ?? Date.now)();
+    const current = new Set(ids);
+    for (const id of this.firstSeen.keys()) if (!current.has(id)) this.firstSeen.delete(id);
+    for (const id of current) if (!this.firstSeen.has(id)) this.firstSeen.set(id, now);
   }
 
   /**

@@ -135,4 +135,31 @@ describe("Monitor", () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(fake.requests.length).toBe(count);
   });
+  it("stamps pending items with when they were first seen and forgets answered ones", async () => {
+    let clock = 100;
+    fake.state.sessions = [rawSession("ses_1")];
+    fake.state.permissions["/workspaces/demo"] = [
+      { id: "per_1", sessionID: "ses_1", action: "bash", resources: ["npm test"] },
+    ];
+    start({ now: () => clock });
+    await vi.waitFor(() => expect(latest?.[0].pending?.permissions).toHaveLength(1));
+    expect(latest?.[0].pending?.permissions[0]).toMatchObject({ id: "per_1", resources: ["npm test"], createdAt: 100 });
+
+    clock = 200;
+    fake.state.permissions["/workspaces/demo"].push({ id: "per_2", sessionID: "ses_1", action: "edit" });
+    await monitor!.reconcile();
+    expect(latest?.[0].pending?.permissions.map((p) => [p.id, p.createdAt])).toEqual([
+      ["per_1", 100],
+      ["per_2", 200],
+    ]);
+
+    fake.state.permissions["/workspaces/demo"] = [];
+    await monitor!.reconcile();
+    expect(latest?.[0].pending).toBeUndefined();
+
+    clock = 300;
+    fake.state.permissions["/workspaces/demo"] = [{ id: "per_1", sessionID: "ses_1", action: "bash" }];
+    await monitor!.reconcile();
+    expect(latest?.[0].pending?.permissions[0].createdAt).toBe(300);
+  });
 });
