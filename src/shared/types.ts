@@ -188,6 +188,82 @@ export interface PublishResult {
   output: string[];
 }
 
+/** A model as opencode refers to it; `id` is the model's id within its provider. */
+export interface ModelRef {
+  id: string;
+  providerID: string;
+  /** A reasoning variant such as "high"; opencode's own default is "default". */
+  variant?: string;
+}
+
+/** A model a new session can use. Only these fields leave the server: opencode's model info also holds API keys. */
+export interface ModelOption {
+  id: string;
+  providerID: string;
+  name: string;
+  variants: string[];
+}
+
+export interface AgentOption {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface ModelsInfo {
+  models: ModelOption[];
+  default?: ModelRef;
+  agents: AgentOption[];
+}
+
+/** What opendevhub writes to `metadata.opendevhub` on each session of a task. */
+export interface TaskMeta {
+  task: string;
+  /** 1-based. */
+  variant: number;
+  of: number;
+  title: string;
+  discarded?: boolean;
+}
+
+export type TaskWhere = "worktree" | "workspace";
+
+/** One variant of a task: no model or agent means the project's default. */
+export interface TaskVariantSpec {
+  model?: ModelRef;
+  agent?: string;
+}
+
+export interface TaskRequest {
+  prompt: string;
+  title?: string;
+  where: TaskWhere;
+  branch?: string;
+  base?: string;
+  variants: TaskVariantSpec[];
+}
+
+export interface TaskVariantResult {
+  branch?: string;
+  /** Missing when the variant's worktree could not be created. */
+  directory?: string;
+  sessionId?: string;
+  error?: string;
+}
+
+export interface TaskResult {
+  task: string;
+  variants: TaskVariantResult[];
+}
+
+export interface PickResult {
+  /** Session ids marked discarded. */
+  discarded: string[];
+  /** Worktree paths removed, with their branches. */
+  removed: string[];
+  errors: string[];
+}
+
 export interface SessionSummary {
   id: string;
   projectId: ProjectId;
@@ -197,6 +273,13 @@ export interface SessionSummary {
   status: SessionStatus;
   /** What the session (or one of its subagents) is waiting on, oldest first. Omitted when nothing is. */
   pending?: PendingItems;
+  /** Set when the session belongs to a task. */
+  task?: TaskMeta;
+  model?: ModelRef;
+  /** USD so far. */
+  cost?: number;
+  /** Input, output and reasoning tokens so far. */
+  tokens?: number;
 }
 
 export interface Preflight {

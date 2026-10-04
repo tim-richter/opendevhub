@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectId } from "../../src/server/ids";
+import { newTaskId, projectId } from "../../src/server/ids";
 
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
@@ -31,5 +31,15 @@ describe("projectId", () => {
 
   it("falls back to 'project' when nothing sluggable remains", () => {
     expect(projectId("/x/项目")).toMatch(/^project-[0-9a-f]{6}$/);
+  });
+});
+
+describe("newTaskId", () => {
+  it("is tsk_ plus a 26-character ULID that sorts by time", () => {
+    const zero = () => new Uint8Array(16);
+    expect(newTaskId(0, zero)).toBe(`tsk_${"0".repeat(26)}`);
+    expect(newTaskId(1, zero)).toBe(`tsk_${"0".repeat(9)}1${"0".repeat(16)}`);
+    expect(newTaskId(Date.now())).toMatch(/^tsk_[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(newTaskId(1000, zero) < newTaskId(2000, zero)).toBe(true);
   });
 });
