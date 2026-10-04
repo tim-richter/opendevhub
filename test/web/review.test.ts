@@ -6,6 +6,8 @@ import {
   anchorFromRange,
   annotationsFor,
   ensurePatchHeader,
+  statsDecoration,
+  treeGitStatus,
   composeReviewPrompt,
   conflictPrompt,
   diffKey,
@@ -217,5 +219,36 @@ describe("@pierre/diffs adapters", () => {
   it("gives a bare hunk the file headers the patch parser needs", () => {
     expect(ensurePatchHeader("@@ -1 +1 @@\n-a\n+b\n", "src/x.ts")).toBe("--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1 +1 @@\n-a\n+b\n");
     expect(ensurePatchHeader(patch, "ignored")).toBe(patch);
+  });
+});
+
+describe("@pierre/trees adapters", () => {
+  const files = [
+    { file: "src/a.ts", status: "modified" as const, additions: 3, deletions: 1 },
+    { file: "src/new.ts", status: "added" as const, additions: 4, deletions: 0 },
+    { file: "old.txt", status: "deleted" as const, additions: 0, deletions: 2 },
+    { file: "logo.png", status: "added" as const, additions: 0, deletions: 0, binary: true },
+  ];
+
+  it("gives every changed file its git status", () => {
+    expect(treeGitStatus(files)).toEqual([
+      { path: "src/a.ts", status: "modified" },
+      { path: "src/new.ts", status: "added" },
+      { path: "old.txt", status: "deleted" },
+      { path: "logo.png", status: "added" },
+    ]);
+  });
+
+  it("decorates file rows with their line counts", () => {
+    expect(statsDecoration(files[0])).toEqual({
+      text: "+3 −1",
+      title: "3 lines added, 1 removed",
+      parts: [
+        { text: "+3", color: "var(--ok)" },
+        { text: " " },
+        { text: "−1", color: "var(--danger)" },
+      ],
+    });
+    expect(statsDecoration(files[3])).toEqual({ text: "binary", title: "binary file" });
   });
 });

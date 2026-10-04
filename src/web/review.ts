@@ -1,4 +1,5 @@
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs/react";
+import type { FileTreeRowDecoration, GitStatusEntry } from "@pierre/trees";
 import type { ProjectView, ReviewFile, UpdateStrategy } from "../shared/types";
 import { workspaceFolderOf } from "./derive";
 
@@ -209,4 +210,21 @@ export function ensurePatchHeader(patch: string, name: string): string {
   const firstHunk = patch.search(/^@@ /m);
   const head = firstHunk < 0 ? patch : patch.slice(0, firstHunk);
   return /^--- /m.test(head) ? patch : `--- a/${name}\n+++ b/${name}\n${patch}`;
+}
+
+/** The changed files' status, for the file tree's built-in git markers. */
+export function treeGitStatus(files: ReviewFile[]): GitStatusEntry[] {
+  return files.map((f) => ({ path: f.file, status: f.status }));
+}
+
+/** "+3 −1" next to a file in the tree. */
+export function statsDecoration(f: ReviewFile): FileTreeRowDecoration {
+  if (f.binary) return { text: "binary", title: "binary file" };
+  const added = `+${f.additions}`;
+  const removed = `−${f.deletions}`;
+  return {
+    text: `${added} ${removed}`,
+    title: `${f.additions} line${f.additions === 1 ? "" : "s"} added, ${f.deletions} removed`,
+    parts: [{ text: added, color: "var(--ok)" }, { text: " " }, { text: removed, color: "var(--danger)" }],
+  };
 }

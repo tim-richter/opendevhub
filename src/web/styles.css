@@ -342,14 +342,8 @@ kbd { font: 11px var(--mono); padding: 0.05rem 0.35rem; border: 1px solid var(--
 .review-drafts li { display: flex; align-items: center; gap: 0.4rem; }
 .review-drafts .icon-button { margin-left: auto; }
 .review-body { display: grid; grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
-.review-files { position: sticky; top: 1rem; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); max-height: calc(100vh - 6rem); overflow: auto; }
-.review-file { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr) auto; gap: 0.4rem; padding: 0.35rem 0.6rem; text-decoration: none; color: var(--text); font-size: 13px; border-top: 1px solid var(--border); }
-.review-file:first-child { border-top: none; }
-.review-file:hover { background: var(--hover); }
-.review-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.review-status { font: 11px var(--mono); color: var(--muted); }
-.status-added .review-status { color: var(--ok); }
-.status-deleted .review-status { color: var(--danger); }
+.review-files { position: sticky; top: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.review-tree { display: block; height: min(60vh, 32rem); --trees-theme-list-active-selection-bg: color-mix(in oklab, var(--accent) 22%, transparent); --trees-theme-list-hover-bg: var(--hover); --trees-theme-focus-ring: var(--accent); }
 .review-stat { font: 12px var(--mono); white-space: nowrap; }
 .review-stat .add { color: var(--ok); }
 .review-stat .del { color: var(--danger); }

@@ -12,6 +12,7 @@ import {
   updateFromBase,
 } from "../api";
 import { type DiffLineAnnotation, type SelectedLineRange, useStableCallback } from "@pierre/diffs/react";
+import { ChangedFilesTree } from "../components/LazyChangedFilesTree";
 import { PatchView } from "../components/LazyPatchView";
 import { Icon } from "../components/Icon";
 import { workspaceFolderOf } from "../derive";
@@ -415,19 +416,15 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
       {data && data.files.length === 0 && <p className="muted">No changes compared with {baseName ?? "the last commit"}.</p>}
       {data && data.files.length > 0 && (
         <div className="review-body">
-          <nav className="review-files" aria-label="Changed files">
-            {data.files.map((f, i) => (
-              <a key={f.file} href={`#review-file-${i}`} className={`review-file status-${f.status}`}>
-                <span className="review-status">{f.status[0].toUpperCase()}</span>
-                <span className="review-name" title={f.file}>
-                  {f.file}
-                </span>
-                <span className="review-stat">
-                  <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
-                </span>
-              </a>
-            ))}
-          </nav>
+          <div className="review-files">
+            <ChangedFilesTree
+              files={data.files}
+              onSelect={(file) => {
+                const index = data.files.findIndex((f) => f.file === file);
+                document.getElementById(`review-file-${index}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+              }}
+            />
+          </div>
           <div className="review-diffs">
             {data.files.map((f, i) => (
               <FileDiff
