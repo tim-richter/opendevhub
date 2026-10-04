@@ -3,9 +3,10 @@ import type { PersistedState } from "../../src/server/config";
 import { CommandError, type ContainerInfo } from "../../src/server/containers";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
-import type { OpencodeClient, OpencodeEndpoint } from "../../src/server/opencode/client";
+import type { NewSession, OpencodeEndpoint, RawAgent, RawModel, RawSession } from "../../src/server/opencode/client";
 import { AlreadyAnsweredError, BusyError, type NetworkPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
-import { OpencodeHttpError } from "../../src/server/opencode/client";
+import { OpencodeClient, OpencodeHttpError } from "../../src/server/opencode/client";
+import { startFakeOpencode } from "../helpers/fake-opencode";
 import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
 import type { ForwardTarget } from "../../src/server/port-forwarder";
@@ -95,9 +96,15 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     update: vi.fn(async (_p: Project, _dir: string, _base: string, strategy: "rebase" | "merge"): Promise<UpdateResult> => ({ strategy })),
     mergeInto: vi.fn(async (_p: Project, _ws: string, _b: string, _ff: boolean) => {}),
     deleteBranch: vi.fn(async (_p: Project, _ws: string, _b: string) => {}),
+    localBranches: vi.fn(async (_p: Project, _dir: string): Promise<string[]> => ["main"]),
   };
   const client = {
-    createSession: vi.fn(async (directory: string) => ({ id: "ses_new", location: { directory } })),
+    createSession: vi.fn(async (directory: string, _o?: NewSession) => ({ id: "ses_new", location: { directory } })),
+    models: vi.fn(async (_dir: string): Promise<RawModel[]> => [{ id: "m1", providerID: "p", name: "M1", enabled: true, variants: [] }]),
+    defaultModel: vi.fn(async (_dir: string): Promise<RawModel | undefined> => ({ id: "m1", providerID: "p", name: "M1" })),
+    agents: vi.fn(async (_dir: string): Promise<RawAgent[]> => [{ id: "build", name: "Build", mode: "primary" }]),
+    session: vi.fn(async (id: string): Promise<RawSession> => ({ id, time: { created: 1, updated: 1 }, location: { directory: "/workspaces/demo" } })),
+    updateSession: vi.fn(async (_id: string, _patch: { metadata?: Record<string, unknown> }, _dir?: string) => {}),
     replyPermission: vi.fn(async (_sid: string, _rid: string, _reply: unknown, _dir?: string) => {}),
     replyForm: vi.fn(async (_sid: string, _fid: string, _answer: unknown, _dir?: string) => {}),
     cancelForm: vi.fn(async (_sid: string, _fid: string, _dir?: string) => {}),
@@ -130,6 +137,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
   };
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
+  const clock = { now: 1_000_000 };
   const orch = new Orchestrator({
     store,
     containers,
@@ -143,6 +151,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     editors,
     mkdir,
     clientFor,
+    now: () => clock.now,
     roots: () => ["/src"],
     scan: async () => projects,
     monitorFactory: (opts) => {
@@ -159,7 +168,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock };
 }
 
 function waiting(pending: PendingItems): SessionSummary {
@@ -1062,6 +1071,185 @@ describe("Orchestrator", () => {
       const { orch, git } = await running();
       await orch.removeWorktree(project.id, wt, false, true);
       expect(git.deleteBranch).toHaveBeenCalledWith(project, "/workspaces/demo", "x");
+    });
+  });
+
+  describe("tasks", () => {
+    async function started() {
+      const s = setup();
+      await s.orch.rescan();
+      await s.orch.start(project.id);
+      let n = 0;
+      s.client.createSession.mockImplementation(async (directory: string) => ({ id: `ses_${++n}`, location: { directory } }));
+      return s;
+    }
+
+    it("starts one variant in a new worktree named after the prompt, tagged with the task", async () => {
+      const { orch, client, worktrees, git, monitors } = await started();
+      git.localBranches.mockResolvedValueOnce(["main", "fix-the-login-bug"]);
+      const res = await orch.createTask(project.id, { prompt: "Fix the login bug\nIt fails on Safari" });
+      const dir = "/workspaces/demo.worktrees/fix-the-login-bug-2";
+      expect(res.task).toMatch(/^tsk_[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(res.variants).toEqual([{ branch: "fix-the-login-bug-2", directory: dir, sessionId: "ses_1" }]);
+      expect(worktrees.add.mock.calls[0][1]).toMatchObject({ branch: "fix-the-login-bug-2", base: undefined, workspaceFolder: "/workspaces/demo" });
+      expect(client.createSession).toHaveBeenCalledWith(dir, {
+        title: "Fix the login bug",
+        metadata: { opendevhub: { task: res.task, variant: 1, of: 1, title: "Fix the login bug" } },
+      });
+      expect(client.prompt).toHaveBeenCalledWith("ses_1", "Fix the login bug\nIt fails on Safari", undefined, dir);
+      expect(monitors.at(-1)!.reconciled).toBeGreaterThan(0);
+    });
+
+    it("avoids branches checked out in worktrees too", async () => {
+      const { orch, store } = await started();
+      store.updateRuntime(project.id, { worktrees: [{ path: "/workspaces/demo.worktrees/ship", branch: "ship" }] });
+      const res = await orch.createTask(project.id, { prompt: "Ship" });
+      expect(res.variants[0].branch).toBe("ship-2");
+    });
+
+    it("runs in the main checkout without a worktree", async () => {
+      const { orch, client, worktrees } = await started();
+      const res = await orch.createTask(project.id, { prompt: "Explain the build", where: "workspace", variants: [{ agent: "plan" }] });
+      expect(res.variants).toEqual([{ directory: "/workspaces/demo", sessionId: "ses_1" }]);
+      expect(worktrees.add).not.toHaveBeenCalled();
+      expect(client.createSession.mock.calls[0][1]).toMatchObject({ agent: "plan", title: "Explain the build" });
+    });
+
+    it("runs several variants, one worktree each, and keeps going when one fails", async () => {
+      const { orch, client, worktrees } = await started();
+      client.createSession
+        .mockImplementationOnce(async (directory: string) => ({ id: "ses_a", location: { directory } }))
+        .mockRejectedValueOnce(new OpencodeHttpError(400, "/api/session", "ModelNotFoundError", "unknown model b"));
+      const res = await orch.createTask(project.id, {
+        prompt: "Add caching",
+        branch: "cache",
+        base: "develop",
+        variants: [{ model: { id: "a", providerID: "p" } }, { model: { id: "b", providerID: "p" } }, { model: { id: "c", providerID: "p" } }],
+      });
+      expect(res.variants.map((v) => v.branch)).toEqual(["cache-a", "cache-b", "cache-c"]);
+      expect(res.variants.map((v) => v.sessionId)).toEqual(["ses_a", undefined, "ses_1"]);
+      expect(res.variants[1].error).toMatch(/unknown model b/);
+      expect(res.variants[1].directory).toBe("/workspaces/demo.worktrees/cache-b");
+      expect(worktrees.add.mock.calls.map((c) => c[1].base)).toEqual(["develop", "develop", "develop"]);
+      expect(client.createSession.mock.calls.map((c) => c[1]?.title)).toEqual(["Add caching · a", "Add caching · b", "Add caching · c"]);
+      expect(client.createSession.mock.calls[2][1]).toMatchObject({
+        model: { id: "c", providerID: "p" },
+        metadata: { opendevhub: { task: res.task, variant: 3, of: 3, title: "Add caching" } },
+      });
+      expect(client.prompt).toHaveBeenCalledTimes(2);
+      expect(orch.logLines(project.id).join("\n")).toMatch(/variant 2 \(cache-b\) failed/);
+    });
+
+    it("records a failed worktree on its variant and still refreshes the list", async () => {
+      const { orch, worktrees, store } = await started();
+      worktrees.add.mockRejectedValueOnce(new CommandError("git worktree failed: invalid reference: nope", ["fatal: invalid reference: nope"]));
+      worktrees.list.mockResolvedValueOnce([{ path: "/workspaces/demo.worktrees/x-2", branch: "x-2" }]);
+      const res = await orch.createTask(project.id, { prompt: "x", variants: [{}, {}] });
+      expect(res.variants[0]).toEqual({ branch: "x-1", error: "git worktree failed: invalid reference: nope" });
+      expect(res.variants[1]).toMatchObject({ branch: "x-2", sessionId: "ses_1" });
+      expect(store.runtime(project.id).worktrees).toEqual([{ path: "/workspaces/demo.worktrees/x-2", branch: "x-2" }]);
+      expect(orch.logLines(project.id)).toContain("fatal: invalid reference: nope");
+    });
+
+    it("rejects a generated branch git would refuse before touching git", async () => {
+      const { orch, worktrees } = await started();
+      // 95 + "-model-a" = 103 characters, over validateBranch's 100.
+      const long = "b".repeat(95);
+      await expect(
+        orch.createTask(project.id, {
+          prompt: "x",
+          branch: long,
+          variants: [{ model: { id: "model-a", providerID: "p" } }, { model: { id: "model-b", providerID: "p" } }],
+        }),
+      ).rejects.toThrow(InvalidRequestError);
+      expect(worktrees.add).not.toHaveBeenCalled();
+    });
+
+    it("integration: tags every session through the real client against fake opencode, and survives a rejected model", async () => {
+      const fake = await startFakeOpencode("pw", { rejectModels: ["b"] });
+      try {
+        const s = setup();
+        s.clientFor.mockImplementation(() => new OpencodeClient({ baseUrl: fake.baseUrl, password: "pw" }));
+        await s.orch.rescan();
+        await s.orch.start(project.id);
+        const res = await s.orch.createTask(project.id, {
+          prompt: "Go",
+          variants: [{ model: { id: "a", providerID: "p" } }, { model: { id: "b", providerID: "p" } }, { model: { id: "c", providerID: "p" } }],
+        });
+        expect(res.variants.map((v) => Boolean(v.sessionId))).toEqual([true, false, true]);
+        expect(res.variants[1].error).toMatch(/ModelNotFoundError: unknown model b/);
+        // The fake prepends new sessions: c, then a.
+        expect(fake.state.sessions.map((x) => x.metadata)).toEqual([
+          { opendevhub: { task: res.task, variant: 3, of: 3, title: "Go" } },
+          { opendevhub: { task: res.task, variant: 1, of: 3, title: "Go" } },
+        ]);
+        expect(fake.state.sessions.map((x) => x.model?.id)).toEqual(["c", "a"]);
+        expect(fake.state.prompts.map((p) => [p.sessionId, (p.body as { text: string }).text, p.directory])).toEqual([
+          [res.variants[0].sessionId, "Go", "/workspaces/demo.worktrees/go-a"],
+          [res.variants[2].sessionId, "Go", "/workspaces/demo.worktrees/go-c"],
+        ]);
+      } finally {
+        await fake.close();
+      }
+    });
+
+    it("validates the request, holds the git lock, and needs the worktrees mount and opencode", async () => {
+      const { orch, store, worktrees } = await started();
+      await expect(orch.createTask(project.id, { prompt: " " })).rejects.toThrow(InvalidRequestError);
+      await expect(orch.createTask(project.id, { prompt: "x", where: "workspace", variants: [{}, {}] })).rejects.toThrow(InvalidRequestError);
+
+      let release!: () => void;
+      worktrees.add.mockImplementationOnce(
+        (_p, a) => new Promise((r) => (release = () => r({ path: `${a.root.container}/y`, branch: "y" }))),
+      );
+      const first = orch.createTask(project.id, { prompt: "y" });
+      await vi.waitFor(() => expect(release).toBeDefined());
+      await expect(orch.createTask(project.id, { prompt: "z" })).rejects.toThrow(BusyError);
+      expect(() => orch.createWorktree(project.id, { branch: "z" })).toThrow(BusyError);
+      release();
+      await first;
+
+      store.updateRuntime(project.id, { worktreeRoot: { host: "/h", container: "/c", mounted: false } });
+      await expect(orch.createTask(project.id, { prompt: "x" })).rejects.toThrow(UnavailableError);
+      store.updateRuntime(project.id, { opencode: "unhealthy" });
+      await expect(orch.createTask(project.id, { prompt: "x", where: "workspace" })).rejects.toThrow(UnavailableError);
+    });
+
+    it("starts a session with a first prompt when creating a worktree", async () => {
+      const { orch, client, worktrees } = await started();
+      worktrees.list.mockResolvedValue([{ path: "/workspaces/demo.worktrees/feature-y", branch: "feature/y" }]);
+      const res = await orch.createWorktree(project.id, { branch: "feature/y", startSession: true, prompt: "Write docs" });
+      expect(client.prompt).toHaveBeenCalledWith(res.sessionId, "Write docs", undefined, res.worktree.path);
+    });
+
+    it("lists models and agents without provider settings, cached for a minute", async () => {
+      const { orch, client, clock } = await started();
+      client.models.mockResolvedValue([
+        { id: "m1", providerID: "p", name: "M1", enabled: true, variants: [{ id: "high" }], settings: { apiKey: "secret" } } as RawModel,
+      ]);
+      const info = await orch.models(project.id);
+      expect(info).toEqual({
+        models: [{ id: "m1", providerID: "p", name: "M1", variants: ["high"] }],
+        default: { id: "m1", providerID: "p" },
+        agents: [{ id: "build", name: "Build" }],
+      });
+      expect(JSON.stringify(info)).not.toContain("secret");
+      expect(client.models).toHaveBeenCalledWith("/workspaces/demo");
+      await orch.models(project.id);
+      expect(client.models).toHaveBeenCalledTimes(1);
+      clock.now += 60_001;
+      await orch.models(project.id);
+      expect(client.models).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not cache a failed model lookup, and forgets the cache when opencode restarts", async () => {
+      const { orch, client } = await started();
+      client.models.mockRejectedValueOnce(new Error("boom"));
+      await expect(orch.models(project.id)).rejects.toThrow("boom");
+      await orch.models(project.id);
+      await orch.restartOpencode(project.id);
+      await orch.models(project.id);
+      expect(client.models).toHaveBeenCalledTimes(3);
     });
   });
 });

@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   FormAnswer,
   ForwardedPort,
+  ModelsInfo,
   PendingItems,
   PermissionDecision,
   Project,
@@ -11,13 +12,19 @@ import type {
   PublishResult,
   ReviewData,
   SessionSummary,
+  TaskMeta,
+  TaskResult,
+  TaskVariantResult,
   UpdateResult,
   Worktree,
   WorktreeRoot,
 } from "../shared/types";
 import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
 import type { EditorLauncher } from "./editors";
+import { deriveTitle, taskBranches, variantLabels, variantTitle } from "../shared/tasks";
 import { splitTitleBody } from "./forge";
+import { newTaskId } from "./ids";
+import { parseTaskRequest, toModelsInfo } from "./tasks";
 import type { GitOps } from "./git";
 import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
@@ -33,6 +40,9 @@ import type { StateStore } from "./state";
 import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeRoot } from "./worktrees";
 
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
+const MODELS_TTL_MS = 60_000;
+const NO_WORKTREE_MOUNT =
+  "this container was created before opendevhub mounted a worktrees folder — rebuild the container to enable worktrees";
 
 export class BusyError extends Error {
   constructor(id: string) {
@@ -79,7 +89,7 @@ export type ContainersPort = Pick<
 >;
 export type GitPort = Pick<
   GitOps,
-  "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch"
+  "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch" | "localBranches"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;
@@ -116,6 +126,8 @@ export interface OrchestratorDeps {
   roots: () => string[];
   scan: (roots: string[]) => Promise<Project[]>;
   monitorFactory?: (opts: MonitorOptions) => MonitorHandle;
+  /** Clock for task ids and the models cache; tests pass their own. */
+  now?: () => number;
 }
 
 export class Orchestrator {
@@ -128,6 +140,7 @@ export class Orchestrator {
   /** Session directories already looked up as possible worktrees, so an unknown one triggers one refresh. */
   private readonly seenDirectories = new Map<ProjectId, Set<string>>();
   private readonly routes = new Map<ProjectId, Route>();
+  private readonly modelCache = new Map<ProjectId, { at: number; value: Promise<ModelsInfo> }>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -282,7 +295,7 @@ export class Orchestrator {
 
   createWorktree(
     id: ProjectId,
-    req: { branch: string; base?: string; startSession?: boolean },
+    req: { branch: string; base?: string; startSession?: boolean; prompt?: string },
   ): Promise<{ worktree: Worktree; sessionId?: string }> {
     const branch = validateBranch(req.branch);
     const base = req.base?.trim() || undefined;
@@ -290,9 +303,7 @@ export class Orchestrator {
       const rt = this.deps.store.runtime(id);
       const root = rt.worktreeRoot;
       if (!root?.mounted) {
-        throw new UnavailableError(
-          "this container was created before opendevhub mounted a worktrees folder — rebuild the container to enable worktrees",
-        );
+        throw new UnavailableError(NO_WORKTREE_MOUNT);
       }
       const ws = this.workspaceFolder(p);
       const worktree = await this.deps.worktrees.add(p, {
@@ -305,7 +316,7 @@ export class Orchestrator {
       const list = await this.deps.worktrees.list(p, ws, root).catch(() => [...(rt.worktrees ?? []), worktree]);
       this.deps.store.updateRuntime(id, { worktrees: list });
       if (!req.startSession) return { worktree };
-      const sessionId = await this.startSession(id, worktree.path, branch).catch((err: unknown) => {
+      const sessionId = await this.startSession(id, worktree.path, branch, req.prompt).catch((err: unknown) => {
         this.log(id, `worktree: could not start a session: ${err instanceof Error ? err.message : String(err)}`);
         return undefined;
       });
@@ -354,6 +365,86 @@ export class Orchestrator {
     if (!session) throw new NotFoundError(sessionId, "session");
     await this.opencodeClient(id).prompt(sessionId, text, session.status === "running" ? "queue" : undefined, session.directory);
     this.monitors.get(id)?.reconcile?.();
+  }
+
+  /** Models, the default model and the agents a new session can use; cached for a minute per project. */
+  async models(id: ProjectId): Promise<ModelsInfo> {
+    const project = this.requireProject(id);
+    const client = this.opencodeClient(id);
+    const now = (this.deps.now ?? Date.now)();
+    const hit = this.modelCache.get(id);
+    if (hit && now - hit.at < MODELS_TTL_MS) return hit.value;
+    const ws = this.workspaceFolder(project);
+    const value = Promise.all([client.models(ws), client.defaultModel(ws).catch(() => undefined), client.agents(ws)]).then(
+      ([models, def, agents]) => toModelsInfo(models, def, agents),
+    );
+    this.modelCache.set(id, { at: now, value });
+    value.catch(() => {
+      if (this.modelCache.get(id)?.value === value) this.modelCache.delete(id);
+    });
+    return value;
+  }
+
+  /**
+   * Starts a task: for each variant, a worktree (unless it runs in the main checkout), a session tagged with
+   * the task in its metadata, and the prompt. Variants run in order under one git lock; a failing variant is
+   * recorded on its result and the others still run. Worktrees already created are kept.
+   */
+  async createTask(id: ProjectId, body: Record<string, unknown>): Promise<TaskResult> {
+    const req = parseTaskRequest(body);
+    const client = this.opencodeClient(id);
+    return this.withGit(id, async (p) => {
+      const rt = this.deps.store.runtime(id);
+      const ws = this.workspaceFolder(p);
+      const root = rt.worktreeRoot;
+      const task = newTaskId((this.deps.now ?? Date.now)());
+      const title = req.title ?? deriveTitle(req.prompt);
+      const of = req.variants.length;
+      const labels = variantLabels(req.variants);
+      let branches: string[] = [];
+      if (req.where === "worktree") {
+        if (!root?.mounted) throw new UnavailableError(NO_WORKTREE_MOUNT);
+        const taken = new Set([
+          ...(await this.deps.git.localBranches(p, ws)),
+          ...(rt.worktrees ?? []).flatMap((w) => (w.branch ? [w.branch] : [])),
+        ]);
+        branches = taskBranches({ branch: req.branch, title, variants: req.variants, taken }).map(validateBranch);
+      }
+      const results: TaskVariantResult[] = [];
+      for (const [i, v] of req.variants.entries()) {
+        const branch = branches[i];
+        const result: TaskVariantResult = branch ? { branch } : { directory: ws };
+        results.push(result);
+        try {
+          if (branch) {
+            const wt = await this.deps.worktrees.add(p, { workspaceFolder: ws, root: root!, branch, base: req.base, onLine: (l) => this.log(id, l) });
+            result.directory = wt.path;
+          }
+          const directory = result.directory!;
+          const meta: TaskMeta = { task, variant: i + 1, of, title };
+          const session = await client.createSession(directory, {
+            title: variantTitle(title, labels[i], of),
+            ...(v.model ? { model: v.model } : {}),
+            ...(v.agent ? { agent: v.agent } : {}),
+            metadata: { opendevhub: meta },
+          });
+          result.sessionId = session.id;
+          await client.prompt(session.id, req.prompt, undefined, directory);
+        } catch (err) {
+          result.error = err instanceof Error ? err.message : String(err);
+          this.log(id, `task ${title}: variant ${i + 1}${branch ? ` (${branch})` : ""} failed: ${result.error}`);
+          if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+        }
+      }
+      if (branches.length > 0) {
+        const list = await this.deps.worktrees.list(p, ws, root).catch(() => undefined);
+        if (list) this.deps.store.updateRuntime(id, { worktrees: list });
+      }
+      const started = results.filter((r) => r.sessionId).length;
+      this.log(id, `task ${title}: started ${started} of ${of} variant${of === 1 ? "" : "s"}`);
+      this.monitors.get(id)?.reconcile?.();
+      return { task, variants: results };
+    });
   }
 
   /** What changed in a checkout compared with its base, for the Review tab. */
@@ -878,6 +969,7 @@ export class Orchestrator {
   }
 
   private stopMonitor(id: ProjectId): void {
+    this.modelCache.delete(id);
     this.monitors.get(id)?.stop();
     this.monitors.delete(id);
   }

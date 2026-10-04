@@ -207,3 +207,10 @@ describe("GitOps", () => {
     expect(fs.existsSync(path.join(repo, ".git", "MERGE_HEAD"))).toBe(false);
   });
 });
+
+describe("localBranches", () => {
+  it("lists local branch names, slashes included", async () => {
+    git(repo, "branch", "feature/x");
+    expect((await ops.localBranches(project, repo)).sort()).toEqual(["feature/x", "main"]);
+  });
+});

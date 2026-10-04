@@ -45,6 +45,14 @@ export class GitOps {
     return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
   }
 
+  /** Local branch names, e.g. to keep generated task branches free. */
+  async localBranches(p: Project, dir: string): Promise<string[]> {
+    return (await this.git(p, dir, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]))
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   async recordedBase(p: Project, dir: string, branch: string): Promise<string | undefined> {
     const r = await this.exec(p, dir, ["config", "--get", baseKey(branch)]);
     return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
