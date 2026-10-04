@@ -89,18 +89,19 @@ describe("OpencodeClient", () => {
 
   it("classifies opencode's errors: gone vs invalid answer", async () => {
     const notFound = await client.replyPermission("ses_1", "per_x", { decision: "once" }).catch((e: unknown) => e);
-    expect(notFound).toMatchObject({ status: 404, tag: "PermissionNotFound" });
+    expect(notFound).toMatchObject({ status: 404, tag: "PermissionNotFoundError" });
     expect(isGone(notFound)).toBe(true);
 
     fake.state.forms["/w"] = [{ id: "frm_1", sessionID: "ses_1", title: "Q" }];
     fake.state.invalidAnswer = "db is required";
     const invalid = await client.replyForm("ses_1", "frm_1", {}).catch((e: unknown) => e);
-    expect(invalid).toMatchObject({ status: 400, tag: "FormInvalidAnswer", detail: "db is required" });
+    expect(invalid).toMatchObject({ status: 400, tag: "FormInvalidAnswerError", detail: "db is required" });
     expect(isInvalidAnswer(invalid)).toBe(true);
     expect(isGone(invalid)).toBe(false);
 
     fake.state.settledForms = ["frm_1"];
     const settled = await client.replyForm("ses_1", "frm_1", {}).catch((e: unknown) => e);
+    expect(settled).toMatchObject({ status: 409, tag: "FormAlreadySettledError" });
     expect(isGone(settled)).toBe(true);
     expect(isInvalidAnswer(settled)).toBe(false);
   });

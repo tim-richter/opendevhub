@@ -838,14 +838,14 @@ describe("Orchestrator", () => {
       const { orch, client, monitors } = await running();
       client.replyPermission.mockRejectedValueOnce(new OpencodeHttpError(404, "/x"));
       await expect(orch.replyPermission(project.id, "per_1", { decision: "once" })).rejects.toThrow(AlreadyAnsweredError);
-      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(400, "/x", "FormAlreadySettled"));
+      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(409, "/x", "FormAlreadySettledError"));
       await expect(orch.replyForm(project.id, "frm_1", {})).rejects.toThrow(AlreadyAnsweredError);
       expect(monitors.at(-1)!.reconciled).toBe(2);
     });
 
     it("surfaces opencode's message for an invalid answer, and keeps other failures as they are", async () => {
       const { orch, client } = await running();
-      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(400, "/x", "FormInvalidAnswer", "db is required"));
+      client.replyForm.mockRejectedValueOnce(new OpencodeHttpError(400, "/x", "FormInvalidAnswerError", "db is required"));
       await expect(orch.replyForm(project.id, "frm_1", {})).rejects.toThrow(
         expect.objectContaining({ name: "InvalidRequestError", message: "db is required" }),
       );

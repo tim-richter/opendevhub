@@ -16,9 +16,9 @@ export interface FakeState {
   listLimit?: number;
   /** Every reply or cancel opendevhub sent. */
   replies: Array<{ method: string; path: string; body?: unknown }>;
-  /** When set, form replies answer 400 FormInvalidAnswer with this message. */
+  /** When set, form replies answer 400 FormInvalidAnswerError with this message. */
   invalidAnswer?: string;
-  /** Form ids that answer 400 FormAlreadySettled. */
+  /** Form ids that answer 409 FormAlreadySettledError (as opencode 2.0.22 does). */
   settledForms?: string[];
   /** Answer errors with plain text instead of opencode's JSON. */
   plainErrors?: boolean;
@@ -74,19 +74,19 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     };
     const settle = (kind: "permission" | "form", sessionId: string, itemId: string, body: unknown) => {
       state.replies.push({ method: req.method ?? "", path: `${url.pathname}${url.search}`, body });
-      if (kind === "form" && state.settledForms?.includes(itemId)) return fail(400, "FormAlreadySettled");
+      if (kind === "form" && state.settledForms?.includes(itemId)) return fail(409, "FormAlreadySettledError");
       const lists: Record<string, Array<{ id: string; sessionID: string }>> =
         kind === "permission" ? state.permissions : state.forms;
       for (const items of Object.values(lists)) {
         const idx = items.findIndex((i) => i.id === itemId && i.sessionID === sessionId);
         if (idx < 0) continue;
         if (kind === "form" && req.method === "POST" && state.invalidAnswer) {
-          return fail(400, "FormInvalidAnswer", state.invalidAnswer);
+          return fail(400, "FormInvalidAnswerError", state.invalidAnswer);
         }
         items.splice(idx, 1);
         return json(true);
       }
-      return fail(404, kind === "permission" ? "PermissionNotFound" : "FormNotFound");
+      return fail(404, kind === "permission" ? "PermissionNotFoundError" : "FormNotFoundError");
     };
     switch (url.pathname) {
       case "/api/info":

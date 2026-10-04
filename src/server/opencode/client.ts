@@ -50,7 +50,8 @@ export class OpencodeHttpError extends Error {
   }
 }
 
-const GONE_TAGS = new Set(["PermissionNotFound", "FormNotFound", "FormAlreadySettled"]);
+// opencode 2.0.22 answers 404 PermissionNotFoundError/FormNotFoundError and 409 FormAlreadySettledError.
+const GONE_TAGS = new Set(["PermissionNotFoundError", "FormNotFoundError", "FormAlreadySettledError"]);
 
 /** opencode no longer has the item: it was answered or cancelled in another client. */
 export function isGone(err: unknown): err is OpencodeHttpError {
@@ -58,13 +59,13 @@ export function isGone(err: unknown): err is OpencodeHttpError {
 }
 
 function gone(err: OpencodeHttpError): boolean {
-  return err.status === 404 || (err.tag !== undefined && GONE_TAGS.has(err.tag));
+  return err.status === 404 || err.status === 409 || (err.tag !== undefined && GONE_TAGS.has(err.tag));
 }
 
 /** opencode rejected a form answer; `detail` says why. */
 export function isInvalidAnswer(err: unknown): err is OpencodeHttpError {
   if (!(err instanceof OpencodeHttpError) || gone(err)) return false;
-  return err.tag === "FormInvalidAnswer" || err.status === 400;
+  return err.tag === "FormInvalidAnswerError" || err.status === 400;
 }
 
 export function basicAuth(password: string): string {
