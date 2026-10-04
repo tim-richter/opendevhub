@@ -1,5 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dismissForm, replyForm, replyPermission } from "../../src/web/api";
+import {
+  commitChanges,
+  dismissForm,
+  fetchReview,
+  mergeIntoBase,
+  removeWorktree,
+  replyForm,
+  replyPermission,
+  sendPrompt,
+  startSession,
+  suggestCommitMessage,
+  updateFromBase,
+} from "../../src/web/api";
 
 function stubFetch(status: number, body: unknown) {
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -37,5 +49,40 @@ describe("reply API", () => {
   it("throws the server's message for other failures", async () => {
     stubFetch(400, { error: "db is required" });
     await expect(replyForm("p", "frm_1", {})).rejects.toThrow("db is required");
+  });
+});
+
+describe("review API", () => {
+  it("fetches review data with directory, base and file in the query", async () => {
+    const fetchMock = stubFetch(200, { directory: "/w", files: [] });
+    await fetchReview("p", "/w/x", { base: "main", file: "a b.ts" });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/p/review?directory=%2Fw%2Fx&base=main&file=a+b.ts");
+    await fetchReview("p", "/w");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/p/review?directory=%2Fw");
+  });
+
+  it("posts the git actions and prompts", async () => {
+    const fetchMock = stubFetch(200, { message: "feat: x", strategy: "rebase", branch: "x", sessionId: "ses_9" });
+    expect(await suggestCommitMessage("p", "/w")).toBe("feat: x");
+    await commitChanges("p", "/w", "m");
+    expect(await updateFromBase("p", "/w", "main")).toMatchObject({ strategy: "rebase" });
+    expect(await mergeIntoBase("p", "/w", "main", true)).toMatchObject({ branch: "x" });
+    await sendPrompt("p", "ses/1", "fix");
+    expect(await startSession("p", "/w", "Review", "look")).toBe("ses_9");
+    await removeWorktree("p", "/w", false, true);
+    expect(fetchMock.mock.calls.map(([u, i]) => [u, JSON.parse(String(i?.body))])).toEqual([
+      ["/api/projects/p/review/commit-message", { directory: "/w" }],
+      ["/api/projects/p/review/commit", { directory: "/w", message: "m" }],
+      ["/api/projects/p/review/update", { directory: "/w", base: "main" }],
+      ["/api/projects/p/review/merge", { directory: "/w", base: "main", ffOnly: true }],
+      ["/api/projects/p/sessions/ses%2F1/prompt", { text: "fix" }],
+      ["/api/projects/p/sessions", { directory: "/w", title: "Review", prompt: "look" }],
+      ["/api/projects/p/worktrees/remove", { path: "/w", force: false, deleteBranch: true }],
+    ]);
+  });
+
+  it("throws the server's error for a failed review", async () => {
+    stubFetch(412, { error: "opencode is not running — start the project first" });
+    await expect(fetchReview("p", "/w")).rejects.toThrow(/not running/);
   });
 });

@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, FormAnswer, LogEvent, PermissionDecision, Worktree } from "../shared/types";
+import type { DashboardSnapshot, FormAnswer, LogEvent, PermissionDecision, ReviewData, UpdateResult, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -29,16 +29,16 @@ export function createWorktree(
   return postJson(projectId, "worktrees", req, "create worktree");
 }
 
-export function removeWorktree(projectId: string, path: string, force: boolean): Promise<unknown> {
-  return postJson(projectId, "worktrees/remove", { path, force }, "remove worktree");
+export function removeWorktree(projectId: string, path: string, force: boolean, deleteBranch = false): Promise<unknown> {
+  return postJson(projectId, "worktrees/remove", { path, force, deleteBranch }, "remove worktree");
 }
 
 export function refreshWorktrees(projectId: string): Promise<{ worktrees: Worktree[] }> {
   return postJson(projectId, "worktrees/refresh", {}, "refresh worktrees");
 }
 
-export async function startSession(projectId: string, directory: string, title?: string): Promise<string> {
-  return (await postJson<{ sessionId: string }>(projectId, "sessions", { directory, title }, "start session")).sessionId;
+export async function startSession(projectId: string, directory: string, title?: string, prompt?: string): Promise<string> {
+  return (await postJson<{ sessionId: string }>(projectId, "sessions", { directory, title, prompt }, "start session")).sessionId;
 }
 
 export function openInEditor(projectId: string, editor: string, directory: string): Promise<unknown> {
@@ -69,6 +69,33 @@ export function replyForm(projectId: string, formId: string, answer: FormAnswer)
 /** Cancels a form. opencode takes no reason, so there is none to send. */
 export function dismissForm(projectId: string, formId: string): Promise<ReplyOutcome> {
   return reply(projectId, `forms/${encodeURIComponent(formId)}`, "DELETE", undefined, "dismiss");
+}
+
+export async function fetchReview(projectId: string, directory: string, opts: { base?: string; file?: string } = {}): Promise<ReviewData> {
+  const query = new URLSearchParams({ directory, ...(opts.base ? { base: opts.base } : {}), ...(opts.file ? { file: opts.file } : {}) });
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/review?${query}`);
+  if (!res.ok) throw await failure(res, "review");
+  return (await res.json()) as ReviewData;
+}
+
+export async function suggestCommitMessage(projectId: string, directory: string): Promise<string> {
+  return (await postJson<{ message: string }>(projectId, "review/commit-message", { directory }, "commit message")).message;
+}
+
+export async function commitChanges(projectId: string, directory: string, message: string): Promise<void> {
+  await postJson(projectId, "review/commit", { directory, message }, "commit");
+}
+
+export function updateFromBase(projectId: string, directory: string, base: string): Promise<UpdateResult> {
+  return postJson(projectId, "review/update", { directory, base }, "update from base");
+}
+
+export function mergeIntoBase(projectId: string, directory: string, base: string, ffOnly: boolean): Promise<{ branch: string }> {
+  return postJson(projectId, "review/merge", { directory, base, ffOnly }, "merge into base");
+}
+
+export async function sendPrompt(projectId: string, sessionId: string, text: string): Promise<void> {
+  await postJson(projectId, `sessions/${encodeURIComponent(sessionId)}/prompt`, { text }, "send to agent");
 }
 
 export async function rescan(): Promise<DashboardSnapshot> {
