@@ -8,6 +8,7 @@ import type { RunResult } from "../../src/server/exec";
 import {
   InvalidRequestError,
   Worktrees,
+  baseKey,
   mountArg,
   parseGitVersion,
   parseWorktreeList,
@@ -111,7 +112,9 @@ describe("parseWorktreeList", () => {
 });
 
 /** A container whose git answers by subcommand; records what ran. */
-function containerGit(opts: { version?: string; branchExists?: boolean; toplevel?: string; fail?: string } = {}) {
+function containerGit(
+  opts: { version?: string; branchExists?: boolean; toplevel?: string; fail?: string; head?: string; recordedBase?: string } = {},
+) {
   const calls: string[][] = [];
   const exec = async (_p: Project, command: string[], _o?: unknown): Promise<RunResult> => {
     calls.push(command);
@@ -120,6 +123,8 @@ function containerGit(opts: { version?: string; branchExists?: boolean; toplevel
     if (command[1] === "--version") return ok(`git version ${opts.version ?? "2.49.0"}\n`);
     if (sub.startsWith("rev-parse --show-toplevel")) return ok(`${opts.toplevel ?? "/workspaces/demo"}\n`);
     if (sub.startsWith("show-ref")) return { ...ok(), exitCode: opts.branchExists ? 0 : 1 };
+    if (sub.startsWith("symbolic-ref")) return opts.head === "" ? { ...ok(), exitCode: 1 } : ok(`${opts.head ?? "main"}\n`);
+    if (sub.startsWith("config --get")) return opts.recordedBase ? ok(`${opts.recordedBase}\n`) : { ...ok(), exitCode: 1 };
     if (opts.fail && sub.startsWith(opts.fail)) {
       return { exitCode: 128, stdout: "", stderr: "fatal: '/x' contains modified or untracked files, use --force to delete it\n", timedOut: false };
     }
@@ -127,6 +132,10 @@ function containerGit(opts: { version?: string; branchExists?: boolean; toplevel
   };
   return { exec, calls };
 }
+
+/** The `git worktree add` call, wherever it falls among the calls. */
+const addCall = (c: { calls: string[][] }) => c.calls.find((x) => x[3] === "worktree" && x[4] === "add");
+const configSets = (c: { calls: string[][] }) => c.calls.filter((x) => x[3] === "config" && x[4] !== "--get");
 
 function hostGit(version = "2.49.0") {
   return fakeRunner((c) => (c.cmd === "git" ? { stdout: `git version ${version}\n` } : {}));
@@ -139,7 +148,7 @@ describe("Worktrees.add", () => {
   it("creates a new branch with relative links when both gits support them", async () => {
     const c = containerGit();
     const wt = await add(new Worktrees({ containers: c, run: hostGit().run }), { base: "main" });
-    expect(c.calls.at(-1)).toEqual([
+    expect(addCall(c)).toEqual([
       "git", "-C", "/workspaces/demo", "worktree", "add", "--relative-paths", "-b", "feature/x", "--",
       "/workspaces/demo.worktrees/feature-x", "main",
     ]);
@@ -149,7 +158,7 @@ describe("Worktrees.add", () => {
   it("checks out an existing branch instead of creating it", async () => {
     const c = containerGit({ branchExists: true });
     await add(new Worktrees({ containers: c, run: hostGit().run }));
-    expect(c.calls.at(-1)?.slice(3)).toEqual([
+    expect(addCall(c)?.slice(3)).toEqual([
       "worktree", "add", "--relative-paths", "--", "/workspaces/demo.worktrees/feature-x", "feature/x",
     ]);
     await expect(add(new Worktrees({ containers: c, run: hostGit().run }), { base: "main" })).rejects.toThrow(/already exists/);
@@ -163,7 +172,7 @@ describe("Worktrees.add", () => {
     const c = containerGit({ version: o.container, toplevel: o.ws });
     const lines: string[] = [];
     await add(new Worktrees({ containers: c, run: hostGit(o.host).run }), { workspaceFolder: o.ws ?? "/workspaces/demo" }, lines);
-    expect(c.calls.at(-1)).not.toContain("--relative-paths");
+    expect(addCall(c)).not.toContain("--relative-paths");
     expect(lines.join("\n")).toMatch(why);
   });
 
@@ -171,7 +180,7 @@ describe("Worktrees.add", () => {
     const c = containerGit();
     const lines: string[] = [];
     await add(new Worktrees({ containers: c, run: hostGit().run, relativeLinks: false }), {}, lines);
-    expect(c.calls.at(-1)).not.toContain("--relative-paths");
+    expect(addCall(c)).not.toContain("--relative-paths");
     expect(lines.join("\n")).toMatch(/OPENDEVHUB_RELATIVE_WORKTREES=0/);
   });
 
@@ -189,6 +198,38 @@ describe("Worktrees.add", () => {
     await expect(add(new Worktrees({ containers: containerGit(), run: hostGit().run }), { base: "--orphan" })).rejects.toThrow(
       InvalidRequestError,
     );
+  });
+  it("records the given base for a new branch", async () => {
+    const c = containerGit();
+    await add(new Worktrees({ containers: c, run: hostGit().run }), { base: "develop" });
+    expect(configSets(c)).toEqual([["git", "-C", "/workspaces/demo", "config", "branch.feature/x.opendevhubBase", "develop"]]);
+    expect(baseKey("feature/x")).toBe("branch.feature/x.opendevhubBase");
+  });
+
+  it("records the workspace's current branch when no base is given", async () => {
+    const c = containerGit({ head: "trunk" });
+    await add(new Worktrees({ containers: c, run: hostGit().run }));
+    expect(configSets(c).map((x) => x.slice(4))).toEqual([["branch.feature/x.opendevhubBase", "trunk"]]);
+  });
+
+  it("keeps an existing branch's recorded base, and records one when it has none", async () => {
+    const kept = containerGit({ branchExists: true, recordedBase: "main" });
+    await add(new Worktrees({ containers: kept, run: hostGit().run }));
+    expect(configSets(kept)).toEqual([]);
+    const missing = containerGit({ branchExists: true, head: "main" });
+    await add(new Worktrees({ containers: missing, run: hostGit().run }));
+    expect(configSets(missing).map((x) => x.slice(4))).toEqual([["branch.feature/x.opendevhubBase", "main"]]);
+  });
+
+  it("records nothing on a detached HEAD and never fails the add over the base", async () => {
+    const detached = containerGit({ head: "" });
+    await add(new Worktrees({ containers: detached, run: hostGit().run }));
+    expect(configSets(detached)).toEqual([]);
+    const broken = containerGit({ fail: "config branch" });
+    const lines: string[] = [];
+    const wt = await add(new Worktrees({ containers: broken, run: hostGit().run }), { base: "main" }, lines);
+    expect(wt.branch).toBe("feature/x");
+    expect(lines.join("\n")).toMatch(/could not record the base/);
   });
 });
 

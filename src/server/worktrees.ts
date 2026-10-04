@@ -67,6 +67,11 @@ export function worktreeDirName(branch: string): string {
   return branch.replace(/\//g, "-");
 }
 
+/** Where opendevhub remembers what a branch was made from, for review: `branch.<b>.opendevhubBase`. */
+export function baseKey(branch: string): string {
+  return `branch.${branch}.opendevhubBase`;
+}
+
 /** Linked worktrees from `git worktree list --porcelain` (the main checkout, bare and prunable entries are dropped). */
 export function parseWorktreeList(porcelain: string, root: WorktreeRoot | undefined): Worktree[] {
   const blocks = porcelain.split(/\n\s*\n/).filter((b) => b.trim());
@@ -141,6 +146,9 @@ export class Worktrees {
       if (base) cmd.push(base);
     }
     await this.git(project, ws, cmd);
+    await this.recordBase(project, ws, branch, exists ? undefined : base, exists).catch((err: unknown) =>
+      onLine(`worktree: could not record the base of ${branch}: ${err instanceof Error ? err.message : String(err)}`),
+    );
     onLine(`worktree: added ${target} (${exists ? "existing" : "new"} branch ${branch}${relative ? "" : ", absolute links"})`);
     const hostPath = root.mounted ? path.join(root.host, worktreeDirName(branch)) : undefined;
     return { path: target, hostPath, branch };
@@ -150,6 +158,21 @@ export class Worktrees {
     const cmd = ["worktree", "remove"];
     if (force) cmd.push("--force");
     await this.git(project, workspaceFolder, [...cmd, "--", worktreePath]);
+  }
+
+  /**
+   * A new branch records the given base, or the workspace's current branch. An existing branch keeps a base
+   * it already has. A detached workspace has nothing to record.
+   */
+  private async recordBase(project: Project, ws: string, branch: string, base: string | undefined, existing: boolean) {
+    const key = baseKey(branch);
+    if (existing && (await this.deps.containers.exec(project, ["git", "-C", ws, "config", "--get", key])).exitCode === 0) return;
+    let from = base;
+    if (!from) {
+      const head = await this.deps.containers.exec(project, ["git", "-C", ws, "symbolic-ref", "--short", "-q", "HEAD"]);
+      from = head.exitCode === 0 ? head.stdout.trim() : "";
+    }
+    if (from) await this.git(project, ws, ["config", key, from]);
   }
 
   /**
