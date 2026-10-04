@@ -155,3 +155,20 @@ export function directoryOf(view: ProjectView, target: string): string | undefin
 export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/** A cheap content fingerprint (FNV-1a), so a refreshed diff re-renders when its text changes. */
+function fingerprint(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
+/** React key for a file's diff: changes whenever its stats or patch change. */
+export function diffKey(f: ReviewFile): string {
+  return `${f.file}:${f.additions}:${f.deletions}:${f.patch === undefined ? "-" : `${f.patch.length}.${fingerprint(f.patch)}`}`;
+}
+
+/** A generated commit message fills the box only if it is the latest request and the user hasn't typed one. */
+export function acceptSuggestion(o: { current: string; suggestion: string; request: number; latest: number }): string {
+  return o.request === o.latest && !o.current.trim() ? o.suggestion : o.current;
+}

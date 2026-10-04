@@ -15,8 +15,10 @@ import { DiffView } from "../components/DiffView";
 import { Icon } from "../components/Icon";
 import { workspaceFolderOf } from "../derive";
 import {
+  acceptSuggestion,
   composeReviewPrompt,
   conflictPrompt,
+  diffKey,
   directoryOf,
   draftKey,
   isLarge,
@@ -165,10 +167,20 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const [ffOnly, setFfOnly] = useState(false);
   const [merged, setMerged] = useState<string>();
 
+  // The suggestion is fetched in the background: it never blocks the actions, and it never replaces what you typed.
+  const [generating, setGenerating] = useState(false);
+  const suggestion = useRef(0);
   const openCommit = () => {
     setCommitOpen(true);
     setMessage("");
-    run("message", async () => setMessage(await suggestCommitMessage(projectId, directory)));
+    const request = ++suggestion.current;
+    setGenerating(true);
+    suggestCommitMessage(projectId, directory)
+      .then((text) => setMessage((current) => acceptSuggestion({ current, suggestion: text, request, latest: suggestion.current })))
+      .catch(() => {})
+      .finally(() => {
+        if (request === suggestion.current) setGenerating(false);
+      });
   };
   const commit = (e: FormEvent) => {
     e.preventDefault();
@@ -289,14 +301,22 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
             aria-label="Commit message"
             rows={3}
             value={message}
-            placeholder={busy === "message" ? "Asking the agent for a message…" : "Commit message"}
+            placeholder={generating ? "Asking the agent for a message…" : "Commit message"}
             onChange={(e) => setMessage(e.target.value)}
           />
           <div className="pending-actions">
             <button type="submit" className="button primary" disabled={!message.trim() || !!busy}>
               Commit
             </button>
-            <button type="button" className="link" onClick={() => setCommitOpen(false)}>
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                suggestion.current++;
+                setGenerating(false);
+                setCommitOpen(false);
+              }}
+            >
               Cancel
             </button>
           </div>
@@ -399,7 +419,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
           <div className="review-diffs">
             {data.files.map((f, i) => (
               <FileDiff
-                key={`${f.file}:${baseName}`}
+                key={`${diffKey(f)}:${baseName}`}
                 id={`review-file-${i}`}
                 file={f}
                 load={() => fetchReview(projectId, directory, { base: baseOverride, file: f.file }).then((d) => d.files[0]?.patch)}

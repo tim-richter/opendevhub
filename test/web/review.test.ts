@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "../../src/shared/types";
 import {
+  acceptSuggestion,
   anchorFor,
   composeReviewPrompt,
   conflictPrompt,
+  diffKey,
   directoryOf,
   draftKey,
   isLarge,
@@ -163,5 +165,19 @@ describe("targets", () => {
   it("collapses files over 400 changed lines", () => {
     expect(isLarge({ file: "a", status: "modified", additions: 300, deletions: 101 })).toBe(true);
     expect(isLarge({ file: "a", status: "modified", additions: 300, deletions: 100 })).toBe(false);
+  });
+
+  it("keys a file's diff by its content, so a refresh with new content re-renders it", () => {
+    const f = { file: "a.ts", status: "modified" as const, additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-a\n+b\n" };
+    expect(diffKey(f)).toBe(diffKey({ ...f }));
+    expect(diffKey(f)).not.toBe(diffKey({ ...f, patch: "@@ -1 +1 @@\n-a\n+c\n" }));
+    expect(diffKey(f)).not.toBe(diffKey({ ...f, additions: 2 }));
+    expect(diffKey({ ...f, patch: undefined })).not.toBe(diffKey(f));
+  });
+
+  it("only fills in a suggested commit message the user hasn't overtaken", () => {
+    expect(acceptSuggestion({ current: "", suggestion: "feat: x", request: 2, latest: 2 })).toBe("feat: x");
+    expect(acceptSuggestion({ current: "my own", suggestion: "feat: x", request: 2, latest: 2 })).toBe("my own");
+    expect(acceptSuggestion({ current: "", suggestion: "feat: old", request: 1, latest: 2 })).toBe("");
   });
 });
