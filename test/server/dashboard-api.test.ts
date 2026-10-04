@@ -8,7 +8,7 @@ import { EditorUnavailableError } from "../../src/server/editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { StateStore } from "../../src/server/state";
-import type { Project } from "../../src/shared/types";
+import type { ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
 
 const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
 
@@ -57,6 +57,12 @@ function setup(webDir?: string) {
     })),
     publishSuggestion: vi.fn(async (_id: string, _dir: string) => ({ title: "t", description: "d" })),
     publish: vi.fn(async (_id: string, _dir: string, _req: unknown) => ({ strategy: "branch" as const, pushedFrom: "host" as const, output: [] })),
+    models: vi.fn(async (_id: string): Promise<ModelsInfo> => ({ models: [], agents: [] })),
+    createTask: vi.fn(async (_id: string, _b: Record<string, unknown>): Promise<TaskResult> => ({
+      task: "tsk_1",
+      variants: [{ branch: "x", directory: "/w/x", sessionId: "ses_1" }],
+    })),
+    pickVariant: vi.fn(async (_id: string, _t: string, _s: string, _r: boolean): Promise<PickResult> => ({ discarded: ["ses_2"], removed: [], errors: [] })),
   } satisfies DashboardOrchestrator;
   return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
 }
@@ -313,6 +319,57 @@ describe("dashboard API", () => {
       const rejected = await post(app, "publish", body);
       expect(rejected.status).toBe(422);
       expect((await rejected.json()).error).toMatch(/git pull origin/);
+    });
+  });
+  describe("tasks", () => {
+    const post = (app: ReturnType<typeof setup>["app"], route: string, body: unknown) =>
+      app.request(`/api/projects/${project.id}/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    it("starts tasks, lists models, picks a variant and passes a worktree's first prompt", async () => {
+      const { app, orchestrator } = setup();
+      const body = { prompt: "Fix it", variants: [{}] };
+      const res = await post(app, "tasks", body);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ task: "tsk_1", variants: [{ branch: "x", directory: "/w/x", sessionId: "ses_1" }] });
+      expect(orchestrator.createTask).toHaveBeenCalledWith(project.id, body);
+      expect(await (await app.request(`/api/projects/${project.id}/models`)).json()).toEqual({ models: [], agents: [] });
+      expect(await (await post(app, "tasks/tsk_1/pick", { sessionId: "ses_1", removeWorktrees: true })).json()).toEqual({
+        discarded: ["ses_2"],
+        removed: [],
+        errors: [],
+      });
+      expect(orchestrator.pickVariant).toHaveBeenCalledWith(project.id, "tsk_1", "ses_1", true);
+      await post(app, "worktrees", { branch: "b", startSession: true, prompt: "go" });
+      expect(orchestrator.createWorktree).toHaveBeenLastCalledWith(project.id, { branch: "b", base: undefined, startSession: true, prompt: "go" });
+    });
+
+    it("maps task errors to statuses", async () => {
+      const { app, orchestrator } = setup();
+      orchestrator.createTask.mockRejectedValueOnce(new InvalidRequestError("the prompt is empty"));
+      const bad = await post(app, "tasks", { prompt: "" });
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toEqual({ error: "the prompt is empty" });
+      orchestrator.createTask.mockRejectedValueOnce(new BusyError(project.id));
+      expect((await post(app, "tasks", { prompt: "x" })).status).toBe(409);
+      orchestrator.pickVariant.mockRejectedValueOnce(new NotFoundError("ses_9", "variant"));
+      expect((await post(app, "tasks/tsk_1/pick", { sessionId: "ses_9" })).status).toBe(404);
+      orchestrator.models.mockRejectedValueOnce(new UnavailableError("opencode is not running — start the project first"));
+      expect((await app.request(`/api/projects/${project.id}/models`)).status).toBe(412);
+    });
+
+    it("blocks cross-site task creation", async () => {
+      const { app, orchestrator } = setup();
+      const res = await app.request(`/api/projects/${project.id}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://evil.example", host: "localhost:7777" },
+        body: JSON.stringify({ prompt: "x" }),
+      });
+      expect(res.status).toBe(403);
+      expect(orchestrator.createTask).not.toHaveBeenCalled();
     });
   });
 });

@@ -35,6 +35,9 @@ export type DashboardOrchestrator = Pick<
   | "publishInfo"
   | "publishSuggestion"
   | "publish"
+  | "models"
+  | "createTask"
+  | "pickVariant"
 >;
 
 export interface DashboardDeps {
@@ -146,6 +149,7 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
         branch: str(b.branch) ?? "",
         base: str(b.base),
         startSession: b.startSession === true,
+        prompt: str(b.prompt),
       }),
     ),
   );
@@ -162,6 +166,19 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   );
   app.post("/api/projects/:id/open", (c) =>
     json(c, (id, b) => orchestrator.openInEditor(id, str(b.editor) ?? "", str(b.directory) ?? "")),
+  );
+
+  // Tasks: one prompt run in one or more sessions, each usually in its own worktree.
+  app.get("/api/projects/:id/models", async (c) => {
+    try {
+      return c.json(await orchestrator.models(c.req.param("id")));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  });
+  app.post("/api/projects/:id/tasks", (c) => json(c, (id, b) => orchestrator.createTask(id, b)));
+  app.post("/api/projects/:id/tasks/:task/pick", (c) =>
+    json(c, (id, b) => orchestrator.pickVariant(id, c.req.param("task") ?? "", str(b.sessionId) ?? "", b.removeWorktrees === true)),
   );
 
   // Answers to what an agent is waiting on. The orchestrator only forwards ids it listed itself.
