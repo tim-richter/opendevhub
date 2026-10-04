@@ -26,6 +26,12 @@ export type DashboardOrchestrator = Pick<
   | "replyPermission"
   | "replyForm"
   | "cancelForm"
+  | "review"
+  | "promptSession"
+  | "commitMessage"
+  | "commit"
+  | "updateFromBase"
+  | "mergeIntoBase"
 >;
 
 export interface DashboardDeps {
@@ -141,10 +147,15 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
     ),
   );
   app.post("/api/projects/:id/worktrees/remove", (c) =>
-    json(c, (id, b) => orchestrator.removeWorktree(id, str(b.path) ?? "", b.force === true)),
+    json(c, (id, b) => orchestrator.removeWorktree(id, str(b.path) ?? "", b.force === true, b.deleteBranch === true)),
   );
   app.post("/api/projects/:id/sessions", (c) =>
-    json(c, async (id, b) => ({ sessionId: await orchestrator.startSession(id, str(b.directory) ?? "", str(b.title)) })),
+    json(c, async (id, b) => ({
+      sessionId: await orchestrator.startSession(id, str(b.directory) ?? "", str(b.title), str(b.prompt)),
+    })),
+  );
+  app.post("/api/projects/:id/sessions/:sid/prompt", (c) =>
+    json(c, (id, b) => orchestrator.promptSession(id, c.req.param("sid") ?? "", str(b.text) ?? "")),
   );
   app.post("/api/projects/:id/open", (c) =>
     json(c, (id, b) => orchestrator.openInEditor(id, str(b.editor) ?? "", str(b.directory) ?? "")),
@@ -161,6 +172,31 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   );
   app.post("/api/projects/:id/forms/:fid", (c) => json(c, (id, b) => orchestrator.replyForm(id, c.req.param("fid") ?? "", b.answer)));
   app.delete("/api/projects/:id/forms/:fid", (c) => json(c, (id) => orchestrator.cancelForm(id, c.req.param("fid") ?? "")));
+
+  // Review: what a checkout changed, and the local git actions on it.
+  app.get("/api/projects/:id/review", async (c) => {
+    try {
+      const data = await orchestrator.review(c.req.param("id"), c.req.query("directory") ?? "", {
+        base: c.req.query("base"),
+        file: c.req.query("file"),
+      });
+      return c.json(data);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  });
+  app.post("/api/projects/:id/review/commit-message", (c) =>
+    json(c, async (id, b) => ({ message: await orchestrator.commitMessage(id, str(b.directory) ?? "") })),
+  );
+  app.post("/api/projects/:id/review/commit", (c) =>
+    json(c, (id, b) => orchestrator.commit(id, str(b.directory) ?? "", str(b.message) ?? "")),
+  );
+  app.post("/api/projects/:id/review/update", (c) =>
+    json(c, (id, b) => orchestrator.updateFromBase(id, str(b.directory) ?? "", str(b.base) ?? "")),
+  );
+  app.post("/api/projects/:id/review/merge", (c) =>
+    json(c, (id, b) => orchestrator.mergeIntoBase(id, str(b.directory) ?? "", str(b.base) ?? "", b.ffOnly === true)),
+  );
 
   app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));
 

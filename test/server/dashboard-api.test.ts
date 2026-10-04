@@ -27,11 +27,26 @@ function setup(webDir?: string) {
     refreshWorktrees: vi.fn(async () => []),
     createWorktree: vi.fn(async () => ({ worktree: { path: "/workspaces/demo.worktrees/x", branch: "x" } })),
     removeWorktree: vi.fn(async () => {}),
-    startSession: vi.fn(async () => "ses_1"),
+    startSession: vi.fn(async (_id: string, _dir: string, _title?: string, _prompt?: string) => "ses_1"),
     openInEditor: vi.fn(async () => {}),
     replyPermission: vi.fn(async (_id: string, _rid: string, _reply: { decision: string; message?: string }) => {}),
     replyForm: vi.fn(async (_id: string, _fid: string, _answer: unknown) => {}),
     cancelForm: vi.fn(async (_id: string, _fid: string) => {}),
+    review: vi.fn(async (_id: string, directory: string, _o?: { base?: string; file?: string }) => ({
+      directory,
+      mode: "branch" as const,
+      ahead: 0,
+      behind: 0,
+      dirty: false,
+      pushed: false,
+      workspace: { clean: true },
+      files: [],
+    })),
+    promptSession: vi.fn(async (_id: string, _sid: string, _text: string) => {}),
+    commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
+    commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
+    updateFromBase: vi.fn(async (_id: string, _dir: string, _base: string) => ({ strategy: "rebase" as const })),
+    mergeIntoBase: vi.fn(async (_id: string, _dir: string, _base: string, _ff: boolean) => ({ branch: "x" })),
   } satisfies DashboardOrchestrator;
   return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
 }
@@ -83,7 +98,7 @@ describe("dashboard API", () => {
     expect(orchestrator.createWorktree).toHaveBeenCalledWith(project.id, { branch: "x", base: "main", startSession: true });
     expect(await created.json()).toMatchObject({ worktree: { branch: "x" } });
     await post("worktrees/remove", { path: "/p", force: "yes" });
-    expect(orchestrator.removeWorktree).toHaveBeenCalledWith(project.id, "/p", false);
+    expect(orchestrator.removeWorktree).toHaveBeenCalledWith(project.id, "/p", false, false);
     expect(await (await post("sessions", { directory: "/d" })).json()).toEqual({ sessionId: "ses_1" });
     expect(await (await post("open", { editor: "zed", directory: "/d" })).json()).toEqual({ ok: true });
     expect(orchestrator.openInEditor).toHaveBeenCalledWith(project.id, "zed", "/d");
@@ -223,6 +238,48 @@ describe("dashboard API", () => {
       const res = await send(app, "POST", "permissions/per_1", { decision: "once" }, "http://evil.example");
       expect(res.status).toBe(403);
       expect(orchestrator.replyPermission).not.toHaveBeenCalled();
+    });
+  });
+  describe("review", () => {
+    const post = (app: ReturnType<typeof setup>["app"], route: string, body: unknown) =>
+      app.request(`/api/projects/${project.id}/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    it("serves review data for a directory with an optional base and file", async () => {
+      const { app, orchestrator } = setup();
+      const res = await app.request(`/api/projects/${project.id}/review?directory=%2Fw%2Fx&base=main&file=a.ts`);
+      expect(res.status).toBe(200);
+      expect((await res.json()).directory).toBe("/w/x");
+      expect(orchestrator.review).toHaveBeenCalledWith(project.id, "/w/x", { base: "main", file: "a.ts" });
+      orchestrator.review.mockRejectedValueOnce(new InvalidRequestError("/etc is neither the workspace nor a known worktree"));
+      expect((await app.request(`/api/projects/${project.id}/review?directory=%2Fetc`)).status).toBe(400);
+    });
+
+    it("runs commit, update and merge, and suggests commit messages", async () => {
+      const { app, orchestrator } = setup();
+      expect(await (await post(app, "review/commit-message", { directory: "/w" })).json()).toEqual({ message: "feat: x" });
+      expect((await post(app, "review/commit", { directory: "/w", message: "m" })).status).toBe(200);
+      expect(orchestrator.commit).toHaveBeenCalledWith(project.id, "/w", "m");
+      expect(await (await post(app, "review/update", { directory: "/w", base: "main" })).json()).toEqual({ strategy: "rebase" });
+      expect(await (await post(app, "review/merge", { directory: "/w", base: "main", ffOnly: true })).json()).toEqual({ branch: "x" });
+      expect(orchestrator.mergeIntoBase).toHaveBeenCalledWith(project.id, "/w", "main", true);
+      orchestrator.commit.mockRejectedValueOnce(new CommandError("git has no user.name/user.email in the container."));
+      const failed = await post(app, "review/commit", { directory: "/w", message: "m" });
+      expect(failed.status).toBe(422);
+      expect((await failed.json()).error).toMatch(/user\.name/);
+    });
+
+    it("prompts a session, starts one with a prompt, and removes a worktree with its branch", async () => {
+      const { app, orchestrator } = setup();
+      expect((await post(app, "sessions/ses_1/prompt", { text: "fix" })).status).toBe(200);
+      expect(orchestrator.promptSession).toHaveBeenCalledWith(project.id, "ses_1", "fix");
+      await post(app, "sessions", { directory: "/w", title: "Review", prompt: "look" });
+      expect(orchestrator.startSession).toHaveBeenLastCalledWith(project.id, "/w", "Review", "look");
+      await post(app, "worktrees/remove", { path: "/w", force: false, deleteBranch: true });
+      expect(orchestrator.removeWorktree).toHaveBeenLastCalledWith(project.id, "/w", false, true);
     });
   });
 });
