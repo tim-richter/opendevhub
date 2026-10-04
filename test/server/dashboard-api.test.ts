@@ -309,10 +309,10 @@ describe("dashboard API", () => {
       const body = { directory: "/w", remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" };
       expect((await post(app, "publish", body)).status).toBe(200);
       expect(orchestrator.publish).toHaveBeenCalledWith(project.id, "/w", { remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" });
-      orchestrator.publish.mockRejectedValueOnce(new CommandError("the remote has commits this branch doesn't; use Update from base, then publish again"));
+      orchestrator.publish.mockRejectedValueOnce(new CommandError("the branch on origin has commits this one doesn't (pushed from elsewhere, or rebased); pull them in with `git pull origin x`, then publish again"));
       const rejected = await post(app, "publish", body);
       expect(rejected.status).toBe(422);
-      expect((await rejected.json()).error).toMatch(/Update from base/);
+      expect((await rejected.json()).error).toMatch(/git pull origin/);
     });
   });
 });

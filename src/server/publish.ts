@@ -19,7 +19,8 @@ import { InvalidRequestError } from "./worktrees";
 
 const PROBE_TIMEOUT_MS = 3000;
 
-async function answers(url: string, fetchImpl: typeof fetch): Promise<boolean> {
+/** true/false: the host answered (with / without a Forgejo-style version); undefined: it didn't answer at all. */
+async function answers(url: string, fetchImpl: typeof fetch): Promise<boolean | undefined> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), PROBE_TIMEOUT_MS);
   try {
@@ -28,26 +29,29 @@ async function answers(url: string, fetchImpl: typeof fetch): Promise<boolean> {
     const body = (await res.json().catch(() => undefined)) as { version?: unknown } | undefined;
     return typeof body?.version === "string";
   } catch {
-    return false;
+    return undefined;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** One unauthenticated look at a host's API: Forgejo first, then Gitea. */
-export async function probeForge(web: string, fetchImpl: typeof fetch = fetch): Promise<ForgeKind> {
+/** One unauthenticated look at a host's API: Forgejo first, then Gitea. undefined means the host was unreachable. */
+export async function probeForge(web: string, fetchImpl: typeof fetch = fetch): Promise<ForgeKind | undefined> {
   const base = web.replace(/\/$/, "");
-  if (await answers(`${base}/api/forgejo/v1/version`, fetchImpl)) return "forgejo";
-  if (await answers(`${base}/api/v1/version`, fetchImpl)) return "gitea";
-  return "unknown";
+  const forgejo = await answers(`${base}/api/forgejo/v1/version`, fetchImpl);
+  if (forgejo) return "forgejo";
+  const gitea = await answers(`${base}/api/v1/version`, fetchImpl);
+  if (gitea) return "gitea";
+  return forgejo === undefined || gitea === undefined ? undefined : "unknown";
 }
 
-/** The forge for a remote; a host nobody configured is probed once and the answer (even "unknown") remembered. */
+/** The forge for a remote; a host nobody configured is probed once and the answer (even "unknown") remembered; an unreachable one isn't. */
 export async function detectForge(remote: RemoteInfo | undefined, store: ForgeStore, fetchImpl: typeof fetch = fetch): Promise<Forge> {
   const known = resolveForge(remote, store.all());
   if (known) return known;
   if (!remote || !remote.host.includes(".")) return { kind: "unknown" };
   const kind = await probeForge(remote.web, fetchImpl);
+  if (!kind) return { kind: "unknown" };
   store.remember(remote.host, { kind });
   return resolveForge(remote, store.all()) ?? { kind: "unknown" };
 }
@@ -83,7 +87,7 @@ export class Publisher {
       if (forced === "host") throw new CommandError(`OPENDEVHUB_PUSH=host, but ${checkout.container} isn't on this machine`);
       return { where: "container", dir: checkout.container };
     }
-    const r = await this.deps.run("git", ["-C", checkout.host, "rev-parse", "--git-dir"], { timeoutMs: GIT_TIMEOUT_MS });
+    const r = await this.deps.run("git", ["-C", checkout.host, "rev-parse", "--git-dir"], { timeoutMs: GIT_TIMEOUT_MS, env: NO_PROMPT, detached: true });
     if (r.exitCode === 0) return { where: "host", dir: checkout.host };
     if (forced === "host") throw new CommandError(`OPENDEVHUB_PUSH=host, but git can't use ${checkout.host} on this machine`);
     return { where: "container", dir: checkout.container };
@@ -91,7 +95,7 @@ export class Publisher {
 
   private exec(p: Project, loc: Location, args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<RunResult> {
     return loc.where === "host"
-      ? this.deps.run("git", ["-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT })
+      ? this.deps.run("git", ["-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT, detached: true })
       : this.deps.containers.exec(p, ["git", "-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT });
   }
 
@@ -139,10 +143,16 @@ export class Publisher {
         : branchPushArgs({ remote: req.remote, branch });
     const r = await this.exec(p, loc, args, PUSH_TIMEOUT_MS);
     const output = `${r.stderr}\n${r.stdout}`;
+    if (r.timedOut) {
+      throw new CommandError(`git push timed out after ${PUSH_TIMEOUT_MS / 1000} s (waiting for credentials?)`, tailLines(output, 8));
+    }
     if (r.exitCode !== 0) {
       const tail = tailLines(output, 8);
-      if (/\[rejected\]|non-fast-forward|fetch first|stale info/.test(output)) {
-        throw new CommandError("the remote has commits this branch doesn't; use Update from base, then publish again", tail);
+      if (/\[rejected\]|non-fast-forward|fetch first/.test(output)) {
+        throw new CommandError(
+          `the branch on ${req.remote} has commits this one doesn't (pushed from elsewhere, or rebased); pull them in with \`git pull ${req.remote} ${branch}\`, then publish again`,
+          tail,
+        );
       }
       throw new CommandError(`git push failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`, tail);
     }

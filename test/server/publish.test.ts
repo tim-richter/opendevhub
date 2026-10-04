@@ -28,6 +28,13 @@ describe("probeForge", () => {
     expect(await probeForge("https://x.example.com", respond({}))).toBe("unknown");
   });
 
+  it("reports an unreachable host as undefined", async () => {
+    const down = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect(await probeForge("https://down.example.com", down)).toBeUndefined();
+  });
+
   it("gives up on hosts that don't answer", async () => {
     const hang = vi.fn((_url: string | URL | Request, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted")))),
@@ -36,7 +43,7 @@ describe("probeForge", () => {
     try {
       const result = probeForge("https://slow.example.com", hang);
       await vi.advanceTimersByTimeAsync(7000);
-      expect(await result).toBe("unknown");
+      expect(await result).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -68,6 +75,17 @@ describe("detectForge", () => {
     expect(none).toHaveBeenCalledTimes(2); // two endpoints on the first detect, none on the second
   });
 
+  it("doesn't remember a host that was unreachable, and probes it again", async () => {
+    const store = memoryStore();
+    const down = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect(await detectForge(parseRemote("git@down.example.com:t/a.git"), store, down)).toEqual({ kind: "unknown" });
+    expect(store.remember).not.toHaveBeenCalled();
+    await detectForge(parseRemote("git@down.example.com:t/a.git"), store, down);
+    expect(down).toHaveBeenCalledTimes(4);
+  });
+
   it("never probes ssh aliases or local remotes", async () => {
     const fetchImpl = respond({});
     expect(await detectForge(parseRemote("gh:a/b"), memoryStore(), fetchImpl)).toEqual({ kind: "unknown" });
@@ -85,14 +103,17 @@ describe("Publisher", () => {
   let env: Record<string, string>;
   const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
   const hostRuns: string[][] = [];
+  const hostOpts: Array<{ args: string[]; env?: Record<string, string>; detached?: boolean }> = [];
   const containerRuns: Array<{ cmd: string[]; env?: Record<string, string> }> = [];
 
   function publisher(over: { env?: NodeJS.ProcessEnv; forges?: Record<string, { kind: "forgejo" }> } = {}) {
     hostRuns.length = 0;
+    hostOpts.length = 0;
     containerRuns.length = 0;
     return new Publisher({
       run: (cmd, args, o) => {
         hostRuns.push([cmd, ...args]);
+        hostOpts.push({ args, env: o?.env, detached: o?.detached });
         return spawnRunner(cmd, args, { ...o, env: { ...env, ...o?.env } });
       },
       containers: {
@@ -205,7 +226,13 @@ describe("Publisher", () => {
     git(other, "push", "-q", "origin", "feature/x");
     const err = await publisher().publish(project, checkout(), "feature/x", req).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CommandError);
-    expect((err as Error).message).toMatch(/Update from base/);
+    expect((err as Error).message).toMatch(/git pull origin feature\/x/);
+    expect((err as Error).message).not.toMatch(/Update from base/);
+    expect(hostOpts.length).toBeGreaterThan(0);
+    for (const h of hostOpts) {
+      expect(h.env).toMatchObject({ GIT_TERMINAL_PROMPT: "0" });
+      expect(h.detached).toBe(true);
+    }
 
     await publisher({ env: { OPENDEVHUB_PUSH: "container" } }).publish(project, checkout(), "feature/x", { ...req, remote: "origin" }).catch(() => {});
     expect(containerRuns.find((r) => r.cmd.includes("push"))?.env).toMatchObject({ GIT_TERMINAL_PROMPT: "0" });

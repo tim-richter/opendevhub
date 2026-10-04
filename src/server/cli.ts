@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import open from "open";
-import { FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
+import { type Config, FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
 import { Containers } from "./containers";
 import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { createDashboardApp } from "./dashboard-api";
@@ -60,6 +60,14 @@ export function parseCli(argv: string[]): CliOptions {
   return { roots: values.root ?? [], port, open: !values["no-open"], help: values.help === true };
 }
 
+/** Merges the command line into the saved config and saves it, keeping every other saved key (forges). */
+export function loadAndSaveStartupConfig(dir: string, opts: Pick<CliOptions, "roots" | "port">): Config {
+  const saved = loadConfig(dir);
+  const config: Config = { ...saved, roots: mergeRoots(saved.roots, opts.roots), port: opts.port ?? saved.port };
+  saveConfig(dir, config);
+  return config;
+}
+
 export function findWebDir(): string | undefined {
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const candidate of [path.join(here, "web"), path.resolve(here, "../../dist/web")]) {
@@ -92,9 +100,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   const dir = configDir();
-  const saved = loadConfig(dir);
-  const config = { roots: mergeRoots(saved.roots, opts.roots), port: opts.port ?? saved.port };
-  saveConfig(dir, config);
+  const config = loadAndSaveStartupConfig(dir, opts);
   if (config.roots.length === 0) {
     console.error("No project roots configured yet. Run: opendevhub --root ~/code");
     process.exitCode = 2;

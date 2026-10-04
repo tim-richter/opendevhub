@@ -25,7 +25,7 @@ describe("parseRemote", () => {
     expect(parseRemote(url)).toEqual(expected);
   });
 
-  it.each(["/srv/git/app.git", "../origin.git", "file:///srv/git/app.git", "", "git@host:single"])("has no forge for %j", (url) => {
+  it.each(["/srv/git/app.git", "../origin.git", "file:///srv/git/app.git", "", "git@host:single", "https://h.example.com/o/r%zz"])("has no forge for %j", (url) => {
     expect(parseRemote(url)).toBeUndefined();
   });
 

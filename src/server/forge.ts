@@ -41,7 +41,13 @@ export function parseRemote(url: string): RemoteInfo | undefined {
     } catch {
       return undefined;
     }
-    const path = cleanPath(decodeURIComponent(u.pathname));
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(u.pathname);
+    } catch {
+      return undefined;
+    }
+    const path = cleanPath(decoded);
     if (!path || !u.hostname) return undefined;
     if (u.protocol === "http:" || u.protocol === "https:") return { host: u.hostname, path, web: `${u.protocol}//${u.host}` };
     if (u.protocol === "ssh:" || u.protocol === "git+ssh:") return { host: u.hostname, path, web: `https://${u.hostname}` };

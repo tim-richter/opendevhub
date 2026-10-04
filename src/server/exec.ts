@@ -11,6 +11,8 @@ export interface RunOptions {
   timeoutMs?: number;
   env?: Record<string, string>;
   onLine?: (line: string) => void;
+  /** Run in a new session without a controlling terminal, so ssh can't open /dev/tty to prompt. */
+  detached?: boolean;
 }
 
 export type Runner = (cmd: string, args: string[], opts?: RunOptions) => Promise<RunResult>;
@@ -22,7 +24,17 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     let timedOut = false;
     let settled = false;
     const carry = { out: "", err: "" };
-    const child = spawn(cmd, args, { env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"],
+      detached: opts.detached === true,
+    });
+    const kill = (signal: NodeJS.Signals) => {
+      try {
+        if (opts.detached && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+        child.kill(signal);
+      }
+    };
 
     const feed = (key: "out" | "err", chunk: Buffer) => {
       const text = chunk.toString("utf8");
@@ -39,8 +51,8 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), 5000).unref();
+          kill("SIGTERM");
+          setTimeout(() => kill("SIGKILL"), 5000).unref();
         }, opts.timeoutMs)
       : undefined;
 

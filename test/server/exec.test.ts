@@ -32,6 +32,12 @@ describe("spawnRunner", () => {
     expect(r.exitCode).not.toBe(0);
   });
 
+  it("kills a detached run's whole process group on timeout", async () => {
+    const r = await spawnRunner(node, ["-e", "setTimeout(() => {}, 10000)"], { timeoutMs: 200, detached: true });
+    expect(r.timedOut).toBe(true);
+    expect(r.exitCode).not.toBe(0);
+  });
+
   it("passes extra env vars", async () => {
     const r = await spawnRunner(node, ["-e", "console.log(process.env.ODH_FOO)"], { env: { ODH_FOO: "bar" } });
     expect(r.stdout.trim()).toBe("bar");
