@@ -1,4 +1,4 @@
-import type { FormField } from "../../shared/types";
+import type { FormAnswer, FormField, PermissionDecision } from "../../shared/types";
 
 export interface OpencodeEndpoint {
   baseUrl: string;
@@ -40,10 +40,31 @@ export class OpencodeHttpError extends Error {
   constructor(
     readonly status: number,
     path: string,
+    /** opencode's error `_tag`, e.g. "FormNotFound", when the body was JSON. */
+    readonly tag?: string,
+    /** opencode's error message, when it sent one. */
+    readonly detail?: string,
   ) {
-    super(`opencode ${path} responded ${status}`);
+    super(`opencode ${path} responded ${status}${tag ? ` ${tag}` : ""}${detail ? `: ${detail}` : ""}`);
     this.name = "OpencodeHttpError";
   }
+}
+
+const GONE_TAGS = new Set(["PermissionNotFound", "FormNotFound", "FormAlreadySettled"]);
+
+/** opencode no longer has the item: it was answered or cancelled in another client. */
+export function isGone(err: unknown): err is OpencodeHttpError {
+  return err instanceof OpencodeHttpError && gone(err);
+}
+
+function gone(err: OpencodeHttpError): boolean {
+  return err.status === 404 || (err.tag !== undefined && GONE_TAGS.has(err.tag));
+}
+
+/** opencode rejected a form answer; `detail` says why. */
+export function isInvalidAnswer(err: unknown): err is OpencodeHttpError {
+  if (!(err instanceof OpencodeHttpError) || gone(err)) return false;
+  return err.tag === "FormInvalidAnswer" || err.status === 400;
 }
 
 export function basicAuth(password: string): string {
@@ -87,6 +108,52 @@ export class OpencodeClient {
     const body = (await res.json()) as { data?: RawSession } & Partial<RawSession>;
     // Accept both the `{ data }` envelope used by the list routes and a bare session.
     return (body.data ?? body) as RawSession;
+  }
+
+  private async send(method: "POST" | "DELETE", path: string, body?: unknown, directory?: string): Promise<void> {
+    const headers: Record<string, string> = { authorization: basicAuth(this.ep.password), accept: "application/json" };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (directory) headers["x-opencode-directory"] = directory;
+    const res = await this.fetchImpl(this.ep.baseUrl + path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (res.ok) {
+      await res.text().catch(() => "");
+      return;
+    }
+    const err = (await res.json().catch(() => ({}))) as { _tag?: unknown; message?: unknown };
+    throw new OpencodeHttpError(
+      res.status,
+      path,
+      typeof err._tag === "string" ? err._tag : undefined,
+      typeof err.message === "string" ? err.message : undefined,
+    );
+  }
+
+  /** Answers a permission request; `sessionId` is the session that asked (may be a subagent). */
+  replyPermission(
+    sessionId: string,
+    requestId: string,
+    reply: { decision: PermissionDecision; message?: string },
+    directory?: string,
+  ): Promise<void> {
+    const path = `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`;
+    return this.send("POST", path, reply, directory);
+  }
+
+  replyForm(sessionId: string, formId: string, answer: FormAnswer, directory?: string): Promise<void> {
+    const path = `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}/reply`;
+    return this.send("POST", path, { answer }, directory);
+  }
+
+  /** Cancels a form; opencode tells the asking agent `message`. */
+  cancelForm(sessionId: string, formId: string, message?: string, directory?: string): Promise<void> {
+    const query = message ? `?${new URLSearchParams({ message })}` : "";
+    const path = `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}${query}`;
+    return this.send("DELETE", path, undefined, directory);
   }
 
   info(): Promise<{ version: string }> {

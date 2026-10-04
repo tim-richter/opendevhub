@@ -14,6 +14,14 @@ export interface FakeState {
   missingDirectories?: string[];
   /** Emulates opencode's default page size for `GET /api/session`. */
   listLimit?: number;
+  /** Every reply or cancel opendevhub sent. */
+  replies: Array<{ method: string; path: string; body?: unknown }>;
+  /** When set, form replies answer 400 FormInvalidAnswer with this message. */
+  invalidAnswer?: string;
+  /** Form ids that answer 400 FormAlreadySettled. */
+  settledForms?: string[];
+  /** Answer errors with plain text instead of opencode's JSON. */
+  plainErrors?: boolean;
 }
 
 export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
@@ -25,6 +33,7 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     permissions: {},
     forms: {},
     fail: false,
+    replies: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -53,6 +62,31 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     const json = (body: unknown) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
+    };
+    const fail = (status: number, tag: string, message?: string) => {
+      if (state.plainErrors) {
+        res.writeHead(status, { "content-type": "text/plain" });
+        res.end("error");
+        return;
+      }
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ _tag: tag, ...(message ? { message } : {}) }));
+    };
+    const settle = (kind: "permission" | "form", sessionId: string, itemId: string, body: unknown) => {
+      state.replies.push({ method: req.method ?? "", path: `${url.pathname}${url.search}`, body });
+      if (kind === "form" && state.settledForms?.includes(itemId)) return fail(400, "FormAlreadySettled");
+      const lists: Record<string, Array<{ id: string; sessionID: string }>> =
+        kind === "permission" ? state.permissions : state.forms;
+      for (const items of Object.values(lists)) {
+        const idx = items.findIndex((i) => i.id === itemId && i.sessionID === sessionId);
+        if (idx < 0) continue;
+        if (kind === "form" && req.method === "POST" && state.invalidAnswer) {
+          return fail(400, "FormInvalidAnswer", state.invalidAnswer);
+        }
+        items.splice(idx, 1);
+        return json(true);
+      }
+      return fail(404, kind === "permission" ? "PermissionNotFound" : "FormNotFound");
     };
     switch (url.pathname) {
       case "/api/info":
@@ -89,6 +123,20 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
         req.on("close", () => sseClients.delete(res));
         return;
       default: {
+        const reply = url.pathname.match(/^\/api\/session\/([^/]+)\/(permission|form)\/([^/]+?)(\/reply)?$/);
+        if (reply && (req.method === "POST" || req.method === "DELETE")) {
+          let raw = "";
+          req.on("data", (c: Buffer) => (raw += c.toString("utf8")));
+          req.on("end", () =>
+            settle(
+              reply[2] as "permission" | "form",
+              decodeURIComponent(reply[1]),
+              decodeURIComponent(reply[3]),
+              raw ? JSON.parse(raw) : undefined,
+            ),
+          );
+          return;
+        }
         const one = url.pathname.match(/^\/api\/session\/(ses[^/]+)$/);
         const found = one && state.sessions.find((s) => s.id === one[1]);
         if (found) return json({ data: found });
