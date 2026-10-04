@@ -356,21 +356,15 @@ kbd { font: 11px var(--mono); padding: 0.05rem 0.35rem; border: 1px solid var(--
 .review-diffs { display: flex; flex-direction: column; gap: 0.8rem; min-width: 0; }
 .review-diff { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
 .review-diff > header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0.75rem; background: var(--surface-2); border-bottom: 1px solid var(--border); }
-.review-diff > header button.link { color: var(--text); font: 13px var(--mono); display: inline-flex; align-items: center; gap: 0.3rem; }
 .review-note { margin: 0; padding: 0.6rem 0.75rem; }
-.diff { width: 100%; border-collapse: collapse; font: 12px/1.5 var(--mono); }
-.diff td { padding: 0 0.5rem; vertical-align: top; }
-.diff-num { width: 1%; min-width: 3rem; text-align: right; color: var(--muted); user-select: none; white-space: nowrap; }
-.diff-no { border: none; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
-.diff-no:hover { color: var(--accent); text-decoration: underline; }
-.diff-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.diff-sign { display: inline-block; width: 1ch; margin-right: 0.5ch; color: var(--muted); user-select: none; }
-.diff-line.add { background: color-mix(in srgb, var(--ok) 10%, transparent); }
-.diff-line.del { background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.diff-hunk td { color: var(--muted); background: var(--surface-2); padding: 0.15rem 0.5rem; }
-.diff-after td { padding: 0.4rem 0.75rem; background: var(--surface-2); font-family: inherit; }
-.diff-raw { margin: 0; padding: 0.5rem 0.75rem; font: 12px/1.5 var(--mono); white-space: pre-wrap; }
-.review-inline { font-size: 13px; padding: 0.3rem 0.5rem; border-left: 3px solid var(--accent); margin-bottom: 0.3rem; }
+.review-diff-name { font: 13px var(--mono); }
+.review-collapse { border: none; background: none; padding: 0 0.25rem 0 0; color: var(--muted); display: inline-flex; align-items: center; }
+.review-collapse:hover:not(:disabled) { background: none; color: var(--text); }
+.review-inline { display: flex; align-items: flex-start; gap: 0.5rem; font: 13px/1.45 system-ui, sans-serif; padding: 0.45rem 0.6rem; margin: 0.3rem 0.5rem; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text); border-radius: 4px; white-space: pre-wrap; }
+.review-inline .icon-button { margin-left: auto; }
+.review-inline-form { margin: 0.3rem 0.5rem; padding: 0.5rem; background: var(--surface); border-radius: 6px; border: 1px solid var(--border); font: 13px system-ui, sans-serif; }
+/* @pierre/diffs renders in shadow DOM; these hand it the dashboard's monospace font. */
+.review-diff, .pending-diff { --diffs-font-family: var(--mono); --diffs-font-size: 12px; --diffs-header-font-family: var(--mono); }
 .pending-diff { max-height: 18rem; overflow: auto; border-radius: 6px; border: 1px solid var(--border); }
 .row-links { justify-self: end; display: inline-flex; align-items: center; gap: 0.6rem; }
 .row-review { font-size: 13px; color: var(--muted); text-decoration: none; }

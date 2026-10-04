@@ -3,6 +3,9 @@ import type { ProjectView } from "../../src/shared/types";
 import {
   acceptSuggestion,
   anchorFor,
+  anchorFromRange,
+  annotationsFor,
+  ensurePatchHeader,
   composeReviewPrompt,
   conflictPrompt,
   diffKey,
@@ -179,5 +182,40 @@ describe("targets", () => {
     expect(acceptSuggestion({ current: "", suggestion: "feat: x", request: 2, latest: 2 })).toBe("feat: x");
     expect(acceptSuggestion({ current: "my own", suggestion: "feat: x", request: 2, latest: 2 })).toBe("my own");
     expect(acceptSuggestion({ current: "", suggestion: "feat: old", request: 1, latest: 2 })).toBe("");
+  });
+});
+
+describe("@pierre/diffs adapters", () => {
+  it("turns a gutter selection into a comment anchor with its quote", () => {
+    expect(anchorFromRange(patch, { start: 42, end: 42, side: "additions" })).toEqual({
+      key: "new:42",
+      line: 42,
+      side: "new",
+      quote: ["   const token = read(req);", "-  if (!token) return deny();", "+  if (token == null) return next();"],
+    });
+    expect(anchorFromRange(patch, { start: 42, end: 42, side: "deletions" })).toMatchObject({ key: "old:42", side: "old" });
+    // A drag anchors to where it ended.
+    expect(anchorFromRange(patch, { start: 40, end: 43, side: "additions", endSide: "additions" })).toMatchObject({ line: 43 });
+    expect(anchorFromRange(patch, { start: 99, end: 99, side: "additions" })).toEqual({ key: "new:99", line: 99, side: "new", quote: [] });
+  });
+
+  it("places a file's comments and the open comment box as diff annotations", () => {
+    const comments = [
+      { id: "1", file: "src/auth.ts", line: 42, side: "new" as const, text: "a" },
+      { id: "2", file: "src/auth.ts", line: 42, side: "old" as const, text: "b" },
+      { id: "3", file: "other.ts", line: 1, side: "new" as const, text: "c" },
+      { id: "4", text: "general" },
+    ];
+    expect(annotationsFor(comments, "src/auth.ts", { key: "new:7", line: 7, side: "new", quote: [] })).toEqual([
+      { side: "additions", lineNumber: 42, metadata: { kind: "comment", comment: comments[0] } },
+      { side: "deletions", lineNumber: 42, metadata: { kind: "comment", comment: comments[1] } },
+      { side: "additions", lineNumber: 7, metadata: { kind: "draft", anchor: { key: "new:7", line: 7, side: "new", quote: [] } } },
+    ]);
+    expect(annotationsFor(comments, "none.ts", undefined)).toEqual([]);
+  });
+
+  it("gives a bare hunk the file headers the patch parser needs", () => {
+    expect(ensurePatchHeader("@@ -1 +1 @@\n-a\n+b\n", "src/x.ts")).toBe("--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1 +1 @@\n-a\n+b\n");
+    expect(ensurePatchHeader(patch, "ignored")).toBe(patch);
   });
 });

@@ -15,7 +15,8 @@ import {
   optionsOf,
   safeUrl,
 } from "../forms";
-import { DiffView } from "./DiffView";
+import { ensurePatchHeader } from "../review";
+import { PatchView } from "./LazyPatchView";
 import { Icon } from "./Icon";
 
 const RESOURCE_LIMIT = 5;
@@ -159,7 +160,7 @@ function PermissionCard(props: {
       {p.message && <p className="pending-message">{p.message}</p>}
       {p.diff && (
         <div className="pending-diff">
-          <DiffView patch={p.diff} />
+          <PatchView patch={ensurePatchHeader(p.diff, p.resources[0] ?? "change")} />
         </div>
       )}
       {rejecting ? (

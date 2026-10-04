@@ -1,50 +1,46 @@
-import { Fragment, type ReactNode, useMemo } from "react";
-import { anchorFor, type LineAnchor, parsePatch } from "../review";
+import { type DiffLineAnnotation, type FileDiffOptions, PatchDiff, type SelectedLineRange } from "@pierre/diffs/react";
+import { type ReactNode, useMemo } from "react";
 
-/** A unified diff with old and new line numbers. Clicking a number reports that line's comment anchor. */
-export function DiffView(props: { patch: string; onAnchor?: (anchor: LineAnchor) => void; renderAfter?: (key: string) => ReactNode }) {
-  const hunks = useMemo(() => parsePatch(props.patch), [props.patch]);
-  if (hunks.length === 0) return <pre className="diff-raw">{props.patch}</pre>;
+/** Unified diffs with syntax highlighting that follow the system's light or dark scheme, like the rest of the UI. */
+const BASE_OPTIONS = {
+  theme: { dark: "pierre-dark", light: "pierre-light" },
+  themeType: "system",
+  diffStyle: "unified",
+  hunkSeparators: "line-info-basic",
+  overflow: "wrap",
+} as const;
+
+/**
+ * One file's patch, rendered by `@pierre/diffs`. Import it through `LazyPatchView` so the highlighter loads
+ * only when a diff is shown. With `onComment`, the gutter shows a "+" button: a click or drag
+ * reports the selected line range. Callbacks and annotations should be stable (memoized) across renders.
+ */
+export default function PatchView<A = undefined>(props: {
+  patch: string;
+  collapsed?: boolean;
+  disableHeader?: boolean;
+  onComment?: (range: SelectedLineRange) => void;
+  annotations?: DiffLineAnnotation<A>[];
+  renderAnnotation?: (annotation: DiffLineAnnotation<A>) => ReactNode;
+  renderHeaderPrefix?: () => ReactNode;
+}) {
+  const { collapsed, disableHeader, onComment } = props;
+  const options = useMemo<FileDiffOptions<A, undefined>>(
+    () => ({
+      ...BASE_OPTIONS,
+      collapsed,
+      disableFileHeader: disableHeader,
+      ...(onComment ? { enableGutterUtility: true, onGutterUtilityClick: onComment } : {}),
+    }),
+    [collapsed, disableHeader, onComment],
+  );
   return (
-    <table className="diff">
-      <tbody>
-        {hunks.map((hunk, h) => (
-          <Fragment key={h}>
-            <tr className="diff-hunk">
-              <td colSpan={3}>{hunk.header}</td>
-            </tr>
-            {hunk.lines.map((line, i) => {
-              const anchor = anchorFor(hunk.lines, i);
-              const after = props.renderAfter?.(anchor.key);
-              const number = (n: number | undefined) =>
-                n === undefined ? null : props.onAnchor ? (
-                  <button type="button" className="diff-no" title="Comment on this line" onClick={() => props.onAnchor!(anchor)}>
-                    {n}
-                  </button>
-                ) : (
-                  n
-                );
-              return (
-                <Fragment key={i}>
-                  <tr className={`diff-line ${line.kind}`}>
-                    <td className="diff-num">{number(line.oldNo)}</td>
-                    <td className="diff-num">{number(line.newNo)}</td>
-                    <td className="diff-text">
-                      <span className="diff-sign">{line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}</span>
-                      {line.text}
-                    </td>
-                  </tr>
-                  {after && (
-                    <tr className="diff-after">
-                      <td colSpan={3}>{after}</td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </Fragment>
-        ))}
-      </tbody>
-    </table>
+    <PatchDiff<A, undefined>
+      patch={props.patch}
+      options={options}
+      lineAnnotations={props.annotations}
+      renderAnnotation={props.renderAnnotation}
+      renderHeaderPrefix={props.renderHeaderPrefix}
+    />
   );
 }

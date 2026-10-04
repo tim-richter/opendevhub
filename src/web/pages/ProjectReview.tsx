@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import type { ProjectView, ReviewData, ReviewFile, UpdateResult } from "../../shared/types";
 import {
@@ -11,11 +11,14 @@ import {
   suggestCommitMessage,
   updateFromBase,
 } from "../api";
-import { DiffView } from "../components/DiffView";
+import { type DiffLineAnnotation, type SelectedLineRange, useStableCallback } from "@pierre/diffs/react";
+import { PatchView } from "../components/LazyPatchView";
 import { Icon } from "../components/Icon";
 import { workspaceFolderOf } from "../derive";
 import {
   acceptSuggestion,
+  anchorFromRange,
+  annotationsFor,
   composeReviewPrompt,
   conflictPrompt,
   diffKey,
@@ -25,6 +28,7 @@ import {
   type LineAnchor,
   newId,
   readComments,
+  type ReviewAnnotation,
   type ReviewComment,
   sentKey,
   targetOf,
@@ -106,14 +110,20 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const key = draftKey(projectId, target, baseName);
   const [comments, setComments] = useState<ReviewComment[]>([]);
   useEffect(() => setComments(readComments(key)), [key]);
-  const saveComments = (next: ReviewComment[]) => {
+  // Comment boxes live inside @pierre/diffs annotations, which can hold on to an older render's callbacks; the
+  // handlers below therefore read the current comments and draft key from refs instead of from their closure.
+  const commentsRef = useRef(comments);
+  commentsRef.current = comments;
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const saveComments = useCallback((next: ReviewComment[]) => {
+    commentsRef.current = next;
     setComments(next);
-    writeComments(key, next);
-  };
+    writeComments(keyRef.current, next);
+  }, []);
   const [sent, setSent] = useState<ReviewComment[]>(() => readComments(sentKey(projectId, target)));
   const [general, setGeneral] = useState("");
   const [open, setOpen] = useState<{ file: string; anchor: LineAnchor }>();
-  const [draft, setDraft] = useState("");
 
   const sessions = useMemo(
     () => view.sessions.filter((s) => s.directory === directory).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -145,13 +155,15 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
       setNotice(`Sent ${comments.length} comment${comments.length === 1 ? "" : "s"} to the agent.`);
     });
 
-  const addLineComment = (e: FormEvent) => {
-    e.preventDefault();
-    if (!open || !draft.trim()) return;
-    saveComments([...comments, { id: newId(), file: open.file, line: open.anchor.line, side: open.anchor.side, quote: open.anchor.quote, text: draft.trim() }]);
-    setOpen(undefined);
-    setDraft("");
-  };
+  const addLineComment = useCallback(
+    (file: string, anchor: LineAnchor, text: string) => {
+      saveComments([...commentsRef.current, { id: newId(), file, line: anchor.line, side: anchor.side, quote: anchor.quote, text }]);
+      setOpen(undefined);
+    },
+    [saveComments],
+  );
+  const cancelLineComment = useCallback(() => setOpen(undefined), []);
+  const deleteComment = useCallback((id: string) => saveComments(commentsRef.current.filter((c) => c.id !== id)), [saveComments]);
 
   const addGeneral = (e: FormEvent) => {
     e.preventDefault();
@@ -423,34 +435,12 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
                 id={`review-file-${i}`}
                 file={f}
                 load={() => fetchReview(projectId, directory, { base: baseOverride, file: f.file }).then((d) => d.files[0]?.patch)}
-                onAnchor={(anchor) => {
-                  setOpen({ file: f.file, anchor });
-                  setDraft("");
-                }}
-                renderAfter={(k) => (
-                  <>
-                    {comments
-                      .filter((c) => c.file === f.file && `${c.side}:${c.line}` === k)
-                      .map((c) => (
-                        <div key={c.id} className="review-inline">
-                          {c.text}
-                        </div>
-                      ))}
-                    {open?.file === f.file && open.anchor.key === k && (
-                      <form className="review-inline-form" onSubmit={addLineComment}>
-                        <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Comment for the agent…" />
-                        <div className="pending-actions">
-                          <button type="submit" className="button primary" disabled={!draft.trim()}>
-                            Add
-                          </button>
-                          <button type="button" className="link" onClick={() => setOpen(undefined)}>
-                            Cancel
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </>
-                )}
+                comments={comments}
+                open={open?.file === f.file ? open.anchor : undefined}
+                onAnchor={(anchor) => setOpen({ file: f.file, anchor })}
+                onAdd={addLineComment}
+                onCancel={cancelLineComment}
+                onDelete={deleteComment}
               />
             ))}
           </div>
@@ -465,45 +455,122 @@ function FileDiff(props: {
   id: string;
   file: ReviewFile;
   load: () => Promise<string | undefined>;
+  comments: ReviewComment[];
+  /** The line whose comment box is open in this file. */
+  open: LineAnchor | undefined;
   onAnchor: (anchor: LineAnchor) => void;
-  renderAfter: (key: string) => ReactNode;
+  /** These three must be stable: annotations may keep the first ones they were rendered with. */
+  onAdd: (file: string, anchor: LineAnchor, text: string) => void;
+  onCancel: () => void;
+  onDelete: (id: string) => void;
 }) {
   const { file } = props;
   const [collapsed, setCollapsed] = useState(isLarge(file));
   const [patch, setPatch] = useState(file.patch);
   const [loading, setLoading] = useState(false);
+  // @pierre/diffs wants stable callbacks and annotations; these read the latest props.
+  const onComment = useStableCallback((range: SelectedLineRange) => {
+    if (patch !== undefined) props.onAnchor(anchorFromRange(patch, range));
+  });
+  const annotations = useMemo(() => annotationsFor(props.comments, file.file, props.open), [props.comments, file.file, props.open]);
+  const renderAnnotation = useStableCallback((a: DiffLineAnnotation<ReviewAnnotation>) =>
+    a.metadata.kind === "draft" ? (
+      <CommentForm onAdd={(text) => props.onAdd(file.file, a.metadata.kind === "draft" ? a.metadata.anchor : props.open!, text)} onCancel={props.onCancel} />
+    ) : (
+      <div className="review-inline">
+        <span>{a.metadata.comment.text}</span>
+        <button className="icon-button" aria-label="Delete comment" onClick={() => props.onDelete(a.metadata.kind === "comment" ? a.metadata.comment.id : "")}>
+          <Icon name="close" size={12} />
+        </button>
+      </div>
+    ),
+  );
+  const toggle = useStableCallback(() => (
+    <button className="review-collapse" onClick={() => setCollapsed((c) => !c)} aria-expanded={!collapsed} title={collapsed ? "Show diff" : "Hide diff"}>
+      <Icon name={collapsed ? "chevron" : "chevron-down"} size={12} />
+    </button>
+  ));
+
+  if (patch !== undefined && !file.binary) {
+    return (
+      <section className="review-diff" id={props.id}>
+        <PatchView<ReviewAnnotation>
+          patch={patch}
+          collapsed={collapsed}
+          onComment={onComment}
+          annotations={annotations}
+          renderAnnotation={renderAnnotation}
+          renderHeaderPrefix={toggle}
+        />
+      </section>
+    );
+  }
   return (
     <section className="review-diff" id={props.id}>
       <header>
-        <button className="link" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed}>
-          <Icon name={collapsed ? "chevron" : "chevron-down"} size={12} /> {file.file}
-        </button>
+        <span className="review-diff-name">{file.file}</span>
         <span className="review-stat">
           <span className="add">+{file.additions}</span> <span className="del">−{file.deletions}</span>
         </span>
       </header>
-      {!collapsed &&
-        (file.binary ? (
-          <p className="muted review-note">binary</p>
-        ) : patch !== undefined ? (
-          <DiffView patch={patch} onAnchor={props.onAnchor} renderAfter={props.renderAfter} />
-        ) : (
-          <p className="review-note">
-            <button
-              className="small"
-              disabled={loading}
-              onClick={() => {
-                setLoading(true);
-                void props
-                  .load()
-                  .then(setPatch)
-                  .finally(() => setLoading(false));
-              }}
-            >
-              {loading ? "Loading…" : "Load diff"}
-            </button>
-          </p>
-        ))}
+      {file.binary ? (
+        <p className="muted review-note">binary</p>
+      ) : (
+        <p className="review-note">
+          <button
+            className="small"
+            disabled={loading}
+            onClick={() => {
+              setLoading(true);
+              void props
+                .load()
+                .then(setPatch)
+                .finally(() => setLoading(false));
+            }}
+          >
+            {loading ? "Loading…" : "Load diff"}
+          </button>
+        </p>
+      )}
     </section>
+  );
+}
+
+/** The comment box inside the diff. Keeps its own text so typing doesn't re-render the whole diff. */
+function CommentForm(props: { onAdd: (text: string) => void; onCancel: () => void }) {
+  const [text, setText] = useState("");
+  // The gutter button keeps focus through the click that opened this box, so focus it once that settles.
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => input.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <form
+      className="review-inline-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (text.trim()) props.onAdd(text.trim());
+      }}
+    >
+      <textarea
+        ref={input}
+        rows={2}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") props.onCancel();
+        }}
+        placeholder="Comment for the agent…"
+      />
+      <div className="pending-actions">
+        <button type="submit" className="button primary" disabled={!text.trim()}>
+          Add
+        </button>
+        <button type="button" className="link" onClick={props.onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

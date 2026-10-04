@@ -1,3 +1,4 @@
+import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs/react";
 import type { ProjectView, ReviewFile, UpdateStrategy } from "../shared/types";
 import { workspaceFolderOf } from "./derive";
 
@@ -171,4 +172,41 @@ export function diffKey(f: ReviewFile): string {
 /** A generated commit message fills the box only if it is the latest request and the user hasn't typed one. */
 export function acceptSuggestion(o: { current: string; suggestion: string; request: number; latest: number }): string {
   return o.request === o.latest && !o.current.trim() ? o.suggestion : o.current;
+}
+
+/** What a review annotation in the diff shows: a saved comment, or the box for writing one. */
+export type ReviewAnnotation = { kind: "comment"; comment: ReviewComment } | { kind: "draft"; anchor: LineAnchor };
+
+const toSide = (side: "new" | "old") => (side === "old" ? "deletions" : "additions");
+
+/**
+ * The comment anchor for a gutter click or drag in the diff: the line where it ended (deleted lines anchor to
+ * the old side), quoted with up to 2 lines before it from the patch.
+ */
+export function anchorFromRange(patch: string, range: SelectedLineRange): LineAnchor {
+  const side = (range.endSide ?? range.side) === "deletions" ? "old" : "new";
+  const line = range.end;
+  for (const hunk of parsePatch(patch)) {
+    const index = hunk.lines.findIndex((l) =>
+      side === "old" ? l.kind === "del" && l.oldNo === line : l.kind !== "del" && l.newNo === line,
+    );
+    if (index >= 0) return anchorFor(hunk.lines, index);
+  }
+  return { key: `${side}:${line}`, line, side, quote: [] };
+}
+
+/** One file's comments, plus the open comment box, as annotations for `@pierre/diffs`. */
+export function annotationsFor(comments: ReviewComment[], file: string, open: LineAnchor | undefined): DiffLineAnnotation<ReviewAnnotation>[] {
+  const annotations: DiffLineAnnotation<ReviewAnnotation>[] = comments
+    .filter((c) => c.file === file && c.line !== undefined)
+    .map((comment) => ({ side: toSide(comment.side ?? "new"), lineNumber: comment.line!, metadata: { kind: "comment", comment } }));
+  if (open) annotations.push({ side: toSide(open.side), lineNumber: open.line, metadata: { kind: "draft", anchor: open } });
+  return annotations;
+}
+
+/** `@pierre/diffs` parses file patches; a bare hunk (as in some permission requests) gets `---`/`+++` headers. */
+export function ensurePatchHeader(patch: string, name: string): string {
+  const firstHunk = patch.search(/^@@ /m);
+  const head = firstHunk < 0 ? patch : patch.slice(0, firstHunk);
+  return /^--- /m.test(head) ? patch : `--- a/${name}\n+++ b/${name}\n${patch}`;
 }
