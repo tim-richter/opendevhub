@@ -1,3 +1,5 @@
+import type { FormField } from "../../shared/types";
+
 export interface OpencodeEndpoint {
   baseUrl: string;
   password: string;
@@ -15,12 +17,17 @@ export interface RawPermissionRequest {
   id: string;
   sessionID: string;
   action: string;
+  resources?: string[];
+  save?: string[];
+  message?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RawForm {
   id: string;
   sessionID: string;
   title: string;
+  fields?: FormField[];
 }
 
 export interface OpencodeEvent {

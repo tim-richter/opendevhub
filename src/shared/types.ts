@@ -55,6 +55,61 @@ export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
 
 export type SessionStatus = "idle" | "running" | "needs-permission" | "needs-answer";
 
+/** A field of an opencode form, passed through unchanged. `type` stays open so new field types still reach the UI. */
+export interface FormField {
+  key: string;
+  type: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: { key: string; op: "eq" | "neq"; value: unknown }[];
+  default?: unknown;
+  options?: (string | { value: string; label?: string })[];
+  custom?: boolean;
+  format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  url?: string;
+}
+
+export type FormAnswer = Record<string, string | number | boolean | string[]>;
+
+export type PermissionDecision = "once" | "always" | "reject";
+
+export interface PendingPermission {
+  id: string;
+  /** The session that asked (may be a subagent); used in the reply path. */
+  sessionId: string;
+  action: string;
+  resources: string[];
+  /** Patterns "always" would persist. */
+  save?: string[];
+  message?: string;
+  /** A unified diff from the request's metadata (`diff` or `patch`), when it carries one. */
+  diff?: string;
+  /** First time the monitor saw it; for ordering. */
+  createdAt?: number;
+}
+
+export interface PendingForm {
+  id: string;
+  sessionId: string;
+  title: string;
+  fields: FormField[];
+  createdAt?: number;
+}
+
+export interface PendingItems {
+  permissions: PendingPermission[];
+  forms: PendingForm[];
+}
+
 export interface SessionSummary {
   id: string;
   projectId: ProjectId;
@@ -62,6 +117,8 @@ export interface SessionSummary {
   directory: string;
   updatedAt: number;
   status: SessionStatus;
+  /** What the session (or one of its subagents) is waiting on, oldest first. Omitted when nothing is. */
+  pending?: PendingItems;
 }
 
 export interface Preflight {
