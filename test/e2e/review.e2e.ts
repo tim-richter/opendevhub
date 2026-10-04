@@ -14,6 +14,7 @@ import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
+import { Publisher } from "../../src/server/publish";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { StateStore } from "../../src/server/state";
 import { Worktrees } from "../../src/server/worktrees";
@@ -54,6 +55,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: review and local git in a rea
       network,
       worktrees: new Worktrees({ containers, run: spawnRunner }),
       git: new GitOps({ containers }),
+      publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }),
       editors: new EditorLauncher([]),
       clientFor,
       roots: () => [],

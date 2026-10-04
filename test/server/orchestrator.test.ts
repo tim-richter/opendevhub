@@ -111,6 +111,23 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     prompt: vi.fn(async (_sid: string, _text: string, _delivery?: string, _dir?: string) => {}),
     generate: vi.fn(async (_sid: string, _prompt: string, _dir?: string) => "feat: do things"),
   };
+  const publisher = {
+    info: vi.fn(async (_p: Project, _c: { container: string; host?: string }, branch: string | undefined, _remote?: string) => ({
+      ...(branch ? { branch } : {}),
+      remotes: ["origin"],
+      remote: "origin",
+      forge: { kind: "github" as const, webBase: "https://github.com/a/b" },
+      strategies: ["branch" as const],
+      strategy: "branch" as const,
+      pushFrom: "host" as const,
+    })),
+    publish: vi.fn(async (_p: Project, _c: { container: string; host?: string }, _branch: string, req: { strategy: "branch" | "agit" }) => ({
+      strategy: req.strategy,
+      pushedFrom: "host" as const,
+      openUrl: "https://github.com/a/b/compare/main...x",
+      output: [],
+    })),
+  };
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
   const orch = new Orchestrator({
@@ -122,6 +139,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     network,
     worktrees,
     git,
+    publisher,
     editors,
     mkdir,
     clientFor,
@@ -141,7 +159,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher };
 }
 
 function waiting(pending: PendingItems): SessionSummary {
@@ -890,6 +908,45 @@ describe("Orchestrator", () => {
       s.store.updateRuntime(project.id, { worktrees: [{ path: wt, branch: "x" }] });
       return s;
     }
+
+    it("describes publishing for the target, from the host path of a worktree", async () => {
+      const { orch, publisher, store } = await running();
+      store.updateRuntime(project.id, { worktrees: [{ path: wt, branch: "x", hostPath: "/src/demo.worktrees/x" }] });
+      const info = await orch.publishInfo(project.id, wt, "origin");
+      expect(publisher.info).toHaveBeenCalledWith(project, { container: wt, host: "/src/demo.worktrees/x" }, "x", "origin");
+      expect(info.branch).toBe("x");
+      await orch.publishInfo(project.id, "/workspaces/demo");
+      expect(publisher.info).toHaveBeenLastCalledWith(project, { container: "/workspaces/demo", host: "/src/demo" }, "main", undefined);
+    });
+
+    it("publishes the target's branch after validating the request", async () => {
+      const { orch, publisher } = await running();
+      const good = { remote: "origin", base: "main", strategy: "branch", title: " Add x ", description: "d" };
+      const result = await orch.publish(project.id, wt, good);
+      expect(publisher.publish.mock.calls[0][2]).toBe("x");
+      expect(publisher.publish.mock.calls[0][3]).toEqual({ remote: "origin", base: "main", strategy: "branch", title: "Add x", description: "d" });
+      expect(result.openUrl).toContain("/compare/");
+      expect(orch.logLines(project.id).join("\n")).toMatch(/review: publish x/);
+      for (const bad of [
+        { ...good, remote: "--upload-pack=x" },
+        { ...good, remote: "--force" },
+        { ...good, base: "-x" },
+        { ...good, strategy: "force" },
+        { ...good, title: "  " },
+        { ...good, title: "x".repeat(201) },
+      ]) {
+        await expect(orch.publish(project.id, wt, bad)).rejects.toThrow(InvalidRequestError);
+      }
+      await expect(orch.publish(project.id, wt, { ...good, base: "x" })).rejects.toThrow(/not the base itself/);
+    });
+
+    it("suggests a title and description from the latest session", async () => {
+      const { orch, client, store } = await running();
+      expect(await orch.publishSuggestion(project.id, wt)).toEqual({ title: "", description: "" });
+      store.setSessions(project.id, [{ id: "ses_1", projectId: project.id, title: "t", directory: wt, updatedAt: 1, status: "idle" }]);
+      client.generate.mockResolvedValueOnce("Add login\n\nAdds the form.");
+      expect(await orch.publishSuggestion(project.id, wt)).toEqual({ title: "Add login", description: "Adds the form." });
+    });
 
     it("diffs a worktree against its recorded base", async () => {
       const { orch, client, git } = await running();

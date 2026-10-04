@@ -7,6 +7,8 @@ import type {
   PermissionDecision,
   Project,
   ProjectId,
+  PublishInfo,
+  PublishResult,
   ReviewData,
   SessionSummary,
   UpdateResult,
@@ -15,6 +17,7 @@ import type {
 } from "../shared/types";
 import { CommandError, type ContainerInfo, type Containers, type PortConfig } from "./containers";
 import type { EditorLauncher } from "./editors";
+import { splitTitleBody } from "./forge";
 import type { GitOps } from "./git";
 import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
@@ -24,6 +27,7 @@ import { type OpencodeClient, type OpencodeEndpoint, isGone, isInvalidAnswer } f
 import type { OpencodeRuntime } from "./opencode/runtime";
 import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
+import type { Publisher } from "./publish";
 import { type RelayRuntime, generateRelayToken } from "./relay/runtime";
 import type { StateStore } from "./state";
 import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeRoot } from "./worktrees";
@@ -62,6 +66,11 @@ export class AlreadyAnsweredError extends Error {
 
 const COMMIT_PROMPT = "Write a conventional commit message for the uncommitted changes. Reply with the message only.";
 
+const PUBLISH_PROMPT =
+  "Write a pull request title on the first line, then a blank line, then a short description of this branch's changes. Reply with that text only.";
+const STRATEGIES: readonly string[] = ["branch", "agit"];
+const REMOTE_NAME = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+
 const DECISIONS: readonly string[] = ["once", "always", "reject"] satisfies PermissionDecision[];
 
 export type ContainersPort = Pick<
@@ -87,6 +96,8 @@ export interface MonitorHandle {
   reconcile?(): unknown;
 }
 
+export type PublisherPort = Pick<Publisher, "info" | "publish">;
+
 export interface OrchestratorDeps {
   store: StateStore;
   containers: ContainersPort;
@@ -94,6 +105,7 @@ export interface OrchestratorDeps {
   forwarder: ForwarderPort;
   relay: RelayPort;
   worktrees: WorktreesPort;
+  publisher: PublisherPort;
   git: GitPort;
   editors: EditorsPort;
   /** Creates the host worktrees folder before `up` mounts it (defaults to a recursive mkdir). */
@@ -444,6 +456,56 @@ export class Orchestrator {
     });
   }
 
+  /** Where and how publishing would push this checkout. */
+  async publishInfo(id: ProjectId, directory: string, remote?: string): Promise<PublishInfo> {
+    const project = this.requireProject(id);
+    this.checkDirectory(id, directory);
+    if (remote !== undefined && !REMOTE_NAME.test(remote)) throw new InvalidRequestError(`invalid remote "${remote}"`);
+    const branch = await this.deps.git.currentBranch(project, directory);
+    return this.deps.publisher.info(project, this.checkout(project, directory), branch, remote);
+  }
+
+  /** A PR title and description suggested by the target's latest session; empty when there is none or it fails. */
+  async publishSuggestion(id: ProjectId, directory: string): Promise<{ title: string; description: string }> {
+    this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const session = this.latestSession(id, directory);
+    if (!session) return { title: "", description: "" };
+    try {
+      return splitTitleBody(await this.opencodeClient(id).generate(session.id, PUBLISH_PROMPT, directory));
+    } catch {
+      return { title: "", description: "" };
+    }
+  }
+
+  /** Pushes the checkout's branch and opens (or links) its pull request. */
+  async publish(
+    id: ProjectId,
+    directory: string,
+    req: { remote: string; base: string; strategy: string; title: string; description: string },
+  ): Promise<PublishResult> {
+    if (!REMOTE_NAME.test(req.remote)) throw new InvalidRequestError(`invalid remote "${req.remote}"`);
+    const base = validateBranch(req.base);
+    if (!STRATEGIES.includes(req.strategy)) throw new InvalidRequestError(`invalid strategy "${req.strategy}"`);
+    const title = req.title.trim();
+    if (!title || title.length > 200) throw new InvalidRequestError("the title must be 1 to 200 characters");
+    this.checkDirectory(id, directory);
+    return this.withGit(id, async (p) => {
+      const branch = await this.deps.git.currentBranch(p, directory);
+      if (!branch) throw new InvalidRequestError(`${directory} is not on a branch`);
+      if (branch === base) throw new InvalidRequestError(`publish a branch, not the base itself (${base})`);
+      return this.gitAction(id, `publish ${branch} to ${req.remote} (${req.strategy})`, () =>
+        this.deps.publisher.publish(p, this.checkout(p, directory), branch, {
+          remote: req.remote,
+          base,
+          strategy: req.strategy as "branch" | "agit",
+          title,
+          description: req.description,
+        }),
+      );
+    });
+  }
+
   /** Answers a permission request the dashboard listed for this project. */
   async replyPermission(id: ProjectId, requestId: string, reply: { decision: string; message?: string }): Promise<void> {
     if (!DECISIONS.includes(reply.decision)) throw new InvalidRequestError(`invalid decision "${reply.decision}"`);
@@ -727,6 +789,13 @@ export class Orchestrator {
       .sessionsOf(id)
       .filter((s) => s.directory === directory)
       .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  }
+
+  /** The checkout as the container sees it, plus where it lives on this machine when it does. */
+  private checkout(project: Project, directory: string): { container: string; host?: string } {
+    if (directory === this.workspaceFolder(project)) return { container: directory, host: project.path };
+    const hostPath = this.deps.store.runtime(project.id).worktrees?.find((w) => w.path === directory)?.hostPath;
+    return { container: directory, ...(hostPath ? { host: hostPath } : {}) };
   }
 
   /** Runs a review git action and writes its outcome (and git's last lines on failure) to the project log. */

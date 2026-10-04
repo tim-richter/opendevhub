@@ -13,6 +13,7 @@ import { OpencodeClient, basicAuth, isGone, isInvalidAnswer } from "../../src/se
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
+import { Publisher } from "../../src/server/publish";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
@@ -47,7 +48,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const runtime = new OpencodeRuntime({ containers, clientFor });
     // OPENDEVHUB_ROUTE=gateway runs the same test through the gateway container (the macOS path).
     const network = new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) });
-    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), git: new GitOps({ containers }), editors: new EditorLauncher([]), clientFor, roots: () => [], scan: async () => [project] });
+    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), git: new GitOps({ containers }), publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }), editors: new EditorLauncher([]), clientFor, roots: () => [], scan: async () => [project] });
     orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
     await orch.rescan();

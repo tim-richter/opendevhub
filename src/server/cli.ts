@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import open from "open";
-import { configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
+import { FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
 import { Containers } from "./containers";
 import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { createDashboardApp } from "./dashboard-api";
@@ -16,6 +16,7 @@ import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
 import { Orchestrator } from "./orchestrator";
 import { PortForwarder } from "./port-forwarder";
+import { Publisher } from "./publish";
 import { RelayRuntime } from "./relay/runtime";
 import { preflight } from "./preflight";
 import { startServer } from "./server";
@@ -123,6 +124,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       run: spawnRunner,
       relativeLinks: process.env.OPENDEVHUB_RELATIVE_WORKTREES !== "0",
     }),
+    publisher: new Publisher({ containers, run: spawnRunner, forges: new FileForgeStore(dir) }),
     editors,
     clientFor,
     roots: () => config.roots,
