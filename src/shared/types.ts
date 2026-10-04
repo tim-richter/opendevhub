@@ -118,6 +118,38 @@ export interface UpdateResult {
   conflicts?: string[];
 }
 
+export interface ReviewBase {
+  name: string;
+  source: "request" | "config" | "opencode" | "default";
+}
+
+export interface ReviewFile {
+  file: string;
+  status: "added" | "deleted" | "modified";
+  additions: number;
+  deletions: number;
+  /** Missing when the response ran out of patch budget (load it with `?file=`) or the file is binary. */
+  patch?: string;
+  binary?: boolean;
+}
+
+export interface ReviewData {
+  directory: string;
+  /** Undefined on a detached HEAD. */
+  branch?: string;
+  base?: ReviewBase;
+  mode: "working" | "branch";
+  ahead: number;
+  behind: number;
+  /** Uncommitted changes in the target. */
+  dirty: boolean;
+  pushed: boolean;
+  /** The main checkout, which "Merge into base" needs clean and on the base. */
+  workspace: { branch?: string; clean: boolean };
+  files: ReviewFile[];
+  truncated?: boolean;
+}
+
 export interface SessionSummary {
   id: string;
   projectId: ProjectId;
