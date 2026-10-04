@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { CommandPalette } from "../components/CommandPalette";
 import { Icon } from "../components/Icon";
+import { Logo } from "../components/Logo";
 import { Count, StatusDot, TONE_LABEL } from "../components/Status";
 import { useDash } from "../DashboardContext";
 import { attentionCounts, matches, projectCounts, projectTone } from "../derive";
@@ -46,7 +47,7 @@ export function Shell() {
     <div className={`shell${drawer ? " drawer-open" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
-          <span className="logo" aria-hidden="true">◆</span> opendevhub
+          <Logo /> opendevhub
           <button className="icon-button drawer-close" aria-label="Close menu" onClick={() => setDrawer(false)}>
             <Icon name="close" />
           </button>
@@ -113,7 +114,9 @@ export function Shell() {
           <button className="icon-button" aria-label="Open menu" onClick={() => setDrawer(true)}>
             <Icon name="menu" />
           </button>
-          <span className="brand-small">opendevhub</span>
+          <span className="brand-small">
+            <Logo size={14} /> opendevhub
+          </span>
           {counts.attention > 0 && <Count n={counts.attention} tone="attention" />}
           <button className="icon-button" aria-label="Search" onClick={() => setPalette(true)}>
             <Icon name="search" />

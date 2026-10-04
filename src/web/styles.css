@@ -116,7 +116,7 @@ kbd { font: 11px var(--mono); padding: 0.05rem 0.35rem; border: 1px solid var(--
   background: var(--sidebar); border-right: 1px solid var(--border); padding: 0.9rem 0.6rem;
 }
 .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 650; padding: 0.1rem 0.5rem 0.6rem; letter-spacing: -0.01em; }
-.logo { color: var(--accent); }
+.logo { color: var(--accent); flex: none; opacity: 0.9; }
 .drawer-close { margin-left: auto; display: none; }
 .search-trigger { justify-content: flex-start; color: var(--muted); margin: 0 0 0.5rem; background: var(--surface); }
 .search-trigger span { flex: 1; text-align: left; }
@@ -374,7 +374,7 @@ kbd { font: 11px var(--mono); padding: 0.05rem 0.35rem; border: 1px solid var(--
   .drawer-open .scrim { display: block; position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, 0.35); }
   .drawer-close { display: inline-flex; }
   .mobile-bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); background: var(--sidebar); position: sticky; top: 0; z-index: 10; }
-  .mobile-bar .brand-small { font-weight: 650; flex: 1; }
+  .mobile-bar .brand-small { font-weight: 650; flex: 1; display: inline-flex; align-items: center; gap: 0.4rem; }
   .content { padding: 1rem 1rem 3rem; }
   .banners { padding: 0 1rem; }
   .row, .with-project .row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.3rem 0.6rem; }
