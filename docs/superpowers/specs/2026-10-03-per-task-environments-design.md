@@ -2,6 +2,7 @@
 
 Date: 2026-10-03
 Status: Draft for review
+Depends on: nothing
 
 ## Problem
 
@@ -295,14 +296,19 @@ project's setting.
 | `hosts`/`proxy` | `<envId>.localhost` |
 | `web` | Environment badges and menus on worktree and task rows; "Preparing environment image…" progress; Ports grouped by environment; the outdated badge |
 
-## Interaction with the respond / tasks / review spec
+## Interaction with other specs
 
-- A task's `where: "worktree"` gains `environment: "shared" | "isolated"`. Isolated variants in
-  a best-of-N task each get their own container, which is exactly what comparing models needs:
-  each variant can run the app and its tests independently.
-- Review, comments and Commit/Update run against the task environment's opencode and container.
-  **Merge into base** runs in the main environment, because it needs the main checkout. Publish
-  is unchanged (it runs on the host).
+None of these depend on per-task environments, and per-task environments don't depend on them.
+- [Tasks](2026-10-03-tasks-design.md): a task's `where: "worktree"` gains
+  `environment: "shared" | "isolated"`. In a multi-model task, isolated variants each get their
+  own container, which is exactly what comparing models needs: each variant can run the app and
+  its tests independently.
+- [Review](2026-10-03-review-design.md): the diff, comments, Commit and Update run against the
+  task environment's opencode and container. **Merge into base** runs in the main environment,
+  because it needs the main checkout.
+- [Publish](2026-10-03-publish-design.md): unchanged (it runs on the host).
+- [Respond inline](2026-10-03-respond-inline-design.md): unchanged; pending items carry `envId`
+  and are routed to that environment's opencode.
 
 ## Delivery plan
 
