@@ -15,6 +15,7 @@ import { type DiffLineAnnotation, type SelectedLineRange, useStableCallback } fr
 import { ChangedFilesTree } from "../components/LazyChangedFilesTree";
 import { PatchView } from "../components/LazyPatchView";
 import { Icon } from "../components/Icon";
+import { PublishPanel } from "../components/PublishPanel";
 import { workspaceFolderOf } from "../derive";
 import {
   acceptSuggestion,
@@ -308,6 +309,8 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
           <input type="checkbox" checked={ffOnly} onChange={(e) => setFfOnly(e.target.checked)} /> fast-forward only
         </label>
       </section>
+
+      {data && <PublishPanel projectId={projectId} directory={directory} data={data} baseName={baseName} onPublished={load} />}
 
       {commitOpen && (
         <form className="review-commit" onSubmit={commit}>
