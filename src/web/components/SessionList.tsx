@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { PendingStack } from "./PendingCards";
 import { targetOf } from "../review";
 import { SessionBadge } from "./Status";
+import { taskChip } from "../tasks";
 
 export function SessionRow(props: {
   session: SessionSummary;
@@ -18,6 +19,7 @@ export function SessionRow(props: {
   highlighted?: boolean;
   /** Link to this session's checkout in the Review tab. */
   reviewTo?: string;
+  task?: { label: string; title: string; to?: string; model?: string };
   now: number;
 }) {
   const { session, openUrl, project, worktree, highlighted, now } = props;
@@ -25,6 +27,17 @@ export function SessionRow(props: {
     <li className={`row session status-row-${session.status}${highlighted ? " highlight" : ""}`} id={`session-${session.id}`}>
       <SessionBadge status={session.status} />
       <span className="session-title" title={worktree ? `${session.title} — worktree ${worktree}` : session.title}>
+        {props.task &&
+          (props.task.to ? (
+            <Link className="chip chip-task" to={props.task.to} title={props.task.title}>
+              {props.task.label}
+            </Link>
+          ) : (
+            <span className="chip chip-task" title={props.task.title}>
+              {props.task.label}
+            </span>
+          ))}
+        {props.task?.model && <span className="chip">{props.task.model}</span>}
         {worktree && (
           <span className="chip">
             <Icon name="branch" size={11} /> {worktree}
@@ -71,6 +84,7 @@ export function SessionList(props: { entries: SessionEntry[]; showProject?: bool
               const t = targetOf(view, session.directory);
               return t === undefined ? undefined : `/p/${encodeURIComponent(view.project.id)}/review${t ? `/${encodeURIComponent(t)}` : ""}`;
             })()}
+            task={taskChip(view, session)}
             now={now}
           />
           {session.pending && (

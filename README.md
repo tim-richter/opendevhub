@@ -61,6 +61,14 @@ To tell opendevhub about a host, or an ssh alias it can't probe, add it to `conf
 
 `kind` is one of `github`, `gitlab`, `forgejo`, `gitea`, `bitbucket` or `unknown`; `web` is the site's origin, needed when the remote host is an ssh alias (`work:team/app.git`).
 
+## Tasks
+
+**New task** (on the Overview and project pages, in `⌘K`, or press `n`) starts agent work from a prompt, without opening the opencode tab. By default it creates a worktree on a branch named after the prompt's first line (`-2`, `-3`… when taken), starts a session there and sends the prompt. **Main checkout** runs it in the project folder instead.
+
+**Compare with another model** runs the same prompt on up to four models, each in its own worktree (`<branch>-<model>`). The task page shows each variant's status, cost, tokens and changes, with a Review link. **Pick this one** hides the other variants and can remove their worktrees and branches (after a confirmation that lists uncommitted changes).
+
+A task is stored in its sessions' opencode metadata (`metadata.opendevhub`), so it survives restarts of opendevhub and of the container.
+
 ## Worktrees
 
 When opendevhub starts a container it bind-mounts `<project>.worktrees` (created next to the project) at `<workspaceFolder>.worktrees` in the container. The project's **Worktrees** tab creates a branch and worktree there with `git worktree add` inside the container, and can start an opencode session in it straight away.

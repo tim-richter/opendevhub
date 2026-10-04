@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { sessionUrl } from "../../shared/urls";
 import { useDash } from "../DashboardContext";
 import { allSessions, matches, projectTone } from "../derive";
+import { projectIdFromPath } from "../tasks";
 import { Icon } from "./Icon";
 import { SESSION_LABEL, StatusDot } from "./Status";
 
@@ -18,8 +19,9 @@ interface Item {
 const LIMIT = 40;
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { snapshot, rescan } = useDash();
+  const { snapshot, rescan, newTask } = useDash();
   const navigate = useNavigate();
+  const location = useLocation();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -38,6 +40,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     const list: Item[] = [
       { key: "nav-overview", group: "Go to", label: "Overview", run: go("/") },
       { key: "nav-sessions", group: "Go to", label: "All sessions", run: go("/sessions") },
+      { key: "act-new-task", group: "Actions", label: "New task", hint: "n", run: () => newTask(projectIdFromPath(location.pathname)) },
       { key: "act-rescan", group: "Actions", label: "Rescan projects", run: rescan },
     ];
     for (const view of snapshot.projects) {
@@ -61,7 +64,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       });
     }
     return list;
-  }, [snapshot, navigate, rescan]);
+  }, [snapshot, navigate, rescan, newTask, location.pathname]);
 
   const filtered = useMemo(() => items.filter((i) => matches(query, i.label, i.hint)).slice(0, LIMIT), [items, query]);
 

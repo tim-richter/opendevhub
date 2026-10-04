@@ -24,7 +24,7 @@ const IDLE_LIMIT = 8;
 
 export function ProjectPage() {
   const { projectId } = useParams();
-  const { snapshot } = useDash();
+  const { snapshot, newTask } = useDash();
   const view = snapshot?.projects.find((v) => v.project.id === projectId);
   if (!view) return <NotFound what="Project" />;
 
@@ -55,6 +55,9 @@ export function ProjectPage() {
           </div>
         </div>
         <div className="head-actions">
+          <button onClick={() => newTask(project.id)} title="New task (n)">
+            <Icon name="plus" size={14} /> New task
+          </button>
           <StartStopButton view={view} />
           <OpenButton view={view} />
           <OpenInMenu view={view} directory={workspaceFolderOf(view)} hostPath={project.path} />
@@ -88,6 +91,7 @@ const useView = () => useOutletContext<ProjectView>();
 
 export function ProjectSessions() {
   const view = useView();
+  const { newTask } = useDash();
   const [params] = useSearchParams();
   const highlight = params.get("session") ?? undefined;
   const [query, setQuery] = useState("");
@@ -115,8 +119,13 @@ export function ProjectSessions() {
         {canOpen ? (
           <>
             <h2>No sessions yet</h2>
-            <p className="muted">Open opencode to start one.</p>
-            <OpenButton view={view} />
+            <p className="muted">Start a task here, or open opencode.</p>
+            <div className="head-actions">
+              <button className="button primary" onClick={() => newTask(view.project.id)}>
+                <Icon name="plus" size={14} /> New task
+              </button>
+              <OpenButton view={view} />
+            </div>
           </>
         ) : (
           <>

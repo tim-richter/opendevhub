@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { ProjectView } from "../../shared/types";
+import { Icon } from "../components/Icon";
 import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL } from "../components/Status";
@@ -11,7 +12,7 @@ type Filter = "all" | "running" | "stopped";
 const ACTIVE_LIMIT = 6;
 
 export function Overview() {
-  const { snapshot } = useDash();
+  const { snapshot, newTask } = useDash();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   if (!snapshot) return null;
@@ -34,6 +35,11 @@ export function Overview() {
         <div>
           <h1>Overview</h1>
           <p className="muted">{snapshot.roots.join(" · ") || "No roots configured"}</p>
+        </div>
+        <div className="head-actions">
+          <button className="button primary" onClick={() => newTask()} title="New task (n)">
+            <Icon name="plus" size={14} /> New task
+          </button>
         </div>
       </header>
 

@@ -398,3 +398,25 @@ kbd { font: 11px var(--mono); padding: 0.05rem 0.35rem; border: 1px solid var(--
   .wt-path { max-width: 12rem; }
   .wt-form button[type="submit"] { margin-left: 0; }
 }
+
+/* ---------- dialogs ---------- */
+.dialog { width: 100%; max-width: 40rem; max-height: 80vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; }
+.dialog-head h2 { margin: 0; font-size: 16px; }
+.dialog-actions { display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end; }
+.dialog-actions .muted { margin-right: auto; font-size: 12.5px; }
+.field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 13px; }
+.field > span { color: var(--muted); }
+.field textarea, .field input { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.field textarea { resize: vertical; min-height: 7rem; }
+
+/* ---------- tasks ---------- */
+.task-start { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.task-where { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; border: none; padding: 0; margin: 0; font-size: 13px; }
+.task-where legend { float: left; margin-right: 0.25rem; color: var(--muted); }
+.task-variants { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
+.task-variant { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.task-options summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.task-options[open] { display: flex; flex-direction: column; gap: 0.5rem; }
+.task-preview { margin: 0; font-size: 12.5px; }
+.chip-task { color: var(--accent); text-decoration: none; }

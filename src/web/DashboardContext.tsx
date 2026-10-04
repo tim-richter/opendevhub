@@ -21,6 +21,10 @@ interface DashboardContextValue {
   dismissError: () => void;
   /** Shows a failed request in the error banner. */
   report: (err: unknown) => void;
+  /** Opens the New task dialog, with a project preselected when given. */
+  newTask: (projectId?: string) => void;
+  newTaskFor: { projectId?: string } | undefined;
+  closeNewTask: () => void;
   permission: Permission;
   requestPermission: () => void;
 }
@@ -32,6 +36,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string>();
   const [scanning, setScanning] = useState(false);
+  const [newTaskFor, setNewTaskFor] = useState<{ projectId?: string }>();
   const [permission, setPermission] = useState<Permission>(() =>
     typeof Notification === "undefined" ? "unsupported" : Notification.permission,
   );
@@ -58,6 +63,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       .catch(fail)
       .finally(() => setScanning(false));
   }, [fail]);
+  const newTask = useCallback((projectId?: string) => setNewTaskFor({ projectId }), []);
   const loadLogs = useCallback((projectId: string) => void fetchLogs(projectId).catch(fail), [fetchLogs, fail]);
 
   const value = useMemo<DashboardContextValue>(
@@ -73,10 +79,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       error,
       dismissError: () => setError(undefined),
       report: fail,
+      newTask,
+      newTaskFor,
+      closeNewTask: () => setNewTaskFor(undefined),
       permission,
       requestPermission: () => void Notification.requestPermission().then(setPermission),
     }),
-    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, fail],
+    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, fail, newTask, newTaskFor],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

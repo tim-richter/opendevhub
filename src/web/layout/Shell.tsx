@@ -3,14 +3,16 @@ import { NavLink, Outlet, useLocation } from "react-router";
 import { CommandPalette } from "../components/CommandPalette";
 import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
+import { NewTaskDialog } from "../components/NewTaskDialog";
 import { Count, StatusDot, TONE_LABEL } from "../components/Status";
 import { useDash } from "../DashboardContext";
 import { attentionCounts, matches, projectCounts, projectTone } from "../derive";
+import { opensNewTask, projectIdFromPath } from "../tasks";
 
 const FILTER_THRESHOLD = 8;
 
 export function Shell() {
-  const { snapshot, connected, error, dismissError, rescan, scanning, permission, requestPermission } = useDash();
+  const { snapshot, connected, error, dismissError, rescan, scanning, permission, requestPermission, newTask, newTaskFor } = useDash();
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
   const [filter, setFilter] = useState("");
@@ -22,11 +24,16 @@ export function Shell() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette((p) => !p);
+        return;
+      }
+      if (!palette && !newTaskFor && opensNewTask(e)) {
+        e.preventDefault();
+        newTask(projectIdFromPath(location.pathname));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [palette, newTaskFor, newTask, location.pathname]);
 
   if (!snapshot) {
     return (
@@ -146,6 +153,7 @@ export function Shell() {
       </div>
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <NewTaskDialog />
     </div>
   );
 }
