@@ -745,7 +745,7 @@ describe("Orchestrator", () => {
       worktrees.list.mockResolvedValue([known]);
       const res = await orch.createWorktree(project.id, { branch: " feature/x ", base: " ", startSession: true });
       expect(worktrees.add.mock.calls[0][1]).toMatchObject({ branch: "feature/x", base: undefined, workspaceFolder: "/workspaces/demo" });
-      expect(client.createSession).toHaveBeenCalledWith(res.worktree.path, "feature/x");
+      expect(client.createSession).toHaveBeenCalledWith(res.worktree.path, { title: "feature/x" });
       expect(res.sessionId).toBe("ses_new");
       expect(store.runtime(project.id).worktrees).toEqual([known]);
     });

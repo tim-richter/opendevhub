@@ -37,6 +37,14 @@ export interface FakeState {
   prompts: Array<{ sessionId: string; body: unknown; directory?: string }>;
   generated?: string;
   generateFails?: boolean;
+  /** `GET /api/model` data, in opencode's Model.Info shape (may include settings with an apiKey). */
+  models?: Array<Record<string, unknown>>;
+  defaultModel?: Record<string, unknown> | null;
+  agents?: Array<Record<string, unknown>>;
+  /** Model ids `POST /api/session` rejects with 400 ModelNotFoundError. */
+  rejectModels?: string[];
+  /** Every `PATCH /api/session/:id` body. */
+  patches: Array<{ sessionId: string; body: unknown }>;
 }
 
 export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
@@ -52,6 +60,7 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     vcs: {},
     diffQueries: [],
     prompts: [],
+    patches: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -114,12 +123,19 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
           let raw = "";
           req.on("data", (c: Buffer) => (raw += c.toString("utf8")));
           req.on("end", () => {
-            const body = JSON.parse(raw) as { title?: string; location: { directory: string } };
+            const body = JSON.parse(raw) as Pick<RawSession, "title" | "location" | "model" | "agent" | "metadata">;
+            if (body.model && state.rejectModels?.includes(body.model.id)) {
+              return fail(400, "ModelNotFoundError", `unknown model ${body.model.id}`);
+            }
             const created: RawSession = {
               id: `ses_created${state.sessions.length}`,
               title: body.title,
               time: { created: 2, updated: 2 },
               location: body.location,
+              cost: 0,
+              ...(body.model ? { model: body.model } : {}),
+              ...(body.agent ? { agent: body.agent } : {}),
+              ...(body.metadata ? { metadata: body.metadata } : {}),
             };
             state.sessions.unshift(created);
             json({ data: created });
@@ -148,6 +164,12 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
         state.diffQueries.push({ directory: dir, mode, ...(base ? { base } : {}) });
         return json({ location: { directory: dir }, data: state.vcs[dir]?.diff?.[mode] ?? [] });
       }
+      case "/api/model":
+        return json({ location: { directory: dir }, data: state.models ?? [] });
+      case "/api/model/default":
+        return json({ location: { directory: dir }, data: state.defaultModel ?? null });
+      case "/api/agent":
+        return json({ location: { directory: dir }, data: state.agents ?? [] });
       case "/api/event":
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
         res.write(`data: ${JSON.stringify({ type: "server.connected", data: {} })}\n\n`);
@@ -156,6 +178,24 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
         req.on("close", () => sseClients.delete(res));
         return;
       default: {
+        const patch = url.pathname.match(/^\/api\/session\/([^/]+)$/);
+        if (patch && req.method === "PATCH") {
+          let raw = "";
+          req.on("data", (c: Buffer) => (raw += c.toString("utf8")));
+          req.on("end", () => {
+            const sessionId = decodeURIComponent(patch[1]);
+            const body = JSON.parse(raw) as { title?: string; metadata?: Record<string, unknown> };
+            const session = state.sessions.find((s) => s.id === sessionId);
+            if (!session) return fail(404, "SessionNotFoundError");
+            state.patches.push({ sessionId, body });
+            if (body.title !== undefined) session.title = body.title;
+            // opencode 2.0.22 replaces metadata as a whole; it does not merge.
+            if (body.metadata !== undefined) session.metadata = body.metadata;
+            res.writeHead(204);
+            res.end();
+          });
+          return;
+        }
         const sessionCall = url.pathname.match(/^\/api\/session\/([^/]+)\/(prompt|generate)$/);
         if (sessionCall && req.method === "POST") {
           let raw = "";

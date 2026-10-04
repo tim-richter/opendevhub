@@ -1,4 +1,4 @@
-import type { FormAnswer, FormField, PermissionDecision } from "../../shared/types";
+import type { FormAnswer, FormField, ModelRef, PermissionDecision } from "../../shared/types";
 
 export interface OpencodeEndpoint {
   baseUrl: string;
@@ -11,6 +11,41 @@ export interface RawSession {
   parentID?: string;
   time: { created: number; updated: number; archived?: number };
   location: { directory: string };
+  metadata?: Record<string, unknown>;
+  model?: ModelRef;
+  agent?: string;
+  /** USD. */
+  cost?: number;
+  tokens?: { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
+  outcome?: "succeeded" | "failed" | "interrupted";
+}
+
+/**
+ * The fields of opencode's Model.Info that opendevhub reads. The rest (`settings`, `headers`, `body`) can hold
+ * API keys and must never be passed on.
+ */
+export interface RawModel {
+  id: string;
+  providerID: string;
+  name: string;
+  enabled?: boolean;
+  status?: string;
+  variants?: { id: string }[];
+}
+
+export interface RawAgent {
+  id: string;
+  name: string;
+  mode: "primary" | "subagent" | "all";
+  hidden?: boolean;
+  description?: string;
+}
+
+export interface NewSession {
+  title?: string;
+  model?: ModelRef;
+  agent?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RawPermissionRequest {
@@ -105,27 +140,22 @@ export class OpencodeClient {
   }
 
   /** Starts a session whose working directory is `directory` (the workspace or one of its worktrees). */
-  async createSession(directory: string, title?: string): Promise<RawSession> {
-    const path = "/api/session";
-    const res = await this.fetchImpl(this.ep.baseUrl + path, {
-      method: "POST",
-      headers: {
-        authorization: basicAuth(this.ep.password),
-        accept: "application/json",
-        "content-type": "application/json",
-        "x-opencode-directory": directory,
-      },
-      body: JSON.stringify({ ...(title ? { title } : {}), location: { directory } }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new OpencodeHttpError(res.status, path);
-    const body = (await res.json()) as { data?: RawSession } & Partial<RawSession>;
+  async createSession(directory: string, opts: NewSession = {}): Promise<RawSession> {
+    const body = {
+      ...(opts.title ? { title: opts.title } : {}),
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.agent ? { agent: opts.agent } : {}),
+      ...(opts.metadata ? { metadata: opts.metadata } : {}),
+      location: { directory },
+    };
+    const res = await this.request("POST", "/api/session", body, directory);
+    const created = (await res.json()) as { data?: RawSession } & Partial<RawSession>;
     // Accept both the `{ data }` envelope used by the list routes and a bare session.
-    return (body.data ?? body) as RawSession;
+    return (created.data ?? created) as RawSession;
   }
 
   private async request(
-    method: "POST" | "DELETE",
+    method: "POST" | "DELETE" | "PATCH",
     path: string,
     body?: unknown,
     directory?: string,
@@ -150,7 +180,7 @@ export class OpencodeClient {
     );
   }
 
-  private async send(method: "POST" | "DELETE", path: string, body?: unknown, directory?: string): Promise<void> {
+  private async send(method: "POST" | "DELETE" | "PATCH", path: string, body?: unknown, directory?: string): Promise<void> {
     const res = await this.request(method, path, body, directory);
     await res.text().catch(() => "");
   }
@@ -211,6 +241,22 @@ export class OpencodeClient {
     return ((await res.json()) as { data: { text: string } }).data.text;
   }
 
+  async models(directory: string): Promise<RawModel[]> {
+    return (await this.get<{ data: RawModel[] }>("/api/model", directory)).data;
+  }
+
+  async defaultModel(directory: string): Promise<RawModel | undefined> {
+    return (await this.get<{ data: RawModel | null }>("/api/model/default", directory)).data ?? undefined;
+  }
+
+  async agents(directory: string): Promise<RawAgent[]> {
+    return (await this.get<{ data: RawAgent[] }>("/api/agent", directory)).data;
+  }
+
+  /** opencode replaces `metadata` as a whole, so pass every key the session should keep. */
+  updateSession(id: string, patch: { title?: string; metadata?: Record<string, unknown> }, directory?: string): Promise<void> {
+    return this.send("PATCH", `/api/session/${encodeURIComponent(id)}`, patch, directory);
+  }
 
   info(): Promise<{ version: string }> {
     return this.get("/api/info");

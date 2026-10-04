@@ -43,10 +43,43 @@ describe("OpencodeClient", () => {
   });
 
   it("creates a session in a given directory", async () => {
-    const created = await client.createSession("/workspaces/demo.worktrees/x", "feature/x");
+    const created = await client.createSession("/workspaces/demo.worktrees/x", { title: "feature/x" });
     expect(created).toMatchObject({ title: "feature/x", location: { directory: "/workspaces/demo.worktrees/x" } });
     expect(fake.state.sessions[0].id).toBe(created.id);
     expect(fake.requests).toContain("POST /api/session");
+  });
+
+  it("creates a session with a model, agent and metadata", async () => {
+    const meta = { opendevhub: { task: "tsk_1", variant: 1, of: 1, title: "T" } };
+    const created = await client.createSession("/w/x", { title: "T", model: { id: "m", providerID: "p" }, agent: "build", metadata: meta });
+    expect(created).toMatchObject({ title: "T", model: { id: "m", providerID: "p" }, agent: "build", metadata: meta, location: { directory: "/w/x" } });
+  });
+
+  it("surfaces opencode's error when a session can't be created", async () => {
+    fake.state.rejectModels = ["nope"];
+    await expect(client.createSession("/w", { model: { id: "nope", providerID: "p" } })).rejects.toMatchObject({
+      status: 400,
+      tag: "ModelNotFoundError",
+    });
+  });
+
+  it("lists models, the default model and agents for a directory", async () => {
+    fake.state.models = [{ id: "m1", providerID: "p", name: "M1", enabled: true, variants: [], settings: { apiKey: "k" } }];
+    fake.state.defaultModel = fake.state.models[0];
+    fake.state.agents = [{ id: "build", name: "Build", mode: "primary", hidden: false }];
+    expect((await client.models("/w")).map((m) => m.id)).toEqual(["m1"]);
+    expect((await client.defaultModel("/w"))?.id).toBe("m1");
+    expect((await client.agents("/w")).map((a) => a.id)).toEqual(["build"]);
+    fake.state.defaultModel = null;
+    expect(await client.defaultModel("/w")).toBeUndefined();
+    expect(fake.requests).toContain("GET /api/model/default");
+  });
+
+  it("patches a session's metadata, which opencode replaces as a whole", async () => {
+    fake.state.sessions = [rawSession("ses_1", { metadata: { keep: 1 } })];
+    await client.updateSession("ses_1", { metadata: { opendevhub: { discarded: true } } }, "/w");
+    expect(fake.state.patches).toEqual([{ sessionId: "ses_1", body: { metadata: { opendevhub: { discarded: true } } } }]);
+    expect(fake.state.sessions[0].metadata).toEqual({ opendevhub: { discarded: true } });
   });
 
   it("streams parsed SSE events, skipping comments, until aborted", async () => {

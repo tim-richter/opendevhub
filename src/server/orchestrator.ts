@@ -340,7 +340,7 @@ export class Orchestrator {
     this.requireProject(id);
     this.checkDirectory(id, directory);
     const client = this.opencodeClient(id);
-    const session = await client.createSession(directory, title);
+    const session = await client.createSession(directory, { title });
     if (prompt?.trim()) await client.prompt(session.id, prompt, undefined, directory);
     this.monitors.get(id)?.reconcile?.();
     return session.id;
