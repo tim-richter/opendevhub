@@ -73,10 +73,14 @@ function Dialog({ initialProject, onClose }: { initialProject?: string; onClose:
   }, [projectId, canOpen]);
 
   const variants: TaskVariantSpec[] = shownRows.map((r) => {
-    const model = modelFromKey(r.model);
+    // Only what the current project's lists offer, so what is sent matches what is shown.
+    const chosen = models?.models.find((m) => modelKey(m) === r.model);
+    const model = chosen ? modelFromKey(r.model) : undefined;
+    const variant = chosen?.variants.includes(r.variant) ? r.variant : "";
+    const agent = models?.agents.some((a) => a.id === r.agent) ? r.agent : "";
     return {
-      ...(model ? { model: { ...model, ...(r.variant ? { variant: r.variant } : {}) } } : {}),
-      ...(r.agent ? { agent: r.agent } : {}),
+      ...(model ? { model: { ...model, ...(variant ? { variant } : {}) } } : {}),
+      ...(agent ? { agent } : {}),
     };
   });
   const shownTitle = title.trim() || deriveTitle(prompt);
@@ -120,7 +124,7 @@ function Dialog({ initialProject, onClose }: { initialProject?: string; onClose:
   };
 
   return (
-    <div className="palette-backdrop" onMouseDown={onClose}>
+    <div className="palette-backdrop" onMouseDown={() => !busy && onClose()}>
       <form
         className="dialog task-dialog"
         role="dialog"
@@ -128,19 +132,22 @@ function Dialog({ initialProject, onClose }: { initialProject?: string; onClose:
         onMouseDown={(e) => e.stopPropagation()}
         onSubmit={submit}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
+          if (e.key === "Escape" && !busy) onClose();
         }}
       >
         <div className="dialog-head">
           <h2>New task</h2>
-          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-button" aria-label="Close" disabled={busy} onClick={onClose}>
             <Icon name="close" size={14} />
           </button>
         </div>
 
         <label className="field">
           <span>Project</span>
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+          <select value={projectId} onChange={(e) => {
+              setProjectId(e.target.value);
+              setRows([EMPTY_ROW]);
+            }}>
             {projects.map((v) => (
               <option key={v.project.id} value={v.project.id}>
                 {v.project.name}
@@ -279,7 +286,7 @@ function Dialog({ initialProject, onClose }: { initialProject?: string; onClose:
 
         <div className="dialog-actions">
           <span className="muted">{isMac ? "⌘" : "Ctrl"}+Enter to start</span>
-          <button type="button" onClick={onClose}>
+          <button type="button" disabled={busy} onClick={onClose}>
             Cancel
           </button>
           <button type="submit" className="button primary" disabled={!view || !prompt.trim() || !canOpen || busy}>
