@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   commitChanges,
+  createTask,
   dismissForm,
+  fetchModels,
   fetchPublishInfo,
   fetchReview,
   mergeIntoBase,
+  pickVariant,
   publishChanges,
   removeWorktree,
   replyForm,
@@ -23,6 +26,23 @@ function stubFetch(status: number, body: unknown) {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("task API", () => {
+  it("starts a task and picks a variant", async () => {
+    const fetchMock = stubFetch(200, { task: "tsk_1", variants: [] });
+    await createTask("demo-1", { prompt: "Fix", where: "worktree", variants: [{}] });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/demo-1/tasks");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ prompt: "Fix", where: "worktree", variants: [{}] });
+    await pickVariant("demo-1", "tsk/1", "ses_1", true);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/demo-1/tasks/tsk%2F1/pick");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ sessionId: "ses_1", removeWorktrees: true });
+  });
+
+  it("loads models and surfaces the server's error", async () => {
+    stubFetch(412, { error: "opencode is not running — start the project first" });
+    await expect(fetchModels("demo-1")).rejects.toThrow("opencode is not running");
+  });
+});
 
 describe("reply API", () => {
   it("posts a permission decision", async () => {

@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, FormAnswer, LogEvent, PermissionDecision, PublishInfo, PublishRequest, PublishResult, ReviewData, UpdateResult, Worktree } from "../shared/types";
+import type { DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -24,9 +24,23 @@ async function postJson<T>(projectId: string, route: string, body: unknown, what
 
 export function createWorktree(
   projectId: string,
-  req: { branch: string; base?: string; startSession?: boolean },
+  req: { branch: string; base?: string; startSession?: boolean; prompt?: string },
 ): Promise<{ worktree: Worktree; sessionId?: string }> {
   return postJson(projectId, "worktrees", req, "create worktree");
+}
+
+export async function fetchModels(projectId: string): Promise<ModelsInfo> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/models`);
+  if (!res.ok) throw await failure(res, "models");
+  return (await res.json()) as ModelsInfo;
+}
+
+export function createTask(projectId: string, req: TaskRequest): Promise<TaskResult> {
+  return postJson(projectId, "tasks", req, "start task");
+}
+
+export function pickVariant(projectId: string, task: string, sessionId: string, removeWorktrees: boolean): Promise<PickResult> {
+  return postJson(projectId, `tasks/${encodeURIComponent(task)}/pick`, { sessionId, removeWorktrees }, "pick variant");
 }
 
 export function removeWorktree(projectId: string, path: string, force: boolean, deleteBranch = false): Promise<unknown> {
