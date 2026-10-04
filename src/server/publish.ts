@@ -1,6 +1,21 @@
-import type { ForgeKind } from "../shared/types";
+import type { ForgeKind, Project, PublishInfo, PublishRequest, PublishResult } from "../shared/types";
 import type { ForgeStore } from "./config";
-import { type Forge, type RemoteInfo, resolveForge } from "./forge";
+import { CommandError, type Containers, tailLines } from "./containers";
+import type { RunResult, Runner } from "./exec";
+import {
+  agitPushArgs,
+  branchPushArgs,
+  compareUrl,
+  defaultStrategy,
+  type Forge,
+  isPrUrl,
+  parseRemote,
+  pushUrls,
+  type RemoteInfo,
+  resolveForge,
+  strategiesFor,
+} from "./forge";
+import { InvalidRequestError } from "./worktrees";
 
 const PROBE_TIMEOUT_MS = 3000;
 
@@ -35,4 +50,117 @@ export async function detectForge(remote: RemoteInfo | undefined, store: ForgeSt
   const kind = await probeForge(remote.web, fetchImpl);
   store.remember(remote.host, { kind });
   return resolveForge(remote, store.all()) ?? { kind: "unknown" };
+}
+
+const GIT_TIMEOUT_MS = 30_000;
+const PUSH_TIMEOUT_MS = 120_000;
+/** A push must fail on a missing credential, never wait for someone to type one. */
+const NO_PROMPT = { GIT_TERMINAL_PROMPT: "0" };
+
+/** One checkout as the container sees it and, when it's on this machine too, as the host sees it. */
+export interface Checkout {
+  container: string;
+  host?: string;
+}
+
+export interface PublisherDeps {
+  containers: Pick<Containers, "exec">;
+  run: Runner;
+  forges: ForgeStore;
+  fetchImpl?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+}
+
+type Location = { where: "host" | "container"; dir: string };
+
+export class Publisher {
+  constructor(private readonly deps: PublisherDeps) {}
+
+  /** Push from the host when the checkout works there, so your own ssh-agent and credential helpers apply. */
+  async location(p: Project, checkout: Checkout): Promise<Location> {
+    const forced = (this.deps.env ?? process.env).OPENDEVHUB_PUSH;
+    if (forced === "container" || !checkout.host) {
+      if (forced === "host") throw new CommandError(`OPENDEVHUB_PUSH=host, but ${checkout.container} isn't on this machine`);
+      return { where: "container", dir: checkout.container };
+    }
+    const r = await this.deps.run("git", ["-C", checkout.host, "rev-parse", "--git-dir"], { timeoutMs: GIT_TIMEOUT_MS });
+    if (r.exitCode === 0) return { where: "host", dir: checkout.host };
+    if (forced === "host") throw new CommandError(`OPENDEVHUB_PUSH=host, but git can't use ${checkout.host} on this machine`);
+    return { where: "container", dir: checkout.container };
+  }
+
+  private exec(p: Project, loc: Location, args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<RunResult> {
+    return loc.where === "host"
+      ? this.deps.run("git", ["-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT })
+      : this.deps.containers.exec(p, ["git", "-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT });
+  }
+
+  private async config(p: Project, loc: Location, key: string): Promise<string | undefined> {
+    const r = await this.exec(p, loc, ["config", "--get", key]);
+    return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
+  }
+
+  private async forge(p: Project, loc: Location, remote: string | undefined): Promise<{ remote?: RemoteInfo; forge: Forge }> {
+    if (!remote) return { forge: { kind: "unknown" } };
+    // The configured URL, before any `insteadOf` rewrite, names the forge the user means.
+    const url = await this.config(p, loc, `remote.${remote}.url`);
+    const info = url ? parseRemote(url) : undefined;
+    return { remote: info, forge: await detectForge(info, this.deps.forges, this.deps.fetchImpl) };
+  }
+
+  async info(p: Project, checkout: Checkout, branch: string | undefined, remote?: string): Promise<PublishInfo> {
+    const loc = await this.location(p, checkout);
+    const remotes = (await this.exec(p, loc, ["remote"])).stdout.split("\n").map((s) => s.trim()).filter(Boolean).sort();
+    const chosen = remote && remotes.includes(remote) ? remote : remotes.includes("origin") ? "origin" : remotes[0];
+    const { forge } = await this.forge(p, loc, chosen);
+    const pr = branch ? await this.config(p, loc, `branch.${branch}.opendevhubPr`) : undefined;
+    return {
+      ...(branch ? { branch } : {}),
+      remotes,
+      ...(chosen ? { remote: chosen } : {}),
+      forge,
+      strategies: strategiesFor(forge.kind),
+      strategy: defaultStrategy(forge.kind),
+      pushFrom: loc.where,
+      ...(pr ? { pr } : {}),
+    };
+  }
+
+  /** Pushes the branch (or an AGit ref) and records what the forge said. Never force-pushes. */
+  async publish(p: Project, checkout: Checkout, branch: string, req: PublishRequest): Promise<PublishResult> {
+    const loc = await this.location(p, checkout);
+    const { forge } = await this.forge(p, loc, req.remote);
+    if (!strategiesFor(forge.kind).includes(req.strategy)) {
+      throw new InvalidRequestError(`AGit publishing needs a Forgejo or Gitea remote; ${req.remote} is ${forge.kind}`);
+    }
+    const args =
+      req.strategy === "agit"
+        ? agitPushArgs({ remote: req.remote, base: req.base, topic: branch, title: req.title, description: req.description })
+        : branchPushArgs({ remote: req.remote, branch });
+    const r = await this.exec(p, loc, args, PUSH_TIMEOUT_MS);
+    const output = `${r.stderr}\n${r.stdout}`;
+    if (r.exitCode !== 0) {
+      const tail = tailLines(output, 8);
+      if (/\[rejected\]|non-fast-forward|fetch first|stale info/.test(output)) {
+        throw new CommandError("the remote has commits this branch doesn't; use Update from base, then publish again", tail);
+      }
+      throw new CommandError(`git push failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`, tail);
+    }
+
+    const urls = pushUrls(output);
+    const prUrl = urls.find(isPrUrl);
+    const previous = await this.config(p, loc, `branch.${branch}.opendevhubPr`);
+    await this.exec(p, loc, ["config", `branch.${branch}.opendevhubPublished`, req.remote]);
+    if (req.strategy === "agit") await this.exec(p, loc, ["config", `branch.${branch}.opendevhubTopic`, branch]);
+    if (prUrl) await this.exec(p, loc, ["config", `branch.${branch}.opendevhubPr`, prUrl]);
+    const compare = req.strategy === "branch" ? compareUrl(forge, { base: req.base, branch, title: req.title, body: req.description }) : undefined;
+    return {
+      strategy: req.strategy,
+      pushedFrom: loc.where,
+      ...(prUrl ? { prUrl } : {}),
+      ...((prUrl ?? compare ?? urls[0]) ? { openUrl: prUrl ?? compare ?? urls[0] } : {}),
+      ...(previous && prUrl && previous !== prUrl ? { notice: "The earlier pull request was closed or merged; this opened a new one." } : {}),
+      output: tailLines(output, 12),
+    };
+  }
 }
