@@ -126,7 +126,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
 
     expect((await opencode("POST", "/form", { title: "e2e dismissed", fields })).ok).toBe(true);
     await vi.waitFor(() => expect(pendingOf()?.forms).toHaveLength(1), { timeout: 15_000 });
-    await orch.cancelForm(project.id, pendingOf()!.forms[0].id, "not needed");
+    await orch.cancelForm(project.id, pendingOf()!.forms[0].id);
     await vi.waitFor(() => expect(pendingOf()).toBeUndefined(), { timeout: 15_000 });
 
     const server = await startServer({

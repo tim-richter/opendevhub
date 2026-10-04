@@ -237,8 +237,6 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
   const [values, setValues] = useState<FormValues>(() => initialValues(form.fields));
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [dismissing, setDismissing] = useState(false);
-  const [reason, setReason] = useState("");
   const ref = useAutoFocus(props.takeFocus);
   // Forms only use j/k; Enter in a form field submits the form natively.
   const onKeyDown = useCardKeys(() => {});
@@ -274,7 +272,8 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
     setErrors({});
     run(() => replyForm(props.projectId, form.id, built.answer));
   };
-  const dismiss = () => run(() => dismissForm(props.projectId, form.id, reason.trim() || undefined));
+  // opencode takes no reason when a form is cancelled, so Dismiss asks for none.
+  const dismiss = () => run(() => dismissForm(props.projectId, form.id));
 
   return (
     <form ref={ref} className="pending-card" tabIndex={0} onKeyDown={onKeyDown} onSubmit={submit} aria-label={form.title}>
@@ -293,38 +292,14 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
             onCustom={(t) => setCustom((prev) => ({ ...prev, [f.key]: t }))}
           />
         ))}
-      {dismissing ? (
-        <div className="pending-actions">
-          <input
-            autoFocus
-            className="pending-reason"
-            placeholder="Why (optional, sent to the agent)"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                dismiss();
-              } else if (e.key === "Escape") setDismissing(false);
-            }}
-          />
-          <button type="button" disabled={busy} onClick={dismiss}>
-            Dismiss
-          </button>
-          <button type="button" className="link" onClick={() => setDismissing(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <div className="pending-actions">
-          <button type="submit" className="button primary" disabled={busy}>
-            Submit
-          </button>
-          <button type="button" disabled={busy} onClick={() => setDismissing(true)}>
-            Dismiss…
-          </button>
-        </div>
-      )}
+      <div className="pending-actions">
+        <button type="submit" className="button primary" disabled={busy}>
+          Submit
+        </button>
+        <button type="button" disabled={busy} onClick={dismiss}>
+          Dismiss
+        </button>
+      </div>
       {error && (
         <p className="pending-error" role="alert">
           {error}

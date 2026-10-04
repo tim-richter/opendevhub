@@ -79,10 +79,10 @@ describe("OpencodeClient", () => {
       { id: "frm_2", sessionID: "ses_1", title: "Q2" },
     ];
     await client.replyForm("ses_1", "frm_1", { db: "postgres", n: 2 });
-    await client.cancelForm("ses_1", "frm_2", "answered in chat");
+    await client.cancelForm("ses_1", "frm_2", "/w");
     expect(fake.state.replies).toEqual([
       { method: "POST", path: "/api/session/ses_1/form/frm_1/reply", body: { answer: { db: "postgres", n: 2 } } },
-      { method: "DELETE", path: "/api/session/ses_1/form/frm_2?message=answered+in+chat", body: undefined },
+      { method: "DELETE", path: "/api/session/ses_1/form/frm_2", body: undefined },
     ]);
     expect(fake.state.forms["/w"]).toEqual([]);
   });

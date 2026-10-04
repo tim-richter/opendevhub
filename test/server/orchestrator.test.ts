@@ -89,7 +89,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     createSession: vi.fn(async (directory: string) => ({ id: "ses_new", location: { directory } })),
     replyPermission: vi.fn(async (_sid: string, _rid: string, _reply: unknown, _dir?: string) => {}),
     replyForm: vi.fn(async (_sid: string, _fid: string, _answer: unknown, _dir?: string) => {}),
-    cancelForm: vi.fn(async (_sid: string, _fid: string, _message?: string, _dir?: string) => {}),
+    cancelForm: vi.fn(async (_sid: string, _fid: string, _dir?: string) => {}),
   };
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
@@ -814,8 +814,8 @@ describe("Orchestrator", () => {
       const { orch, client } = await running();
       await orch.replyForm(project.id, "frm_1", { db: "postgres" });
       expect(client.replyForm).toHaveBeenCalledWith("ses_root", "frm_1", { db: "postgres" }, "/workspaces/demo.worktrees/x");
-      await orch.cancelForm(project.id, "frm_1", "not needed");
-      expect(client.cancelForm).toHaveBeenCalledWith("ses_root", "frm_1", "not needed", "/workspaces/demo.worktrees/x");
+      await orch.cancelForm(project.id, "frm_1");
+      expect(client.cancelForm).toHaveBeenCalledWith("ses_root", "frm_1", "/workspaces/demo.worktrees/x");
     });
 
     it("only forwards ids it listed itself", async () => {

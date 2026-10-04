@@ -31,7 +31,7 @@ function setup(webDir?: string) {
     openInEditor: vi.fn(async () => {}),
     replyPermission: vi.fn(async (_id: string, _rid: string, _reply: { decision: string; message?: string }) => {}),
     replyForm: vi.fn(async (_id: string, _fid: string, _answer: unknown) => {}),
-    cancelForm: vi.fn(async (_id: string, _fid: string, _message?: string) => {}),
+    cancelForm: vi.fn(async (_id: string, _fid: string) => {}),
   } satisfies DashboardOrchestrator;
   return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
 }
@@ -198,8 +198,8 @@ describe("dashboard API", () => {
       expect(orchestrator.replyPermission).toHaveBeenCalledWith(project.id, "per_1", { decision: "reject", message: "no" });
       expect((await send(app, "POST", "forms/frm_1", { answer: { db: "pg" } })).status).toBe(200);
       expect(orchestrator.replyForm).toHaveBeenCalledWith(project.id, "frm_1", { db: "pg" });
-      expect((await send(app, "DELETE", "forms/frm_1", { message: "later" })).status).toBe(200);
-      expect(orchestrator.cancelForm).toHaveBeenCalledWith(project.id, "frm_1", "later");
+      expect((await send(app, "DELETE", "forms/frm_1", undefined)).status).toBe(200);
+      expect(orchestrator.cancelForm).toHaveBeenCalledWith(project.id, "frm_1");
     });
 
     it("maps unknown ids to 404, already answered to 409 and invalid answers to 400 with the message", async () => {

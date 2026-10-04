@@ -339,14 +339,14 @@ export class Orchestrator {
     );
   }
 
-  /** Dismisses a form; the agent is told `message`. */
-  async cancelForm(id: ProjectId, formId: string, message?: string): Promise<void> {
+  /** Dismisses a form. */
+  async cancelForm(id: ProjectId, formId: string): Promise<void> {
     await this.respond(
       id,
       "form",
       formId,
       (p) => p.forms.find((i) => i.id === formId),
-      (client, item, dir) => client.cancelForm(item.sessionId, formId, message, dir),
+      (client, item, dir) => client.cancelForm(item.sessionId, formId, dir),
     );
   }
 

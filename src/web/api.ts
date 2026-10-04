@@ -51,8 +51,7 @@ export type ReplyOutcome = "done" | "gone";
 async function reply(projectId: string, route: string, method: "POST" | "DELETE", body: unknown, what: string): Promise<ReplyOutcome> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/${route}`, {
     method,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   });
   if (res.status === 409) return "gone";
   if (!res.ok) throw await failure(res, what);
@@ -67,8 +66,9 @@ export function replyForm(projectId: string, formId: string, answer: FormAnswer)
   return reply(projectId, `forms/${encodeURIComponent(formId)}`, "POST", { answer }, "answer");
 }
 
-export function dismissForm(projectId: string, formId: string, message?: string): Promise<ReplyOutcome> {
-  return reply(projectId, `forms/${encodeURIComponent(formId)}`, "DELETE", { message }, "dismiss");
+/** Cancels a form. opencode takes no reason, so there is none to send. */
+export function dismissForm(projectId: string, formId: string): Promise<ReplyOutcome> {
+  return reply(projectId, `forms/${encodeURIComponent(formId)}`, "DELETE", undefined, "dismiss");
 }
 
 export async function rescan(): Promise<DashboardSnapshot> {

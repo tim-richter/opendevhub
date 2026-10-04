@@ -150,10 +150,9 @@ export class OpencodeClient {
     return this.send("POST", path, { answer }, directory);
   }
 
-  /** Cancels a form; opencode tells the asking agent `message`. */
-  cancelForm(sessionId: string, formId: string, message?: string, directory?: string): Promise<void> {
-    const query = message ? `?${new URLSearchParams({ message })}` : "";
-    const path = `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}${query}`;
+  /** Cancels a form. opencode 2.0.22's DELETE takes no reason, so the agent only learns it was cancelled. */
+  cancelForm(sessionId: string, formId: string, directory?: string): Promise<void> {
+    const path = `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}`;
     return this.send("DELETE", path, undefined, directory);
   }
 

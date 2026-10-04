@@ -22,10 +22,10 @@ describe("reply API", () => {
   it("answers and dismisses forms", async () => {
     const fetchMock = stubFetch(200, { ok: true });
     await replyForm("p", "frm_1", { db: "pg" });
-    await dismissForm("p", "frm_1", "later");
-    expect(fetchMock.mock.calls.map(([u, i]) => [u, i?.method, JSON.parse(String(i?.body))])).toEqual([
-      ["/api/projects/p/forms/frm_1", "POST", { answer: { db: "pg" } }],
-      ["/api/projects/p/forms/frm_1", "DELETE", { message: "later" }],
+    await dismissForm("p", "frm_1");
+    expect(fetchMock.mock.calls.map(([u, i]) => [u, i?.method, i?.body])).toEqual([
+      ["/api/projects/p/forms/frm_1", "POST", JSON.stringify({ answer: { db: "pg" } })],
+      ["/api/projects/p/forms/frm_1", "DELETE", undefined],
     ]);
   });
 

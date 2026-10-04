@@ -20,7 +20,7 @@ From `GET /openapi.json` on `opencode serve` 2.0.22:
 | Reply to a permission | `POST /api/session/:sid/permission/:rid/reply` | `{ decision: "once" \| "always" \| "reject", message?: string }` |
 | Pending forms | `GET /api/form` | `{ id, sessionID, title, fields[] }`. Field types: `string` (with optional `options`, `custom`, `format`, `pattern`), `number`, `integer`, `boolean`, `multiselect`, `external` (`url`). Every field may have `required`, `hidden` and `when: [{ key, op: eq\|neq, value }]`. |
 | Answer a form | `POST /api/session/:sid/form/:fid/reply` | `{ answer: { [key]: string \| number \| boolean \| string[] } }` |
-| Cancel a form | `DELETE /api/session/:sid/form/:fid?message=` | The asker is told why. |
+| Cancel a form | `DELETE /api/session/:sid/form/:fid` | Takes no reason (checked against `openapi.json` while implementing): the asker only learns it was cancelled. |
 | Test fixtures | `POST /api/session/:sid/permission`, `POST /api/session/:sid/form` | Create real pending items without an LLM. |
 
 ## Data
@@ -61,7 +61,7 @@ Snapshots stay small: rarely more than a handful are pending at once.
 | --- | --- | --- |
 | `POST /api/projects/:id/permissions/:rid` | `{ decision, message? }` | `…/permission/:rid/reply` |
 | `POST /api/projects/:id/forms/:fid` | `{ answer }` | `…/form/:fid/reply` |
-| `DELETE /api/projects/:id/forms/:fid` | `{ message? }` | `DELETE …/form/:fid` |
+| `DELETE /api/projects/:id/forms/:fid` | none | `DELETE …/form/:fid` |
 
 - **Known ids only.** The server finds `rid`/`fid` in the project's latest snapshot to get the
   `sessionId`. Unknown ids get a 404, so the dashboard only ever forwards ids it listed itself.
@@ -101,8 +101,8 @@ a plain unified diff. If the review feature has shipped, reuse its diff componen
 | `multiselect` | checkboxes, honouring `minItems`/`maxItems` and `custom` |
 | `external` | "Open" link to `url` |
 
-`when` and `hidden` are evaluated in the browser. Buttons: **Submit**, and **Dismiss** (cancels
-with an optional message). If a field type isn't in the table, the fields are shown read-only
+`when` and `hidden` are evaluated in the browser. Buttons: **Submit**, and **Dismiss** (cancels;
+opencode takes no reason). If a field type isn't in the table, the fields are shown read-only
 with a link to "Answer in opencode".
 
 **Other behaviour:**

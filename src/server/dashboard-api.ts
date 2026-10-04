@@ -160,9 +160,7 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
     ),
   );
   app.post("/api/projects/:id/forms/:fid", (c) => json(c, (id, b) => orchestrator.replyForm(id, c.req.param("fid") ?? "", b.answer)));
-  app.delete("/api/projects/:id/forms/:fid", (c) =>
-    json(c, (id, b) => orchestrator.cancelForm(id, c.req.param("fid") ?? "", str(b.message))),
-  );
+  app.delete("/api/projects/:id/forms/:fid", (c) => json(c, (id) => orchestrator.cancelForm(id, c.req.param("fid") ?? "")));
 
   app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));
 
