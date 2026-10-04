@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, FormAnswer, LogEvent, PermissionDecision, ReviewData, UpdateResult, Worktree } from "../shared/types";
+import type { DashboardSnapshot, FormAnswer, LogEvent, PermissionDecision, PublishInfo, PublishRequest, PublishResult, ReviewData, UpdateResult, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -108,6 +108,21 @@ export async function fetchLogs(projectId: string): Promise<string[]> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/logs`);
   if (!res.ok) throw await failure(res, "logs");
   return ((await res.json()) as { lines: string[] }).lines;
+}
+
+export async function fetchPublishInfo(projectId: string, directory: string, remote?: string): Promise<PublishInfo> {
+  const query = new URLSearchParams({ directory, ...(remote ? { remote } : {}) });
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish?${query}`);
+  if (!res.ok) throw await failure(res, "publish info");
+  return (await res.json()) as PublishInfo;
+}
+
+export function suggestPublish(projectId: string, directory: string): Promise<{ title: string; description: string }> {
+  return postJson(projectId, "publish/suggest", { directory }, "suggest");
+}
+
+export function publishChanges(projectId: string, directory: string, req: PublishRequest): Promise<PublishResult> {
+  return postJson(projectId, "publish", { directory, ...req }, "publish");
 }
 
 export function subscribe(handlers: {

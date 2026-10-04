@@ -1,6 +1,6 @@
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs/react";
 import type { FileTreeRowDecoration, GitStatusEntry } from "@pierre/trees";
-import type { ProjectView, ReviewFile, UpdateStrategy } from "../shared/types";
+import type { ProjectView, ReviewData, ReviewFile, UpdateStrategy } from "../shared/types";
 import { workspaceFolderOf } from "./derive";
 
 export interface DiffLine {
@@ -237,4 +237,13 @@ export function selectionFor(open: LineAnchor | undefined): SelectedLineRange | 
   if (!open) return null;
   const side = toSide(open.side);
   return { start: open.line, end: open.line, side, endSide: side };
+}
+
+/** Why the branch can't be published yet, or undefined when it can. */
+export function publishBlocker(data: ReviewData): string | undefined {
+  if (!data.branch) return "Not on a branch";
+  if (data.branch === data.base?.name) return "This is the base branch";
+  if (data.dirty) return "Commit the changes first";
+  if (data.ahead === 0) return "Nothing to publish";
+  return undefined;
 }

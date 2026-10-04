@@ -2,14 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   commitChanges,
   dismissForm,
+  fetchPublishInfo,
   fetchReview,
   mergeIntoBase,
+  publishChanges,
   removeWorktree,
   replyForm,
   replyPermission,
   sendPrompt,
   startSession,
   suggestCommitMessage,
+  suggestPublish,
   updateFromBase,
 } from "../../src/web/api";
 
@@ -84,5 +87,19 @@ describe("review API", () => {
   it("throws the server's error for a failed review", async () => {
     stubFetch(412, { error: "opencode is not running — start the project first" });
     await expect(fetchReview("p", "/w")).rejects.toThrow(/not running/);
+  });
+});
+
+describe("publish API", () => {
+  it("reads info and suggestions, and publishes", async () => {
+    const fetchMock = stubFetch(200, { remotes: [], title: "t", description: "d", strategy: "branch", output: [] });
+    await fetchPublishInfo("p", "/w", "fork");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/p/publish?directory=%2Fw&remote=fork");
+    expect(await suggestPublish("p", "/w")).toMatchObject({ title: "t" });
+    await publishChanges("p", "/w", { remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" });
+    expect(fetchMock.mock.calls.slice(1).map(([u, i]) => [u, JSON.parse(String(i?.body))])).toEqual([
+      ["/api/projects/p/publish/suggest", { directory: "/w" }],
+      ["/api/projects/p/publish", { directory: "/w", remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" }],
+    ]);
   });
 });

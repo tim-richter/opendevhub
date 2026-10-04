@@ -6,6 +6,7 @@ import {
   anchorFromRange,
   annotationsFor,
   ensurePatchHeader,
+  publishBlocker,
   selectionFor,
   statsDecoration,
   treeGitStatus,
@@ -259,5 +260,27 @@ describe("diff selection", () => {
     expect(selectionFor({ key: "new:7", line: 7, side: "new", quote: [] })).toEqual({ start: 7, end: 7, side: "additions", endSide: "additions" });
     expect(selectionFor({ key: "old:3", line: 3, side: "old", quote: [] })).toEqual({ start: 3, end: 3, side: "deletions", endSide: "deletions" });
     expect(selectionFor(undefined)).toBeNull();
+  });
+});
+
+describe("publishBlocker", () => {
+  const data = {
+    directory: "/w",
+    branch: "feature/x",
+    base: { name: "main", source: "config" as const },
+    mode: "branch" as const,
+    ahead: 1,
+    behind: 0,
+    dirty: false,
+    pushed: false,
+    workspace: { clean: true },
+    files: [],
+  };
+  it("allows publishing a clean branch that is ahead of its base", () => {
+    expect(publishBlocker(data)).toBeUndefined();
+    expect(publishBlocker({ ...data, ahead: 0 })).toBe("Nothing to publish");
+    expect(publishBlocker({ ...data, dirty: true })).toBe("Commit the changes first");
+    expect(publishBlocker({ ...data, branch: undefined })).toBe("Not on a branch");
+    expect(publishBlocker({ ...data, branch: "main" })).toBe("This is the base branch");
   });
 });
