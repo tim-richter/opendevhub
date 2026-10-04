@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PORT,
   configDir,
+  FileForgeStore,
   loadConfig,
   loadState,
   mergeRoots,
@@ -66,5 +67,49 @@ describe("mergeRoots", () => {
       "/cwd/rel",
       path.join(os.homedir(), "code"),
     ]);
+  });
+});
+
+describe("FileForgeStore", () => {
+  it("keeps forges in config.json next to the other settings", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forges-"));
+    try {
+      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: ["/src"], port: 7777, forges: { "git.example.com": { kind: "forgejo" } } }));
+      const store = new FileForgeStore(dir);
+      expect(store.all()).toEqual({ "git.example.com": { kind: "forgejo" } });
+      store.remember("gitea.example.com", { kind: "gitea" });
+      const saved = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
+      expect(saved).toEqual({
+        roots: ["/src"],
+        port: 7777,
+        forges: { "git.example.com": { kind: "forgejo" }, "gitea.example.com": { kind: "gitea" } },
+      });
+      expect(new FileForgeStore(dir).all()["gitea.example.com"]).toEqual({ kind: "gitea" });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores malformed forge entries", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forges-"));
+    try {
+      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ forges: { a: { kind: "nope" }, b: "x", c: { kind: "gitlab", web: 3 } } }));
+      expect(new FileForgeStore(dir).all()).toEqual({ c: { kind: "gitlab" } });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("config forges", () => {
+  it("survives the CLI's load and save on start", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forges-"));
+    try {
+      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: [], port: 1, forges: { h: { kind: "gitea" } } }));
+      saveConfig(dir, loadConfig(dir));
+      expect(JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8")).forges).toEqual({ h: { kind: "gitea" } });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ProjectId } from "../shared/types";
+import type { ProjectId, ForgeKind } from "../shared/types";
+import type { ForgeEntry } from "./forge";
 
 export interface Config {
   roots: string[];
   port: number;
+  /** Forge per git host: configured by hand or remembered after a probe. */
+  forges?: Record<string, ForgeEntry>;
 }
 
 export interface PersistedRuntime {
@@ -52,16 +55,50 @@ function writeJson(file: string, value: unknown, mode: number): void {
   fs.renameSync(tmp, file);
 }
 
+const FORGE_KINDS: readonly ForgeKind[] = ["github", "gitlab", "forgejo", "gitea", "bitbucket", "unknown"];
+
+function readForges(raw: unknown): Record<string, ForgeEntry> {
+  const out: Record<string, ForgeEntry> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [host, value] of Object.entries(raw as Record<string, unknown>)) {
+    const entry = value as { kind?: unknown; web?: unknown };
+    if (!entry || typeof entry !== "object" || !FORGE_KINDS.includes(entry.kind as ForgeKind)) continue;
+    out[host] = { kind: entry.kind as ForgeKind, ...(typeof entry.web === "string" ? { web: entry.web } : {}) };
+  }
+  return out;
+}
+
 export function loadConfig(dir: string): Config {
   const raw = readJson<Partial<Config>>(path.join(dir, "config.json"), {});
+  const forges = readForges(raw.forges);
   return {
     roots: Array.isArray(raw.roots) ? raw.roots.filter((r) => typeof r === "string") : [],
     port: typeof raw.port === "number" ? raw.port : DEFAULT_PORT,
+    ...(Object.keys(forges).length > 0 ? { forges } : {}),
   };
 }
 
 export function saveConfig(dir: string, cfg: Config): void {
   writeJson(path.join(dir, "config.json"), cfg, 0o644);
+}
+
+export interface ForgeStore {
+  all(): Record<string, ForgeEntry>;
+  remember(host: string, entry: ForgeEntry): void;
+}
+
+/** Forges in `config.json`; remembering re-reads the file so settings changed meanwhile aren't lost. */
+export class FileForgeStore implements ForgeStore {
+  constructor(private readonly dir: string) {}
+
+  all(): Record<string, ForgeEntry> {
+    return loadConfig(this.dir).forges ?? {};
+  }
+
+  remember(host: string, entry: ForgeEntry): void {
+    const cfg = loadConfig(this.dir);
+    saveConfig(this.dir, { ...cfg, forges: { ...cfg.forges, [host]: entry } });
+  }
 }
 
 export function loadState(dir: string): PersistedState {
