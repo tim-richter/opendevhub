@@ -1303,6 +1303,26 @@ describe("Orchestrator", () => {
       await expect(orch.pickVariant(project.id, "tsk_1", "nope", false)).rejects.toThrow(NotFoundError);
     });
 
+    it("removes nothing for variants in the main checkout, in unknown folders, or whose discard failed", async () => {
+      const { orch, client, worktrees, git, store } = await started();
+      const known = ["/workspaces/demo.worktrees/s3", "/workspaces/demo.worktrees/s4"];
+      store.updateRuntime(project.id, { worktrees: known.map((path) => ({ path, branch: path.split("/").at(-1) })) });
+      store.setSessions(project.id, [
+        variant("s1", 1, "/workspaces/demo"),
+        variant("s2", 2, "/workspaces/elsewhere"),
+        variant("s3", 3, known[0]),
+        variant("s4", 4, known[1]),
+      ]);
+      client.session.mockResolvedValue({ id: "x", time: { created: 1, updated: 1 }, location: { directory: "/w" }, metadata: {} });
+      client.updateSession.mockImplementation(async (sid: string) => {
+        if (sid === "s3") throw new Error("boom");
+      });
+      const res = await orch.pickVariant(project.id, "tsk_1", "s4", true);
+      expect(res).toEqual({ discarded: ["s1", "s2"], removed: [], errors: ["Fix · #3: boom"] });
+      expect(worktrees.remove).not.toHaveBeenCalled();
+      expect(git.deleteBranch).not.toHaveBeenCalled();
+    });
+
     it("keeps going when one worktree can't be removed", async () => {
       const { orch, worktrees, store } = await started();
       const dirs = ["/workspaces/demo.worktrees/a", "/workspaces/demo.worktrees/b", "/workspaces/demo.worktrees/c"];
