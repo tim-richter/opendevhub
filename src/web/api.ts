@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, LogEvent, Worktree } from "../shared/types";
+import type { DashboardSnapshot, FormAnswer, LogEvent, PermissionDecision, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -43,6 +43,32 @@ export async function startSession(projectId: string, directory: string, title?:
 
 export function openInEditor(projectId: string, editor: string, directory: string): Promise<unknown> {
   return postJson(projectId, "open", { editor, directory }, "open editor");
+}
+
+/** "gone": the item was already answered elsewhere (e.g. in the opencode tab); drop it without an error. */
+export type ReplyOutcome = "done" | "gone";
+
+async function reply(projectId: string, route: string, method: "POST" | "DELETE", body: unknown, what: string): Promise<ReplyOutcome> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/${route}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 409) return "gone";
+  if (!res.ok) throw await failure(res, what);
+  return "done";
+}
+
+export function replyPermission(projectId: string, requestId: string, decision: PermissionDecision, message?: string): Promise<ReplyOutcome> {
+  return reply(projectId, `permissions/${encodeURIComponent(requestId)}`, "POST", { decision, message }, "reply");
+}
+
+export function replyForm(projectId: string, formId: string, answer: FormAnswer): Promise<ReplyOutcome> {
+  return reply(projectId, `forms/${encodeURIComponent(formId)}`, "POST", { answer }, "answer");
+}
+
+export function dismissForm(projectId: string, formId: string, message?: string): Promise<ReplyOutcome> {
+  return reply(projectId, `forms/${encodeURIComponent(formId)}`, "DELETE", { message }, "dismiss");
 }
 
 export async function rescan(): Promise<DashboardSnapshot> {

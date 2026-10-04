@@ -5,6 +5,7 @@ import {
   attentionCounts,
   compareSessions,
   diffForNotifications,
+  pendingSummary,
   matches,
   projectCounts,
   projectTone,
@@ -148,5 +149,31 @@ describe("worktree helpers", () => {
     expect(containerShellCommand(view({ containerName: "demo_c1", remoteUser: "node" }), "/workspaces/demo")).toBe(
       "docker exec -it -u node -w /workspaces/demo demo_c1 sh -c 'command -v bash >/dev/null && exec bash -l || exec sh -l'",
     );
+  });
+});
+
+describe("pendingSummary and notifications", () => {
+  it("says what is being asked", () => {
+    const base = snap({ a: "needs-permission" }).projects[0].sessions[0];
+    expect(pendingSummary(base)).toBeUndefined();
+    expect(
+      pendingSummary({
+        ...base,
+        pending: { permissions: [{ id: "p", sessionId: "a", action: "bash", resources: ["npm test", "npm run lint"] }], forms: [] },
+      }),
+    ).toBe("wants bash: npm test (+1 more)");
+    expect(
+      pendingSummary({ ...base, pending: { permissions: [], forms: [{ id: "f", sessionId: "a", title: "Which DB?", fields: [] }] } }),
+    ).toBe("asks: Which DB?");
+  });
+
+  it("puts the ask in the notification title when it is known", () => {
+    const next = snap({ a: "needs-permission" });
+    next.projects[0].sessions[0].pending = {
+      permissions: [{ id: "p", sessionId: "a", action: "bash", resources: ["npm test"] }],
+      forms: [],
+    };
+    const [notice] = diffForNotifications(snap({ a: "running" }), next);
+    expect(notice).toMatchObject({ title: "demo · wants bash: npm test", body: "T a" });
   });
 });

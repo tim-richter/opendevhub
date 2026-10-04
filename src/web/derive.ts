@@ -13,6 +13,18 @@ const MESSAGES: Partial<Record<SessionStatus, string>> = {
   "needs-answer": "question waiting",
 };
 
+/** What a session is waiting on, as plain text: "wants bash: npm test" or "asks: Which DB?". */
+export function pendingSummary(session: SessionSummary): string | undefined {
+  const p = session.pending?.permissions[0];
+  if (p) {
+    const first = p.resources[0] ? `: ${p.resources[0]}` : "";
+    const more = p.resources.length > 1 ? ` (+${p.resources.length - 1} more)` : "";
+    return `wants ${p.action}${first}${more}`;
+  }
+  const f = session.pending?.forms[0];
+  return f ? `asks: ${f.title}` : undefined;
+}
+
 export function diffForNotifications(prev: DashboardSnapshot | undefined, next: DashboardSnapshot): Notice[] {
   if (!prev) return [];
   const before = new Map<string, SessionSummary>();
@@ -26,9 +38,10 @@ export function diffForNotifications(prev: DashboardSnapshot | undefined, next: 
       if (MESSAGES[s.status] && old !== s.status) what = MESSAGES[s.status];
       else if (s.status === "idle" && old === "running") what = "finished";
       if (!what) continue;
+      const ask = MESSAGES[s.status] ? pendingSummary(s) : undefined;
       notices.push({
         key: `${s.id}:${s.status}`,
-        title: `${view.project.name}: ${what}`,
+        title: ask ? `${view.project.name} · ${ask}` : `${view.project.name}: ${what}`,
         body: s.title,
         projectId: view.project.id,
         sessionId: s.id,
