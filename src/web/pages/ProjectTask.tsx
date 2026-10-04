@@ -42,21 +42,33 @@ export function ProjectTask() {
     // `sessions` is rebuilt on every snapshot; reloadKey holds what matters.
   }, [view.project.id, reloadKey]);
 
-  const pick = (keep: SessionSummary) => {
+  const pick = async (keep: SessionSummary) => {
+    if (picking) return;
     const others = sessions.filter((s) => s.id !== keep.id);
-    const dirty = Object.fromEntries(Object.entries(reviews).map(([dir, r]) => [dir, r.dirty]));
-    const prompts = pickPrompts(variantName(keep), others.length, removals(view, task, keep.id, dirty));
-    if (!confirm(prompts.discard)) return;
-    const removeWorktrees = prompts.remove ? confirm(prompts.remove) : false;
+    const name = variantName(keep);
+    if (!confirm(pickPrompts(name, others.length, []).discard)) return;
     setPicking(true);
     setNotice(undefined);
-    pickVariant(view.project.id, task, keep.id, removeWorktrees)
-      .then((r) => {
-        const removed = r.removed.length > 0 ? `, removed ${r.removed.length} worktree${r.removed.length === 1 ? "" : "s"}` : "";
-        if (mounted.current) setNotice(`Kept ${variantName(keep)}. Discarded ${r.discarded.length}${removed}.`);
-        if (r.errors.length > 0) report(new Error(r.errors.join("; ")));
-      }, report)
-      .finally(() => mounted.current && setPicking(false));
+    try {
+      // Re-read the others' changes: the cached ones may predate edits made while this page was open.
+      const dirs = [...new Set(others.map((s) => s.directory))];
+      const fresh = await Promise.allSettled(dirs.map((d) => fetchReview(view.project.id, d)));
+      if (!mounted.current) return;
+      const dirty: Record<string, boolean> = {};
+      fresh.forEach((r, i) => {
+        if (r.status === "fulfilled") dirty[dirs[i]] = r.value.dirty;
+      });
+      const prompts = pickPrompts(name, others.length, removals(view, task, keep.id, dirty));
+      const removeWorktrees = prompts.remove ? confirm(prompts.remove) : false;
+      const r = await pickVariant(view.project.id, task, keep.id, removeWorktrees);
+      const removed = r.removed.length > 0 ? `, removed ${r.removed.length} worktree${r.removed.length === 1 ? "" : "s"}` : "";
+      if (mounted.current) setNotice(`Kept ${name}. Discarded ${r.discarded.length}${removed}.`);
+      if (r.errors.length > 0) report(new Error(r.errors.join("; ")));
+    } catch (e) {
+      report(e);
+    } finally {
+      if (mounted.current) setPicking(false);
+    }
   };
 
   if (sessions.length === 0) {
