@@ -150,6 +150,44 @@ export interface ReviewData {
   truncated?: boolean;
 }
 
+export type ForgeKind = "github" | "gitlab" | "forgejo" | "gitea" | "bitbucket" | "unknown";
+export type PublishStrategy = "branch" | "agit";
+
+export interface PublishInfo {
+  /** Undefined on a detached HEAD. */
+  branch?: string;
+  remotes: string[];
+  /** The remote the rest describes: `origin` when it exists, else the first. */
+  remote?: string;
+  forge: { kind: ForgeKind; webBase?: string };
+  strategies: PublishStrategy[];
+  strategy: PublishStrategy;
+  /** Where the push will run: the host uses your own ssh-agent and credentials. */
+  pushFrom: "host" | "container";
+  /** The pull request this branch was published to, when the forge printed one. */
+  pr?: string;
+}
+
+export interface PublishRequest {
+  remote: string;
+  base: string;
+  strategy: PublishStrategy;
+  title: string;
+  description: string;
+}
+
+export interface PublishResult {
+  strategy: PublishStrategy;
+  pushedFrom: "host" | "container";
+  /** An existing pull request the forge printed (stored for "View PR"). */
+  prUrl?: string;
+  /** Where to go next: the PR, the forge's new-PR page, or whatever URL the remote printed. */
+  openUrl?: string;
+  notice?: string;
+  /** The last lines of git's output. */
+  output: string[];
+}
+
 export interface SessionSummary {
   id: string;
   projectId: ProjectId;
