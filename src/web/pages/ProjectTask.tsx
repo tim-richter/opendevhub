@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useOutletContext, useParams } from "react-router";
-import type { ProjectView, ReviewData, SessionSummary } from "../../shared/types";
+import { Link, useParams } from "react-router";
+import type { ReviewData, SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { fetchReview, pickVariant } from "../api";
-import { Icon } from "../components/Icon";
+import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Empty, muted } from "../components/Page";
 import { SessionBadge } from "../components/Status";
 import { useDash } from "../DashboardContext";
-import { targetOf } from "../review";
+import { checkoutOf, checkoutPath } from "../checkouts";
+import { useProjectView } from "./ProjectLayout";
 import { diffStats, formatCost, formatTokens, pickPrompts, removals, taskSessions, variantName } from "../tasks";
 
 export function ProjectTask() {
-  const view = useOutletContext<ProjectView>();
+  const view = useProjectView();
   const { task = "" } = useParams();
   const { report } = useDash();
   const sessions = taskSessions(view, task);
@@ -74,37 +79,48 @@ export function ProjectTask() {
 
   if (sessions.length === 0) {
     return (
-      <div className="empty">
-        <h2>No variants to show</h2>
-        <p className="muted">This task's sessions were discarded, or are older than the sessions opencode lists.</p>
-        <Link to={projectPath}>Back to sessions</Link>
-      </div>
+      <Empty title="No variants to show">
+        <p className={muted}>This task's sessions were discarded, or are older than the sessions opencode lists.</p>
+        <Button asChild variant="link">
+          <Link to={projectPath}>Back to {view.project.name}</Link>
+        </Button>
+      </Empty>
     );
   }
 
   return (
-    <div className="tab-body">
-      <div className="task-head">
-        <h2>{sessions[0].task?.title || "Task"}</h2>
-        <span className="muted">
+    <div className="flex flex-col gap-4">
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
+        <Link to={projectPath} className="hover:text-foreground hover:underline">
+          {view.project.name}
+        </Link>
+        <ChevronRightIcon className="size-3.5" /> Task
+      </nav>
+      <div className="flex items-baseline gap-2.5">
+        <h2 className="text-lg font-semibold">{sessions[0].task?.title || "Task"}</h2>
+        <span className={muted}>
           {sessions.length} variant{sessions.length === 1 ? "" : "s"}
         </span>
       </div>
-      {notice && <div className="banner ok">{notice}</div>}
-      <div className="task-columns">
+      {notice && (
+        <Alert className="border-ok/40 bg-ok/10">
+          <AlertDescription className="text-ok">{notice}</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
         {sessions.map((s) => {
           const review = reviews[s.directory];
           const stats = review ? diffStats(review) : undefined;
-          const target = targetOf(view, s.directory);
+          const checkout = checkoutOf(view, s.directory);
           return (
-            <section key={s.id} className="task-column">
-              <header>
+            <Card key={s.id} className="min-w-0 gap-3 px-4 py-3">
+              <header className="flex min-w-0 items-center gap-2">
                 <SessionBadge status={s.status} />
-                <strong>{variantName(s)}</strong>
+                <strong className="truncate">{variantName(s)}</strong>
               </header>
-              <dl className="task-facts">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm [&_dd]:truncate [&_dt]:text-muted-foreground">
                 <dt>Branch</dt>
-                <dd className="mono">{review?.branch ?? "—"}</dd>
+                <dd className="font-mono text-xs">{review?.branch ?? "—"}</dd>
                 <dt>Cost</dt>
                 <dd>{formatCost(s.cost)}</dd>
                 <dt>Tokens</dt>
@@ -113,31 +129,33 @@ export function ProjectTask() {
                 <dd>
                   {stats ? (
                     <>
-                      {stats.files} file{stats.files === 1 ? "" : "s"} <span className="add">+{stats.additions}</span>{" "}
-                      <span className="del">−{stats.deletions}</span>
-                      {review?.dirty ? <span className="muted"> · uncommitted</span> : null}
+                      {stats.files} file{stats.files === 1 ? "" : "s"} <span className="text-ok">+{stats.additions}</span>{" "}
+                      <span className="text-destructive">−{stats.deletions}</span>
+                      {review?.dirty ? <span className="text-muted-foreground"> · uncommitted</span> : null}
                     </>
                   ) : (
                     "—"
                   )}
                 </dd>
               </dl>
-              <div className="task-links">
-                {target !== undefined && (
-                  <Link className="button small" to={`${projectPath}/review${target ? `/${encodeURIComponent(target)}` : ""}`}>
-                    Review
-                  </Link>
+              <div className="flex flex-wrap gap-2">
+                {checkout && (
+                  <Button asChild variant="outline" size="sm">
+                    <Link to={checkoutPath(view.project.id, checkout.target, "review")}>Review</Link>
+                  </Button>
                 )}
-                <a className="button small" href={sessionUrl(view.openUrl, s.id)} target="_blank" rel="noreferrer">
-                  Open <Icon name="external" size={12} />
-                </a>
+                <Button asChild variant="outline" size="sm">
+                  <a href={sessionUrl(view.openUrl, s.id)} target="_blank" rel="noreferrer">
+                    Open <ExternalLinkIcon />
+                  </a>
+                </Button>
                 {sessions.length > 1 && (
-                  <button className="small" disabled={picking} onClick={() => pick(s)}>
+                  <Button size="sm" disabled={picking} onClick={() => pick(s)}>
                     Pick this one
-                  </button>
+                  </Button>
                 )}
               </div>
-            </section>
+            </Card>
           );
         })}
       </div>

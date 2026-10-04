@@ -1,6 +1,10 @@
 import { useSearchParams } from "react-router";
 import type { SessionStatus } from "../../shared/types";
+import { Input } from "@/components/ui/input";
+import { Choice } from "../components/Choice";
+import { Empty, muted, Page, PageHeader, Segmented } from "../components/Page";
 import { SessionList } from "../components/SessionList";
+import { Card } from "@/components/ui/card";
 import { useDash } from "../DashboardContext";
 import { allSessions, matches, needsAttention } from "../derive";
 
@@ -42,45 +46,44 @@ export function SessionsPage() {
   const withSessions = snapshot.projects.filter((v) => v.sessions.length > 0);
 
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>Sessions</h1>
-          <p className="muted">Every opencode session across running projects</p>
-        </div>
-      </header>
+    <Page>
+      <PageHeader title="Sessions" description="Every opencode session across running projects" />
 
-      <div className="toolbar">
-        <div className="segmented">
-          {CHIPS.map((c) => (
-            <button key={c.id} className={status === c.id ? "on" : ""} aria-pressed={status === c.id} onClick={() => set("status", c.id)}>
-              {c.label} <span className="seg-count">{byStatus(c.id).length}</span>
-            </button>
-          ))}
-        </div>
-        <select value={project} onChange={(e) => set("project", e.target.value)} aria-label="Project">
-          <option value="">All projects</option>
-          {withSessions.map((v) => (
-            <option key={v.project.id} value={v.project.id}>
-              {v.project.name}
-            </option>
-          ))}
-        </select>
-        <input className="search" placeholder="Search titles…" value={q} onChange={(e) => set("q", e.target.value)} />
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Segmented
+          label="Status"
+          value={status}
+          onChange={(id) => set("status", id)}
+          options={CHIPS.map((c) => ({
+            id: c.id,
+            label: (
+              <>
+                {c.label} <span className="text-xs text-muted-foreground tabular-nums">{byStatus(c.id).length}</span>
+              </>
+            ),
+          }))}
+        />
+        <Choice
+          label="Project"
+          size="default"
+          value={project}
+          onChange={(v) => set("project", v)}
+          options={[{ value: "", label: "All projects" }, ...withSessions.map((v) => ({ value: v.project.id, label: v.project.name }))]}
+        />
+        <Input className="w-56 md:ml-auto max-md:w-full" placeholder="Search titles…" value={q} onChange={(e) => set("q", e.target.value)} />
       </div>
 
       {all.length === 0 ? (
-        <div className="empty">
-          <h2>No sessions</h2>
-          <p className="muted">Start a project and open opencode to create one.</p>
-        </div>
+        <Empty title="No sessions">
+          <p className={muted}>Start a project and open opencode to create one.</p>
+        </Empty>
       ) : entries.length === 0 ? (
-        <p className="muted">No sessions match these filters.</p>
+        <p className={muted}>No sessions match these filters.</p>
       ) : (
-        <div className="panel flush">
+        <Card className="overflow-hidden py-0">
           <SessionList entries={entries} showProject />
-        </div>
+        </Card>
       )}
-    </div>
+    </Page>
   );
 }

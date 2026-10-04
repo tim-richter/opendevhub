@@ -6,7 +6,7 @@ const Loaded = lazy(() => import("./ChangedFilesTree"));
 
 export function ChangedFilesTree(props: Parameters<typeof ChangedFilesTreeComponent>[0]) {
   return (
-    <Suspense fallback={<p className="muted review-note">Loading files…</p>}>
+    <Suspense fallback={<p className="px-3 py-2.5 text-sm text-muted-foreground">Loading files…</p>}>
       <Loaded {...props} />
     </Suspense>
   );

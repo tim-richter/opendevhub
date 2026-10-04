@@ -6,7 +6,7 @@ const Loaded = lazy(() => import("./PatchView")) as unknown as typeof PatchViewC
 
 export function PatchView<A = undefined>(props: Parameters<typeof PatchViewComponent<A>>[0]) {
   return (
-    <Suspense fallback={<p className="muted review-note">Loading diff…</p>}>
+    <Suspense fallback={<p className="px-3 py-2.5 text-sm text-muted-foreground">Loading diff…</p>}>
       <Loaded<A> {...props} />
     </Suspense>
   );

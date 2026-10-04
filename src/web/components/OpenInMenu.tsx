@@ -1,9 +1,17 @@
+import { ChevronDownIcon } from "lucide-react";
 import type { ProjectView } from "../../shared/types";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { openInEditor } from "../api";
 import { useDash } from "../DashboardContext";
 import { containerShellCommand, shellQuote } from "../derive";
-import { Icon } from "./Icon";
-import { useMenu } from "./ProjectActions";
 
 /**
  * "Open in…" for one checkout (the workspace or a worktree): editors opendevhub found on this machine,
@@ -12,7 +20,6 @@ import { useMenu } from "./ProjectActions";
 export function OpenInMenu(props: { view: ProjectView; directory: string; hostPath?: string; compact?: boolean }) {
   const { view, directory, hostPath, compact } = props;
   const { snapshot, report } = useDash();
-  const { open, setOpen, ref, run } = useMenu();
   const running = view.runtime.containerState === "running";
   const editors = snapshot?.editors ?? [];
   const shell = running ? containerShellCommand(view, directory) : undefined;
@@ -28,45 +35,36 @@ export function OpenInMenu(props: { view: ProjectView; directory: string; hostPa
       : running && view.runtime.containerName
         ? undefined
         : "container stopped";
-  const item = (label: string, reason: string | undefined, onClick: () => void, key?: string) => (
-    <button key={key} role="menuitem" disabled={!!reason} onClick={run(onClick)}>
+  const item = (label: string, reason: string | undefined, onSelect: () => void, key?: string) => (
+    <DropdownMenuItem key={key} disabled={!!reason} onSelect={onSelect}>
       {label}
-      {reason && <span className="menu-hint">{reason}</span>}
-    </button>
+      {reason && <span className="ml-auto pl-4 text-xs text-muted-foreground">{reason}</span>}
+    </DropdownMenuItem>
   );
+  const note = "max-w-68 px-2 py-1.5 text-xs text-muted-foreground";
 
   return (
-    <div className="menu" ref={ref}>
-      <button
-        className={compact ? "small" : undefined}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
-      >
-        Open in… <Icon name="chevron-down" size={12} />
-      </button>
-      {open && (
-        <div className="menu-pop" role="menu">
-          {editors.length > 0 && <div className="menu-label">Editors on this machine</div>}
-          {editors.map((e) => item(e.label, why(e.target), launch(e.id), e.id))}
-          {editors.length === 0 && (
-            <div className="menu-note muted">No supported editor found on PATH (VS Code, Zed, JetBrains, Neovim…)</div>
-          )}
-          <div className="menu-sep" role="separator" />
-          <div className="menu-label">Copy</div>
-          {item(hostPath ? "Path" : "Path in container", undefined, copy(hostPath ?? directory))}
-          {item("Neovim command", why("host"), copy(`cd ${shellQuote(hostPath ?? "")} && nvim .`))}
-          {item("Shell in container command", shell ? undefined : why("container"), copy(shell ?? ""))}
-          {!hostPath && (
-            <div className="menu-note muted">
-              This checkout only exists inside the container. Rebuild the container to mount worktrees on this machine.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size={compact ? "sm" : "default"} onClick={(e) => e.stopPropagation()}>
+          Open in… <ChevronDownIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-56" onClick={(e) => e.stopPropagation()}>
+        {editors.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">Editors on this machine</DropdownMenuLabel>}
+        {editors.map((e) => item(e.label, why(e.target), launch(e.id), e.id))}
+        {editors.length === 0 && <p className={note}>No supported editor found on PATH (VS Code, Zed, JetBrains, Neovim…)</p>}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Copy</DropdownMenuLabel>
+        {item(hostPath ? "Path" : "Path in container", undefined, copy(hostPath ?? directory))}
+        {item("Neovim command", why("host"), copy(`cd ${shellQuote(hostPath ?? "")} && nvim .`))}
+        {item("Shell in container command", shell ? undefined : why("container"), copy(shell ?? ""))}
+        {!hostPath && (
+          <p className={note}>
+            This checkout only exists inside the container. Rebuild the container to mount worktrees on this machine.
+          </p>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

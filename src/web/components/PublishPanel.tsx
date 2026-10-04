@@ -2,7 +2,13 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import type { PublishInfo, PublishResult, PublishStrategy, ReviewData } from "../../shared/types";
 import { fetchPublishInfo, publishChanges, suggestPublish } from "../api";
 import { acceptSuggestion, publishBlocker } from "../review";
-import { Icon } from "./Icon";
+import { ExternalLinkIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Choice } from "./Choice";
 
 const STRATEGY_LABEL: Record<PublishStrategy, string> = {
   agit: "AGit (the push opens the PR)",
@@ -73,63 +79,63 @@ export function PublishPanel(props: { projectId: string; directory: string; data
 
   const blocker = publishBlocker(data) ?? (info && info.remotes.length === 0 ? "This repository has no remote" : undefined);
   return (
-    <section className="publish">
-      <div className="pending-actions">
-        <button disabled={!!blocker || busy || !info} title={blocker} onClick={openDialog}>
+    <section className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" disabled={!!blocker || busy || !info} title={blocker} onClick={openDialog}>
           {info?.pr ? "Update PR…" : "Publish…"}
-        </button>
+        </Button>
         {info?.pr && (
-          <a className="button" href={info.pr} target="_blank" rel="noreferrer">
-            View PR <Icon name="external" size={13} />
-          </a>
+          <Button asChild variant="outline">
+            <a href={info.pr} target="_blank" rel="noreferrer">
+              View PR <ExternalLinkIcon />
+            </a>
+          </Button>
         )}
-        {info && info.forge.kind !== "unknown" && <span className="muted publish-forge">{info.forge.kind}</span>}
+        {info && info.forge.kind !== "unknown" && <span className="text-xs text-muted-foreground">{info.forge.kind}</span>}
       </div>
 
       {open && info && (
-        <form className="review-commit publish-form" onSubmit={submit}>
-          <input aria-label="Pull request title" placeholder={generating ? "Asking the agent for a title…" : "Title"} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea aria-label="Pull request description" rows={4} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <div className="publish-options">
-            <label>
-              Remote{" "}
-              <select
-                value={remote}
-                onChange={(e) => {
-                  setRemote(e.target.value);
-                  void loadInfo(e.target.value);
+        <form className="flex flex-col gap-2" onSubmit={submit}>
+          <Input
+            aria-label="Pull request title"
+            placeholder={generating ? "Asking the agent for a title…" : "Title"}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <Textarea aria-label="Pull request description" rows={4} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            <Label className="font-normal">
+              Remote
+              <Choice
+                label="Remote"
+                value={remote ?? ""}
+                onChange={(r) => {
+                  setRemote(r);
+                  void loadInfo(r);
                 }}
-              >
-                {info.remotes.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              into <input value={base} onChange={(e) => setBase(e.target.value)} aria-label="Target branch" />
-            </label>
-            <label>
-              <select value={strategy} onChange={(e) => setStrategy(e.target.value as PublishStrategy)} aria-label="How to publish">
-                {info.strategies.map((s) => (
-                  <option key={s} value={s}>
-                    {STRATEGY_LABEL[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={info.remotes.map((r) => ({ value: r, label: r }))}
+              />
+            </Label>
+            <Label className="font-normal">
+              into <Input className="h-8 w-40" value={base} onChange={(e) => setBase(e.target.value)} aria-label="Target branch" />
+            </Label>
+            <Choice
+              label="How to publish"
+              value={strategy}
+              onChange={(v) => setStrategy(v as PublishStrategy)}
+              options={info.strategies.map((s) => ({ value: s, label: STRATEGY_LABEL[s] }))}
+            />
           </div>
-          <p className="muted publish-where">
+          <p className="text-xs text-muted-foreground">
             Pushes {info.pushFrom === "host" ? "from this machine, with your own git credentials" : "from the container"}.
           </p>
-          <div className="pending-actions">
-            <button type="submit" className="button primary" disabled={busy || !title.trim() || !base.trim()}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={busy || !title.trim() || !base.trim()}>
               {busy ? "Publishing…" : info.pr ? "Update PR" : "Publish"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="link"
+              variant="ghost"
               onClick={() => {
                 suggestion.current++;
                 setGenerating(false);
@@ -137,23 +143,29 @@ export function PublishPanel(props: { projectId: string; directory: string; data
               }}
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}
 
-      {error && <div className="banner error">{error}</div>}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       {result && (
-        <div className="banner ok">
-          <span>
-            {result.notice ? `${result.notice} ` : ""}Pushed from {result.pushedFrom === "host" ? "this machine" : "the container"}.
-          </span>
-          {result.openUrl && (
-            <a href={result.openUrl} target="_blank" rel="noreferrer">
-              {result.prUrl ? "Open pull request" : "Create the pull request on the forge"} <Icon name="external" size={13} />
-            </a>
-          )}
-        </div>
+        <Alert className="border-ok/40 bg-ok/10">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-2 text-ok">
+            <span>
+              {result.notice ? `${result.notice} ` : ""}Pushed from {result.pushedFrom === "host" ? "this machine" : "the container"}.
+            </span>
+            {result.openUrl && (
+              <a className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline" href={result.openUrl} target="_blank" rel="noreferrer">
+                {result.prUrl ? "Open pull request" : "Create the pull request on the forge"} <ExternalLinkIcon className="size-3.5" />
+              </a>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
     </section>
   );

@@ -225,7 +225,7 @@ export function statsDecoration(f: ReviewFile): FileTreeRowDecoration {
   return {
     text: `${added} ${removed}`,
     title: `${f.additions} line${f.additions === 1 ? "" : "s"} added, ${f.deletions} removed`,
-    parts: [{ text: added, color: "var(--ok)" }, { text: " " }, { text: removed, color: "var(--danger)" }],
+    parts: [{ text: added, color: "var(--ok)" }, { text: " " }, { text: removed, color: "var(--destructive)" }],
   };
 }
 

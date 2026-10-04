@@ -1,24 +1,47 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { BellIcon, LayoutGridIcon, ListIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useMatch } from "react-router";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInput,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 import { CommandPalette } from "../components/CommandPalette";
-import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
 import { NewTaskDialog } from "../components/NewTaskDialog";
 import { Count, StatusDot, TONE_LABEL } from "../components/Status";
 import { useDash } from "../DashboardContext";
+import { checkoutCounts, checkoutPath, checkouts, checkoutTone } from "../checkouts";
 import { attentionCounts, matches, projectCounts, projectTone } from "../derive";
+import type { ProjectView } from "../../shared/types";
 import { opensNewTask, projectIdFromPath } from "../tasks";
 
 const FILTER_THRESHOLD = 8;
 
 export function Shell() {
-  const { snapshot, connected, error, dismissError, rescan, scanning, permission, requestPermission, newTask, newTaskFor } = useDash();
-  const [drawer, setDrawer] = useState(false);
+  const { snapshot, connected, newTask, newTaskFor } = useDash();
   const [palette, setPalette] = useState(false);
-  const [filter, setFilter] = useState("");
   const location = useLocation();
 
-  useEffect(() => setDrawer(false), [location.pathname]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -37,123 +60,204 @@ export function Shell() {
 
   if (!snapshot) {
     return (
-      <div className="splash">
-        <div className="spinner" />
-        <p className="muted">{connected ? "Loading…" : "Connecting to opendevhub…"}</p>
+      <div className="grid h-full place-content-center justify-items-center gap-3">
+        <div className="size-5 animate-spin rounded-full border-2 border-border border-t-foreground" />
+        <p className="text-muted-foreground">{connected ? "Loading…" : "Connecting to opendevhub…"}</p>
       </div>
     );
   }
 
+  return (
+    <SidebarProvider>
+      <AppSidebar onSearch={() => setPalette(true)} />
+      <SidebarInset className="min-w-0">
+        <MobileBar onSearch={() => setPalette(true)} />
+        <Banners />
+        <div className="px-4 pt-4 pb-12 md:px-8 md:pt-6 md:pb-16">
+          <Outlet />
+        </div>
+      </SidebarInset>
+      <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <NewTaskDialog />
+    </SidebarProvider>
+  );
+}
+
+function NavItem(props: { to: string; end?: boolean; title?: string; children: ReactNode; badge?: ReactNode; sub?: ReactNode }) {
+  const active = useMatch({ path: props.to, end: props.end ?? false }) !== null;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={active} title={props.title}>
+        <NavLink to={props.to} end={props.end}>
+          {props.children}
+        </NavLink>
+      </SidebarMenuButton>
+      {props.badge && <SidebarMenuBadge>{props.badge}</SidebarMenuBadge>}
+      {props.sub}
+    </SidebarMenuItem>
+  );
+}
+
+/** The project's checkouts, shown under it in the sidebar while it is open or needs you. */
+function CheckoutItems({ view }: { view: ProjectView }) {
+  const location = useLocation();
+  return (
+    <SidebarMenuSub>
+      {checkouts(view).map((c) => {
+        const to = checkoutPath(view.project.id, c.target);
+        const active = location.pathname === to || location.pathname.startsWith(`${to}/`);
+        const n = checkoutCounts(view, c.directory);
+        const tone = checkoutTone(view, c.directory);
+        return (
+          <SidebarMenuSubItem key={c.directory}>
+            <SidebarMenuSubButton asChild isActive={active} title={`${c.label} — ${TONE_LABEL[tone]}`}>
+              <NavLink to={to}>
+                <StatusDot tone={tone} />
+                <span className="min-w-0 flex-1 truncate">{c.label}</span>
+                {n.attention > 0 ? <Count n={n.attention} tone="attention" /> : <Count n={n.running} tone="muted" />}
+              </NavLink>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        );
+      })}
+    </SidebarMenuSub>
+  );
+}
+
+function AppSidebar({ onSearch }: { onSearch: () => void }) {
+  const { snapshot, connected, rescan, scanning, permission, requestPermission } = useDash();
+  const { setOpenMobile } = useSidebar();
+  const [filter, setFilter] = useState("");
+  const location = useLocation();
+
+  useEffect(() => setOpenMobile(false), [location.pathname, setOpenMobile]);
+
+  if (!snapshot) return null;
   const counts = attentionCounts(snapshot);
   const projects = [...snapshot.projects]
     .sort((a, b) => a.project.name.localeCompare(b.project.name))
     .filter((v) => matches(filter, v.project.name, v.project.path));
+  const current = projectIdFromPath(location.pathname);
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
   return (
-    <div className={`shell${drawer ? " drawer-open" : ""}`}>
-      <aside className="sidebar">
-        <div className="brand">
+    <Sidebar>
+      <SidebarHeader>
+        <div className="flex items-center gap-2 px-2 pt-1 pb-2 font-semibold tracking-tight">
           <Logo /> opendevhub
-          <button className="icon-button drawer-close" aria-label="Close menu" onClick={() => setDrawer(false)}>
-            <Icon name="close" />
-          </button>
         </div>
+        <Button variant="outline" className="justify-start text-muted-foreground shadow-none" onClick={onSearch}>
+          <SearchIcon /> <span className="flex-1 text-left">Jump to…</span>
+          <Kbd>{isMac ? "⌘" : "Ctrl"} K</Kbd>
+        </Button>
+      </SidebarHeader>
 
-        <button className="search-trigger" onClick={() => setPalette(true)}>
-          <Icon name="search" size={14} /> <span>Jump to…</span> <kbd>{isMac ? "⌘" : "Ctrl"} K</kbd>
-        </button>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarMenu>
+            <NavItem to="/" end>
+              <LayoutGridIcon /> Overview
+            </NavItem>
+            <NavItem to="/sessions" badge={counts.attention > 0 && <Count n={counts.attention} tone="attention" />}>
+              <ListIcon /> Sessions
+            </NavItem>
+          </SidebarMenu>
+        </SidebarGroup>
 
-        <nav className="nav">
-          <NavLink to="/" end>
-            <Icon name="overview" /> Overview
-          </NavLink>
-          <NavLink to="/sessions">
-            <Icon name="sessions" /> Sessions
-            <span className="nav-trail">
-              <Count n={counts.attention} tone="attention" />
-            </span>
-          </NavLink>
-        </nav>
+        <SidebarGroup>
+          <SidebarGroupLabel className="justify-between">
+            <span>Projects</span>
+            <span>{snapshot.projects.length}</span>
+          </SidebarGroupLabel>
+          {snapshot.projects.length > FILTER_THRESHOLD && (
+            <SidebarInput className="mb-2" placeholder="Filter projects" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          )}
+          <SidebarMenu>
+            {projects.map((view) => {
+              const c = projectCounts(view);
+              const tone = projectTone(view);
+              const expanded = view.project.id === current || c.attention > 0;
+              return (
+                <NavItem
+                  key={view.project.id}
+                  end
+                  to={`/p/${encodeURIComponent(view.project.id)}`}
+                  title={`${view.project.name} — ${TONE_LABEL[tone]}`}
+                  sub={expanded && <CheckoutItems view={view} />}
+                  badge={c.attention > 0 ? <Count n={c.attention} tone="attention" /> : c.running > 0 && <Count n={c.running} tone="muted" />}
+                >
+                  <StatusDot tone={tone} className="mx-1" />
+                  <span className="truncate">{view.project.name}</span>
+                </NavItem>
+              );
+            })}
+            {projects.length === 0 && <p className="px-2 py-1 text-sm text-muted-foreground">{filter ? "No match" : "No projects found"}</p>}
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
 
-        <div className="nav-section">
-          <span>Projects</span>
-          <span className="muted">{snapshot.projects.length}</span>
-        </div>
-        {snapshot.projects.length > FILTER_THRESHOLD && (
-          <input className="nav-filter" placeholder="Filter projects" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        )}
-        <nav className="nav projects-nav">
-          {projects.map((view) => {
-            const c = projectCounts(view);
-            const tone = projectTone(view);
-            return (
-              <NavLink key={view.project.id} to={`/p/${encodeURIComponent(view.project.id)}`} title={`${view.project.name} — ${TONE_LABEL[tone]}`}>
-                <StatusDot tone={tone} />
-                <span className="nav-label">{view.project.name}</span>
-                <span className="nav-trail">
-                  {c.attention > 0 ? <Count n={c.attention} tone="attention" /> : <Count n={c.running} tone="muted" />}
-                </span>
-              </NavLink>
-            );
-          })}
-          {projects.length === 0 && <p className="muted nav-empty">{filter ? "No match" : "No projects found"}</p>}
-        </nav>
-
-        <div className="sidebar-foot">
+      <SidebarFooter className="border-t">
+        <SidebarMenu>
           {permission === "default" && (
-            <button className="small ghost" onClick={requestPermission}>
-              <Icon name="bell" size={14} /> Enable notifications
-            </button>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="sm" className="text-muted-foreground" onClick={requestPermission}>
+                <BellIcon /> Enable notifications
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           )}
-          <button className="small ghost" disabled={scanning} onClick={rescan} title={snapshot.roots.join("\n")}>
-            <Icon name="refresh" size={14} /> {scanning ? "Scanning…" : "Rescan roots"}
-          </button>
-          <div className={`conn ${connected ? "on" : "off"}`}>
-            <span className="dot" /> {connected ? "Live" : "Reconnecting…"}
-          </div>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="sm" className="text-muted-foreground" disabled={scanning} onClick={rescan} title={snapshot.roots.join("\n")}>
+              <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan roots"}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
+          <span className={cn("size-2 rounded-full", connected ? "bg-ok" : "animate-pulse bg-warn")} /> {connected ? "Live" : "Reconnecting…"}
         </div>
-      </aside>
-      <div className="scrim" onClick={() => setDrawer(false)} />
-
-      <div className="main">
-        <div className="mobile-bar">
-          <button className="icon-button" aria-label="Open menu" onClick={() => setDrawer(true)}>
-            <Icon name="menu" />
-          </button>
-          <span className="brand-small">
-            <Logo size={14} /> opendevhub
-          </span>
-          {counts.attention > 0 && <Count n={counts.attention} tone="attention" />}
-          <button className="icon-button" aria-label="Search" onClick={() => setPalette(true)}>
-            <Icon name="search" />
-          </button>
-        </div>
-
-        <div className="banners">
-          {!connected && <div className="banner warn">Lost connection to opendevhub — retrying…</div>}
-          {snapshot.preflight.errors.map((e) => (
-            <div key={e} className="banner error">
-              {e}
-            </div>
-          ))}
-          {error && (
-            <div className="banner error">
-              <span>{error}</span>
-              <button className="icon-button" aria-label="Dismiss" onClick={dismissError}>
-                <Icon name="close" size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        <main className="content">
-          <Outlet />
-        </main>
-      </div>
-
-      <CommandPalette open={palette} onClose={() => setPalette(false)} />
-      <NewTaskDialog />
-    </div>
+      </SidebarFooter>
+    </Sidebar>
   );
+}
+
+function MobileBar({ onSearch }: { onSearch: () => void }) {
+  const { snapshot } = useDash();
+  const counts = snapshot ? attentionCounts(snapshot) : undefined;
+  return (
+    <header className="sticky top-0 z-10 flex items-center gap-2 border-b bg-sidebar px-3 py-2 md:hidden">
+      <SidebarTrigger aria-label="Open menu" />
+      <span className="inline-flex flex-1 items-center gap-1.5 font-semibold">
+        <Logo size={14} /> opendevhub
+      </span>
+      {counts && <Count n={counts.attention} tone="attention" />}
+      <Button variant="ghost" size="icon-sm" aria-label="Search" onClick={onSearch}>
+        <SearchIcon />
+      </Button>
+    </header>
+  );
+}
+
+function Banners() {
+  const { snapshot, connected, error, dismissError } = useDash();
+  const banners = [
+    !connected && (
+      <Alert key="conn" className="border-warn/40 bg-warn/10 text-warn">
+        <AlertDescription className="text-warn">Lost connection to opendevhub — retrying…</AlertDescription>
+      </Alert>
+    ),
+    ...(snapshot?.preflight.errors ?? []).map((e) => (
+      <Alert key={e} variant="destructive">
+        <AlertDescription>{e}</AlertDescription>
+      </Alert>
+    )),
+    error && (
+      <Alert key="error" variant="destructive" className="flex items-center justify-between gap-4">
+        <AlertDescription>{error}</AlertDescription>
+        <Button variant="ghost" size="icon-xs" aria-label="Dismiss" onClick={dismissError}>
+          <XIcon />
+        </Button>
+      </Alert>
+    ),
+  ].filter(Boolean);
+  if (banners.length === 0) return null;
+  return <div className="flex flex-col gap-2 px-4 pt-4 md:px-8">{banners}</div>;
 }

@@ -1,7 +1,9 @@
+import { cn } from "@/lib/utils";
+
 /** The opendevhub mark (same shape as `public/logo.svg`), drawn in the current text colour. */
-export function Logo({ size = 16 }: { size?: number }) {
+export function Logo({ size = 16, className }: { size?: number; className?: string }) {
   return (
-    <svg className="logo" width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+    <svg className={cn("shrink-0", className)} width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       <g stroke="currentColor" strokeWidth={6} fill="none" strokeLinejoin="round" strokeLinecap="round">
         <polygon points="50,10 84.64,30 84.64,70 50,90 15.36,70 15.36,30" />
         <circle cx="50" cy="50" r="15" />

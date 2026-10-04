@@ -17,7 +17,16 @@ import {
 } from "../forms";
 import { ensurePatchHeader } from "../review";
 import { PatchView } from "./LazyPatchView";
-import { Icon } from "./Icon";
+import { ExternalLinkIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { cn } from "@/lib/utils";
+import { Choice } from "./Choice";
+import { diffFont } from "./Page";
 
 const RESOURCE_LIMIT = 5;
 const RADIO_LIMIT = 5;
@@ -39,7 +48,7 @@ function useCardKeys(onAction: (action: CardAction) => void) {
     if (!action) return;
     e.preventDefault();
     if (action === "next" || action === "prev") {
-      const cards = [...document.querySelectorAll<HTMLElement>(".pending-card")];
+      const cards = [...document.querySelectorAll<HTMLElement>("[data-pending-card]")];
       cards[cards.indexOf(e.currentTarget) + (action === "next" ? 1 : -1)]?.focus();
     } else onAction(action);
   };
@@ -96,8 +105,8 @@ export function PendingStack(props: { session: SessionSummary; view: ProjectView
     setAnswered((prev) => new Set(prev).add(current.item.id));
   };
   return (
-    <div className="pending-stack" ref={stack}>
-      {items.length > 1 && <p className="pending-count muted">1 of {items.length} waiting</p>}
+    <div ref={stack}>
+      {items.length > 1 && <p className="mb-1.5 text-xs text-muted-foreground">1 of {items.length} waiting</p>}
       {current.kind === "permission" ? (
         <PermissionCard
           key={current.item.id}
@@ -143,37 +152,37 @@ function PermissionCard(props: {
 
   const shown = p.resources.slice(0, RESOURCE_LIMIT);
   return (
-    <section ref={ref} className="pending-card" tabIndex={0} onKeyDown={onKeyDown} aria-label={`${props.sessionTitle} wants ${p.action}`}>
-      <p className="pending-ask">
-        <span className="pending-who">{props.sessionTitle}</span> wants <strong>{p.action}</strong>
+    <section ref={ref} className={CARD} data-pending-card tabIndex={0} onKeyDown={onKeyDown} aria-label={`${props.sessionTitle} wants ${p.action}`}>
+      <p>
+        <span className="text-muted-foreground">{props.sessionTitle}</span> wants <strong>{p.action}</strong>
       </p>
       {shown.length > 0 && (
-        <ul className="pending-resources">
+        <ul className="flex flex-col gap-1">
           {shown.map((r, i) => (
             <li key={i}>
-              <code>{r}</code>
+              <code className="font-mono text-xs wrap-anywhere whitespace-pre-wrap">{r}</code>
             </li>
           ))}
-          {p.resources.length > RESOURCE_LIMIT && <li className="muted">+{p.resources.length - RESOURCE_LIMIT} more</li>}
+          {p.resources.length > RESOURCE_LIMIT && <li className="text-muted-foreground">+{p.resources.length - RESOURCE_LIMIT} more</li>}
         </ul>
       )}
-      {p.message && <p className="pending-message">{p.message}</p>}
+      {p.message && <p className="wrap-anywhere whitespace-pre-wrap">{p.message}</p>}
       {p.diff && (
-        <div className="pending-diff">
+        <div className={cn("max-h-72 overflow-auto rounded-md border", diffFont)}>
           <PatchView patch={ensurePatchHeader(p.diff, p.resources[0] ?? "change")} />
         </div>
       )}
       {rejecting ? (
         <form
-          className="pending-actions"
+          className={ACTIONS}
           onSubmit={(e) => {
             e.preventDefault();
             reply("reject", reason.trim() || undefined);
           }}
         >
-          <input
+          <Input
             autoFocus
-            className="pending-reason"
+            className="h-8 flex-[1_1_16rem]"
             placeholder="Reason for the agent (optional)"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -181,32 +190,34 @@ function PermissionCard(props: {
               if (e.key === "Escape") setRejecting(false);
             }}
           />
-          <button type="submit" disabled={busy}>
+          <Button type="submit" variant="destructive" size="sm" disabled={busy}>
             Reject
-          </button>
-          <button type="button" className="link" onClick={() => setRejecting(false)}>
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setRejecting(false)}>
             Cancel
-          </button>
+          </Button>
         </form>
       ) : (
-        <div className="pending-actions">
-          <button className="button primary" disabled={busy} onClick={() => reply("once")}>
-            Allow once <kbd>↵</kbd>
-          </button>
-          <button
+        <div className={ACTIONS}>
+          <Button size="sm" disabled={busy} onClick={() => reply("once")}>
+            Allow once <Kbd className="bg-primary-foreground/15 text-primary-foreground">↵</Kbd>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             disabled={busy}
             title={p.save?.length ? `Saves a rule for: ${p.save.join(", ")}` : "Allow this and future requests like it"}
             onClick={() => reply("always")}
           >
-            Always allow <kbd>a</kbd>
-          </button>
-          <button disabled={busy} onClick={() => setRejecting(true)}>
-            Reject… <kbd>r</kbd>
-          </button>
+            Always allow <Kbd>a</Kbd>
+          </Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => setRejecting(true)}>
+            Reject… <Kbd>r</Kbd>
+          </Button>
         </div>
       )}
       {error && (
-        <p className="pending-error" role="alert">
+        <p className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}
@@ -226,20 +237,22 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
 
   if (!formSupported(form.fields)) {
     return (
-      <section ref={ref} className="pending-card" tabIndex={0} onKeyDown={onKeyDown} aria-label={form.title}>
-        <p className="pending-ask">{form.title}</p>
-        <dl className="pending-readonly">
+      <section ref={ref} className={CARD} data-pending-card tabIndex={0} onKeyDown={onKeyDown} aria-label={form.title}>
+        <p>{form.title}</p>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           {form.fields.map((f) => (
             <Fragment key={f.key}>
               <dt>{fieldLabel(f)}</dt>
-              <dd className="muted">{f.type}</dd>
+              <dd className="text-muted-foreground">{f.type}</dd>
             </Fragment>
           ))}
         </dl>
-        <div className="pending-actions">
-          <a className="button primary" href={props.openUrl} target="_blank" rel="noreferrer">
-            Answer in opencode <Icon name="external" size={13} />
-          </a>
+        <div className={ACTIONS}>
+          <Button asChild size="sm">
+            <a href={props.openUrl} target="_blank" rel="noreferrer">
+              Answer in opencode <ExternalLinkIcon />
+            </a>
+          </Button>
         </div>
       </section>
     );
@@ -259,8 +272,8 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
   const dismiss = () => run(() => dismissForm(props.projectId, form.id));
 
   return (
-    <form ref={ref} className="pending-card" tabIndex={0} onKeyDown={onKeyDown} onSubmit={submit} aria-label={form.title}>
-      <p className="pending-ask">{form.title}</p>
+    <form ref={ref} className={CARD} data-pending-card tabIndex={0} onKeyDown={onKeyDown} onSubmit={submit} aria-label={form.title}>
+      <p>{form.title}</p>
       {form.fields
         .filter((f) => isVisible(f, values))
         .map((f) => (
@@ -275,16 +288,16 @@ function FormCard(props: { projectId: string; form: PendingForm; openUrl: string
             onCustom={(t) => setCustom((prev) => ({ ...prev, [f.key]: t }))}
           />
         ))}
-      <div className="pending-actions">
-        <button type="submit" className="button primary" disabled={busy}>
+      <div className={ACTIONS}>
+        <Button type="submit" size="sm" disabled={busy}>
           Submit
-        </button>
-        <button type="button" disabled={busy} onClick={dismiss}>
+        </Button>
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={dismiss}>
           Dismiss
-        </button>
+        </Button>
       </div>
       {error && (
-        <p className="pending-error" role="alert">
+        <p className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}
@@ -308,16 +321,17 @@ function FieldControl(props: {
   switch (f.type) {
     case "boolean":
       control = (
-        <label className="pending-choice">
-          <input type="checkbox" checked={value === true} onChange={(e) => props.onChange(e.target.checked)} /> Yes
-        </label>
+        <Label className="font-normal">
+          <Checkbox checked={value === true} onCheckedChange={(c) => props.onChange(c === true)} /> Yes
+        </Label>
       );
       break;
     case "number":
     case "integer":
       control = (
-        <input
+        <Input
           type="number"
+          className="h-8 w-48"
           aria-label={label}
           step={f.type === "integer" ? 1 : "any"}
           min={f.minimum}
@@ -331,19 +345,24 @@ function FieldControl(props: {
     case "multiselect": {
       const picked = Array.isArray(value) ? value : [];
       control = (
-        <div className="pending-choices">
+        <div className={CHOICES}>
           {optionsOf(f).map((o) => (
-            <label key={o.value} className="pending-choice">
-              <input
-                type="checkbox"
+            <Label key={o.value} className="font-normal">
+              <Checkbox
                 checked={picked.includes(o.value)}
-                onChange={(e) => props.onChange(e.target.checked ? [...picked, o.value] : picked.filter((v) => v !== o.value))}
-              />{" "}
+                onCheckedChange={(c) => props.onChange(c === true ? [...picked, o.value] : picked.filter((v) => v !== o.value))}
+              />
               {o.label}
-            </label>
+            </Label>
           ))}
           {f.custom && (
-            <input aria-label={`${label}: other`} placeholder="Other (comma-separated)" value={props.custom} onChange={(e) => props.onCustom(e.target.value)} />
+            <Input
+              className="h-8 w-56"
+              aria-label={`${label}: other`}
+              placeholder="Other (comma-separated)"
+              value={props.custom}
+              onChange={(e) => props.onCustom(e.target.value)}
+            />
           )}
         </div>
       );
@@ -352,11 +371,13 @@ function FieldControl(props: {
     case "external": {
       const href = safeUrl(f.url);
       control = href ? (
-        <a className="button" href={href} target="_blank" rel="noreferrer">
-          Open <Icon name="external" size={13} />
-        </a>
+        <Button asChild variant="outline" size="sm" className="self-start">
+          <a href={href} target="_blank" rel="noreferrer">
+            Open <ExternalLinkIcon />
+          </a>
+        </Button>
       ) : (
-        <span className="muted">No usable link{f.url ? `: ${f.url}` : ""}</span>
+        <span className="text-muted-foreground">No usable link{f.url ? `: ${f.url}` : ""}</span>
       );
       break;
     }
@@ -364,8 +385,9 @@ function FieldControl(props: {
       const options = optionsOf(f);
       if (options.length === 0) {
         control = (
-          <input
+          <Input
             type={inputType(f.format)}
+            className="h-8"
             aria-label={label}
             required={f.required}
             pattern={f.pattern}
@@ -379,39 +401,50 @@ function FieldControl(props: {
       }
       const isOption = options.some((o) => o.value === text);
       control = (
-        <div className="pending-choices">
+        <div className={CHOICES}>
           {options.length <= RADIO_LIMIT ? (
-            options.map((o) => (
-              <label key={o.value} className="pending-choice">
-                <input type="radio" name={name} checked={text === o.value} onChange={() => props.onChange(o.value)} /> {o.label}
-              </label>
-            ))
-          ) : (
-            <select aria-label={label} value={isOption ? text : ""} onChange={(e) => props.onChange(e.target.value)}>
-              <option value="">Choose…</option>
+            <RadioGroup className="flex flex-wrap gap-x-4 gap-y-2" name={name} aria-label={label} value={isOption ? text : ""} onValueChange={props.onChange}>
               {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
+                <Label key={o.value} className="font-normal">
+                  <RadioGroupItem value={o.value} /> {o.label}
+                </Label>
               ))}
-            </select>
+            </RadioGroup>
+          ) : (
+            <Choice
+              label={label}
+              value={isOption ? text : ""}
+              onChange={props.onChange}
+              options={[{ value: "", label: "Choose…" }, ...options.map((o) => ({ value: o.value, label: o.label }))]}
+            />
           )}
           {f.custom && (
-            <input aria-label={`${label}: other`} placeholder="Other…" value={isOption ? "" : text} onChange={(e) => props.onChange(e.target.value)} />
+            <Input
+              className="h-8 w-56"
+              aria-label={`${label}: other`}
+              placeholder="Other…"
+              value={isOption ? "" : text}
+              onChange={(e) => props.onChange(e.target.value)}
+            />
           )}
         </div>
       );
     }
   }
   return (
-    <div className="pending-field">
-      <span className="pending-label">
+    <div className="flex flex-col gap-1.5">
+      <span className="font-medium">
         {label}
-        {f.required && <span className="tone-text-attention"> *</span>}
+        {f.required && <span className="text-attention"> *</span>}
       </span>
-      {f.description && <span className="muted pending-hint">{f.description}</span>}
+      {f.description && <span className="text-xs text-muted-foreground">{f.description}</span>}
       {control}
-      {props.error && <span className="pending-error">{props.error}</span>}
+      {props.error && <span className="text-xs text-destructive">{props.error}</span>}
     </div>
   );
 }
+
+const CARD =
+  "flex flex-col gap-2.5 rounded-lg border border-attention/35 bg-card px-3.5 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-attention focus-visible:ring-offset-1 focus-visible:ring-offset-background";
+const ACTIONS = "flex flex-wrap items-center gap-2";
+const CHOICES = "flex flex-wrap items-center gap-x-4 gap-y-2";

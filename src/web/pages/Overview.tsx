@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { ProjectView } from "../../shared/types";
-import { Icon } from "../components/Icon";
+import { CheckIcon, PlusIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { Empty, muted, Page, PageHeader, Section, Segmented } from "../components/Page";
 import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
 import { SessionList } from "../components/SessionList";
-import { STATE_LABEL, StatusDot, TONE_LABEL } from "../components/Status";
+import { STATE_LABEL, StatusDot, TONE_LABEL, TONE_TEXT } from "../components/Status";
 import { useDash } from "../DashboardContext";
 import { allSessions, matches, needsAttention, projectCounts, projectTone } from "../derive";
 
@@ -30,20 +35,18 @@ export function Overview() {
     .filter((v) => matches(query, v.project.name, v.project.path));
 
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>Overview</h1>
-          <p className="muted">{snapshot.roots.join(" · ") || "No roots configured"}</p>
-        </div>
-        <div className="head-actions">
-          <button className="button primary" onClick={() => newTask()} title="New task (n)">
-            <Icon name="plus" size={14} /> New task
-          </button>
-        </div>
-      </header>
+    <Page>
+      <PageHeader
+        title="Overview"
+        description={snapshot.roots.join(" · ") || "No roots configured"}
+        actions={
+          <Button onClick={() => newTask()} title="New task (n)">
+            <PlusIcon /> New task
+          </Button>
+        }
+      />
 
-      <section className="stats">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Projects running" value={runningProjects.length} of={snapshot.projects.length} />
         <Stat label="Agents working" value={active.length} tone={active.length > 0 ? "running" : undefined} />
         <Stat label="Need you" value={attention.length} tone={attention.length > 0 ? "attention" : undefined} />
@@ -51,40 +54,38 @@ export function Overview() {
       </section>
 
       {attention.length > 0 ? (
-        <section className="panel panel-attention">
-          <div className="panel-head">
-            <h2>Needs you</h2>
-            <span className="muted">Agents blocked on a permission or a question</span>
-          </div>
+        <Section title="Needs you" hint="Agents blocked on a permission or a question" attention>
           <SessionList entries={attention} showProject />
-        </section>
+        </Section>
       ) : (
-        snapshot.projects.length > 0 && <p className="all-clear">✓ No agent is waiting on you.</p>
+        snapshot.projects.length > 0 && (
+          <p className="flex items-center gap-1.5 font-medium text-ok">
+            <CheckIcon className="size-4" /> No agent is waiting on you.
+          </p>
+        )
       )}
 
-      <section>
-        <div className="section-head">
-          <h2>Projects</h2>
-          <div className="segmented" role="tablist">
-            {(["all", "running", "stopped"] as const).map((f) => (
-              <button key={f} role="tab" aria-selected={filter === f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>
-                {f[0]!.toUpperCase() + f.slice(1)}
-              </button>
-            ))}
-          </div>
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="font-semibold">Projects</h2>
+          <Segmented
+            label="Show projects"
+            value={filter}
+            onChange={setFilter}
+            options={(["all", "running", "stopped"] as const).map((f) => ({ id: f, label: f[0]!.toUpperCase() + f.slice(1) }))}
+          />
           {snapshot.projects.length > 6 && (
-            <input className="search" placeholder="Filter…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Input className="ml-auto w-56 max-md:w-full" placeholder="Filter…" value={query} onChange={(e) => setQuery(e.target.value)} />
           )}
         </div>
         {snapshot.projects.length === 0 ? (
-          <div className="empty">
-            <h2>No projects yet</h2>
-            <p className="muted">No folder with a devcontainer was found under the configured roots.</p>
-          </div>
+          <Empty title="No projects yet">
+            <p className={muted}>No folder with a devcontainer was found under the configured roots.</p>
+          </Empty>
         ) : tiles.length === 0 ? (
-          <p className="muted">No projects match.</p>
+          <p className={muted}>No projects match.</p>
         ) : (
-          <ul className="tiles">
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3">
             {tiles.map((v) => (
               <ProjectTile key={v.project.id} view={v} />
             ))}
@@ -93,31 +94,38 @@ export function Overview() {
       </section>
 
       {active.length > 0 && (
-        <section className="panel">
-          <div className="panel-head">
-            <h2>Working now</h2>
-            {active.length > ACTIVE_LIMIT && (
-              <Link to="/sessions?status=running" className="muted-link">
+        <Section
+          title="Working now"
+          action={
+            active.length > ACTIVE_LIMIT && (
+              <Link to="/sessions?status=running" className="text-sm text-muted-foreground hover:text-foreground">
                 All {active.length} →
               </Link>
-            )}
-          </div>
+            )
+          }
+        >
           <SessionList entries={active.slice(0, ACTIVE_LIMIT)} showProject />
-        </section>
+        </Section>
       )}
-    </div>
+    </Page>
   );
 }
 
 function Stat(props: { label: string; value: number; of?: number; tone?: "attention" | "running" }) {
   return (
-    <div className={`stat${props.tone ? ` stat-${props.tone}` : ""}`}>
-      <span className="stat-value">
+    <Card className={cn("gap-0.5 px-4 py-3", props.tone === "attention" && "border-attention/50")}>
+      <span
+        className={cn(
+          "text-2xl font-semibold tracking-tight tabular-nums",
+          props.tone === "attention" && "text-attention",
+          props.tone === "running" && "text-running",
+        )}
+      >
         {props.value}
-        {props.of !== undefined && <span className="stat-of"> / {props.of}</span>}
+        {props.of !== undefined && <span className="text-base font-medium text-muted-foreground"> / {props.of}</span>}
       </span>
-      <span className="stat-label">{props.label}</span>
-    </div>
+      <span className="text-xs text-muted-foreground">{props.label}</span>
+    </Card>
   );
 }
 
@@ -130,35 +138,52 @@ function ProjectTile({ view }: { view: ProjectView }) {
   const status = view.runtime.containerState === "running" ? TONE_LABEL[tone] : STATE_LABEL[view.runtime.containerState];
 
   return (
-    <li className={`tile tile-${tone}`} onClick={() => void navigate(to)}>
-      <div className="tile-head">
-        <StatusDot tone={tone} />
-        <Link to={to} className="tile-name" onClick={(e) => e.stopPropagation()}>
-          {view.project.name}
-        </Link>
-        <span className={`tile-status tone-text-${tone}`}>{status}</span>
-      </div>
-      <p className="muted path" title={view.project.path}>
-        {view.project.path}
-      </p>
-      <div className="tile-meta">
-        {c.attention > 0 && <span className="meta-attention">{c.attention} need you</span>}
-        {running ? (
-          <>
-            <span>{c.running} working</span>
-            <span>{c.idle} idle</span>
-            <span>{c.ports} {c.ports === 1 ? "port" : "ports"}</span>
-          </>
-        ) : (
-          view.runtime.containerState === "stopped" && <span className="muted">Container not running</span>
+    <li>
+      <Card
+        className={cn(
+          "h-full min-w-0 cursor-pointer gap-2 px-4 py-3 transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md",
+          tone === "attention" && "border-attention/60",
+          tone === "off" && "bg-muted/40",
         )}
-      </div>
-      {view.runtime.error && <p className="tile-error" title={view.runtime.error}>{view.runtime.error}</p>}
-      <div className="tile-actions" onClick={(e) => e.stopPropagation()}>
-        {canOpen ? <OpenButton view={view} compact /> : null}
-        <StartStopButton view={view} compact />
-        <MoreMenu view={view} />
-      </div>
+        onClick={() => void navigate(to)}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <StatusDot tone={tone} />
+          <Link to={to} className="truncate font-semibold hover:underline" onClick={(e) => e.stopPropagation()}>
+            {view.project.name}
+          </Link>
+          <span className={cn("ml-auto text-xs whitespace-nowrap", TONE_TEXT[tone])}>{status}</span>
+        </div>
+        <p className="truncate font-mono text-xs text-muted-foreground" title={view.project.path}>
+          {view.project.path}
+        </p>
+        <div className="flex min-h-5 flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+          {c.attention > 0 && <span className="font-semibold text-attention">{c.attention} need you</span>}
+          {running ? (
+            <>
+              <span>{c.running} working</span>
+              <span>{c.idle} idle</span>
+              <span>
+                {c.ports} {c.ports === 1 ? "port" : "ports"}
+              </span>
+            </>
+          ) : (
+            view.runtime.containerState === "stopped" && <span>Container not running</span>
+          )}
+        </div>
+        {view.runtime.error && (
+          <p className="truncate text-xs text-destructive" title={view.runtime.error}>
+            {view.runtime.error}
+          </p>
+        )}
+        <div className="mt-auto flex cursor-default items-center gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
+          {canOpen ? <OpenButton view={view} compact /> : null}
+          <StartStopButton view={view} compact />
+          <div className="ml-auto">
+            <MoreMenu view={view} />
+          </div>
+        </div>
+      </Card>
     </li>
   );
 }

@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { EllipsisIcon, ExternalLinkIcon, PlayIcon, SquareIcon } from "lucide-react";
+import { useState } from "react";
 import type { ProjectView, SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { startSession } from "../api";
 import { useDash } from "../DashboardContext";
 import { workspaceFolderOf } from "../derive";
-import { Icon } from "./Icon";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 export function projectFlags(view: ProjectView, blocked: boolean) {
   const { runtime } = view;
@@ -55,24 +63,25 @@ export function OpenButton({ view, compact }: { view: ProjectView; compact?: boo
   );
   const enabled = canOpen && !starting;
   return (
-    <a
-      className={`button primary${enabled ? "" : " disabled"}${compact ? " small" : ""}`}
-      href={enabled ? (latest ? sessionUrl(view.openUrl, latest.id) : view.openUrl) : undefined}
-      target="_blank"
-      rel="noreferrer"
-      aria-disabled={!enabled}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!enabled || latest) return;
-        e.preventDefault();
-        setStarting(true);
-        openSessionTab(view, () => startSession(view.project.id, workspaceFolderOf(view)))
-          .catch(report)
-          .finally(() => setStarting(false));
-      }}
-    >
-      {compact ? "Open" : "Open in opencode"} <Icon name="external" size={14} />
-    </a>
+    <Button asChild size={compact ? "sm" : "default"} className={cn(!enabled && "pointer-events-none opacity-50")}>
+      <a
+        href={enabled ? (latest ? sessionUrl(view.openUrl, latest.id) : view.openUrl) : undefined}
+        target="_blank"
+        rel="noreferrer"
+        aria-disabled={!enabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!enabled || latest) return;
+          e.preventDefault();
+          setStarting(true);
+          openSessionTab(view, () => startSession(view.project.id, workspaceFolderOf(view)))
+            .catch(report)
+            .finally(() => setStarting(false));
+        }}
+      >
+        {compact ? "Open" : "Open in opencode"} <ExternalLinkIcon />
+      </a>
+    </Button>
   );
 }
 
@@ -82,74 +91,48 @@ export function StartStopButton({ view, compact }: { view: ProjectView; compact?
   const { canStop, locked, transitioning } = projectFlags(view, blocked);
   const id = view.project.id;
   return (
-    <button
-      className={compact ? "small" : undefined}
+    <Button
+      variant="outline"
+      size={compact ? "sm" : "default"}
       disabled={locked}
       onClick={(e) => {
         e.stopPropagation();
         act(id, canStop ? "stop" : "start");
       }}
     >
-      <Icon name={canStop ? "stop" : "play"} size={12} />
+      {canStop ? <SquareIcon className="size-3" /> : <PlayIcon className="size-3" />}
       {transitioning ? (view.runtime.containerState === "stopping" ? "Stopping…" : "Starting…") : canStop ? "Stop" : "Start"}
-    </button>
+    </Button>
   );
-}
-
-/** Open/close state for a popup menu that closes on outside click or Escape. */
-export function useMenu() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-
-  const run = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
-  return { open, setOpen, ref, run };
 }
 
 export function MoreMenu({ view }: { view: ProjectView }) {
   const { act, snapshot } = useDash();
   const blocked = (snapshot?.preflight.errors.length ?? 0) > 0;
   const { locked, running } = projectFlags(view, blocked);
-  const { open, setOpen, ref, run } = useMenu();
   const id = view.project.id;
 
   return (
-    <div className="menu" ref={ref}>
-      <button className="icon-button" aria-haspopup="menu" aria-expanded={open} aria-label="More actions" onClick={() => setOpen(!open)}>
-        <Icon name="more" />
-      </button>
-      {open && (
-        <div className="menu-pop" role="menu">
-          <button
-            role="menuitem"
-            disabled={locked}
-            onClick={run(() => {
-              if (confirm(`Rebuild the devcontainer for ${view.project.name}? Running sessions will be interrupted.`))
-                act(id, "rebuild");
-            })}
-          >
-            Rebuild container
-          </button>
-          <button role="menuitem" disabled={locked || !running} onClick={run(() => act(id, "restart-opencode"))}>
-            Restart opencode
-          </button>
-        </div>
-      )}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="More actions">
+          <EllipsisIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          disabled={locked}
+          onSelect={() => {
+            if (confirm(`Rebuild the devcontainer for ${view.project.name}? Running sessions will be interrupted.`))
+              act(id, "rebuild");
+          }}
+        >
+          Rebuild container
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={locked || !running} onSelect={() => act(id, "restart-opencode")}>
+          Restart opencode
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { checkoutPath, checkouts, checkoutTone } from "../checkouts";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { sessionUrl } from "../../shared/urls";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@/components/ui/command";
 import { useDash } from "../DashboardContext";
 import { allSessions, matches, projectTone } from "../derive";
 import { projectIdFromPath } from "../tasks";
-import { Icon } from "./Icon";
 import { SESSION_LABEL, StatusDot } from "./Status";
 
 interface Item {
@@ -23,15 +32,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const navigate = useNavigate();
   const location = useLocation();
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setActive(0);
-      setTimeout(() => input.current?.focus(), 0);
-    }
+    if (open) setQuery("");
   }, [open]);
 
   const items = useMemo<Item[]>(() => {
@@ -53,6 +56,16 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         dot: projectTone(view),
         run: go(`/p/${id}`),
       });
+      for (const c of checkouts(view).filter((c) => c.worktree)) {
+        list.push({
+          key: `w-${view.project.id}-${c.target}`,
+          group: "Worktrees",
+          label: `${view.project.name} › ${c.label}`,
+          hint: c.hostPath ?? c.directory,
+          dot: checkoutTone(view, c.directory),
+          run: go(checkoutPath(view.project.id, c.target)),
+        });
+      }
     }
     for (const { session, view } of allSessions(snapshot)) {
       list.push({
@@ -66,74 +79,44 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     return list;
   }, [snapshot, navigate, rescan, newTask, location.pathname]);
 
-  const filtered = useMemo(() => items.filter((i) => matches(query, i.label, i.hint)).slice(0, LIMIT), [items, query]);
+  // Filtering stays ours (substring match, capped) rather than cmdk's fuzzy ranking.
+  const groups = useMemo(() => {
+    const out = new Map<string, Item[]>();
+    for (const item of items.filter((i) => matches(query, i.label, i.hint)).slice(0, LIMIT)) {
+      out.set(item.group, [...(out.get(item.group) ?? []), item]);
+    }
+    return [...out];
+  }, [items, query]);
 
-  if (!open) return null;
-
-  const choose = (item: Item | undefined) => {
-    if (!item) return;
+  const choose = (item: Item) => {
     onClose();
     item.run();
   };
 
-  let lastGroup = "";
   return (
-    <div className="palette-backdrop" onMouseDown={onClose}>
-      <div className="palette" role="dialog" aria-label="Command palette" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="palette-input">
-          <Icon name="search" />
-          <input
-            ref={input}
-            value={query}
-            placeholder="Jump to a project, session or action…"
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActive(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setActive((a) => Math.min(a + 1, filtered.length - 1));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setActive((a) => Math.max(a - 1, 0));
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                choose(filtered[active]);
-              } else if (e.key === "Escape") {
-                onClose();
-              }
-            }}
-          />
-          <kbd>esc</kbd>
-        </div>
-        <ul className="palette-list" role="listbox">
-          {filtered.length === 0 && <li className="muted palette-empty">No matches</li>}
-          {filtered.map((item, i) => {
-            const header = item.group !== lastGroup ? item.group : undefined;
-            lastGroup = item.group;
-            return (
-              <li key={item.key}>
-                {header && <div className="palette-group">{header}</div>}
-                <button
-                  role="option"
-                  aria-selected={i === active}
-                  className={`palette-item${i === active ? " active" : ""}`}
-                  onMouseMove={() => setActive(i)}
-                  onClick={() => choose(item)}
-                  ref={(el) => {
-                    if (i === active) el?.scrollIntoView({ block: "nearest" });
-                  }}
-                >
-                  {item.dot && <StatusDot tone={item.dot} />}
-                  <span className="palette-label">{item.label}</span>
-                  {item.hint && <span className="muted palette-hint">{item.hint}</span>}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </div>
+    <CommandDialog
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      shouldFilter={false}
+      title="Command palette"
+      description="Jump to a project, session or action"
+      showCloseButton={false}
+    >
+      <CommandInput value={query} onValueChange={setQuery} placeholder="Jump to a project, session or action…" />
+      <CommandList>
+        <CommandEmpty>No matches</CommandEmpty>
+        {groups.map(([group, list]) => (
+          <CommandGroup key={group} heading={group}>
+            {list.map((item) => (
+              <CommandItem key={item.key} value={item.key} onSelect={() => choose(item)}>
+                {item.dot && <StatusDot tone={item.dot} />}
+                <span className="truncate">{item.label}</span>
+                {item.hint && <CommandShortcut className="max-w-1/2 truncate tracking-normal">{item.hint}</CommandShortcut>}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
+      </CommandList>
+    </CommandDialog>
   );
 }

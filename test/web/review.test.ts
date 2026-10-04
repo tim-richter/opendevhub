@@ -248,7 +248,7 @@ describe("@pierre/trees adapters", () => {
       parts: [
         { text: "+3", color: "var(--ok)" },
         { text: " " },
-        { text: "−1", color: "var(--danger)" },
+        { text: "−1", color: "var(--destructive)" },
       ],
     });
     expect(statsDecoration(files[3])).toEqual({ text: "binary", title: "binary file" });

@@ -9,7 +9,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": { "@/*": ["./src/web/*"] }
   },
   "include": ["src", "test", "*.config.ts"]
 }

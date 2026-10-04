@@ -5,7 +5,16 @@ import type { ModelsInfo, TaskVariantSpec, TaskWhere } from "../../shared/types"
 import { createTask, fetchModels } from "../api";
 import { useDash } from "../DashboardContext";
 import { modelFromKey, modelKey, taskDestination, taskFailures } from "../tasks";
-import { Icon } from "./Icon";
+import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
+import { Choice } from "./Choice";
 import { projectFlags } from "./ProjectActions";
 
 interface Row {
@@ -19,10 +28,10 @@ export function NewTaskDialog() {
   const { snapshot, newTaskFor, closeNewTask } = useDash();
   if (!snapshot || !newTaskFor) return null;
   // Mounted per opening, so every field starts empty.
-  return <Dialog initialProject={newTaskFor.projectId} onClose={closeNewTask} />;
+  return <TaskForm initialProject={newTaskFor.projectId} onClose={closeNewTask} />;
 }
 
-function Dialog({ initialProject, onClose }: { initialProject?: string; onClose: () => void }) {
+function TaskForm({ initialProject, onClose }: { initialProject?: string; onClose: () => void }) {
   const { snapshot, act, report } = useDash();
   const navigate = useNavigate();
   const projects = useMemo(
@@ -54,10 +63,6 @@ function Dialog({ initialProject, onClose }: { initialProject?: string; onClose:
   const effectiveWhere: TaskWhere = worktreesReady ? where : "workspace";
   const shownRows = effectiveWhere === "worktree" ? rows : rows.slice(0, 1);
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
-
-  useEffect(() => {
-    promptRef.current?.focus();
-  }, []);
 
   useEffect(() => {
     setModels(undefined);
@@ -124,176 +129,200 @@ function Dialog({ initialProject, onClose }: { initialProject?: string; onClose:
   };
 
   return (
-    <div className="palette-backdrop" onMouseDown={() => !busy && onClose()}>
-      <form
-        className="dialog task-dialog"
-        role="dialog"
-        aria-label="New task"
-        onMouseDown={(e) => e.stopPropagation()}
-        onSubmit={submit}
-        onKeyDown={(e) => {
-          if (e.key === "Escape" && !busy) onClose();
+    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+        showCloseButton={!busy}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          promptRef.current?.focus();
         }}
       >
-        <div className="dialog-head">
-          <h2>New task</h2>
-          <button type="button" className="icon-button" aria-label="Close" disabled={busy} onClick={onClose}>
-            <Icon name="close" size={14} />
-          </button>
-        </div>
+        <DialogHeader>
+          <DialogTitle>New task</DialogTitle>
+          <DialogDescription className="sr-only">Start an agent on a prompt in one of your projects.</DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-4" onSubmit={submit}>
+          <div className="grid gap-2">
+            <Label htmlFor="task-project">Project</Label>
+            <Choice
+              id="task-project"
+              size="default"
+              className="w-full"
+              value={projectId}
+              options={projects.map((v) => ({ value: v.project.id, label: v.project.name }))}
+              onChange={(id) => {
+                setProjectId(id);
+                setRows([EMPTY_ROW]);
+              }}
+            />
+          </div>
 
-        <label className="field">
-          <span>Project</span>
-          <select value={projectId} onChange={(e) => {
-              setProjectId(e.target.value);
-              setRows([EMPTY_ROW]);
-            }}>
-            {projects.map((v) => (
-              <option key={v.project.id} value={v.project.id}>
-                {v.project.name}
-              </option>
-            ))}
-          </select>
-        </label>
+          {view && !canOpen && (
+            <Alert className="border-warn/40 bg-warn/10 text-warn">
+              <AlertDescription className="flex items-center justify-between gap-2 text-warn">
+                <span>
+                  {flags?.transitioning
+                    ? "Starting the project…"
+                    : flags?.unhealthy
+                      ? "opencode is not responding. Restart it from the project's menu."
+                      : "The project isn't running. Start it to run a task."}
+                </span>
+                {!flags?.transitioning && !flags?.unhealthy && (
+                  <Button type="button" variant="outline" size="sm" disabled={flags?.locked} onClick={() => act(view.project.id, "start")}>
+                    <PlayIcon className="size-3" /> Start project
+                  </Button>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {view && !canOpen && (
-          <div className="note note-warn task-start">
-            <span>
-              {flags?.transitioning
-                ? "Starting the project…"
-                : flags?.unhealthy
-                  ? "opencode is not responding. Restart it from the project's menu."
-                  : "The project isn't running. Start it to run a task."}
-            </span>
-            {!flags?.transitioning && !flags?.unhealthy && (
-              <button type="button" disabled={flags?.locked} onClick={() => act(view.project.id, "start")}>
-                <Icon name="play" size={12} /> Start project
-              </button>
+          <div className="grid gap-2">
+            <Label htmlFor="task-prompt">Prompt</Label>
+            <Textarea
+              id="task-prompt"
+              ref={promptRef}
+              rows={6}
+              className="min-h-28"
+              value={prompt}
+              placeholder="What should the agent do?"
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <span className="text-muted-foreground">Where</span>
+            <RadioGroup
+              className="flex flex-wrap gap-4"
+              value={effectiveWhere}
+              onValueChange={(v) => setWhere(v as TaskWhere)}
+              aria-label="Where"
+            >
+              <Label className="font-normal">
+                <RadioGroupItem value="worktree" disabled={!worktreesReady} /> New worktree
+              </Label>
+              <Label className="font-normal">
+                <RadioGroupItem value="workspace" /> Main checkout
+              </Label>
+            </RadioGroup>
+            {view && canOpen && !worktreesReady && <span className="text-muted-foreground">Rebuild the container to enable worktrees.</span>}
+          </div>
+
+          <div className="flex flex-col items-start gap-2">
+            {shownRows.map((row, i) => {
+              const chosen = models?.models.find((m) => modelKey(m) === row.model);
+              return (
+                <div className="flex flex-wrap items-center gap-2" key={i}>
+                  <Choice
+                    label={`Model ${i + 1}`}
+                    value={row.model}
+                    onChange={(model) => setRow(i, { model, variant: "" })}
+                    options={[
+                      { value: "", label: defaultName ? `Default (${defaultName})` : "Default model" },
+                      ...(models?.models.map((m) => ({ value: modelKey(m), label: m.name })) ?? []),
+                    ]}
+                  />
+                  {chosen && chosen.variants.length > 0 && (
+                    <Choice
+                      label={`Reasoning ${i + 1}`}
+                      value={row.variant}
+                      onChange={(variant) => setRow(i, { variant })}
+                      options={[{ value: "", label: "Default effort" }, ...chosen.variants.map((v) => ({ value: v, label: v }))]}
+                    />
+                  )}
+                  {models && models.agents.length > 1 && (
+                    <Choice
+                      label={`Agent ${i + 1}`}
+                      value={row.agent}
+                      onChange={(agent) => setRow(i, { agent })}
+                      options={[
+                        { value: "", label: "Default agent" },
+                        ...models.agents.map((a) => ({ value: a.id, label: a.name, title: a.description })),
+                      ]}
+                    />
+                  )}
+                  {shownRows.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      aria-label={`Remove model ${i + 1}`}
+                      onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                    >
+                      <XIcon />
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+            {effectiveWhere === "worktree" && rows.length < MAX_VARIANTS && (
+              <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setRows((rs) => [...rs, EMPTY_ROW])}>
+                <PlusIcon /> Compare with another model
+              </Button>
             )}
           </div>
-        )}
 
-        <label className="field">
-          <span>Prompt</span>
-          <textarea
-            ref={promptRef}
-            rows={6}
-            value={prompt}
-            placeholder="What should the agent do?"
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-        </label>
-
-        <fieldset className="task-where">
-          <legend>Where</legend>
-          <label>
-            <input type="radio" name="where" checked={effectiveWhere === "worktree"} disabled={!worktreesReady} onChange={() => setWhere("worktree")} />{" "}
-            New worktree
-          </label>
-          <label>
-            <input type="radio" name="where" checked={effectiveWhere === "workspace"} onChange={() => setWhere("workspace")} /> Main checkout
-          </label>
-          {view && canOpen && !worktreesReady && <span className="muted">Rebuild the container to enable worktrees.</span>}
-        </fieldset>
-
-        <div className="task-variants">
-          {shownRows.map((row, i) => {
-            const chosen = models?.models.find((m) => modelKey(m) === row.model);
-            return (
-              <div className="task-variant" key={i}>
-                <select aria-label={`Model ${i + 1}`} value={row.model} onChange={(e) => setRow(i, { model: e.target.value, variant: "" })}>
-                  <option value="">{defaultName ? `Default (${defaultName})` : "Default model"}</option>
-                  {models?.models.map((m) => (
-                    <option key={modelKey(m)} value={modelKey(m)}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                {chosen && chosen.variants.length > 0 && (
-                  <select aria-label={`Reasoning ${i + 1}`} value={row.variant} onChange={(e) => setRow(i, { variant: e.target.value })}>
-                    <option value="">Default effort</option>
-                    {chosen.variants.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {models && models.agents.length > 1 && (
-                  <select aria-label={`Agent ${i + 1}`} value={row.agent} onChange={(e) => setRow(i, { agent: e.target.value })}>
-                    <option value="">Default agent</option>
-                    {models.agents.map((a) => (
-                      <option key={a.id} value={a.id} title={a.description}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {shownRows.length > 1 && (
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Remove model ${i + 1}`}
-                    onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
-                  >
-                    <Icon name="close" size={14} />
-                  </button>
-                )}
+          <Collapsible className="group/options flex flex-col gap-3">
+            <CollapsibleTrigger className="flex items-center gap-1 self-start text-sm text-muted-foreground hover:text-foreground">
+              <ChevronRightIcon className="size-4 transition-transform group-data-[state=open]/options:rotate-90" /> Options
+            </CollapsibleTrigger>
+            <CollapsibleContent className="flex flex-col gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="task-title">Title</Label>
+                <Input
+                  id="task-title"
+                  value={title}
+                  maxLength={200}
+                  placeholder={deriveTitle(prompt) || "First line of the prompt"}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
               </div>
-            );
-          })}
-          {effectiveWhere === "worktree" && rows.length < MAX_VARIANTS && (
-            <button type="button" className="link" onClick={() => setRows((rs) => [...rs, EMPTY_ROW])}>
-              <Icon name="plus" size={12} /> Compare with another model
-            </button>
+              {effectiveWhere === "worktree" && (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="task-branch">Branch</Label>
+                    <Input id="task-branch" value={branch} placeholder={branchSlug(shownTitle)} onChange={(e) => setBranch(e.target.value)} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="task-base">Base</Label>
+                    <Input id="task-base" value={base} placeholder="the main checkout's current branch" onChange={(e) => setBase(e.target.value)} />
+                  </div>
+                </>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+
+          {preview.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {preview.length === 1 ? "Branch" : "Branches"}: <code className="font-mono">{preview.join(", ")}</code>
+              {!branch.trim() || preview.length > 1 ? " — a number is added when one is taken" : ""}
+            </p>
           )}
-        </div>
 
-        <details className="task-options">
-          <summary>Options</summary>
-          <label className="field">
-            <span>Title</span>
-            <input value={title} maxLength={200} placeholder={deriveTitle(prompt) || "First line of the prompt"} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          {effectiveWhere === "worktree" && (
-            <>
-              <label className="field">
-                <span>Branch</span>
-                <input value={branch} placeholder={branchSlug(shownTitle)} onChange={(e) => setBranch(e.target.value)} />
-              </label>
-              <label className="field">
-                <span>Base</span>
-                <input value={base} placeholder="the main checkout's current branch" onChange={(e) => setBase(e.target.value)} />
-              </label>
-            </>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
-        </details>
 
-        {preview.length > 0 && (
-          <p className="muted task-preview">
-            {preview.length === 1 ? "Branch" : "Branches"}: <code>{preview.join(", ")}</code>
-            {!branch.trim() || preview.length > 1 ? " — a number is added when one is taken" : ""}
-          </p>
-        )}
-
-        {error && <div className="banner error">{error}</div>}
-
-        <div className="dialog-actions">
-          <span className="muted">{isMac ? "⌘" : "Ctrl"}+Enter to start</span>
-          <button type="button" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="button primary" disabled={!view || !prompt.trim() || !canOpen || busy}>
-            {busy ? "Starting…" : variants.length > 1 ? `Start ${variants.length} variants` : "Start task"}
-          </button>
-        </div>
-      </form>
-    </div>
+          <DialogFooter className="items-center">
+            <span className="mr-auto text-xs text-muted-foreground">{isMac ? "⌘" : "Ctrl"}+Enter to start</span>
+            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!view || !prompt.trim() || !canOpen || busy}>
+              {busy ? "Starting…" : variants.length > 1 ? `Start ${variants.length} variants` : "Start task"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
