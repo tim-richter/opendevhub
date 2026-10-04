@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { useOutletContext } from "react-router";
+import { Link, useOutletContext } from "react-router";
 import type { ProjectView } from "../../shared/types";
 import { createWorktree, refreshWorktrees, removeWorktree, startSession } from "../api";
 import { CopyButton } from "../components/CopyButton";
@@ -8,6 +8,7 @@ import { OpenInMenu } from "../components/OpenInMenu";
 import { openSessionTab, projectFlags } from "../components/ProjectActions";
 import { useDash } from "../DashboardContext";
 import { workspaceFolderOf } from "../derive";
+import { targetOf } from "../review";
 
 export function ProjectWorktrees() {
   const view = useOutletContext<ProjectView>();
@@ -157,6 +158,9 @@ export function ProjectWorktrees() {
               <td>{sessionsIn(ws) || "—"}</td>
               <td>
                 <div className="wt-actions">
+                  <Link className="button small" to={`/p/${encodeURIComponent(project.id)}/review`}>
+                    Review
+                  </Link>
                   <button className="small" disabled={!canOpen || !!pending} onClick={() => newSession(ws)}>
                     New session
                   </button>
@@ -186,6 +190,11 @@ export function ProjectWorktrees() {
                   <td>{sessionsIn(w.path) || "—"}</td>
                   <td>
                     <div className="wt-actions">
+                      {targetOf(view, w.path) !== undefined && (
+                        <Link className="button small" to={`/p/${encodeURIComponent(project.id)}/review/${encodeURIComponent(targetOf(view, w.path)!)}`}>
+                          Review
+                        </Link>
+                      )}
                       <button className="small" disabled={!canOpen || !!pending} onClick={() => newSession(w.path, w.branch)}>
                         New session
                       </button>

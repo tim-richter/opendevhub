@@ -6,6 +6,7 @@ import { useNow } from "../DashboardContext";
 import { relativeTime, type SessionEntry, worktreeLabel } from "../derive";
 import { Icon } from "./Icon";
 import { PendingStack } from "./PendingCards";
+import { targetOf } from "../review";
 import { SessionBadge } from "./Status";
 
 export function SessionRow(props: {
@@ -15,6 +16,8 @@ export function SessionRow(props: {
   /** Set when the session works in a worktree rather than the main checkout. */
   worktree?: string;
   highlighted?: boolean;
+  /** Link to this session's checkout in the Review tab. */
+  reviewTo?: string;
   now: number;
 }) {
   const { session, openUrl, project, worktree, highlighted, now } = props;
@@ -37,10 +40,17 @@ export function SessionRow(props: {
       <time className="muted nowrap" dateTime={new Date(session.updatedAt).toISOString()} title={new Date(session.updatedAt).toLocaleString()}>
         {relativeTime(session.updatedAt, now)}
       </time>
-      <a className="row-action" href={sessionUrl(openUrl, session.id)} target="_blank" rel="noreferrer">
-        {(session.status === "needs-permission" || session.status === "needs-answer") && !session.pending ? "Respond" : "Open"}{" "}
-        <Icon name="external" size={13} />
-      </a>
+      <span className="row-links">
+        {props.reviewTo && (
+          <Link className="row-review" to={props.reviewTo} title="Review this checkout's changes">
+            Review
+          </Link>
+        )}
+        <a className="row-action" href={sessionUrl(openUrl, session.id)} target="_blank" rel="noreferrer">
+          {(session.status === "needs-permission" || session.status === "needs-answer") && !session.pending ? "Respond" : "Open"}{" "}
+          <Icon name="external" size={13} />
+        </a>
+      </span>
     </li>
   );
 }
@@ -57,6 +67,10 @@ export function SessionList(props: { entries: SessionEntry[]; showProject?: bool
             project={props.showProject ? { id: view.project.id, name: view.project.name } : undefined}
             worktree={worktreeLabel(view, session.directory)}
             highlighted={session.id === props.highlight}
+            reviewTo={(() => {
+              const t = targetOf(view, session.directory);
+              return t === undefined ? undefined : `/p/${encodeURIComponent(view.project.id)}/review${t ? `/${encodeURIComponent(t)}` : ""}`;
+            })()}
             now={now}
           />
           {session.pending && (

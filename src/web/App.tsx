@@ -3,6 +3,7 @@ import { Shell } from "./layout/Shell";
 import { NotFound } from "./pages/NotFound";
 import { Overview } from "./pages/Overview";
 import { ProjectLogs, ProjectPage, ProjectPorts, ProjectSessions } from "./pages/ProjectPage";
+import { ProjectReview } from "./pages/ProjectReview";
 import { ProjectWorktrees } from "./pages/ProjectWorktrees";
 import { SessionsPage } from "./pages/SessionsPage";
 
@@ -15,6 +16,8 @@ export function App() {
         <Route path="p/:projectId" element={<ProjectPage />}>
           <Route index element={<ProjectSessions />} />
           <Route path="worktrees" element={<ProjectWorktrees />} />
+          <Route path="review" element={<ProjectReview />} />
+          <Route path="review/:target" element={<ProjectReview />} />
           <Route path="ports" element={<ProjectPorts />} />
           <Route path="logs" element={<ProjectLogs />} />
         </Route>

@@ -15,6 +15,7 @@ import {
   optionsOf,
   safeUrl,
 } from "../forms";
+import { DiffView } from "./DiffView";
 import { Icon } from "./Icon";
 
 const RESOURCE_LIMIT = 5;
@@ -156,7 +157,11 @@ function PermissionCard(props: {
         </ul>
       )}
       {p.message && <p className="pending-message">{p.message}</p>}
-      {p.diff && <DiffView patch={p.diff} />}
+      {p.diff && (
+        <div className="pending-diff">
+          <DiffView patch={p.diff} />
+        </div>
+      )}
       {rejecting ? (
         <form
           className="pending-actions"
@@ -205,29 +210,6 @@ function PermissionCard(props: {
         </p>
       )}
     </section>
-  );
-}
-
-function DiffView({ patch }: { patch: string }) {
-  const kind = (line: string) =>
-    line.startsWith("+++") || line.startsWith("---")
-      ? "file"
-      : line.startsWith("+")
-        ? "add"
-        : line.startsWith("-")
-          ? "del"
-          : line.startsWith("@@")
-            ? "hunk"
-            : undefined;
-  return (
-    <pre className="pending-diff">
-      {patch.split("\n").map((line, i) => (
-        <span key={i} className={kind(line)}>
-          {line}
-          {"\n"}
-        </span>
-      ))}
-    </pre>
   );
 }
 

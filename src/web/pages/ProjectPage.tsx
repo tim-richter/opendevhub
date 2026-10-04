@@ -72,6 +72,7 @@ export function ProjectPage() {
         <NavLink to={`${base}/worktrees`}>
           Worktrees <Count n={runtime.worktrees?.length ?? 0} tone="muted" />
         </NavLink>
+<NavLink to={`${base}/review`}>Review</NavLink>
         <NavLink to={`${base}/ports`}>
           Ports <Count n={portCount} tone="muted" />
         </NavLink>
