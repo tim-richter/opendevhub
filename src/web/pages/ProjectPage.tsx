@@ -103,7 +103,9 @@ export function ProjectSessions() {
   );
 
   useEffect(() => {
-    if (highlight) document.getElementById(`session-${highlight}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!highlight) return;
+    document.getElementById(`session-${highlight}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    document.querySelector<HTMLElement>(`#pending-${CSS.escape(highlight)} .pending-card`)?.focus({ preventScroll: true });
   }, [highlight]);
 
   if (view.sessions.length === 0) {

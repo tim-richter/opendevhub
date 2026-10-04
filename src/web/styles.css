@@ -303,6 +303,32 @@ kbd { font: 11px var(--mono); padding: 0.05rem 0.35rem; border: 1px solid var(--
 .palette-empty { padding: 1rem; text-align: center; }
 
 /* ---------- responsive ---------- */
+/* Inline responses */
+.pending-item { list-style: none; padding: 0 1rem 0.8rem; }
+.pending-count { margin: 0 0 0.35rem; font-size: 12.5px; }
+.pending-card { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.75rem 0.9rem; border: 1px solid color-mix(in srgb, var(--attention) 35%, var(--border)); border-radius: 8px; background: var(--surface); }
+.pending-card:focus-visible, .pending-card:focus { outline: 2px solid var(--attention); outline-offset: 1px; }
+.pending-ask { margin: 0; }
+.pending-who { color: var(--muted); }
+.pending-resources { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.2rem; }
+.pending-resources code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pending-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pending-diff { margin: 0; max-height: 18rem; overflow: auto; padding: 0.5rem 0.75rem; font: 12px/1.5 var(--mono); background: var(--surface-2); border-radius: 6px; }
+.pending-diff .add { color: var(--ok); }
+.pending-diff .del { color: var(--danger); }
+.pending-diff .hunk, .pending-diff .file { color: var(--muted); }
+.pending-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.pending-actions kbd { margin-left: 0.3rem; }
+.pending-reason { flex: 1 1 16rem; }
+.pending-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.pending-label { font-weight: 500; }
+.pending-hint { font-size: 12.5px; }
+.pending-choices { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; align-items: center; }
+.pending-choice { display: inline-flex; align-items: center; gap: 0.3rem; }
+.pending-error { color: var(--danger); font-size: 12.5px; margin: 0; }
+.pending-readonly { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.8rem; margin: 0; }
+.pending-readonly dd { margin: 0; }
+
 @media (max-width: 64rem) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

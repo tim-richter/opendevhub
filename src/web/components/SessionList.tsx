@@ -1,9 +1,11 @@
+import { Fragment } from "react";
 import { Link } from "react-router";
 import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { useNow } from "../DashboardContext";
 import { relativeTime, type SessionEntry, worktreeLabel } from "../derive";
 import { Icon } from "./Icon";
+import { PendingStack } from "./PendingCards";
 import { SessionBadge } from "./Status";
 
 export function SessionRow(props: {
@@ -36,7 +38,7 @@ export function SessionRow(props: {
         {relativeTime(session.updatedAt, now)}
       </time>
       <a className="row-action" href={sessionUrl(openUrl, session.id)} target="_blank" rel="noreferrer">
-        {session.status === "needs-permission" || session.status === "needs-answer" ? "Respond" : "Open"}{" "}
+        {(session.status === "needs-permission" || session.status === "needs-answer") && !session.pending ? "Respond" : "Open"}{" "}
         <Icon name="external" size={13} />
       </a>
     </li>
@@ -48,15 +50,21 @@ export function SessionList(props: { entries: SessionEntry[]; showProject?: bool
   return (
     <ul className={`rows sessions${props.showProject ? " with-project" : ""}`}>
       {props.entries.map(({ session, view }) => (
-        <SessionRow
-          key={session.id}
-          session={session}
-          openUrl={view.openUrl}
-          project={props.showProject ? { id: view.project.id, name: view.project.name } : undefined}
-          worktree={worktreeLabel(view, session.directory)}
-          highlighted={session.id === props.highlight}
-          now={now}
-        />
+        <Fragment key={session.id}>
+          <SessionRow
+            session={session}
+            openUrl={view.openUrl}
+            project={props.showProject ? { id: view.project.id, name: view.project.name } : undefined}
+            worktree={worktreeLabel(view, session.directory)}
+            highlighted={session.id === props.highlight}
+            now={now}
+          />
+          {session.pending && (
+            <li className="pending-item" id={`pending-${session.id}`}>
+              <PendingStack session={session} view={view} />
+            </li>
+          )}
+        </Fragment>
       ))}
     </ul>
   );
