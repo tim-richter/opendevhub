@@ -21,6 +21,8 @@ export default function PatchView<A = undefined>(props: {
   disableHeader?: boolean;
   onComment?: (range: SelectedLineRange) => void;
   annotations?: DiffLineAnnotation<A>[];
+  /** Controlled line selection; pass null to clear it. */
+  selectedLines?: SelectedLineRange | null;
   renderAnnotation?: (annotation: DiffLineAnnotation<A>) => ReactNode;
   renderHeaderPrefix?: () => ReactNode;
 }) {
@@ -39,6 +41,7 @@ export default function PatchView<A = undefined>(props: {
       patch={props.patch}
       options={options}
       lineAnnotations={props.annotations}
+      selectedLines={props.selectedLines}
       renderAnnotation={props.renderAnnotation}
       renderHeaderPrefix={props.renderHeaderPrefix}
     />

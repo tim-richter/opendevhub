@@ -228,3 +228,13 @@ export function statsDecoration(f: ReviewFile): FileTreeRowDecoration {
     parts: [{ text: added, color: "var(--ok)" }, { text: " " }, { text: removed, color: "var(--danger)" }],
   };
 }
+
+/**
+ * The diff's line selection: the line whose comment box is open, else none. A gutter "+" click selects its line
+ * inside @pierre/diffs, and the "+" stays pinned to that selection, so it must be cleared once the box closes.
+ */
+export function selectionFor(open: LineAnchor | undefined): SelectedLineRange | null {
+  if (!open) return null;
+  const side = toSide(open.side);
+  return { start: open.line, end: open.line, side, endSide: side };
+}

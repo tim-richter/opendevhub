@@ -6,6 +6,7 @@ import {
   anchorFromRange,
   annotationsFor,
   ensurePatchHeader,
+  selectionFor,
   statsDecoration,
   treeGitStatus,
   composeReviewPrompt,
@@ -250,5 +251,13 @@ describe("@pierre/trees adapters", () => {
       ],
     });
     expect(statsDecoration(files[3])).toEqual({ text: "binary", title: "binary file" });
+  });
+});
+
+describe("diff selection", () => {
+  it("selects the line whose comment box is open, and nothing once it closes", () => {
+    expect(selectionFor({ key: "new:7", line: 7, side: "new", quote: [] })).toEqual({ start: 7, end: 7, side: "additions", endSide: "additions" });
+    expect(selectionFor({ key: "old:3", line: 3, side: "old", quote: [] })).toEqual({ start: 3, end: 3, side: "deletions", endSide: "deletions" });
+    expect(selectionFor(undefined)).toBeNull();
   });
 });

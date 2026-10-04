@@ -29,6 +29,7 @@ import {
   type LineAnchor,
   newId,
   readComments,
+  selectionFor,
   type ReviewAnnotation,
   type ReviewComment,
   sentKey,
@@ -470,6 +471,7 @@ function FileDiff(props: {
     if (patch !== undefined) props.onAnchor(anchorFromRange(patch, range));
   });
   const annotations = useMemo(() => annotationsFor(props.comments, file.file, props.open), [props.comments, file.file, props.open]);
+  const selectedLines = useMemo(() => selectionFor(props.open), [props.open]);
   const renderAnnotation = useStableCallback((a: DiffLineAnnotation<ReviewAnnotation>) =>
     a.metadata.kind === "draft" ? (
       <CommentForm onAdd={(text) => props.onAdd(file.file, a.metadata.kind === "draft" ? a.metadata.anchor : props.open!, text)} onCancel={props.onCancel} />
@@ -496,6 +498,7 @@ function FileDiff(props: {
           collapsed={collapsed}
           onComment={onComment}
           annotations={annotations}
+          selectedLines={selectedLines}
           renderAnnotation={renderAnnotation}
           renderHeaderPrefix={toggle}
         />
