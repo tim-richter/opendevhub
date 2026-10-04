@@ -234,6 +234,11 @@ export class OpencodeClient {
     return this.send("POST", `/api/session/${encodeURIComponent(sessionId)}/prompt`, { text, ...(delivery ? { delivery } : {}) }, directory);
   }
 
+  /** Stops the session's running turn. */
+  interrupt(sessionId: string, directory?: string): Promise<void> {
+    return this.send("POST", `/api/session/${encodeURIComponent(sessionId)}/interrupt`, undefined, directory);
+  }
+
   /** Text generated from the session's context, without adding to its history. */
   async generate(sessionId: string, prompt: string, directory?: string): Promise<string> {
     const path = `/api/session/${encodeURIComponent(sessionId)}/generate`;

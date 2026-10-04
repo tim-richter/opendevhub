@@ -114,14 +114,35 @@ describe("after starting a task", () => {
 describe("picking a variant", () => {
   it("removes other variants' worktrees that no remaining session uses", () => {
     const v = view([
-      session("s1", wt("a"), { task: meta(1) }),
-      session("s2", wt("b"), { task: meta(2) }),
-      session("s3", wt("c"), { task: meta(3) }),
+      session("s1", wt("a"), { task: { ...meta(1), branch: "fix-a" } }),
+      session("s2", wt("b"), { task: { ...meta(2), branch: "fix-b" } }),
+      session("s3", wt("c"), { task: { ...meta(3), branch: "fix-c" } }),
       session("other", wt("c")),
       session("ws", "/workspaces/demo", { task: { ...meta(1), task: "tsk_2" } }),
     ]);
     expect(removals(v, "tsk_1", "s2", { [wt("a")]: true })).toEqual([{ name: "fix-a", dirty: true }]);
     expect(removals(v, "tsk_1", "s1", {})).toEqual([{ name: "fix-b" }]);
+  });
+
+  it("marks worktrees whose branch would be kept", () => {
+    const v = view([session("s1", wt("a"), { task: { ...meta(1), branch: "fix-a" } }), session("s2", wt("b"), { task: { ...meta(2), branch: "fix-b" } }), session("s3", wt("c"), { task: meta(3) })]);
+    v.runtime.worktrees = [
+      { path: wt("a"), branch: "fix-a" },
+      { path: wt("b"), branch: "other" },
+      { path: wt("c"), branch: "fix-c" },
+    ];
+    expect(removals(v, "tsk_1", "s1", { [wt("b")]: true })).toEqual([
+      { name: "other", dirty: true, branchKept: true },
+      { name: "fix-c", branchKept: true },
+    ]);
+  });
+
+  it("says running variants are stopped and which branches are kept", () => {
+    expect(pickPrompts("a", 1, [], false).discard).not.toMatch(/stopped/);
+    expect(pickPrompts("a", 1, [], true).discard).toMatch(/Running variants are stopped\./);
+    const p = pickPrompts("a", 2, [{ name: "x", dirty: true, branchKept: true }, { name: "y", branchKept: true }]);
+    expect(p.remove).toContain("• x — has uncommitted changes, branch kept (not created by this task)");
+    expect(p.remove).toContain("• y — may have uncommitted changes, branch kept (not created by this task)");
   });
 
   it("asks to discard, then to remove worktrees, naming the ones with changes", () => {

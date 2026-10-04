@@ -83,7 +83,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: tasks in a real container", (
       expect(hostGit("branch", "--list", "e2e-task")).toContain("e2e-task");
       expect(store.runtime(project.id).worktrees?.find((w) => w.branch === "e2e-task")?.path).toBe(v.directory);
       await vi.waitFor(
-        () => expect(sessionOf(v.sessionId)?.task).toEqual({ task: one.task, variant: 1, of: 1, title: "e2e task" }),
+        () => expect(sessionOf(v.sessionId)?.task).toEqual({ task: one.task, variant: 1, of: 1, title: "e2e task", branch: "e2e-task" }),
         { timeout: 20_000, interval: 500 },
       );
 

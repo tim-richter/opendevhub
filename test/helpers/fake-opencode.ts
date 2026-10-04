@@ -45,6 +45,8 @@ export interface FakeState {
   rejectModels?: string[];
   /** Every `PATCH /api/session/:id` body. */
   patches: Array<{ sessionId: string; body: unknown }>;
+  /** Session ids `POST /api/session/:id/interrupt` was called for. */
+  interrupts: string[];
 }
 
 export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
@@ -61,6 +63,7 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     diffQueries: [],
     prompts: [],
     patches: [],
+    interrupts: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -195,6 +198,11 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
             res.end();
           });
           return;
+        }
+        const interrupt = url.pathname.match(/^\/api\/session\/([^/]+)\/interrupt$/);
+        if (interrupt && req.method === "POST") {
+          state.interrupts.push(decodeURIComponent(interrupt[1]));
+          return json(true);
         }
         const sessionCall = url.pathname.match(/^\/api\/session\/([^/]+)\/(prompt|generate)$/);
         if (sessionCall && req.method === "POST") {

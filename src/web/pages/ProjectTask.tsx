@@ -46,7 +46,8 @@ export function ProjectTask() {
     if (picking) return;
     const others = sessions.filter((s) => s.id !== keep.id);
     const name = variantName(keep);
-    if (!confirm(pickPrompts(name, others.length, []).discard)) return;
+    const running = others.some((s) => s.status !== "idle");
+    if (!confirm(pickPrompts(name, others.length, [], running).discard)) return;
     setPicking(true);
     setNotice(undefined);
     try {
@@ -58,7 +59,7 @@ export function ProjectTask() {
       fresh.forEach((r, i) => {
         if (r.status === "fulfilled") dirty[dirs[i]] = r.value.dirty;
       });
-      const prompts = pickPrompts(name, others.length, removals(view, task, keep.id, dirty));
+      const prompts = pickPrompts(name, others.length, removals(view, task, keep.id, dirty), running);
       const removeWorktrees = prompts.remove ? confirm(prompts.remove) : false;
       const r = await pickVariant(view.project.id, task, keep.id, removeWorktrees);
       const removed = r.removed.length > 0 ? `, removed ${r.removed.length} worktree${r.removed.length === 1 ? "" : "s"}` : "";

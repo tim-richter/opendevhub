@@ -168,6 +168,11 @@ describe("OpencodeClient", () => {
     expect(await client.vcsBase("/w/b")).toBeUndefined();
   });
 
+  it("interrupts a session", async () => {
+    await client.interrupt("ses_1", "/w/x");
+    expect(fake.state.interrupts).toEqual(["ses_1"]);
+  });
+
   it("sends prompts, queued when asked, and generates text from a session", async () => {
     await client.prompt("ses_1", "fix it", "queue", "/w/x");
     await client.prompt("ses_2", "hello");

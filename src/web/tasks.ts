@@ -51,6 +51,8 @@ export interface Removal {
   name: string;
   /** Undefined when the variant's review didn't load, so it's unknown. */
   dirty?: boolean;
+  /** The worktree's branch wasn't created by this task, so only the worktree is removed. */
+  branchKept?: true;
 }
 
 /** The worktrees "Pick this one" would remove (mirrors the server): other variants' worktrees no remaining session uses. */
@@ -63,19 +65,30 @@ export function removals(view: ProjectView, task: string, keep: string, dirty: R
     .flatMap((d) => {
       const worktree = view.runtime.worktrees?.find((w) => w.path === d);
       if (!worktree) return [];
-      return [{ name: worktree.branch ?? d, ...(d in dirty ? { dirty: dirty[d] } : {}) }];
+      const ours = worktree.branch === undefined || others.some((s) => s.directory === d && s.task?.branch === worktree.branch);
+      return [{ name: worktree.branch ?? d, ...(d in dirty ? { dirty: dirty[d] } : {}), ...(ours ? {} : { branchKept: true as const }) }];
     });
 }
 
 /** The two confirmations of "Pick this one": discard the others, then (optionally) remove their worktrees. */
-export function pickPrompts(keepName: string, discardCount: number, list: Removal[]): { discard: string; remove?: string } {
+export function pickPrompts(
+  keepName: string,
+  discardCount: number,
+  list: Removal[],
+  othersRunning = false,
+): { discard: string; remove?: string } {
   const one = discardCount === 1;
   const discard = `Keep ${keepName} and discard the other ${one ? "variant" : `${discardCount} variants`}? ${
     one ? "It disappears from the dashboard; its session stays" : "They disappear from the dashboard; their sessions stay"
-  } in opencode.`;
+  } in opencode.${othersRunning ? " Running variants are stopped." : ""}`;
   if (list.length === 0) return { discard };
   const lines = list
-    .map((r) => `• ${r.name}${r.dirty === true ? " — has uncommitted changes" : r.dirty === undefined ? " — may have uncommitted changes" : ""}`)
+    .map((r) => {
+      const dirty = r.dirty === true ? "has uncommitted changes" : r.dirty === undefined ? "may have uncommitted changes" : "";
+      const kept = r.branchKept ? "branch kept (not created by this task)" : "";
+      const notes = [dirty, kept].filter(Boolean).join(", ");
+      return `• ${r.name}${notes ? ` — ${notes}` : ""}`;
+    })
     .join("\n");
   return {
     discard,

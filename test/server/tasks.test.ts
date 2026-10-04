@@ -53,6 +53,8 @@ describe("task metadata", () => {
     const meta = { task: "tsk_1", variant: 2, of: 3, title: "Fix" };
     expect(parseTaskMeta({ opendevhub: meta, other: 1 })).toEqual(meta);
     expect(parseTaskMeta({ opendevhub: { ...meta, discarded: true } })).toEqual({ ...meta, discarded: true });
+    expect(parseTaskMeta({ opendevhub: { ...meta, branch: "fix-a" } })).toEqual({ ...meta, branch: "fix-a" });
+    expect(parseTaskMeta({ opendevhub: { ...meta, branch: 5 } })).toEqual(meta);
     expect(parseTaskMeta({ opendevhub: { ...meta, title: 5 } })).toEqual({ ...meta, title: "" });
     expect(parseTaskMeta(undefined)).toBeUndefined();
     expect(parseTaskMeta({ opendevhub: { task: "nope", variant: 1, of: 1 } })).toBeUndefined();

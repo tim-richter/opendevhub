@@ -25,7 +25,7 @@ import type { EditorLauncher } from "./editors";
 import { deriveTitle, taskBranches, variantLabels, variantTitle } from "../shared/tasks";
 import { splitTitleBody } from "./forge";
 import { newTaskId } from "./ids";
-import { discardMetadata, parseTaskRequest, toModelsInfo } from "./tasks";
+import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "./tasks";
 import type { GitOps } from "./git";
 import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
@@ -435,7 +435,7 @@ export class Orchestrator {
             result.directory = wt.path;
           }
           const directory = result.directory!;
-          const meta: TaskMeta = { task, variant: i + 1, of, title };
+          const meta: TaskMeta = { task, variant: i + 1, of, title, ...(branch ? { branch } : {}) };
           const session = await client.createSession(directory, {
             title: variantTitle(title, labels[i], of),
             ...(v.model ? { model: v.model } : {}),
@@ -451,8 +451,14 @@ export class Orchestrator {
         }
       }
       if (branches.length > 0) {
-        const list = await this.deps.worktrees.list(p, ws, root).catch(() => undefined);
-        if (list) this.deps.store.updateRuntime(id, { worktrees: list });
+        const created = results.flatMap((r) => (r.branch && r.directory ? [{ path: r.directory, branch: r.branch }] : []));
+        const list = await this.deps.worktrees
+          .list(p, ws, root)
+          .catch(() => {
+            const known = rt.worktrees ?? [];
+            return [...known, ...created.filter((c) => !known.some((w) => w.path === c.path))];
+          });
+        this.deps.store.updateRuntime(id, { worktrees: list });
       }
       const started = results.filter((r) => r.sessionId).length;
       this.log(id, `task ${title}: started ${started} of ${of} variant${of === 1 ? "" : "s"}`);
@@ -472,6 +478,8 @@ export class Orchestrator {
     const variants = all.filter((s) => s.task?.task === task);
     if (!variants.some((s) => s.id === keep)) throw new NotFoundError(keep, "variant");
     const client = this.opencodeClient(id);
+    // A concurrent pick may have discarded this variant since the dashboard last saw it.
+    if (parseTaskMeta((await client.session(keep)).metadata)?.discarded) throw new InvalidRequestError("that variant was already discarded");
     const others = variants.filter((s) => s.id !== keep);
     const result: PickResult = { discarded: [], removed: [], errors: [] };
     const discard = async () => {
@@ -480,6 +488,8 @@ export class Orchestrator {
           const raw = await client.session(s.id);
           await client.updateSession(s.id, { metadata: discardMetadata(raw.metadata) }, s.directory);
           result.discarded.push(s.id);
+          // A discarded variant must not keep running (or be force-removed mid-run).
+          if (s.status !== "idle") await client.interrupt(s.id, s.directory);
         } catch (err) {
           result.errors.push(`${s.title}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -500,14 +510,29 @@ export class Orchestrator {
       for (const dir of dirs) {
         const wt = known.find((w) => w.path === dir);
         if (!wt) continue;
+        // Only delete a branch this task created: the worktree may have switched to another one since.
+        const ours = wt.branch !== undefined && gone.some((s) => s.directory === dir && s.task?.branch === wt.branch);
+        const fail = (err: unknown) => {
+          if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+          return err instanceof Error ? err.message : String(err);
+        };
         try {
           await this.deps.worktrees.remove(p, ws, dir, true);
+        } catch (err) {
+          result.errors.push(`${wt.branch ?? dir}: ${fail(err)}`);
+          continue;
+        }
+        result.removed.push(dir);
+        if (wt.branch && !ours) {
+          result.errors.push(`${wt.branch}: kept — not created by this task`);
+          this.log(id, `task: removed ${dir}; kept branch ${wt.branch}, not created by this task`);
+          continue;
+        }
+        try {
           if (wt.branch) await this.deps.git.deleteBranch(p, ws, wt.branch, true);
-          result.removed.push(dir);
           this.log(id, `task: removed ${dir}${wt.branch ? ` and branch ${wt.branch}` : ""}`);
         } catch (err) {
-          result.errors.push(`${wt.branch ?? dir}: ${err instanceof Error ? err.message : String(err)}`);
-          if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+          result.errors.push(`${wt.branch}: worktree removed, branch kept: ${fail(err)}`);
         }
       }
       if (dirs.length > 0) {

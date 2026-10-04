@@ -223,6 +223,8 @@ export interface TaskMeta {
   variant: number;
   of: number;
   title: string;
+  /** The branch the task created for this variant's worktree; absent for the main checkout and for older tasks. */
+  branch?: string;
   discarded?: boolean;
 }
 

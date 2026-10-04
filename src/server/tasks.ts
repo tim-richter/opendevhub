@@ -63,11 +63,13 @@ export function parseTaskMeta(metadata: unknown): TaskMeta | undefined {
   if (!metadata || typeof metadata !== "object") return undefined;
   const m = (metadata as { opendevhub?: unknown }).opendevhub;
   if (!m || typeof m !== "object") return undefined;
-  const { task, variant, of, title, discarded } = m as Record<string, unknown>;
+  const { task, variant, of, title, branch, discarded } = m as Record<string, unknown>;
   if (typeof task !== "string" || !task.startsWith("tsk_")) return undefined;
   if (typeof variant !== "number" || typeof of !== "number" || !Number.isInteger(variant) || !Number.isInteger(of)) return undefined;
   if (variant < 1 || of < variant) return undefined;
-  return { task, variant, of, title: typeof title === "string" ? title : "", ...(discarded === true ? { discarded: true } : {}) };
+  return { task, variant, of, title: typeof title === "string" ? title : "",
+    ...(typeof branch === "string" ? { branch } : {}),
+    ...(discarded === true ? { discarded: true } : {}) };
 }
 
 /** The session's metadata with `opendevhub.discarded` set. opencode's PATCH replaces metadata, so keep every key. */
