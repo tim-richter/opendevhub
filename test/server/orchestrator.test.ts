@@ -993,6 +993,14 @@ describe("Orchestrator", () => {
       await expect(orch.mergeIntoBase(project.id, wt, "main", true)).rejects.toThrow(/main checkout has uncommitted/);
     });
 
+    it("still refreshes the worktree list when deleting the branch fails", async () => {
+      const { orch, git, worktrees, store } = await running();
+      git.deleteBranch.mockRejectedValueOnce(new CommandError("git branch failed: not fully merged"));
+      worktrees.list.mockResolvedValueOnce([]);
+      await expect(orch.removeWorktree(project.id, wt, false, true)).rejects.toThrow(/not fully merged/);
+      expect(store.runtime(project.id).worktrees).toEqual([]);
+    });
+
     it("removes a worktree and deletes its branch when asked", async () => {
       const { orch, git } = await running();
       await orch.removeWorktree(project.id, wt, false, true);

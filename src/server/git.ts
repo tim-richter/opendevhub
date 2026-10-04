@@ -77,28 +77,40 @@ export class GitOps {
     await this.git(p, dir, ["commit", "-q", "-m", message]);
   }
 
-  /** Brings `base` into the branch. On a conflict it aborts, so the checkout is never left mid-way, and lists the files. */
+  /**
+   * Brings `base` into the branch. Any failure (a conflict, a hook, signing, a lock) is aborted, so the checkout
+   * is never left mid-way; conflicts are reported, anything else is thrown.
+   */
   async update(p: Project, dir: string, base: string, strategy: UpdateStrategy): Promise<UpdateResult> {
     await this.requireIdentity(p, dir);
     const args = strategy === "rebase" ? ["rebase", base] : ["merge", "--no-edit", base];
     const r = await this.exec(p, dir, args);
     if (r.exitCode === 0) return { strategy };
     const conflicts = await this.conflicts(p, dir);
+    await this.abort(p, dir, strategy);
     if (conflicts.length === 0) throw failure(args, r);
-    const abort = await this.exec(p, dir, [strategy, "--abort"]);
-    if (abort.exitCode !== 0) throw failure([strategy, "--abort"], abort);
     return { strategy, conflicts };
   }
 
-  /** Merges `branch` into the checkout at `workspace`, which is on the base. A conflict is aborted. */
+  /**
+   * Undoes a rebase or merge that stopped part-way. When none is in progress git refuses with "no rebase/merge
+   * to abort" and nothing changes; otherwise the abort itself must succeed.
+   */
+  private async abort(p: Project, dir: string, op: UpdateStrategy): Promise<void> {
+    const r = await this.exec(p, dir, [op, "--abort"]);
+    if (r.exitCode === 0 || /no rebase in progress|no merge to abort|MERGE_HEAD missing/i.test(r.stderr)) return;
+    throw failure([op, "--abort"], r);
+  }
+
+  /** Merges `branch` into the checkout at `workspace`, which is on the base. Any failure is aborted. */
   async mergeInto(p: Project, workspace: string, branch: string, ffOnly: boolean): Promise<void> {
     if (!ffOnly) await this.requireIdentity(p, workspace);
     const args = ["merge", ffOnly ? "--ff-only" : "--no-ff", "--no-edit", branch];
     const r = await this.exec(p, workspace, args);
     if (r.exitCode === 0) return;
     const conflicts = await this.conflicts(p, workspace);
+    await this.abort(p, workspace, "merge");
     if (conflicts.length === 0) throw failure(args, r);
-    await this.exec(p, workspace, ["merge", "--abort"]);
     throw new CommandError(
       `merging ${branch} conflicts in ${conflicts.join(", ")}; nothing was merged. Update the branch from its base first.`,
       conflicts,

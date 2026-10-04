@@ -309,13 +309,17 @@ export class Orchestrator {
       const ws = this.workspaceFolder(p);
       await this.deps.worktrees.remove(p, ws, worktreePath, force);
       this.log(id, `worktree: removed ${worktreePath}`);
-      if (deleteBranch && target.branch) {
-        await this.gitAction(id, `delete branch ${target.branch}`, () => this.deps.git.deleteBranch(p, ws, target.branch!));
+      try {
+        if (deleteBranch && target.branch) {
+          await this.gitAction(id, `delete branch ${target.branch}`, () => this.deps.git.deleteBranch(p, ws, target.branch!));
+        }
+      } finally {
+        // The worktree is gone either way; don't keep listing it when only the branch delete failed.
+        const list = await this.deps.worktrees
+          .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
+          .catch(() => known.filter((w) => w.path !== worktreePath));
+        this.deps.store.updateRuntime(id, { worktrees: list });
       }
-      const list = await this.deps.worktrees
-        .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
-        .catch(() => known.filter((w) => w.path !== worktreePath));
-      this.deps.store.updateRuntime(id, { worktrees: list });
     });
   }
 

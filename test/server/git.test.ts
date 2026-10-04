@@ -175,4 +175,35 @@ describe("GitOps", () => {
     git(repo, "checkout", "-q", "main");
     await expect(ops.deleteBranch(project, repo, "open")).rejects.toBeInstanceOf(CommandError);
   });
+
+  it.each(["rebase", "merge"] as const)("never leaves a %s half-done when it fails without conflicts", async (strategy) => {
+    git(repo, "checkout", "-q", "-b", "feature");
+    write(repo, "b.txt", "b\n");
+    commitAll(repo, "b");
+    const before = git(repo, "rev-parse", "HEAD");
+    git(repo, "checkout", "-q", "main");
+    write(repo, "c.txt", "c\n");
+    commitAll(repo, "c");
+    git(repo, "checkout", "-q", "feature");
+    // Signing is required but impossible, as in a container that copied a gpgsign host config without the key.
+    git(repo, "config", "commit.gpgsign", "true");
+    git(repo, "config", "gpg.program", "false");
+    await expect(ops.update(project, repo, "main", strategy)).rejects.toBeInstanceOf(CommandError);
+    expect(git(repo, "rev-parse", "HEAD")).toBe(before);
+    expect(fs.existsSync(path.join(repo, ".git", "rebase-merge"))).toBe(false);
+    expect(fs.existsSync(path.join(repo, ".git", "MERGE_HEAD"))).toBe(false);
+  });
+
+  it("never leaves a merge into the base half-done when it fails without conflicts", async () => {
+    git(repo, "checkout", "-q", "-b", "feature");
+    write(repo, "b.txt", "b\n");
+    commitAll(repo, "b");
+    git(repo, "checkout", "-q", "main");
+    const before = git(repo, "rev-parse", "HEAD");
+    git(repo, "config", "commit.gpgsign", "true");
+    git(repo, "config", "gpg.program", "false");
+    await expect(ops.mergeInto(project, repo, "feature", false)).rejects.toBeInstanceOf(CommandError);
+    expect(git(repo, "rev-parse", "HEAD")).toBe(before);
+    expect(fs.existsSync(path.join(repo, ".git", "MERGE_HEAD"))).toBe(false);
+  });
 });
