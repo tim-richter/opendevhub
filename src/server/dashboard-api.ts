@@ -32,6 +32,9 @@ export type DashboardOrchestrator = Pick<
   | "commit"
   | "updateFromBase"
   | "mergeIntoBase"
+  | "publishInfo"
+  | "publishSuggestion"
+  | "publish"
 >;
 
 export interface DashboardDeps {
@@ -196,6 +199,29 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   );
   app.post("/api/projects/:id/review/merge", (c) =>
     json(c, (id, b) => orchestrator.mergeIntoBase(id, str(b.directory) ?? "", str(b.base) ?? "", b.ffOnly === true)),
+  );
+
+  // Publish: push the branch and open its pull request.
+  app.get("/api/projects/:id/publish", async (c) => {
+    try {
+      return c.json(await orchestrator.publishInfo(c.req.param("id"), c.req.query("directory") ?? "", c.req.query("remote")));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  });
+  app.post("/api/projects/:id/publish/suggest", (c) =>
+    json(c, (id, b) => orchestrator.publishSuggestion(id, str(b.directory) ?? "")),
+  );
+  app.post("/api/projects/:id/publish", (c) =>
+    json(c, (id, b) =>
+      orchestrator.publish(id, str(b.directory) ?? "", {
+        remote: str(b.remote) ?? "",
+        base: str(b.base) ?? "",
+        strategy: str(b.strategy) ?? "",
+        title: str(b.title) ?? "",
+        description: str(b.description) ?? "",
+      }),
+    ),
   );
 
   app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));

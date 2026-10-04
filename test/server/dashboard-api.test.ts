@@ -47,6 +47,16 @@ function setup(webDir?: string) {
     commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
     updateFromBase: vi.fn(async (_id: string, _dir: string, _base: string) => ({ strategy: "rebase" as const })),
     mergeIntoBase: vi.fn(async (_id: string, _dir: string, _base: string, _ff: boolean) => ({ branch: "x" })),
+    publishInfo: vi.fn(async (_id: string, _dir: string, _remote?: string) => ({
+      remotes: ["origin"],
+      remote: "origin",
+      forge: { kind: "unknown" as const },
+      strategies: ["branch" as const],
+      strategy: "branch" as const,
+      pushFrom: "host" as const,
+    })),
+    publishSuggestion: vi.fn(async (_id: string, _dir: string) => ({ title: "t", description: "d" })),
+    publish: vi.fn(async (_id: string, _dir: string, _req: unknown) => ({ strategy: "branch" as const, pushedFrom: "host" as const, output: [] })),
   } satisfies DashboardOrchestrator;
   return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
 }
@@ -280,6 +290,29 @@ describe("dashboard API", () => {
       expect(orchestrator.startSession).toHaveBeenLastCalledWith(project.id, "/w", "Review", "look");
       await post(app, "worktrees/remove", { path: "/w", force: false, deleteBranch: true });
       expect(orchestrator.removeWorktree).toHaveBeenLastCalledWith(project.id, "/w", false, true);
+    });
+  });
+  describe("publish", () => {
+    const post = (app: ReturnType<typeof setup>["app"], route: string, body: unknown) =>
+      app.request(`/api/projects/${project.id}/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    it("serves publish info, suggestions and publishes", async () => {
+      const { app, orchestrator } = setup();
+      const info = await app.request(`/api/projects/${project.id}/publish?directory=%2Fw&remote=fork`);
+      expect(info.status).toBe(200);
+      expect(orchestrator.publishInfo).toHaveBeenCalledWith(project.id, "/w", "fork");
+      expect(await (await post(app, "publish/suggest", { directory: "/w" })).json()).toEqual({ title: "t", description: "d" });
+      const body = { directory: "/w", remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" };
+      expect((await post(app, "publish", body)).status).toBe(200);
+      expect(orchestrator.publish).toHaveBeenCalledWith(project.id, "/w", { remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" });
+      orchestrator.publish.mockRejectedValueOnce(new CommandError("the remote has commits this branch doesn't; use Update from base, then publish again"));
+      const rejected = await post(app, "publish", body);
+      expect(rejected.status).toBe(422);
+      expect((await rejected.json()).error).toMatch(/Update from base/);
     });
   });
 });
