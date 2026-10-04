@@ -100,6 +100,15 @@ describe("after starting a task", () => {
       "variant 2 (b): boom; variant 3: no",
     );
   });
+
+  it("navigates when a variant has both sessionId and error (prompt failed after session created)", () => {
+    expect(taskDestination("p", { task: "tsk_1", variants: [{ sessionId: "ses_1", error: "prompt failed" }] })).toBe("/p/p?session=ses_1");
+    expect(taskFailures({ task: "tsk_1", variants: [{ sessionId: "ses_1", error: "prompt failed" }] })).toBe("variant 1: prompt failed");
+  });
+
+  it("goes to task page when both variants errored but only one has a sessionId", () => {
+    expect(taskDestination("p", { task: "tsk_1", variants: [{ sessionId: "ses_1", error: "x" }, { error: "y" }] })).toBe("/p/p/t/tsk_1");
+  });
 });
 
 describe("picking a variant", () => {
