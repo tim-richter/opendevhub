@@ -126,4 +126,26 @@ describe("deriveSessions", () => {
     });
     expect(out[0].pending?.permissions.map((p) => p.diff)).toEqual(["--- a\n+++ b\n", undefined]);
   });
+
+  it("carries task metadata, model, cost and tokens, and hides discarded variants", () => {
+    const meta = (variant: number, extra = {}) => ({ opendevhub: { task: "tsk_1", variant, of: 2, title: "Fix", ...extra } });
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [
+        rawSession("a", {
+          metadata: meta(1),
+          model: { id: "m", providerID: "p", variant: "default" },
+          cost: 0.25,
+          tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 100, write: 0 } },
+        }),
+        rawSession("b", { metadata: meta(2, { discarded: true }) }),
+        rawSession("c", { metadata: { opendevhub: { task: "nope" } }, model: { id: "n", providerID: "p", variant: "high" } }),
+      ],
+    });
+    expect(out.map((s) => s.id)).toEqual(["a", "c"]);
+    expect(out[0]).toMatchObject({ task: { task: "tsk_1", variant: 1, of: 2, title: "Fix" }, model: { id: "m", providerID: "p" }, cost: 0.25, tokens: 16 });
+    expect(out[0].model).not.toHaveProperty("variant");
+    expect(out[1]).not.toHaveProperty("task");
+    expect(out[1].model).toEqual({ id: "n", providerID: "p", variant: "high" });
+  });
 });

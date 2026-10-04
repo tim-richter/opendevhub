@@ -1,5 +1,6 @@
-import type { PendingForm, PendingItems, PendingPermission, SessionStatus, SessionSummary } from "../shared/types";
+import type { ModelRef, PendingForm, PendingItems, PendingPermission, SessionStatus, SessionSummary } from "../shared/types";
 import type { RawForm, RawPermissionRequest, RawSession } from "./opencode/client";
+import { parseTaskMeta } from "./tasks";
 
 export interface StatusInput {
   sessions: RawSession[];
@@ -54,6 +55,17 @@ function toForm(f: RawForm, createdAt: number | undefined): PendingForm {
 
 const byAge = (a: { createdAt?: number }, b: { createdAt?: number }) => (a.createdAt ?? 0) - (b.createdAt ?? 0);
 
+function modelOf(s: RawSession): ModelRef | undefined {
+  if (!s.model?.id || !s.model.providerID) return undefined;
+  const { id, providerID, variant } = s.model;
+  return { id, providerID, ...(variant && variant !== "default" ? { variant } : {}) };
+}
+
+function tokensOf(s: RawSession): number | undefined {
+  const t = s.tokens;
+  return t ? (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0) : undefined;
+}
+
 export function deriveSessions(projectId: string, input: StatusInput): SessionSummary[] {
   const parents = new Map(input.sessions.map((s) => [s.id, s.parentID]));
   const flags = new Map<string, SessionStatus>();
@@ -83,8 +95,13 @@ export function deriveSessions(projectId: string, input: StatusInput): SessionSu
 
   return input.sessions
     .filter((s) => !s.parentID && s.time.archived === undefined)
-    .map((s) => {
+    .map((s) => ({ s, task: parseTaskMeta(s.metadata) }))
+    // A discarded task variant is hidden, the way archiving would (opencode's PATCH can't archive).
+    .filter(({ task }) => !task?.discarded)
+    .map(({ s, task }) => {
       const items = pending.get(s.id);
+      const model = modelOf(s);
+      const tokens = tokensOf(s);
       return {
         id: s.id,
         projectId,
@@ -95,6 +112,10 @@ export function deriveSessions(projectId: string, input: StatusInput): SessionSu
         ...(items
           ? { pending: { permissions: items.permissions.sort(byAge), forms: items.forms.sort(byAge) } }
           : {}),
+        ...(task ? { task } : {}),
+        ...(model ? { model } : {}),
+        ...(typeof s.cost === "number" ? { cost: s.cost } : {}),
+        ...(tokens !== undefined ? { tokens } : {}),
       };
     })
     .sort(compareSessions);
