@@ -138,6 +138,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
   const clock = { now: 1_000_000 };
+  const delay = vi.fn(async (_ms: number) => {});
   const orch = new Orchestrator({
     store,
     containers,
@@ -152,6 +153,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     mkdir,
     clientFor,
     now: () => clock.now,
+    delay,
     roots: () => ["/src"],
     scan: async () => projects,
     monitorFactory: (opts) => {
@@ -168,7 +170,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay };
 }
 
 function waiting(pending: PendingItems): SessionSummary {
@@ -1240,6 +1242,28 @@ describe("Orchestrator", () => {
       clock.now += 60_001;
       await orch.models(project.id);
       expect(client.models).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries once when a fresh opencode answers empty", async () => {
+      const { orch, client, delay } = await started();
+      client.models.mockResolvedValueOnce([]);
+      client.agents.mockResolvedValueOnce([]);
+      const info = await orch.models(project.id);
+      expect(info.models).toEqual([{ id: "m1", providerID: "p", name: "M1", variants: [] }]);
+      expect(info.agents).toEqual([{ id: "build", name: "Build" }]);
+      expect(client.models).toHaveBeenCalledTimes(2);
+      expect(delay).toHaveBeenCalledWith(1500);
+    });
+
+    it("never caches a list that is still empty after the retry", async () => {
+      const { orch, client } = await started();
+      client.models.mockResolvedValue([]);
+      client.agents.mockResolvedValue([]);
+      client.defaultModel.mockResolvedValue(undefined);
+      expect(await orch.models(project.id)).toEqual({ models: [], agents: [] });
+      expect(client.models).toHaveBeenCalledTimes(2);
+      await orch.models(project.id);
+      expect(client.models).toHaveBeenCalledTimes(4);
     });
 
     it("does not cache a failed model lookup, and forgets the cache when opencode restarts", async () => {

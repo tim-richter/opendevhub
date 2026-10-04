@@ -42,6 +42,7 @@ import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktree
 
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
 const MODELS_TTL_MS = 60_000;
+const MODELS_RETRY_MS = 1500;
 const NO_WORKTREE_MOUNT =
   "this container was created before opendevhub mounted a worktrees folder — rebuild the container to enable worktrees";
 
@@ -129,6 +130,8 @@ export interface OrchestratorDeps {
   monitorFactory?: (opts: MonitorOptions) => MonitorHandle;
   /** Clock for task ids and the models cache; tests pass their own. */
   now?: () => number;
+  /** Waits between retries; tests pass their own. */
+  delay?: (ms: number) => Promise<void>;
 }
 
 export class Orchestrator {
@@ -376,13 +379,23 @@ export class Orchestrator {
     const hit = this.modelCache.get(id);
     if (hit && now - hit.at < MODELS_TTL_MS) return hit.value;
     const ws = this.workspaceFolder(project);
-    const value = Promise.all([client.models(ws), client.defaultModel(ws).catch(() => undefined), client.agents(ws)]).then(
-      ([models, def, agents]) => toModelsInfo(models, def, agents),
-    );
-    this.modelCache.set(id, { at: now, value });
-    value.catch(() => {
-      if (this.modelCache.get(id)?.value === value) this.modelCache.delete(id);
+    const fetchOnce = () =>
+      Promise.all([client.models(ws), client.defaultModel(ws).catch(() => undefined), client.agents(ws)]).then(([models, def, agents]) =>
+        toModelsInfo(models, def, agents),
+      );
+    const isEmpty = (v: ModelsInfo) => v.models.length === 0 && v.agents.length === 0;
+    const delay = this.deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    // A freshly started opencode answers these routes empty at first, so an empty answer gets one retry.
+    const value = fetchOnce().then(async (first) => {
+      if (!isEmpty(first)) return first;
+      await delay(MODELS_RETRY_MS);
+      return fetchOnce();
     });
+    this.modelCache.set(id, { at: now, value });
+    const forget = () => {
+      if (this.modelCache.get(id)?.value === value) this.modelCache.delete(id);
+    };
+    value.then((v) => isEmpty(v) && forget(), forget);
     return value;
   }
 
