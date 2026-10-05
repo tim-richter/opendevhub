@@ -8,7 +8,7 @@ export type { UpdateResult, UpdateStrategy };
 const GIT_TIMEOUT_MS = 120_000;
 
 export const IDENTITY_HINT =
-  "git has no user.name/user.email in the container. Set them in the devcontainer, e.g. run `git config --global user.name …` and `git config --global user.email …` in postCreateCommand.";
+  "git has no user.name/user.email in the container. opendevhub copies them from this machine when the container starts: set them with `git config --global user.name …` and `git config --global user.email …` here (or in the devcontainer), then restart the project.";
 
 /** `git rev-list --left-right --count base...HEAD` prints "<behind>\t<ahead>". */
 export function parseAheadBehind(out: string): { ahead: number; behind: number } {
