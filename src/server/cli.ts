@@ -15,6 +15,7 @@ import { Gateway } from "./gateway";
 import { GitOps } from "./git";
 import { Images } from "./images";
 import { Network, parseRouteMode } from "./network";
+import { Onboarding } from "./onboarding";
 import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
 import { Orchestrator } from "./orchestrator";
@@ -163,7 +164,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   await orchestrator.rescan();
   if (store.preflight().errors.length === 0) await orchestrator.adopt();
 
-  const app = createDashboardApp({ store, orchestrator, webDir: findWebDir() });
+  const app = createDashboardApp({
+    store,
+    orchestrator,
+    onboarding: new Onboarding({ roots: () => config.roots }),
+    webDir: findWebDir(),
+  });
   const server = await startServer({
     port: config.port,
     app,

@@ -7,10 +7,13 @@ import { CommandError } from "../../src/server/containers";
 import { EditorUnavailableError } from "../../src/server/editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
 import { InvalidRequestError } from "../../src/server/worktrees";
+import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
 import { StateStore } from "../../src/server/state";
-import type { ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
+import type { Candidate, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
 
 const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
+const added: Candidate = { path: "/src/new-app", name: "new-app", root: "/src", stack: "node" };
+const newProject: Project = { id: "new-app-def456", name: "new-app", path: "/src/new-app", devcontainerPath: "/src/new-app/.devcontainer/devcontainer.json" };
 
 function setup(webDir?: string) {
   const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
@@ -68,7 +71,13 @@ function setup(webDir?: string) {
     })),
     pickVariant: vi.fn(async (_id: string, _t: string, _s: string, _r: boolean): Promise<PickResult> => ({ discarded: ["ses_2"], removed: [], errors: [] })),
   } satisfies DashboardOrchestrator;
-  return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
+  const onboarding = {
+    list: vi.fn(async () => ({ roots: ["/src"], candidates: [added] })),
+    add: vi.fn(async (_path: string, _stack: unknown) => added),
+  } satisfies OnboardingPort;
+  // Rescanning after a write discovers the new project.
+  orchestrator.rescan.mockImplementation(async () => store.setProjects([project, newProject]));
+  return { store, orchestrator, onboarding, app: createDashboardApp({ store, orchestrator, onboarding, webDir }) };
 }
 
 describe("dashboard API", () => {
@@ -394,5 +403,64 @@ describe("dashboard API", () => {
       expect(res.status).toBe(403);
       expect(orchestrator.createTask).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("add project", () => {
+  const post = (app: ReturnType<typeof setup>["app"], body: unknown) =>
+    app.request("/api/onboarding", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("GET candidates returns the onboarding list", async () => {
+    const { app } = setup();
+    expect(await (await app.request("/api/onboarding/candidates")).json()).toEqual({ roots: ["/src"], candidates: [added] });
+  });
+
+  it("writes, rescans, starts the new project and returns its id", async () => {
+    const { app, onboarding, orchestrator } = setup();
+    const res = await post(app, { path: "/src/new-app", stack: "node" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ projectId: newProject.id, started: true });
+    expect(onboarding.add).toHaveBeenCalledWith("/src/new-app", "node");
+    expect(orchestrator.rescan).toHaveBeenCalled();
+    expect(orchestrator.start).toHaveBeenCalledWith(newProject.id);
+  });
+
+  it("writes but does not start while preflight has errors", async () => {
+    const { app, store, orchestrator } = setup();
+    store.setPreflight({ errors: ["docker not found"] });
+    const res = await post(app, { path: "/src/new-app", stack: "node" });
+    expect(await res.json()).toEqual({ projectId: newProject.id, started: false, error: "docker not found" });
+    expect(orchestrator.start).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new InvalidRequestError("unknown stack x"), 400],
+    [new NotFoundError("/etc", "repo without a devcontainer"), 404],
+    [new DevcontainerExistsError("/src/new-app"), 409],
+    [new Error("EACCES: permission denied"), 500],
+  ])("maps %s to %i without rescanning", async (err, status) => {
+    const { app, onboarding, orchestrator } = setup();
+    onboarding.add.mockRejectedValueOnce(err);
+    const res = await post(app, { path: "/src/new-app", stack: "node" });
+    expect(res.status).toBe(status);
+    expect((await res.json()).error).toBe(err.message);
+    expect(orchestrator.rescan).not.toHaveBeenCalled();
+  });
+
+  it("passes a missing path through as an empty string", async () => {
+    const { app, onboarding } = setup();
+    await post(app, { stack: "node" });
+    expect(onboarding.add).toHaveBeenCalledWith("", "node");
+  });
+
+  it("blocks a cross-site POST", async () => {
+    const { app, onboarding } = setup();
+    const res = await app.request("/api/onboarding", {
+      method: "POST",
+      headers: { origin: "http://evil.example", host: "localhost:7777", "content-type": "application/json" },
+      body: JSON.stringify({ path: "/src/new-app", stack: "node" }),
+    });
+    expect(res.status).toBe(403);
+    expect(onboarding.add).not.toHaveBeenCalled();
   });
 });

@@ -2,11 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { LogEvent } from "../shared/types";
+import type { AddProjectResult, LogEvent } from "../shared/types";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
 import { InvalidRequestError } from "./worktrees";
+import { DevcontainerExistsError, type OnboardingPort } from "./onboarding";
 import type { StateStore } from "./state";
 
 export type DashboardOrchestrator = Pick<
@@ -47,6 +48,7 @@ export type DashboardOrchestrator = Pick<
 export interface DashboardDeps {
   store: StateStore;
   orchestrator: DashboardOrchestrator;
+  onboarding: OnboardingPort;
   webDir?: string;
 }
 
@@ -65,7 +67,7 @@ const CONTENT_TYPES: Record<string, string> = {
 function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 {
   if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError) return 400;
   if (err instanceof NotFoundError) return 404;
-  if (err instanceof BusyError || err instanceof AlreadyAnsweredError) return 409;
+  if (err instanceof BusyError || err instanceof AlreadyAnsweredError || err instanceof DevcontainerExistsError) return 409;
   if (err instanceof UnavailableError) return 412;
   if (err instanceof CommandError) return 422;
   return 500;
@@ -76,7 +78,7 @@ function str(value: unknown): string | undefined {
 }
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
-  const { store, orchestrator } = deps;
+  const { store, orchestrator, onboarding } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -100,10 +102,41 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
 
   app.get("/api/projects", (c) => c.json(store.snapshot()));
 
+  // Worktrees, sessions and editors answer with a result, so these wait for the work to finish.
+  const json = async (c: Context, fn: (id: string, body: Record<string, unknown>) => Promise<unknown>) => {
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await c.req.json();
+      if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+    } catch {
+      // no or invalid body: handlers validate the fields they need
+    }
+    try {
+      return c.json((await fn(c.req.param("id") ?? "", body)) ?? { ok: true });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  };
+
   app.post("/api/projects/rescan", async (c) => {
     await orchestrator.rescan();
     return c.json(store.snapshot());
   });
+
+  // Add project: repos under the roots without a devcontainer.
+  app.get("/api/onboarding/candidates", async (c) => c.json(await onboarding.list()));
+  app.post("/api/onboarding", (c) =>
+    json(c, async (_id, b): Promise<AddProjectResult> => {
+      const added = await onboarding.add(str(b.path) ?? "", b.stack);
+      await orchestrator.rescan();
+      const project = store.projects().find((p) => p.path === added.path);
+      if (!project) throw new Error(`${added.path} was not discovered after writing its devcontainer.json`);
+      const errors = store.preflight().errors;
+      if (errors.length > 0) return { projectId: project.id, started: false, error: errors.join("; ") };
+      orchestrator.start(project.id).catch(() => {});
+      return { projectId: project.id, started: true };
+    }),
+  );
 
   const actions = {
     start: (id: string) => orchestrator.start(id),
@@ -127,22 +160,6 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       }
     });
   }
-
-  // Worktrees, sessions and editors answer with a result, so these wait for the work to finish.
-  const json = async (c: Context, fn: (id: string, body: Record<string, unknown>) => Promise<unknown>) => {
-    let body: Record<string, unknown> = {};
-    try {
-      const parsed = await c.req.json();
-      if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
-    } catch {
-      // no or invalid body: handlers validate the fields they need
-    }
-    try {
-      return c.json((await fn(c.req.param("id") ?? "", body)) ?? { ok: true });
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
-    }
-  };
 
   app.post("/api/projects/:id/worktrees/refresh", (c) =>
     json(c, async (id) => ({ worktrees: await orchestrator.refreshWorktrees(id) })),
