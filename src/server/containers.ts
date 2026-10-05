@@ -1,8 +1,21 @@
 import path from "node:path";
-import type { Project } from "../shared/types";
 import type { RunResult, Runner } from "./exec";
 
 export const LABEL = "opendevhub.project";
+
+/**
+ * The container a devcontainer CLI call addresses. A Project is one: its main environment, found by
+ * `opendevhub.project=<id>`. A task environment sets its own labels and the generated config.
+ */
+export interface ExecTarget {
+  id: string;
+  /** Host folder passed as --workspace-folder. */
+  path: string;
+  /** Defaults to `opendevhub.project=<id>`. */
+  idLabels?: string[];
+  /** A generated devcontainer.json that replaces the repo's (task environments). */
+  overrideConfig?: string;
+}
 const UP_TIMEOUT_MS = 15 * 60_000;
 const EXEC_TIMEOUT_MS = 30_000;
 const DOCKER_TIMEOUT_MS = 15_000;
@@ -109,26 +122,29 @@ export function parseInspect(json: string): ContainerInfo {
 export class Containers {
   constructor(private readonly run: Runner) {}
 
-  private idArgs(project: Project): string[] {
-    return ["--workspace-folder", project.path, "--id-label", `${LABEL}=${project.id}`];
+  private idArgs(t: ExecTarget): string[] {
+    const args = ["--workspace-folder", t.path];
+    for (const label of t.idLabels ?? [`${LABEL}=${t.id}`]) args.push("--id-label", label);
+    if (t.overrideConfig) args.push("--override-config", t.overrideConfig);
+    return args;
   }
 
   async up(
-    project: Project,
+    target: ExecTarget,
     opts: { rebuild: boolean; onLine: (line: string) => void; mounts?: string[] },
   ): Promise<UpResult> {
-    const args = ["up", ...this.idArgs(project)];
+    const args = ["up", ...this.idArgs(target)];
     if (opts.rebuild) args.push("--remove-existing-container");
     // Only applied when the container is created; an existing container keeps its mounts.
     for (const m of opts.mounts ?? []) args.push("--mount", m);
     const result = await this.run("devcontainer", args, { timeoutMs: UP_TIMEOUT_MS, onLine: opts.onLine });
-    return parseUpOutput(result, `/workspaces/${path.basename(project.path)}`);
+    return parseUpOutput(result, `/workspaces/${path.basename(target.path)}`);
   }
 
-  async readConfiguration(project: Project): Promise<PortConfig> {
+  async readConfiguration(target: ExecTarget): Promise<PortConfig> {
     const r = await this.run(
       "devcontainer",
-      ["read-configuration", ...this.idArgs(project), "--include-merged-configuration"],
+      ["read-configuration", ...this.idArgs(target), "--include-merged-configuration"],
       { timeoutMs: 60_000 },
     );
     if (r.exitCode !== 0) {
@@ -149,8 +165,8 @@ export class Containers {
   }
 
   /** The workspace folder `up` will use, read before the container exists (undefined if it can't be read). */
-  async workspaceFolder(project: Project): Promise<string | undefined> {
-    const r = await this.run("devcontainer", ["read-configuration", ...this.idArgs(project)], { timeoutMs: 60_000 });
+  async workspaceFolder(target: ExecTarget): Promise<string | undefined> {
+    const r = await this.run("devcontainer", ["read-configuration", ...this.idArgs(target)], { timeoutMs: 60_000 });
     if (r.exitCode !== 0) return undefined;
     try {
       const parsed = JSON.parse(r.stdout.trim()) as { workspace?: { workspaceFolder?: unknown } };
@@ -185,11 +201,11 @@ export class Containers {
   }
 
   exec(
-    project: Project,
+    target: ExecTarget,
     command: string[],
     opts: { env?: Record<string, string>; timeoutMs?: number } = {},
   ): Promise<RunResult> {
-    const args = ["exec", ...this.idArgs(project)];
+    const args = ["exec", ...this.idArgs(target)];
     for (const [k, v] of Object.entries(opts.env ?? {})) args.push("--remote-env", `${k}=${v}`);
     return this.run("devcontainer", [...args, ...command], { timeoutMs: opts.timeoutMs ?? EXEC_TIMEOUT_MS });
   }

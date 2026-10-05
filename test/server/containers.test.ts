@@ -173,3 +173,30 @@ describe("Containers.readConfiguration", () => {
     await expect(new Containers(garbage.run).readConfiguration(project)).rejects.toThrow(/invalid JSON/);
   });
 });
+
+describe("exec targets", () => {
+  it("keeps addressing a project's container by its project label", async () => {
+    const { run, calls } = fakeRunner();
+    await new Containers(run).exec(project, ["pwd"]);
+    expect(calls[0].args).toEqual(["exec", "--workspace-folder", "/src/demo", "--id-label", `${LABEL}=demo-1a2b3c`, "pwd"]);
+  });
+
+  it("addresses a task environment by its own labels and generated config", async () => {
+    const { run, calls } = fakeRunner();
+    const target = {
+      id: "demo-1a2b3c-feat-0a1b",
+      path: "/src/demo.worktrees/feat",
+      idLabels: ["opendevhub.env=demo-1a2b3c-feat-0a1b", "opendevhub.env-project=demo-1a2b3c"],
+      overrideConfig: "/state/envs/demo-1a2b3c-feat-0a1b/devcontainer.json",
+    };
+    await new Containers(run).exec(target, ["pwd"]);
+    expect(calls[0].args).toEqual([
+      "exec",
+      "--workspace-folder", "/src/demo.worktrees/feat",
+      "--id-label", "opendevhub.env=demo-1a2b3c-feat-0a1b",
+      "--id-label", "opendevhub.env-project=demo-1a2b3c",
+      "--override-config", "/state/envs/demo-1a2b3c-feat-0a1b/devcontainer.json",
+      "pwd",
+    ]);
+  });
+});

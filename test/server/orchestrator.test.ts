@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PersistedState } from "../../src/server/config";
-import { CommandError, type ContainerInfo } from "../../src/server/containers";
+import { CommandError, type ContainerInfo, type ExecTarget } from "../../src/server/containers";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
 import type { NewSession, OpencodeEndpoint, RawAgent, RawModel, RawSession } from "../../src/server/opencode/client";
@@ -37,28 +37,28 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
   const containers = {
     up: vi.fn(
       async (
-        _p: Project,
+        _p: ExecTarget,
         o: { rebuild: boolean; onLine: (l: string) => void; mounts?: string[] },
       ): Promise<{ containerId: string; remoteWorkspaceFolder: string; remoteUser?: string }> => {
         o.onLine("building image");
         return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo", remoteUser: "node" };
       },
     ),
-    workspaceFolder: vi.fn(async (_p?: Project): Promise<string | undefined> => "/workspaces/demo"),
+    workspaceFolder: vi.fn(async (_p?: ExecTarget): Promise<string | undefined> => "/workspaces/demo"),
     inspect: vi.fn(async (_id?: string): Promise<ContainerInfo | undefined> => running),
     listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
     stop: vi.fn(async () => {}),
-    readConfiguration: vi.fn(async (_p?: Project) => ({
+    readConfiguration: vi.fn(async (_p?: ExecTarget) => ({
       forwardPorts: [3000, "db:5432"] as unknown[],
       portsAttributes: { "3000": { label: "web" } } as Record<string, unknown>,
     })),
   };
   const runtime = {
     endpoint: (a: HostPort, password: string) => ({ baseUrl: `http://${a.host}:${a.port}`, password }),
-    ensureRunning: vi.fn(async (_p: Project, _a: { password?: string }) => ({ password: "pw", version: "2.0.20" })),
+    ensureRunning: vi.fn(async (_p: ExecTarget, _a: { password?: string }) => ({ password: "pw", version: "2.0.20" })),
     stopServer: vi.fn(async () => {}),
     isHealthy: vi.fn(async () => true),
-    resolveBinary: vi.fn(async (_p?: Project): Promise<string | undefined> => "/usr/local/bin/opencode"),
+    resolveBinary: vi.fn(async (_p?: ExecTarget): Promise<string | undefined> => "/usr/local/bin/opencode"),
   };
   const forwarder = {
     open: vi.fn(async (_id: string, _target: ForwardTarget, ports: PortSpec[], _onLog?: (l: string) => void, _events?: { onRelayUnreachable?: () => void }) =>
@@ -69,12 +69,12 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
   };
   const relay = {
     ensureRunning: vi.fn(
-      async (_p: Project, _a: { address: HostPort; token: string; binary?: string }): Promise<RelayStatus> => ({
+      async (_p: ExecTarget, _a: { address: HostPort; token: string; binary?: string }): Promise<RelayStatus> => ({
         status: "active",
         via: "bun",
       }),
     ),
-    stop: vi.fn(async (_p?: Project) => {}),
+    stop: vi.fn(async (_p?: ExecTarget) => {}),
   };
   const worktrees = {
     list: vi.fn(async (_p: Project, _ws: string, _root?: WorktreeRoot): Promise<Worktree[]> => []),
@@ -331,7 +331,7 @@ describe("Orchestrator", () => {
   it("refreshContainers keeps checking other projects when inspect rejects for one", async () => {
     const project2: Project = { ...project, id: "demo2-def456" };
     const { store, containers, orch } = setup();
-    containers.up.mockImplementation(async (p: Project) => ({
+    containers.up.mockImplementation(async (p: ExecTarget) => ({
       containerId: p.id === project.id ? "c1" : "c2",
       remoteWorkspaceFolder: "/workspaces/demo",
     }));

@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Project } from "../../shared/types";
-import { CommandError, type Containers, tailLines } from "../containers";
+import { CommandError, type Containers, type ExecTarget, tailLines } from "../containers";
 import type { HostPort } from "../network";
 import type { OpencodeClient, OpencodeEndpoint } from "./client";
 
@@ -70,13 +69,13 @@ export class OpencodeRuntime {
     }
   }
 
-  async resolveBinary(project: Project): Promise<string | undefined> {
-    const resolved = await this.deps.containers.exec(project, ["sh", "-c", RESOLVE_BINARY]);
+  async resolveBinary(target: ExecTarget): Promise<string | undefined> {
+    const resolved = await this.deps.containers.exec(target, ["sh", "-c", RESOLVE_BINARY]);
     return resolved.exitCode === 0 ? parseBinaryPath(resolved.stdout) : undefined;
   }
 
   async ensureRunning(
-    project: Project,
+    target: ExecTarget,
     args: { address: HostPort; password?: string; workspaceFolder: string; onLine: (line: string) => void },
   ): Promise<{ password: string; version: string }> {
     if (args.password) {
@@ -89,9 +88,9 @@ export class OpencodeRuntime {
     }
 
     const { containers } = this.deps;
-    const binary = await this.resolveBinary(project);
+    const binary = await this.resolveBinary(target);
     if (!binary) throw new CommandError(`opencode v2 not found in the devcontainer (searched ${SEARCHED})`);
-    const versionRun = await containers.exec(project, [binary, "--version"]);
+    const versionRun = await containers.exec(target, [binary, "--version"]);
     if (versionRun.exitCode !== 0) {
       throw new CommandError(`failed to run ${binary} --version`, tailLines(versionRun.stderr + versionRun.stdout));
     }
@@ -103,11 +102,11 @@ export class OpencodeRuntime {
 
     const password = this.deps.generatePassword?.() ?? randomBytes(32).toString("base64url");
     const port = this.deps.port ?? OPENCODE_PORT;
-    await containers.exec(project, ["sh", "-c", KILL_SERVER]);
+    await containers.exec(target, ["sh", "-c", KILL_SERVER]);
     const script =
       `cd ${shellQuote(args.workspaceFolder)} && ` +
       `nohup ${shellQuote(binary)} serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
-    const launch = await containers.exec(project, ["sh", "-c", script], { env: { OPENCODE_PASSWORD: password } });
+    const launch = await containers.exec(target, ["sh", "-c", script], { env: { OPENCODE_PASSWORD: password } });
     if (launch.exitCode !== 0) {
       throw new CommandError("failed to launch opencode serve", tailLines(launch.stderr + launch.stdout));
     }
@@ -119,11 +118,11 @@ export class OpencodeRuntime {
       if (await this.isHealthy(ep)) return { password, version };
       await new Promise((r) => setTimeout(r, this.deps.healthIntervalMs ?? 500));
     }
-    const log = await containers.exec(project, ["sh", "-c", `tail -n 20 ${LOG_FILE} 2>/dev/null`]);
+    const log = await containers.exec(target, ["sh", "-c", `tail -n 20 ${LOG_FILE} 2>/dev/null`]);
     throw new CommandError("opencode did not become healthy within 30 s", tailLines(log.stdout));
   }
 
-  async stopServer(project: Project): Promise<void> {
-    await this.deps.containers.exec(project, ["sh", "-c", KILL_SERVER]);
+  async stopServer(target: ExecTarget): Promise<void> {
+    await this.deps.containers.exec(target, ["sh", "-c", KILL_SERVER]);
   }
 }
