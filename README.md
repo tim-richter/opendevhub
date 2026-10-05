@@ -81,6 +81,26 @@ When opendevhub starts a container it bind-mounts `<project>.worktrees` (created
 
 Editors are launched by the opendevhub process, so it needs your desktop session's environment (`DISPLAY`/`WAYLAND_DISPLAY`). Neovim opens in `$TERMINAL`, or the first of kitty, ghostty, wezterm, alacritty, foot, gnome-terminal, konsole or xfce4-terminal it finds. Attaching VS Code needs the Dev Containers extension.
 
+## Own containers for worktrees
+
+A worktree can run in its own devcontainer, with its own opencode, processes, ports and `$HOME`, so parallel agents don't trip over each other's dev servers or databases. Choose **Run in its own container** from a worktree's container menu (the box icon on its card or page), or **Environment: Own container** in the New task dialog.
+
+- The container starts from an image built once per project and devcontainer config (`opendevhub/<project>:<key>-base`). All lifecycle commands run in each container, so a task gets its own `npm ci`.
+- Make it the default for a project in `devcontainer.json`:
+
+  ```jsonc
+  "customizations": {
+    "opendevhub": {
+      "isolation": "isolated",            // "shared" (default) | "isolated"
+      "keyFiles": ["package-lock.json"]   // files whose change means a new image
+    }
+  }
+  ```
+
+  or, for a repo you don't own, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "isolation": "isolated" } }`.
+- Git commands (review, commit, merge, worktree add and remove) still run in the project's container, which has to be running.
+- Removing a worktree's container deletes the sessions that ran in it; the worktree and its files stay.
+
 ## Development
 
 ```bash
@@ -104,3 +124,5 @@ On macOS, the port forwarder tests use `127.0.0.2` and `127.0.0.3`, which macOS 
 - Containers using `--network=host` are not supported.
 - Worktree folder paths containing a comma can't be mounted (Docker's `--mount` syntax).
 - The opencode password is passed through `devcontainer exec --remote-env`, so other users on the same machine can see it in the process list while the command runs.
+- Own containers don't support Docker Compose configs, `appPort`, `runArgs` that publish ports, host networking, or lifecycle commands that use `${containerWorkspaceFolder}`; such projects run tasks in the shared container and say why.
+- A Dockerfile whose build context reaches outside `.devcontainer` can change without opendevhub noticing; remove the `opendevhub/<project>:*` images to force a rebuild.
