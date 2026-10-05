@@ -26,6 +26,7 @@ function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
         project: { id: "p", name: "demo", path: "/p", devcontainerPath: "/p/x" },
         runtime: { projectId: "p", containerState: "running", opencode: "healthy" },
         openUrl: "http://p.localhost:7777/",
+        environments: [],
         sessions: Object.entries(statuses).map(([id, status]) => ({
           id,
           projectId: "p",
@@ -125,6 +126,7 @@ describe("worktree helpers", () => {
     runtime: { projectId: "demo-1", containerState: "running", opencode: "healthy", ...runtime },
     sessions: [],
     openUrl: "http://demo-1.localhost:7777/",
+    environments: [],
   });
 
   it("falls back to /workspaces/<name> before the first start", () => {

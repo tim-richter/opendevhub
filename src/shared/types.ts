@@ -1,5 +1,18 @@
 export type ProjectId = string;
 
+/** One devcontainer with its own opencode. A project's main environment has the project's id. */
+export type EnvId = string;
+
+/** Whether a task's worktree runs in the project's container or in its own. */
+export type Isolation = "shared" | "isolated";
+
+/** The worktree a task environment serves, as the main container and this machine see it. */
+export interface EnvWorktree {
+  path: string;
+  hostPath: string;
+  branch: string;
+}
+
 export interface Project {
   id: ProjectId;
   name: string;
@@ -52,6 +65,24 @@ export interface ProjectRuntime {
 }
 
 export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
+
+/** A worktree's own container. */
+export interface EnvironmentView {
+  id: EnvId;
+  worktree: EnvWorktree;
+  /** The base image it was last started from. */
+  image?: { key: string; ref: string };
+  runtime: PublicRuntime;
+  /** Its opencode, like ProjectView.openUrl. */
+  openUrl: string;
+}
+
+export interface IsolationInfo {
+  /** What new tasks use unless they choose. */
+  default: Isolation;
+  /** Why worktrees of this project can't get their own container; tasks then run shared. */
+  unsupported?: string;
+}
 
 export type SessionStatus = "idle" | "running" | "needs-permission" | "needs-answer";
 
@@ -242,6 +273,8 @@ export interface TaskRequest {
   where: TaskWhere;
   branch?: string;
   base?: string;
+  /** Worktree tasks only; the project's default when absent. */
+  environment?: Isolation;
   variants: TaskVariantSpec[];
 }
 
@@ -250,6 +283,10 @@ export interface TaskVariantResult {
   /** Missing when the variant's worktree could not be created. */
   directory?: string;
   sessionId?: string;
+  /** Set when the variant runs in its own container. */
+  envId?: EnvId;
+  /** Why the variant runs shared although its own container was asked for. */
+  notice?: string;
   error?: string;
 }
 
@@ -269,6 +306,8 @@ export interface PickResult {
 export interface SessionSummary {
   id: string;
   projectId: ProjectId;
+  /** The task environment whose opencode runs it; absent for the main environment. */
+  envId?: EnvId;
   title: string;
   directory: string;
   updatedAt: number;
@@ -293,6 +332,10 @@ export interface ProjectView {
   runtime: PublicRuntime;
   sessions: SessionSummary[];
   openUrl: string;
+  /** Worktrees with their own container. The main environment is `runtime`. */
+  environments: EnvironmentView[];
+  /** Known once the main container has started. */
+  isolation?: IsolationInfo;
 }
 
 export type EditorTarget = "host" | "container";

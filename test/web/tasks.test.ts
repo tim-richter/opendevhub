@@ -41,6 +41,7 @@ function view(sessions: SessionSummary[]): ProjectView {
     },
     sessions,
     openUrl: "http://p.localhost:7777/",
+    environments: [],
   };
 }
 

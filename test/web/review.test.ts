@@ -158,6 +158,7 @@ describe("targets", () => {
     },
     sessions: [],
     openUrl: "",
+    environments: [],
   } as ProjectView;
 
   it("maps checkouts to route targets and back", () => {

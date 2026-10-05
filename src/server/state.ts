@@ -106,6 +106,7 @@ export class StateStore {
           runtime,
           sessions: this.sessions.get(project.id) ?? [],
           openUrl: projectUrl(project.id, this.opts.port),
+          environments: [],
         };
       }),
     };

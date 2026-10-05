@@ -60,6 +60,12 @@ describe("StateStore", () => {
     });
   });
 
+  it("lists no task environments for a project that has none", () => {
+    const { store } = make();
+    store.setProjects([p("a")]);
+    expect(store.snapshot().projects[0].environments).toEqual([]);
+  });
+
   it("drops projects that disappear from a rescan", () => {
     const { store } = make();
     store.setProjects([p("a"), p("b")]);
