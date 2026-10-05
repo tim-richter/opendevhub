@@ -23,8 +23,8 @@ export const STACKS: Record<StackId, Stack> = {
 
 export const STACK_IDS = Object.keys(STACKS) as StackId[];
 
-/** Works on every image above; opendevhub finds the binary in ~/.opencode/bin. */
-export const OPENCODE_INSTALL = "curl -fsSL https://opencode.ai/install | bash";
+/** Installs opencode v2 on every image above; opendevhub finds the binary in ~/.opencode/bin. */
+export const OPENCODE_INSTALL = "curl -fsSL https://opencode.ai/v2/install | bash";
 
 export function isStackId(value: unknown): value is StackId {
   return typeof value === "string" && Object.hasOwn(STACKS, value);

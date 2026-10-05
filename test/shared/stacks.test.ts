@@ -24,9 +24,9 @@ describe("stacks", () => {
     expect(JSON.parse(text)).toEqual({
       name: "my-app",
       image: "mcr.microsoft.com/devcontainers/python:3",
-      postCreateCommand: "curl -fsSL https://opencode.ai/install | bash",
+      postCreateCommand: "curl -fsSL https://opencode.ai/v2/install | bash",
     });
-    expect(OPENCODE_INSTALL).toBe("curl -fsSL https://opencode.ai/install | bash");
+    expect(OPENCODE_INSTALL).toBe("curl -fsSL https://opencode.ai/v2/install | bash");
     expect(text).toContain('\n  "name": "my-app"');
   });
 
