@@ -44,6 +44,10 @@ export function parseTaskRequest(body: Record<string, unknown>): TaskRequest {
   if (title && title.length > TITLE_LIMIT) throw new InvalidRequestError(`the title must be at most ${TITLE_LIMIT} characters`);
   const where = body.where ?? "worktree";
   if (where !== "worktree" && where !== "workspace") throw new InvalidRequestError(`invalid where "${String(where)}"`);
+  const environment = body.environment ?? undefined;
+  if (environment !== undefined && environment !== "shared" && environment !== "isolated") {
+    throw new InvalidRequestError(`invalid environment "${String(environment)}"`);
+  }
   const branch = str(body.branch)?.trim() ? validateBranch(str(body.branch)!) : undefined;
   const base = str(body.base)?.trim() ? validateBranch(str(body.base)!) : undefined;
   const raw = body.variants === undefined || body.variants === null ? [{}] : body.variants;
@@ -52,10 +56,11 @@ export function parseTaskRequest(body: Record<string, unknown>): TaskRequest {
   }
   const variants = raw.map((v, i) => parseVariant(v, i + 1));
   if (where === "workspace") {
+    if (environment === "isolated") throw new InvalidRequestError("only a new worktree can get its own container");
     if (variants.length > 1) throw new InvalidRequestError("several variants need a worktree each; choose New worktree");
     if (branch || base) throw new InvalidRequestError("branch and base only apply to a new worktree");
   }
-  return { prompt, ...(title ? { title } : {}), where, ...(branch ? { branch } : {}), ...(base ? { base } : {}), variants };
+  return { prompt, ...(title ? { title } : {}), where, ...(environment ? { environment } : {}), ...(branch ? { branch } : {}), ...(base ? { base } : {}), variants };
 }
 
 /** The task a session belongs to, from `metadata.opendevhub`; undefined when it has none or it is malformed. */

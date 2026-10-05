@@ -1532,6 +1532,68 @@ describe("Orchestrator", () => {
 });
 
 describe("task environments", () => {
+  it("starts each variant of an isolated task in its own container", async () => {
+    const s = await withWorktree();
+    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", where: "worktree", environment: "isolated", variants: [{}, {}] });
+    expect(r.variants.map((v) => v.branch)).toEqual(["iso-1", "iso-2"]);
+    expect(r.variants.every((v) => v.envId && v.sessionId && !v.error)).toBe(true);
+    expect(new Set(r.variants.map((v) => v.envId)).size).toBe(2);
+    expect(s.images.ensureBase).toHaveBeenCalledTimes(2);
+    expect(s.client.createSession.mock.calls.map((c) => c[0]).sort()).toEqual(["/workspaces/demo.worktrees/iso-1", "/workspaces/demo.worktrees/iso-2"]);
+    expect(s.store.environments(project.id).map((e) => e.worktree.branch).sort()).toEqual(["iso-1", "iso-2"]);
+  });
+
+  it("uses the project's default when the task doesn't choose", async () => {
+    const s = setup();
+    s.projectSettings.mockReturnValue({ isolation: "isolated" });
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", variants: [{}] });
+    expect(r.variants[0].envId).toBeDefined();
+    const shared = await s.orch.createTask(project.id, { prompt: "Do it", title: "Sh", environment: "shared", variants: [{}] });
+    expect(shared.variants[0].envId).toBeUndefined();
+  });
+
+  it("runs an isolated task shared, and says why, when the project can't isolate", async () => {
+    const s = setup();
+    s.containers.readConfiguration.mockResolvedValue({ forwardPorts: [], portsAttributes: {}, configuration: { appPort: 1 } });
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", environment: "isolated", variants: [{}] });
+    expect(r.variants[0]).toMatchObject({ sessionId: "ses_new", notice: expect.stringMatching(/shared container: appPort/) });
+    expect(r.variants[0].envId).toBeUndefined();
+  });
+
+  it("keeps the worktree of a variant whose container didn't start", async () => {
+    const s = await withWorktree();
+    s.images.ensureBase.mockRejectedValueOnce(new CommandError("devcontainer build failed: boom"));
+    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", environment: "isolated", variants: [{}] });
+    expect(r.variants[0].error).toMatch(/its container did not start: devcontainer build failed: boom/);
+    expect(r.variants[0].directory).toBe("/workspaces/demo.worktrees/iso");
+    expect(s.worktrees.remove).not.toHaveBeenCalled();
+  });
+
+  it("removes a worktree's container before the worktree, and keeps the worktree when that fails", async () => {
+    const { orch, containers, worktrees, store, envId } = await withEnv();
+    containers.remove.mockRejectedValueOnce(new CommandError("docker rm failed: busy"));
+    await expect(orch.removeWorktree(project.id, feat.path, false)).rejects.toThrow(/kept the worktree/);
+    expect(worktrees.remove).not.toHaveBeenCalled();
+    await orch.removeWorktree(project.id, feat.path, false);
+    expect(containers.remove.mock.invocationCallOrder.at(-1)!).toBeLessThan(worktrees.remove.mock.invocationCallOrder[0]);
+    expect(store.environment(envId)).toBeUndefined();
+  });
+
+  it("Pick removes a discarded variant's container with its worktree", async () => {
+    const { orch, store, containers, envId } = await withEnv();
+    const meta = (variant: number, branch?: string) => ({ task: "tsk_1", variant, of: 2, title: "T", ...(branch ? { branch } : {}) });
+    store.setSessions(project.id, [{ id: "ses_keep", projectId: project.id, title: "T", directory: "/workspaces/demo", updatedAt: 1, status: "idle", task: meta(1) }]);
+    store.setSessions(envId, [{ id: "ses_drop", projectId: project.id, envId, title: "T", directory: feat.path, updatedAt: 1, status: "idle", task: meta(2, "feat") }]);
+    const r = await orch.pickVariant(project.id, "tsk_1", "ses_keep", true);
+    expect(r).toEqual({ discarded: ["ses_drop"], removed: [feat.path], errors: [] });
+    expect(containers.remove).toHaveBeenCalledWith("c2");
+    expect(store.environment(envId)).toBeUndefined();
+  });
+
   it("gives a worktree its own container from the base image", async () => {
     const { orch, store, containers, images, envFiles, runtime, forwarder, monitors, envId } = await withEnv();
     expect(envId).toBe(featEnv);

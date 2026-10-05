@@ -19,6 +19,7 @@ import type {
   TaskMeta,
   TaskResult,
   TaskVariantResult,
+  TaskVariantSpec,
   UpdateResult,
   Worktree,
   WorktreeRoot,
@@ -356,6 +357,16 @@ export class Orchestrator {
       const known = this.deps.store.runtime(id).worktrees ?? [];
       const target = known.find((w) => w.path === worktreePath);
       if (!target) throw new InvalidRequestError(`unknown worktree ${worktreePath}`);
+      const rec = this.deps.store.environments(id).find((e) => e.worktree.path === worktreePath);
+      if (rec) {
+        const env = this.taskEnv(p, rec);
+        try {
+          await this.exclusiveEnv(env, () => this.destroyEnv(env));
+        } catch (err) {
+          if (err instanceof BusyError) throw err;
+          throw new UnavailableError(`kept the worktree: its container could not be removed (${err instanceof Error ? err.message : String(err)})`);
+        }
+      }
       const ws = this.workspaceFolder(p);
       await this.deps.worktrees.remove(p, ws, worktreePath, force);
       this.log(id, `worktree: removed ${worktreePath}`);
@@ -425,20 +436,24 @@ export class Orchestrator {
 
   /**
    * Starts a task: for each variant, a worktree (unless it runs in the main checkout), a session tagged with
-   * the task in its metadata, and the prompt. Variants run in order under one git lock; a failing variant is
-   * recorded on its result and the others still run. Worktrees already created are kept.
+   * the task in its metadata, and the prompt. Worktrees are created in order under one git lock; a failing
+   * variant is recorded on its result and the others still run, and worktrees already created are kept.
+   * Isolated variants then start their own containers in parallel and get their sessions there.
    */
   async createTask(id: ProjectId, body: Record<string, unknown>): Promise<TaskResult> {
     const req = parseTaskRequest(body);
     const client = this.opencodeClient(id);
-    return this.withGit(id, async (p) => {
+    const project = this.requireProject(id);
+    const { isolated, notice } = req.where === "worktree" ? this.isolationFor(project, req.environment) : { isolated: false, notice: undefined };
+    const title = req.title ?? deriveTitle(req.prompt);
+    const of = req.variants.length;
+    const labels = variantLabels(req.variants);
+    const own: (EnvWorktree | undefined)[] = [];
+    const { task, results } = await this.withGit(id, async (p) => {
       const rt = this.deps.store.runtime(id);
       const ws = this.workspaceFolder(p);
       const root = rt.worktreeRoot;
       const task = newTaskId((this.deps.now ?? Date.now)());
-      const title = req.title ?? deriveTitle(req.prompt);
-      const of = req.variants.length;
-      const labels = variantLabels(req.variants);
       let branches: string[] = [];
       if (req.where === "worktree") {
         if (!root?.mounted) throw new UnavailableError(NO_WORKTREE_MOUNT);
@@ -452,43 +467,80 @@ export class Orchestrator {
       for (const [i, v] of req.variants.entries()) {
         const branch = branches[i];
         const result: TaskVariantResult = branch ? { branch } : { directory: ws };
+        if (notice) result.notice = notice;
         results.push(result);
         try {
           if (branch) {
             const wt = await this.deps.worktrees.add(p, { workspaceFolder: ws, root: root!, branch, base: req.base, onLine: (l) => this.log(id, l) });
             result.directory = wt.path;
+            if (isolated && wt.hostPath) {
+              own[i] = { path: wt.path, hostPath: wt.hostPath, branch };
+              continue;
+            }
           }
-          const directory = result.directory!;
           const meta: TaskMeta = { task, variant: i + 1, of, title, ...(branch ? { branch } : {}) };
-          const session = await client.createSession(directory, {
-            title: variantTitle(title, labels[i], of),
-            ...(v.model ? { model: v.model } : {}),
-            ...(v.agent ? { agent: v.agent } : {}),
-            metadata: { opendevhub: meta },
-          });
-          result.sessionId = session.id;
-          await client.prompt(session.id, req.prompt, undefined, directory);
+          await this.startVariant(client, result, result.directory!, meta, variantTitle(title, labels[i], of), v, req.prompt);
         } catch (err) {
-          result.error = err instanceof Error ? err.message : String(err);
-          this.log(id, `task ${title}: variant ${i + 1}${branch ? ` (${branch})` : ""} failed: ${result.error}`);
-          if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+          this.variantFailed(id, title, i, branch, result, err);
         }
       }
       if (branches.length > 0) {
         const created = results.flatMap((r) => (r.branch && r.directory ? [{ path: r.directory, branch: r.branch }] : []));
-        const list = await this.deps.worktrees
-          .list(p, ws, root)
-          .catch(() => {
-            const known = rt.worktrees ?? [];
-            return [...known, ...created.filter((c) => !known.some((w) => w.path === c.path))];
-          });
+        const list = await this.deps.worktrees.list(p, ws, root).catch(() => {
+          const known = rt.worktrees ?? [];
+          return [...known, ...created.filter((c) => !known.some((w) => w.path === c.path))];
+        });
         this.deps.store.updateRuntime(id, { worktrees: list });
       }
-      const started = results.filter((r) => r.sessionId).length;
-      this.log(id, `task ${title}: started ${started} of ${of} variant${of === 1 ? "" : "s"}`);
-      this.monitors.get(id)?.reconcile?.();
-      return { task, variants: results };
+      return { task, results };
     });
+    await Promise.all(
+      own.map(async (worktree, i) => {
+        if (!worktree) return;
+        const result = results[i];
+        try {
+          const env = await this.ensureTaskEnv(project, worktree).catch((err: unknown) => {
+            throw new Error(`its container did not start: ${err instanceof Error ? err.message : String(err)}`);
+          });
+          result.envId = env.id;
+          const meta: TaskMeta = { task, variant: i + 1, of, title, branch: worktree.branch };
+          await this.startVariant(this.opencodeClient(env.id), result, worktree.path, meta, variantTitle(title, labels[i], of), req.variants[i], req.prompt);
+        } catch (err) {
+          this.variantFailed(id, title, i, worktree.branch, result, err);
+        }
+      }),
+    );
+    const started = results.filter((r) => r.sessionId).length;
+    this.log(id, `task ${title}: started ${started} of ${of} variant${of === 1 ? "" : "s"}`);
+    this.monitors.get(id)?.reconcile?.();
+    for (const r of results) if (r.envId) this.monitors.get(r.envId)?.reconcile?.();
+    return { task, variants: results };
+  }
+
+  /** Creates a variant's session (recorded on the result at once) and sends the prompt. */
+  private async startVariant(
+    client: OpencodeClient,
+    result: TaskVariantResult,
+    directory: string,
+    meta: TaskMeta,
+    title: string,
+    v: TaskVariantSpec,
+    prompt: string,
+  ): Promise<void> {
+    const session = await client.createSession(directory, {
+      title,
+      ...(v.model ? { model: v.model } : {}),
+      ...(v.agent ? { agent: v.agent } : {}),
+      metadata: { opendevhub: meta },
+    });
+    result.sessionId = session.id;
+    await client.prompt(session.id, prompt, undefined, directory);
+  }
+
+  private variantFailed(id: ProjectId, title: string, i: number, branch: string | undefined, result: TaskVariantResult, err: unknown): void {
+    result.error = err instanceof Error ? err.message : String(err);
+    this.log(id, `task ${title}: variant ${i + 1}${branch ? ` (${branch})` : ""} failed: ${result.error}`);
+    if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
   }
 
   /**
@@ -542,6 +594,16 @@ export class Orchestrator {
           if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
           return err instanceof Error ? err.message : String(err);
         };
+        const rec = this.deps.store.environments(id).find((e) => e.worktree.path === dir);
+        if (rec) {
+          const env = this.taskEnv(p, rec);
+          try {
+            await this.exclusiveEnv(env, () => this.destroyEnv(env));
+          } catch (err) {
+            result.errors.push(`${wt.branch ?? dir}: kept — its container could not be removed: ${fail(err)}`);
+            continue;
+          }
+        }
         try {
           await this.deps.worktrees.remove(p, ws, dir, true);
         } catch (err) {
