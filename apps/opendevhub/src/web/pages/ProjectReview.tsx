@@ -446,7 +446,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
               files={data.files}
               onSelect={(file) => {
                 const index = data.files.findIndex((f) => f.file === file);
-                document.getElementById(`review-file-${index}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+                document.getElementById(`review-file-${index}`)?.scrollIntoView({ block: "start" });
               }}
             />
           </Card>
