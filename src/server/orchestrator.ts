@@ -45,6 +45,9 @@ import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
 import type { Publisher } from "./publish";
 import { type RelayRuntime, generateRelayToken } from "./relay/runtime";
+import type { Credentials } from "./credentials";
+import { AGENT_SOCKET, AgentTunnel, type AgentTunnelOptions } from "./relay/agent";
+import type { RelayTarget } from "./relay/client";
 import type { EnvRecord, StateStore } from "./state";
 import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeRoot } from "./worktrees";
 
@@ -119,6 +122,12 @@ export interface MonitorHandle {
 }
 
 export type PublisherPort = Pick<Publisher, "info" | "publish">;
+export type CredentialsPort = Pick<Credentials, "prepare">;
+export interface AgentTunnelHandle {
+  start(): void;
+  stop(): void;
+}
+export type AgentTunnelFactory = (target: RelayTarget, opts: AgentTunnelOptions) => AgentTunnelHandle;
 
 export interface OrchestratorDeps {
   store: StateStore;
@@ -148,6 +157,10 @@ export interface OrchestratorDeps {
   envFiles?: EnvFilesPort;
   /** The project's entry in config.json `projects`. */
   projectSettings?: (project: Project) => unknown;
+  /** Git identity, known_hosts and git's ssh command in containers; skipped when absent. */
+  credentials?: CredentialsPort;
+  /** Defaults to a real AgentTunnel; tests pass their own. */
+  agentTunnel?: AgentTunnelFactory;
 }
 
 /**
@@ -175,6 +188,8 @@ export class Orchestrator {
   /** Session directories already looked up as possible worktrees, so an unknown one triggers one refresh. */
   private readonly seenDirectories = new Map<ProjectId, Set<string>>();
   private readonly routes = new Map<EnvId, Route>();
+  /** The ssh-agent tunnel of each environment whose agent is forwarded. */
+  private readonly tunnels = new Map<EnvId, AgentTunnelHandle>();
   /** Isolation settings per project, read when its main container forwards ports. */
   private readonly settings = new Map<ProjectId, EnvSettings>();
   private defaultEnvFiles?: EnvFilesPort;
@@ -843,6 +858,7 @@ export class Orchestrator {
   }
 
   async shutdown(): Promise<void> {
+    for (const id of [...this.tunnels.keys()]) this.stopTunnel(id);
     for (const id of [...this.monitors.keys()]) this.stopMonitor(id);
     await this.deps.forwarder.closeAll();
     await Promise.all([...this.routes.keys()].map((id) => this.closeRoute(id)));
@@ -941,7 +957,9 @@ export class Orchestrator {
         this.fail(env, err);
         return;
       }
-      await this.forwardPorts(env, await this.startRelay(env, info.ip, route));
+      const target = await this.startRelay(env, info.ip, route);
+      await this.forwardPorts(env, target);
+      await this.prepareCredentials(env, target);
     }
     if (!env.worktree) await this.refreshWorktreesQuietly(env.project);
     const rt = store.runtime(env.id);
@@ -994,7 +1012,10 @@ export class Orchestrator {
     try {
       const relayWasActive = rt.relay === "active";
       const target = await this.startRelay(env, rt.containerIp, route);
-      if (target.relay && !relayWasActive) await this.forwardPorts(env, target);
+      if (target.relay && !relayWasActive) {
+        await this.forwardPorts(env, target);
+        await this.prepareCredentials(env, target);
+      }
       await this.launchOpencode(env, undefined);
     } catch (err) {
       this.fail(env, err);
@@ -1081,7 +1102,9 @@ export class Orchestrator {
         opencode: "starting",
       });
       const route = await this.openRoute(env, { id: up.containerId, ip: info.ip, network: info.network });
-      await this.forwardPorts(env, await this.startRelay(env, info.ip, route));
+      const target = await this.startRelay(env, info.ip, route);
+      await this.forwardPorts(env, target);
+      await this.prepareCredentials(env, target);
       await this.launchOpencode(env, store.runtime(env.id).password);
     } catch (err) {
       this.fail(env, err);
@@ -1139,7 +1162,9 @@ export class Orchestrator {
         opencode: "starting",
       });
       const route = await this.openRoute(env, { id: up.containerId, ip: info.ip, network: info.network });
-      await this.forwardPorts(env, await this.startRelay(env, info.ip, route));
+      const target = await this.startRelay(env, info.ip, route);
+      await this.forwardPorts(env, target);
+      await this.prepareCredentials(env, target);
       await this.refreshWorktreesQuietly(project);
       await this.launchOpencode(env, rebuild ? undefined : store.runtime(env.id).password);
     } catch (err) {
@@ -1156,6 +1181,7 @@ export class Orchestrator {
       password,
       workspaceFolder: this.envDirectory(env),
       onLine: (l) => this.envLog(env, l),
+      ...(this.settingsOf(env.project).sshAgent ? { env: { SSH_AUTH_SOCK: AGENT_SOCKET } } : {}),
     });
     store.updateRuntime(env.id, {
       password: result.password,
@@ -1324,6 +1350,43 @@ export class Orchestrator {
     return direct;
   }
 
+  /** Git identity, known_hosts and the ssh-agent tunnel. Never throws: each step logs what happened. */
+  private async prepareCredentials(env: Env, target: ForwardTarget): Promise<void> {
+    const { store, credentials } = this.deps;
+    const sshAgent = this.settingsOf(env.project).sshAgent;
+    if (credentials) {
+      try {
+        await credentials.prepare(env.target, env.project.path, { sshAgent, onLine: (l) => this.envLog(env, l) });
+      } catch (err) {
+        this.envLog(env, `credentials: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    this.stopTunnel(env.id);
+    if (!sshAgent) {
+      store.updateRuntime(env.id, { sshAgent: "off", sshAgentReason: undefined });
+      return;
+    }
+    if (!target.relay) {
+      store.updateRuntime(env.id, { sshAgent: "unavailable", sshAgentReason: "relay not running" });
+      this.envLog(env, "ssh-agent: unavailable (relay not running)");
+      return;
+    }
+    const relayTarget: RelayTarget = { host: target.relay.host ?? target.host, port: target.relay.port, token: target.relay.token };
+    const factory: AgentTunnelFactory = this.deps.agentTunnel ?? ((t, o) => new AgentTunnel(t, o));
+    const tunnel = factory(relayTarget, {
+      onLog: (l) => this.envLog(env, l),
+      onStatus: (s) => store.updateRuntime(env.id, { sshAgent: s.state, sshAgentReason: s.reason }),
+      onRelayLost: () => void this.recoverRelay(env.id),
+    });
+    this.tunnels.set(env.id, tunnel);
+    tunnel.start();
+  }
+
+  private stopTunnel(id: EnvId): void {
+    this.tunnels.get(id)?.stop();
+    this.tunnels.delete(id);
+  }
+
   /** A forwarded connection found the relay gone: mark it and relaunch in the background (at most every 30 s). */
   private async recoverRelay(id: EnvId): Promise<void> {
     const now = Date.now();
@@ -1340,8 +1403,9 @@ export class Orchestrator {
   }
 
   private async closePorts(id: EnvId): Promise<void> {
+    this.stopTunnel(id);
     await this.deps.forwarder.close(id);
-    this.deps.store.updateRuntime(id, { ports: undefined, relay: undefined });
+    this.deps.store.updateRuntime(id, { ports: undefined, relay: undefined, sshAgent: undefined, sshAgentReason: undefined });
   }
 
   private latestSession(id: ProjectId, directory: string): SessionSummary | undefined {

@@ -10,6 +10,7 @@ import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
 import { EnvFiles } from "./env-files";
 import { spawnRunner } from "./exec";
+import { Credentials } from "./credentials";
 import { Gateway } from "./gateway";
 import { GitOps } from "./git";
 import { Images } from "./images";
@@ -151,6 +152,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       relativeLinks: process.env.OPENDEVHUB_RELATIVE_WORKTREES !== "0",
     }),
     publisher: new Publisher({ containers, run: spawnRunner, forges: new FileForgeStore(dir) }),
+    credentials: new Credentials({ run: spawnRunner, containers }),
     editors,
     clientFor,
     roots: () => config.roots,

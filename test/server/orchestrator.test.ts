@@ -12,6 +12,8 @@ import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
 import type { ForwardTarget } from "../../src/server/port-forwarder";
 import type { RelayStatus } from "../../src/server/relay/runtime";
+import type { RelayTarget } from "../../src/server/relay/client";
+import type { AgentTunnelOptions } from "../../src/server/relay/agent";
 import type { OpenTarget } from "../../src/server/editors";
 import { type AddWorktreeArgs, InvalidRequestError } from "../../src/server/worktrees";
 import type { ForwardedPort, Worktree, WorktreeRoot } from "../../src/shared/types";
@@ -77,7 +79,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
   };
   const runtime = {
     endpoint: (a: HostPort, password: string) => ({ baseUrl: `http://${a.host}:${a.port}`, password }),
-    ensureRunning: vi.fn(async (_p: ExecTarget, _a: { password?: string }) => ({ password: "pw", version: "2.0.20" })),
+    ensureRunning: vi.fn(async (_p: ExecTarget, _a: { password?: string; env?: Record<string, string> }) => ({ password: "pw", version: "2.0.20" })),
     stopServer: vi.fn(async () => {}),
     isHealthy: vi.fn(async () => true),
     resolveBinary: vi.fn(async (_p?: ExecTarget): Promise<string | undefined> => "/usr/local/bin/opencode"),
@@ -175,6 +177,15 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
   const clock = { now: 1_000_000 };
   const delay = vi.fn(async (_ms: number) => {});
+  const credentials = {
+    prepare: vi.fn(async (_t: ExecTarget, _path: string, _o: { sshAgent: boolean; onLine: (l: string) => void }) => {}),
+  };
+  const tunnels: Array<{ target: RelayTarget; opts: AgentTunnelOptions; start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
+  const agentTunnel = vi.fn((target: RelayTarget, opts: AgentTunnelOptions) => {
+    const t = { target, opts, start: vi.fn(), stop: vi.fn() };
+    tunnels.push(t);
+    return t;
+  });
   const orch = new Orchestrator({
     store,
     containers,
@@ -193,6 +204,8 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     images,
     envFiles,
     projectSettings,
+    credentials,
+    agentTunnel,
     roots: () => ["/src"],
     scan: async () => projects,
     monitorFactory: (opts) => {
@@ -209,7 +222,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay, images, envFiles, projectSettings };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay, images, envFiles, projectSettings, credentials, agentTunnel, tunnels };
 }
 
 /** A started project whose worktree list has `feat`. */
@@ -1756,5 +1769,104 @@ describe("task environments", () => {
     expect(client.replyPermission).toHaveBeenCalled();
     await orch.stopEnv(project.id, envId);
     await expect(orch.startSession(project.id, feat.path)).rejects.toThrow(/container is not running/);
+  });
+});
+
+describe("git and ssh credentials", () => {
+  it("prepares credentials and the agent tunnel after the relay and before opencode", async () => {
+    const { store, orch, relay, credentials, agentTunnel, tunnels, runtime } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    const token = store.runtime(project.id).relayToken!;
+    expect(credentials.prepare).toHaveBeenCalledWith(project, "/src/demo", expect.objectContaining({ sshAgent: true }));
+    expect(agentTunnel).toHaveBeenCalledWith({ host: "172.17.0.9", port: 4097, token }, expect.anything());
+    expect(tunnels[0].start).toHaveBeenCalled();
+    expect(relay.ensureRunning.mock.invocationCallOrder[0]).toBeLessThan(credentials.prepare.mock.invocationCallOrder[0]);
+    expect(credentials.prepare.mock.invocationCallOrder[0]).toBeLessThan(runtime.ensureRunning.mock.invocationCallOrder[0]);
+    expect(runtime.ensureRunning.mock.calls[0][1].env).toEqual({ SSH_AUTH_SOCK: "/tmp/opendevhub-ssh-agent.sock" });
+  });
+
+  it("shows the tunnel's status on the runtime", async () => {
+    const { store, orch, tunnels } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    tunnels[0].opts.onStatus({ state: "forwarded" });
+    expect(store.runtime(project.id)).toMatchObject({ sshAgent: "forwarded", sshAgentReason: undefined });
+    tunnels[0].opts.onStatus({ state: "unavailable", reason: "SSH_AUTH_SOCK is not set on this machine" });
+    expect(store.runtime(project.id)).toMatchObject({ sshAgent: "unavailable", sshAgentReason: "SSH_AUTH_SOCK is not set on this machine" });
+  });
+
+  it("leaves the agent out when the project turns it off", async () => {
+    const { store, orch, credentials, agentTunnel, runtime, projectSettings } = setup();
+    projectSettings.mockReturnValue({ sshAgent: false });
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(credentials.prepare).toHaveBeenCalledWith(project, "/src/demo", expect.objectContaining({ sshAgent: false }));
+    expect(agentTunnel).not.toHaveBeenCalled();
+    expect(store.runtime(project.id).sshAgent).toBe("off");
+    expect(runtime.ensureRunning.mock.calls[0][1].env).toBeUndefined();
+  });
+
+  it("reports the agent unavailable without a relay", async () => {
+    const { store, orch, relay, agentTunnel } = setup();
+    relay.ensureRunning.mockResolvedValueOnce({ status: "unavailable", reason: "no relay runtime" });
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(agentTunnel).not.toHaveBeenCalled();
+    expect(store.runtime(project.id)).toMatchObject({ sshAgent: "unavailable", sshAgentReason: "relay not running" });
+    expect(orch.logLines(project.id)).toContain("ssh-agent: unavailable (relay not running)");
+  });
+
+  it("still starts when preparing credentials fails", async () => {
+    const { store, orch, credentials } = setup();
+    credentials.prepare.mockRejectedValueOnce(new Error("boom"));
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(store.runtime(project.id)).toMatchObject({ opencode: "healthy", error: undefined });
+    expect(orch.logLines(project.id)).toContain("credentials: boom");
+  });
+
+  it("stops the tunnel and clears the status when the container stops", async () => {
+    const { store, orch, tunnels } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    tunnels[0].opts.onStatus({ state: "forwarded" });
+    await orch.stop(project.id);
+    expect(tunnels[0].stop).toHaveBeenCalled();
+    expect(store.runtime(project.id).sshAgent).toBeUndefined();
+  });
+
+  it("stops every tunnel on shutdown", async () => {
+    const { orch, tunnels } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    await orch.shutdown();
+    expect(tunnels[0].stop).toHaveBeenCalled();
+  });
+
+  it("gives an adopted running container a tunnel too", async () => {
+    const { orch, containers, agentTunnel, credentials } = setup({ projects: { [project.id]: { password: "pw", relayToken: "kept" } } });
+    containers.listManaged.mockResolvedValue([running]);
+    await orch.rescan();
+    await orch.adopt();
+    expect(credentials.prepare).toHaveBeenCalledTimes(1);
+    expect(agentTunnel).toHaveBeenCalledWith({ host: "172.17.0.9", port: 4097, token: "kept" }, expect.anything());
+  });
+
+  it("gives a task container its own tunnel, with its own token", async () => {
+    const s = await withEnv();
+    expect(s.agentTunnel).toHaveBeenCalledTimes(2);
+    const [main, task] = s.tunnels;
+    expect(task.target.host).toBe("172.17.0.10");
+    expect(task.target.token).not.toBe(main.target.token);
+    expect(s.credentials.prepare.mock.calls[1][0]).toMatchObject({ id: s.envId });
+  });
+
+  it("asks for relay recovery when the tunnel loses the relay", async () => {
+    const { orch, relay, tunnels } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    tunnels[0].opts.onRelayLost?.();
+    await vi.waitFor(() => expect(relay.ensureRunning).toHaveBeenCalledTimes(2));
   });
 });
