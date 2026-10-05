@@ -382,6 +382,16 @@ export interface UsageReport {
   days: ({ day: string } & Usage)[];
 }
 
+/** One container's load, as `docker stats` reports it. */
+export interface ResourceStats {
+  /** Percent of one CPU core, so it exceeds 100 on several cores (as in `docker stats`). Whole number. */
+  cpu: number;
+  /** Bytes, rounded to 1 MiB. */
+  memory: number;
+  /** Bytes; the container's limit, or the host's memory when it has none. */
+  memoryLimit: number;
+}
+
 export interface DashboardSnapshot {
   roots: string[];
   preflight: Preflight;
@@ -389,6 +399,8 @@ export interface DashboardSnapshot {
   projects: ProjectView[];
   /** Absent when the usage ledger couldn't be opened. */
   usage?: UsageTotals;
+  /** By environment id (a main environment's id is its project id); running environments only. */
+  resources?: Record<EnvId, ResourceStats>;
 }
 
 export interface LogEvent {
