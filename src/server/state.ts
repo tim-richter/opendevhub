@@ -1,14 +1,19 @@
 import type {
   DashboardSnapshot,
   EditorInfo,
+  EnvId,
+  EnvWorktree,
+  IsolationInfo,
   Preflight,
   Project,
   ProjectId,
   ProjectRuntime,
+  PublicRuntime,
   SessionSummary,
 } from "../shared/types";
 import { projectUrl } from "../shared/urls";
-import type { PersistedRuntime, PersistedState } from "./config";
+import type { PersistedEnv, PersistedRuntime, PersistedState } from "./config";
+import { compareSessions } from "./status";
 
 export interface StoreOptions {
   port: number;
@@ -17,6 +22,29 @@ export interface StoreOptions {
 }
 
 const DURABLE_KEYS = ["containerId", "password", "workspaceFolder", "relayToken", "remoteUser"] as const;
+
+/** A task environment opendevhub created: its worktree, and the image it was last started from. */
+export interface EnvRecord {
+  id: EnvId;
+  projectId: ProjectId;
+  worktree: EnvWorktree;
+  image?: { key: string; ref: string };
+}
+
+function durable(r: ProjectRuntime): PersistedRuntime {
+  return {
+    containerId: r.containerId,
+    password: r.password,
+    workspaceFolder: r.workspaceFolder,
+    relayToken: r.relayToken,
+    ...(r.remoteUser ? { remoteUser: r.remoteUser } : {}),
+  };
+}
+
+function publicRuntime(r: ProjectRuntime): PublicRuntime {
+  const { password: _password, relayToken: _relayToken, ...rest } = r;
+  return rest;
+}
 
 function defaultRuntime(projectId: ProjectId): ProjectRuntime {
   return { projectId, containerState: "stopped", opencode: "absent" };
@@ -30,10 +58,18 @@ export class StateStore {
   private roots: string[] = [];
   private preflightState: Preflight = { errors: [] };
   private editorList: EditorInfo[] = [];
+  private envs = new Map<EnvId, EnvRecord>();
+  private isolationInfo = new Map<ProjectId, IsolationInfo>();
 
   constructor(private readonly opts: StoreOptions) {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
       this.runtimes.set(id, { ...defaultRuntime(id), ...saved });
+    }
+    for (const [id, saved] of Object.entries(opts.persisted.environments ?? {})) {
+      if (!saved?.worktree?.path || !saved.projectId) continue;
+      const { projectId, worktree, image, ...runtime } = saved;
+      this.envs.set(id, { id, projectId, worktree, ...(image ? { image } : {}) });
+      this.runtimes.set(id, { ...defaultRuntime(projectId), ...runtime });
     }
   }
 
@@ -71,8 +107,45 @@ export class StateStore {
     this.emit();
   }
 
+  /** The project's sessions across its main and task environments. */
   sessionsOf(id: ProjectId): SessionSummary[] {
-    return this.sessions.get(id) ?? [];
+    const main = this.sessions.get(id) ?? [];
+    const envs = this.environments(id);
+    if (envs.length === 0) return main;
+    return [...main, ...envs.flatMap((e) => this.sessions.get(e.id) ?? [])].sort(compareSessions);
+  }
+
+  environments(projectId: ProjectId): EnvRecord[] {
+    return [...this.envs.values()].filter((e) => e.projectId === projectId);
+  }
+
+  environment(id: EnvId): EnvRecord | undefined {
+    return this.envs.get(id);
+  }
+
+  putEnvironment(rec: EnvRecord): void {
+    this.envs.set(rec.id, rec);
+    if (!this.runtimes.has(rec.id)) this.runtimes.set(rec.id, defaultRuntime(rec.projectId));
+    this.save();
+    this.emit();
+  }
+
+  removeEnvironment(id: EnvId): void {
+    if (!this.envs.delete(id)) return;
+    this.runtimes.delete(id);
+    this.sessions.delete(id);
+    this.save();
+    this.emit();
+  }
+
+  setIsolation(projectId: ProjectId, info: IsolationInfo): void {
+    if (JSON.stringify(this.isolationInfo.get(projectId)) === JSON.stringify(info)) return;
+    this.isolationInfo.set(projectId, info);
+    this.emit();
+  }
+
+  isolation(projectId: ProjectId): IsolationInfo | undefined {
+    return this.isolationInfo.get(projectId);
   }
 
   setRoots(roots: string[]): void {
@@ -100,13 +173,20 @@ export class StateStore {
       preflight: this.preflightState,
       editors: this.editorList,
       projects: this.projects().map((project) => {
-        const { password: _password, relayToken: _relayToken, ...runtime } = this.runtime(project.id);
+        const isolation = this.isolationInfo.get(project.id);
         return {
           project,
-          runtime,
-          sessions: this.sessions.get(project.id) ?? [],
+          runtime: publicRuntime(this.runtime(project.id)),
+          sessions: this.sessionsOf(project.id),
           openUrl: projectUrl(project.id, this.opts.port),
-          environments: [],
+          environments: this.environments(project.id).map((e) => ({
+            id: e.id,
+            worktree: e.worktree,
+            ...(e.image ? { image: e.image } : {}),
+            runtime: publicRuntime(this.runtime(e.id)),
+            openUrl: projectUrl(e.id, this.opts.port),
+          })),
+          ...(isolation ? { isolation } : {}),
         };
       }),
     };
@@ -119,18 +199,15 @@ export class StateStore {
 
   private save(): void {
     const projects: Record<ProjectId, PersistedRuntime> = {};
+    const environments: Record<EnvId, PersistedEnv> = {};
     for (const [id, r] of this.runtimes) {
-      if (r.containerId || r.password || r.workspaceFolder || r.relayToken) {
-        projects[id] = {
-          containerId: r.containerId,
-          password: r.password,
-          workspaceFolder: r.workspaceFolder,
-          relayToken: r.relayToken,
-          ...(r.remoteUser ? { remoteUser: r.remoteUser } : {}),
-        };
-      }
+      if (this.envs.has(id)) continue;
+      if (r.containerId || r.password || r.workspaceFolder || r.relayToken) projects[id] = durable(r);
     }
-    this.opts.persist({ projects });
+    for (const [id, e] of this.envs) {
+      environments[id] = { projectId: e.projectId, worktree: e.worktree, ...(e.image ? { image: e.image } : {}), ...durable(this.runtime(id)) };
+    }
+    this.opts.persist(Object.keys(environments).length > 0 ? { projects, environments } : { projects });
   }
 
   private emit(): void {

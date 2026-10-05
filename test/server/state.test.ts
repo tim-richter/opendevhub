@@ -82,3 +82,56 @@ describe("StateStore", () => {
     expect(store.snapshot().projects[0].runtime.relay).toBe("active");
   });
 });
+
+describe("task environments", () => {
+  const rec = { id: "a-feat-0a1b", projectId: "a", worktree: { path: "/w/a.worktrees/feat", hostPath: "/src/a.worktrees/feat", branch: "feat" } };
+
+  it("records an environment, persists it with its durable runtime, and restores it", () => {
+    const { store, saved } = make();
+    store.setProjects([p("a")]);
+    store.putEnvironment(rec);
+    store.updateRuntime(rec.id, { containerId: "c2", password: "pw2", containerState: "running" });
+    expect(saved.at(-1)?.environments?.[rec.id]).toMatchObject({ projectId: "a", worktree: rec.worktree, containerId: "c2", password: "pw2" });
+    expect(saved.at(-1)?.projects).not.toHaveProperty(rec.id);
+    const restored = make(saved.at(-1)).store;
+    restored.setProjects([p("a")]);
+    expect(restored.environment(rec.id)).toEqual(rec);
+    expect(restored.runtime(rec.id)).toMatchObject({ projectId: "a", containerId: "c2", containerState: "stopped" });
+  });
+
+  it("shows environments in the snapshot without secrets, with their own URL", () => {
+    const { store } = make();
+    store.setProjects([p("a")]);
+    store.putEnvironment({ ...rec, image: { key: "k", ref: "r" } });
+    store.updateRuntime(rec.id, { password: "secret2", containerState: "running" });
+    store.setIsolation("a", { default: "isolated" });
+    const view = store.snapshot().projects[0];
+    expect(JSON.stringify(view)).not.toContain("secret2");
+    expect(view.environments).toEqual([
+      expect.objectContaining({ id: rec.id, worktree: rec.worktree, image: { key: "k", ref: "r" }, openUrl: `http://${rec.id}.localhost:7777/` }),
+    ]);
+    expect(view.environments[0].runtime.containerState).toBe("running");
+    expect(view.isolation).toEqual({ default: "isolated" });
+  });
+
+  it("lists a project's sessions from all its environments, newest first", () => {
+    const { store } = make();
+    store.setProjects([p("a")]);
+    store.putEnvironment(rec);
+    const s = (id: string, updatedAt: number, envId?: string) => ({ id, projectId: "a", title: id, directory: "/w", updatedAt, status: "idle" as const, ...(envId ? { envId } : {}) });
+    store.setSessions("a", [s("main", 1)]);
+    store.setSessions(rec.id, [s("task", 2, rec.id)]);
+    expect(store.sessionsOf("a").map((x) => x.id)).toEqual(["task", "main"]);
+  });
+
+  it("forgets an environment, its runtime and its sessions", () => {
+    const { store, saved } = make();
+    store.setProjects([p("a")]);
+    store.putEnvironment(rec);
+    store.setSessions(rec.id, [{ id: "t", projectId: "a", title: "t", directory: "/w", updatedAt: 1, status: "idle" }]);
+    store.removeEnvironment(rec.id);
+    expect(store.environments("a")).toEqual([]);
+    expect(store.sessionsOf("a")).toEqual([]);
+    expect(saved.at(-1)).not.toHaveProperty("environments");
+  });
+});
