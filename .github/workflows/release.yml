@@ -1,6 +1,6 @@
 name: Release
 
-# After CI (unit + e2e) passes on main:
+# After CI (typecheck, unit tests, build) passes on main:
 # - pending changesets → open/update the "Version Packages" PR
 # - no pending changesets (i.e. that PR was just merged) → publish to npm,
 #   tag and create a GitHub release
