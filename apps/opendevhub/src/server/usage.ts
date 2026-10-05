@@ -198,3 +198,35 @@ export class UsageStore {
     this.db.close();
   }
 }
+
+export interface UsageTracker {
+  record(projectId: ProjectId, sessions: RawSession[]): void;
+  stop(): void;
+}
+
+const DAY_CHECK_MS = 60_000;
+
+/** Keeps the dashboard's usage totals current: after each booking, and every minute so "today" resets at midnight. */
+export function trackUsage(
+  usage: Pick<UsageStore, "record" | "totals">,
+  store: { setUsage(totals: UsageTotals | undefined): void },
+  now: () => number = Date.now,
+  log: (message: string) => void = console.warn,
+): UsageTracker {
+  const refresh = () => {
+    try {
+      store.setUsage(usage.totals(localDay(now())));
+    } catch (err) {
+      log(`usage: couldn't read totals: ${(err as Error).message}`);
+    }
+  };
+  refresh();
+  const timer = setInterval(refresh, DAY_CHECK_MS);
+  timer.unref?.();
+  return {
+    record: (projectId, sessions) => {
+      if (usage.record(projectId, sessions)) refresh();
+    },
+    stop: () => clearInterval(timer),
+  };
+}

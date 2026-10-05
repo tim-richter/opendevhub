@@ -135,3 +135,23 @@ describe("task environments", () => {
     expect(saved.at(-1)).not.toHaveProperty("environments");
   });
 });
+
+describe("usage", () => {
+  const totals = { today: { cost: 1, tokens: 10 }, projects: {}, tasks: {} };
+
+  it("puts usage in the snapshot only once set", () => {
+    const { store } = make();
+    expect(store.snapshot()).not.toHaveProperty("usage");
+    store.setUsage(totals);
+    expect(store.snapshot().usage).toEqual(totals);
+  });
+
+  it("notifies only when the totals change", () => {
+    const { store } = make();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setUsage(totals);
+    store.setUsage(structuredClone(totals));
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});

@@ -10,6 +10,7 @@ import type {
   ProjectRuntime,
   PublicRuntime,
   SessionSummary,
+  UsageTotals,
 } from "../shared/types";
 import { projectUrl } from "../shared/urls";
 import type { PersistedEnv, PersistedRuntime, PersistedState } from "./config";
@@ -60,6 +61,7 @@ export class StateStore {
   private editorList: EditorInfo[] = [];
   private envs = new Map<EnvId, EnvRecord>();
   private isolationInfo = new Map<ProjectId, IsolationInfo>();
+  private usageTotals?: UsageTotals;
 
   constructor(private readonly opts: StoreOptions) {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
@@ -163,6 +165,12 @@ export class StateStore {
     this.emit();
   }
 
+  setUsage(totals: UsageTotals | undefined): void {
+    if (JSON.stringify(this.usageTotals) === JSON.stringify(totals)) return;
+    this.usageTotals = totals;
+    this.emit();
+  }
+
   preflight(): Preflight {
     return this.preflightState;
   }
@@ -189,6 +197,7 @@ export class StateStore {
           ...(isolation ? { isolation } : {}),
         };
       }),
+      ...(this.usageTotals ? { usage: this.usageTotals } : {}),
     };
   }
 

@@ -374,6 +374,8 @@ export interface DashboardSnapshot {
   preflight: Preflight;
   editors: EditorInfo[];
   projects: ProjectView[];
+  /** Absent when the usage ledger couldn't be opened. */
+  usage?: UsageTotals;
 }
 
 export interface LogEvent {

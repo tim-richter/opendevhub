@@ -2,8 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { type Observed, UsageStore, book, localDay, observe } from "../../src/server/usage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Observed, UsageStore, book, localDay, observe, trackUsage } from "../../src/server/usage";
 import { rawSession } from "../helpers/fake-opencode";
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime();
@@ -156,5 +156,46 @@ describe("UsageStore", () => {
     const log = vi.fn();
     expect(UsageStore.open(file, log)).toBeUndefined();
     expect(log.mock.calls[0][0]).toMatch(/newer opendevhub/);
+  });
+});
+
+describe("trackUsage", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sets totals at once, after each booking, and when the day changes without new spend", () => {
+    let clock = new Date(2026, 9, 5, 23, 59, 30).getTime();
+    const u = UsageStore.open(":memory:")!;
+    const store = { setUsage: vi.fn() };
+    const tracker = trackUsage(u, store, () => clock);
+    expect(store.setUsage).toHaveBeenLastCalledWith({ today: { cost: 0, tokens: 0 }, projects: {}, tasks: {} });
+
+    tracker.record("p", [rawSession("a", { cost: 1, tokens: tokens(10), time: { created: 1, updated: clock } })]);
+    expect(store.setUsage.mock.lastCall![0].today).toEqual({ cost: 1, tokens: 10 });
+
+    const calls = store.setUsage.mock.calls.length;
+    tracker.record("p", [rawSession("a", { cost: 1, tokens: tokens(10), time: { created: 1, updated: clock } })]);
+    expect(store.setUsage.mock.calls.length).toBe(calls);
+
+    clock = new Date(2026, 9, 6, 0, 0, 30).getTime();
+    vi.advanceTimersByTime(60_000);
+    expect(store.setUsage.mock.lastCall![0].today).toEqual({ cost: 0, tokens: 0 });
+    expect(store.setUsage.mock.lastCall![0].projects.p.total).toEqual({ cost: 1, tokens: 10 });
+    tracker.stop();
+  });
+
+  it("logs and keeps the old totals when reading them fails", () => {
+    const store = { setUsage: vi.fn() };
+    const log = vi.fn();
+    const broken = { record: () => true, totals: () => { throw new Error("disk I/O error"); } };
+    const tracker = trackUsage(broken, store, Date.now, log);
+    tracker.record("p", []);
+    expect(store.setUsage).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/disk I\/O error/));
+    tracker.stop();
   });
 });
