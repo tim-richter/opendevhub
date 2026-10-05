@@ -40,6 +40,7 @@ import {
   diffKey,
   draftKey,
   isLarge,
+  linesLabel,
   type LineAnchor,
   newId,
   readComments,
@@ -158,7 +159,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
 
   const addLineComment = useCallback(
     (file: string, anchor: LineAnchor, text: string) => {
-      saveComments([...commentsRef.current, { id: newId(), file, line: anchor.line, side: anchor.side, quote: anchor.quote, text }]);
+      saveComments([...commentsRef.current, { id: newId(), file, line: anchor.line, side: anchor.side, start: anchor.start, startSide: anchor.startSide, quote: anchor.quote, text }]);
       setOpen(undefined);
     },
     [saveComments],
@@ -385,9 +386,9 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         {comments.length > 0 && (
           <ul className="flex flex-col gap-1 text-sm">
             {comments.map((c) => (
-              <li key={c.id} className="flex items-center gap-1.5">
-                <span>
-                  <span className="text-muted-foreground">{c.file ? `${c.file}:${c.line}${c.side === "old" ? " (removed)" : ""}` : "General"}</span>{" "}
+              <li key={c.id} className="flex items-start gap-1.5">
+                <span className="whitespace-pre-wrap">
+                  <span className="text-muted-foreground">{c.file ? `${c.file}:${linesLabel(c)}` : "General"}</span>{" "}
                   {c.text}
                 </span>
                 <Button
@@ -505,10 +506,17 @@ function FileDiff(props: {
   const selectedLines = useMemo(() => selectionFor(props.open), [props.open]);
   const renderAnnotation = useStableCallback((a: DiffLineAnnotation<ReviewAnnotation>) =>
     a.metadata.kind === "draft" ? (
-      <CommentForm onAdd={(text) => props.onAdd(file.file, a.metadata.kind === "draft" ? a.metadata.anchor : props.open!, text)} onCancel={props.onCancel} />
+      <CommentForm
+        anchor={a.metadata.anchor}
+        onAdd={(text) => props.onAdd(file.file, a.metadata.kind === "draft" ? a.metadata.anchor : props.open!, text)}
+        onCancel={props.onCancel}
+      />
     ) : (
       <div className="mx-2 my-1 flex items-start gap-2 rounded-sm border-l-3 border-primary bg-card px-2.5 py-2 font-sans text-sm whitespace-pre-wrap text-card-foreground">
-        <span>{a.metadata.comment.text}</span>
+        <span>
+          {a.metadata.comment.start !== undefined && <span className="text-muted-foreground">Lines {linesLabel(a.metadata.comment)}: </span>}
+          {a.metadata.comment.text}
+        </span>
         <Button
           variant="ghost"
           size="icon-xs"
@@ -581,7 +589,7 @@ function FileDiff(props: {
 }
 
 /** The comment box inside the diff. Keeps its own text so typing doesn't re-render the whole diff. */
-function CommentForm(props: { onAdd: (text: string) => void; onCancel: () => void }) {
+function CommentForm(props: { anchor: LineAnchor; onAdd: (text: string) => void; onCancel: () => void }) {
   const [text, setText] = useState("");
   // The gutter button keeps focus through the click that opened this box, so focus it once that settles.
   const input = useRef<HTMLTextAreaElement>(null);
@@ -597,6 +605,7 @@ function CommentForm(props: { onAdd: (text: string) => void; onCancel: () => voi
         if (text.trim()) props.onAdd(text.trim());
       }}
     >
+      {props.anchor.start !== undefined && <span className="text-muted-foreground">Lines {linesLabel(props.anchor)}</span>}
       <Textarea
         ref={input}
         className="min-h-0"

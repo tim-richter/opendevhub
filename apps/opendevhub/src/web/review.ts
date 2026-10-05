@@ -18,9 +18,13 @@ export interface Hunk {
 /** Where a comment points: the new-side line, or the old-side line of a deleted line. */
 export interface LineAnchor {
   key: string;
+  /** The last commented line; the comment shows below it. */
   line: number;
   side: "new" | "old";
-  /** The commented line and up to 2 lines before it, with their +/-/space prefix. */
+  /** The first line of a range comment; missing for a single line. */
+  start?: number;
+  startSide?: "new" | "old";
+  /** The commented range, or the commented line and up to 2 lines before it, with their +/-/space prefix. */
   quote: string[];
 }
 
@@ -30,6 +34,8 @@ export interface ReviewComment {
   file?: string;
   line?: number;
   side?: "new" | "old";
+  start?: number;
+  startSide?: "new" | "old";
   quote?: string[];
   text: string;
 }
@@ -61,12 +67,31 @@ export function parsePatch(patch: string): Hunk[] {
 
 const PREFIX: Record<DiffLine["kind"], string> = { add: "+", del: "-", ctx: " " };
 
+const sideOf = (l: DiffLine) => (l.kind === "del" ? "old" : "new");
+const numberOf = (l: DiffLine) => (l.kind === "del" ? l.oldNo : l.newNo) ?? 0;
+const quoteOf = (lines: DiffLine[]) => lines.map((q) => PREFIX[q.kind] + q.text);
+
 export function anchorFor(lines: DiffLine[], index: number): LineAnchor {
   const l = lines[index];
-  const side = l.kind === "del" ? "old" : "new";
-  const line = (side === "old" ? l.oldNo : l.newNo) ?? 0;
-  const quote = lines.slice(Math.max(0, index - 2), index + 1).map((q) => PREFIX[q.kind] + q.text);
-  return { key: `${side}:${line}`, line, side, quote };
+  const side = sideOf(l);
+  const line = numberOf(l);
+  return { key: `${side}:${line}`, line, side, quote: quoteOf(lines.slice(Math.max(0, index - 2), index + 1)) };
+}
+
+/** A comment on `lines[from..to]`, quoting all of them. */
+function rangeAnchor(lines: DiffLine[], from: number, to: number): LineAnchor {
+  if (from === to) return anchorFor(lines, to);
+  const first = lines[from];
+  return { ...anchorFor(lines, to), start: numberOf(first), startSide: sideOf(first), quote: quoteOf(lines.slice(from, to + 1)) };
+}
+
+/** "40-43", "3 (removed line)", "42 (removed) to 42": the lines a comment covers. */
+export function linesLabel(c: Pick<ReviewComment, "line" | "side" | "start" | "startSide">): string {
+  const removed = c.side === "old";
+  if (c.start === undefined) return `${c.line}${removed ? " (removed line)" : ""}`;
+  if ((c.startSide ?? "new") === (c.side ?? "new")) return `${c.start}-${c.line}${removed ? " (removed lines)" : ""}`;
+  const label = (n: number | undefined, side: "new" | "old" | undefined) => `${n}${side === "old" ? " (removed)" : ""}`;
+  return `${label(c.start, c.startSide)} to ${label(c.line, c.side)}`;
 }
 
 /** The spec's review prompt: line comments ordered by file and line, then general comments. */
@@ -83,7 +108,7 @@ export function composeReviewPrompt(o: { branch?: string; base?: string; comment
     const pad = " ".repeat(n.length);
     const body = c.text.trim().split("\n");
     if (!c.file) return `${n}General: ${body.join(`\n${pad}`)}`;
-    const where = `${c.file}:${c.line}${c.side === "old" ? " (removed line)" : ""}`;
+    const where = `${c.file}:${linesLabel(c)}`;
     return [`${n}${where}`, ...(c.quote ?? []).map((q) => `${pad}> ${q}`), ...body.map((l) => pad + l)].join("\n");
   });
   return `${what}${vs}. Address each point, then reply with what you changed.\n\n${items.join("\n\n")}`;
@@ -181,19 +206,23 @@ export type ReviewAnnotation = { kind: "comment"; comment: ReviewComment } | { k
 const toSide = (side: "new" | "old") => (side === "old" ? "deletions" : "additions");
 
 /**
- * The comment anchor for a gutter click or drag in the diff: the line where it ended (deleted lines anchor to
- * the old side), quoted with up to 2 lines before it from the patch.
+ * The comment anchor for a gutter click or drag in the diff (deleted lines anchor to the old side). A click
+ * quotes its line with up to 2 lines before it; a drag within one hunk covers and quotes every line it selected,
+ * whichever way it went. A drag across hunks only comments on the line where it ended.
  */
 export function anchorFromRange(patch: string, range: SelectedLineRange): LineAnchor {
-  const side = (range.endSide ?? range.side) === "deletions" ? "old" : "new";
-  const line = range.end;
+  const endSide = (range.endSide ?? range.side) === "deletions" ? "old" : "new";
+  const startSide = (range.side ?? range.endSide) === "deletions" ? "old" : "new";
+  const find = (lines: DiffLine[], side: "new" | "old", line: number) =>
+    lines.findIndex((l) => sideOf(l) === side && numberOf(l) === line);
   for (const hunk of parsePatch(patch)) {
-    const index = hunk.lines.findIndex((l) =>
-      side === "old" ? l.kind === "del" && l.oldNo === line : l.kind !== "del" && l.newNo === line,
-    );
-    if (index >= 0) return anchorFor(hunk.lines, index);
+    const end = find(hunk.lines, endSide, range.end);
+    if (end < 0) continue;
+    const start = find(hunk.lines, startSide, range.start);
+    if (start < 0) return anchorFor(hunk.lines, end);
+    return rangeAnchor(hunk.lines, Math.min(start, end), Math.max(start, end));
   }
-  return { key: `${side}:${line}`, line, side, quote: [] };
+  return { key: `${endSide}:${range.end}`, line: range.end, side: endSide, quote: [] };
 }
 
 /** One file's comments, plus the open comment box, as annotations for `@pierre/diffs`. */
@@ -230,13 +259,14 @@ export function statsDecoration(f: ReviewFile): FileTreeRowDecoration {
 }
 
 /**
- * The diff's line selection: the line whose comment box is open, else none. A gutter "+" click selects its line
+ * The diff's line selection: the lines whose comment box is open, else none. A gutter "+" click selects its line
  * inside @pierre/diffs, and the "+" stays pinned to that selection, so it must be cleared once the box closes.
  */
 export function selectionFor(open: LineAnchor | undefined): SelectedLineRange | null {
   if (!open) return null;
-  const side = toSide(open.side);
-  return { start: open.line, end: open.line, side, endSide: side };
+  const endSide = toSide(open.side);
+  if (open.start === undefined) return { start: open.line, end: open.line, side: endSide, endSide };
+  return { start: open.start, end: open.line, side: toSide(open.startSide ?? open.side), endSide };
 }
 
 /** Why the branch can't be published yet, or undefined when it can. */

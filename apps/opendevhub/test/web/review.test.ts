@@ -109,6 +109,21 @@ describe("composeReviewPrompt", () => {
     );
   });
 
+  it("names the lines a range comment covers", () => {
+    const text = composeReviewPrompt({
+      comments: [
+        { id: "a", file: "a.ts", line: 43, side: "new", start: 40, startSide: "new", quote: [" x", "+y"], text: "split this" },
+        { id: "b", file: "b.ts", line: 5, side: "old", start: 3, startSide: "old", text: "keep these" },
+        { id: "c", file: "c.ts", line: 42, side: "new", start: 42, startSide: "old", text: "why?" },
+      ],
+    });
+    expect(text.split("\n\n").slice(1)).toEqual([
+      ["1. a.ts:40-43", "   >  x", "   > +y", "   split this"].join("\n"),
+      ["2. b.ts:3-5 (removed lines)", "   keep these"].join("\n"),
+      ["3. c.ts:42 (removed) to 42", "   why?"].join("\n"),
+    ]);
+  });
+
   it("asks the agent to resolve conflicts", () => {
     expect(conflictPrompt({ branch: "x", base: "main", strategy: "rebase", files: ["a.ts", "b.ts"] })).toBe(
       "Rebase x onto main and resolve the conflicts in a.ts, b.ts. Run the tests afterwards, then reply with what you changed.",
@@ -199,9 +214,32 @@ describe("@pierre/diffs adapters", () => {
       quote: ["   const token = read(req);", "-  if (!token) return deny();", "+  if (token == null) return next();"],
     });
     expect(anchorFromRange(patch, { start: 42, end: 42, side: "deletions" })).toMatchObject({ key: "old:42", side: "old" });
-    // A drag anchors to where it ended.
-    expect(anchorFromRange(patch, { start: 40, end: 43, side: "additions", endSide: "additions" })).toMatchObject({ line: 43 });
     expect(anchorFromRange(patch, { start: 99, end: 99, side: "additions" })).toEqual({ key: "new:99", line: 99, side: "new", quote: [] });
+  });
+
+  it("turns a drag into a comment on the whole range, anchored where it ends and quoting every selected line", () => {
+    const range = {
+      key: "new:43",
+      line: 43,
+      side: "new",
+      start: 40,
+      startSide: "new",
+      quote: [" function check(req) {", "   const token = read(req);", "-  if (!token) return deny();", "+  if (token == null) return next();", "   return verify(token);"],
+    };
+    expect(anchorFromRange(patch, { start: 40, end: 43, side: "additions", endSide: "additions" })).toEqual(range);
+    // Dragging upwards selects the same range.
+    expect(anchorFromRange(patch, { start: 43, end: 40, side: "additions", endSide: "additions" })).toEqual(range);
+    // A range can start on a removed line and end on an added one.
+    expect(anchorFromRange(patch, { start: 42, end: 42, side: "deletions", endSide: "additions" })).toEqual({
+      key: "new:42",
+      line: 42,
+      side: "new",
+      start: 42,
+      startSide: "old",
+      quote: ["-  if (!token) return deny();", "+  if (token == null) return next();"],
+    });
+    // A start outside the patch falls back to a comment on the end line.
+    expect(anchorFromRange(patch, { start: 99, end: 43, side: "additions", endSide: "additions" })).not.toHaveProperty("start");
   });
 
   it("places a file's comments and the open comment box as diff annotations", () => {
@@ -260,6 +298,12 @@ describe("diff selection", () => {
   it("selects the line whose comment box is open, and nothing once it closes", () => {
     expect(selectionFor({ key: "new:7", line: 7, side: "new", quote: [] })).toEqual({ start: 7, end: 7, side: "additions", endSide: "additions" });
     expect(selectionFor({ key: "old:3", line: 3, side: "old", quote: [] })).toEqual({ start: 3, end: 3, side: "deletions", endSide: "deletions" });
+    expect(selectionFor({ key: "new:43", line: 43, side: "new", start: 42, startSide: "old", quote: [] })).toEqual({
+      start: 42,
+      end: 43,
+      side: "deletions",
+      endSide: "additions",
+    });
     expect(selectionFor(undefined)).toBeNull();
   });
 });
