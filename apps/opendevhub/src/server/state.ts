@@ -9,11 +9,13 @@ import type {
   ProjectId,
   ProjectRuntime,
   PublicRuntime,
+  ResourceStats,
   SessionSummary,
   UsageTotals,
 } from "../shared/types";
 import { projectUrl } from "../shared/urls";
 import type { PersistedEnv, PersistedRuntime, PersistedState } from "./config";
+import type { RunningContainer } from "./resources";
 import { compareSessions } from "./status";
 
 export interface StoreOptions {
@@ -62,6 +64,7 @@ export class StateStore {
   private envs = new Map<EnvId, EnvRecord>();
   private isolationInfo = new Map<ProjectId, IsolationInfo>();
   private usageTotals?: UsageTotals;
+  private resourceStats: Record<EnvId, ResourceStats> = {};
 
   constructor(private readonly opts: StoreOptions) {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
@@ -136,6 +139,7 @@ export class StateStore {
     if (!this.envs.delete(id)) return;
     this.runtimes.delete(id);
     this.sessions.delete(id);
+    delete this.resourceStats[id];
     this.save();
     this.emit();
   }
@@ -171,6 +175,20 @@ export class StateStore {
     this.emit();
   }
 
+  setResources(stats: Record<EnvId, ResourceStats>): void {
+    if (JSON.stringify(this.resourceStats) === JSON.stringify(stats)) return;
+    this.resourceStats = stats;
+    this.emit();
+  }
+
+  /** The containers of running environments, main and task, for the resource sampler. */
+  runningContainers(): RunningContainer[] {
+    return [...this.projectsById.keys(), ...this.envs.keys()].flatMap((envId) => {
+      const r = this.runtimes.get(envId);
+      return r?.containerState === "running" && r.containerId ? [{ envId, containerId: r.containerId }] : [];
+    });
+  }
+
   preflight(): Preflight {
     return this.preflightState;
   }
@@ -198,6 +216,7 @@ export class StateStore {
         };
       }),
       ...(this.usageTotals ? { usage: this.usageTotals } : {}),
+      ...(Object.keys(this.resourceStats).length > 0 ? { resources: this.resourceStats } : {}),
     };
   }
 

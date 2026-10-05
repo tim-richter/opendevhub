@@ -81,6 +81,43 @@ describe("StateStore", () => {
     expect(snap).not.toContain("relay-secret");
     expect(store.snapshot().projects[0].runtime.relay).toBe("active");
   });
+
+  it("lists the containers of running main and task environments", () => {
+    const { store } = make();
+    store.setProjects([p("a"), p("b")]);
+    store.putEnvironment({ id: "env-1", projectId: "a", worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" } });
+    store.updateRuntime("a", { containerState: "running", containerId: "ca" });
+    store.updateRuntime("b", { containerState: "stopped", containerId: "cb" });
+    store.updateRuntime("env-1", { containerState: "running", containerId: "ce" });
+    expect(store.runningContainers()).toEqual([
+      { envId: "a", containerId: "ca" },
+      { envId: "env-1", containerId: "ce" },
+    ]);
+  });
+
+  it("puts resources in the snapshot and emits only when they change", () => {
+    const { store } = make();
+    store.setProjects([p("a")]);
+    expect(store.snapshot().resources).toBeUndefined();
+    const fn = vi.fn();
+    store.subscribe(fn);
+    const stats = { a: { cpu: 3, memory: 1024 ** 2, memoryLimit: 1024 ** 3 } };
+    store.setResources(stats);
+    store.setResources(structuredClone(stats));
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(store.snapshot().resources).toEqual(stats);
+    store.setResources({});
+    expect(store.snapshot().resources).toBeUndefined();
+  });
+
+  it("drops a removed environment's resources", () => {
+    const { store } = make();
+    store.setProjects([p("a")]);
+    store.putEnvironment({ id: "env-1", projectId: "a", worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" } });
+    store.setResources({ "env-1": { cpu: 1, memory: 0, memoryLimit: 1 } });
+    store.removeEnvironment("env-1");
+    expect(store.snapshot().resources).toBeUndefined();
+  });
 });
 
 describe("task environments", () => {
