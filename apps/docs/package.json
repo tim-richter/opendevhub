@@ -14,7 +14,7 @@
     "fumadocs-core": "16.16.0",
     "fumadocs-mdx": "15.4.6",
     "fumadocs-ui": "npm:@fumadocs/base-ui@16.16.0",
-    "lucide-react": "^1.50.0",
+    "lucide-react": "^1.52.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-server-dom-webpack": "^19.3.0",
