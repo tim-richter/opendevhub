@@ -1,8 +1,9 @@
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Project } from "../shared/types";
+import type { Candidate, Project } from "../shared/types";
 import { projectId } from "./ids";
+import { detectStack } from "./stacks";
 import { WORKTREES_SUFFIX } from "./worktrees";
 
 const SPEC_CANDIDATES = [path.join(".devcontainer", "devcontainer.json"), ".devcontainer.json"];
@@ -20,20 +21,28 @@ export async function findDevcontainerSpec(dir: string): Promise<string | undefi
   return undefined;
 }
 
-export async function scanRoots(
-  roots: string[],
-  maxDepth = 2,
-  onWarn: (msg: string) => void = (m) => console.warn(m),
-): Promise<Project[]> {
-  const found = new Map<string, Project>();
+async function isGitRepo(dir: string): Promise<boolean> {
+  try {
+    await fs.stat(path.join(dir, ".git"));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  async function visit(dir: string, depth: number): Promise<void> {
-    if (found.has(dir)) return;
-    const spec = await findDevcontainerSpec(dir);
-    if (spec) {
-      found.set(dir, { id: projectId(dir), name: path.basename(dir), path: dir, devcontainerPath: spec });
-      return;
-    }
+/**
+ * Visits folders under each root up to `maxDepth`, skipping dotfolders, node_modules and
+ * worktree folders. `claim` returns true when it has taken a folder, so the walk doesn't go
+ * inside it.
+ */
+async function walk(
+  roots: string[],
+  maxDepth: number,
+  onWarn: (msg: string) => void,
+  claim: (dir: string, root: string) => Promise<boolean>,
+): Promise<void> {
+  async function visit(dir: string, root: string, depth: number): Promise<void> {
+    if (await claim(dir, root)) return;
     if (depth >= maxDepth) return;
     let entries: Dirent[];
     try {
@@ -46,10 +55,48 @@ export async function scanRoots(
       if (!entry.isDirectory() || entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
       // Worktrees opendevhub keeps next to a project carry its devcontainer.json too; they aren't projects.
       if (entry.name.endsWith(WORKTREES_SUFFIX)) continue;
-      await visit(path.join(dir, entry.name), depth + 1);
+      await visit(path.join(dir, entry.name), root, depth + 1);
     }
   }
+  for (const root of roots) {
+    const resolved = path.resolve(root);
+    await visit(resolved, resolved, 0);
+  }
+}
 
-  for (const root of roots) await visit(path.resolve(root), 0);
+export async function scanRoots(
+  roots: string[],
+  maxDepth = 2,
+  onWarn: (msg: string) => void = (m) => console.warn(m),
+): Promise<Project[]> {
+  const found = new Map<string, Project>();
+  await walk(roots, maxDepth, onWarn, async (dir) => {
+    if (found.has(dir)) return true;
+    const spec = await findDevcontainerSpec(dir);
+    if (!spec) return false;
+    found.set(dir, { id: projectId(dir), name: path.basename(dir), path: dir, devcontainerPath: spec });
+    return true;
+  });
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+}
+
+/** Git repos under the roots that have no devcontainer: what Add project offers. */
+export async function scanCandidates(
+  roots: string[],
+  maxDepth = 2,
+  onWarn: (msg: string) => void = (m) => console.warn(m),
+): Promise<Candidate[]> {
+  const found = new Map<string, Candidate>();
+  const projects = new Set<string>();
+  await walk(roots, maxDepth, onWarn, async (dir, root) => {
+    if (found.has(dir) || projects.has(dir)) return true;
+    if (await findDevcontainerSpec(dir)) {
+      projects.add(dir);
+      return true;
+    }
+    if (!(await isGitRepo(dir))) return false;
+    found.set(dir, { path: dir, name: path.basename(dir), root, stack: await detectStack(dir) });
+    return true;
+  });
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }

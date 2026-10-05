@@ -2,13 +2,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { scanRoots } from "../../src/server/discovery";
+import { scanCandidates, scanRoots } from "../../src/server/discovery";
 
 let root: string;
 function mk(rel: string, file?: string) {
   const dir = path.join(root, rel);
   fs.mkdirSync(dir, { recursive: true });
   if (file) fs.writeFileSync(path.join(dir, file), "{}");
+}
+
+/** A git repo: a .git folder, or a .git file as in submodules and linked worktrees. */
+function git(rel: string, asFile = false) {
+  const dir = path.join(root, rel);
+  fs.mkdirSync(dir, { recursive: true });
+  if (asFile) fs.writeFileSync(path.join(dir, ".git"), "gitdir: /elsewhere\n");
+  else fs.mkdirSync(path.join(dir, ".git"));
 }
 
 beforeEach(() => {
@@ -79,5 +87,55 @@ describe("scanRoots", () => {
     fs.chmodSync(path.join(root, "locked"), 0o755);
     expect(found.map((p) => p.name)).toEqual(["a"]);
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("scanCandidates", () => {
+  it("lists git repos without a devcontainer at depth 1 and 2, with their root and stack", async () => {
+    git("app");
+    fs.writeFileSync(path.join(root, "app", "package.json"), "{}");
+    git("org/svc", true);
+    const found = await scanCandidates([root]);
+    expect(found).toEqual([
+      { path: path.join(root, "app"), name: "app", root, stack: "node" },
+      { path: path.join(root, "org/svc"), name: "svc", root, stack: "generic" },
+    ]);
+  });
+
+  it("skips projects and everything inside them", async () => {
+    git("proj");
+    mk("proj/.devcontainer", "devcontainer.json");
+    git("proj/vendored-submodule");
+    git("other");
+    mk("other", ".devcontainer.json");
+    expect(await scanCandidates([root])).toEqual([]);
+  });
+
+  it("does not descend into a candidate", async () => {
+    git("mono");
+    git("mono/nested");
+    expect((await scanCandidates([root])).map((c) => c.name)).toEqual(["mono"]);
+  });
+
+  it("skips depth 3, node_modules, hidden dirs and worktree folders", async () => {
+    git("org/deep/c");
+    git("node_modules/x");
+    git(".hidden/y");
+    git("a.worktrees/feature");
+    mk("plain/folder");
+    expect(await scanCandidates([root])).toEqual([]);
+  });
+
+  it("dedupes overlapping roots and keeps the first root a repo was found under", async () => {
+    git("org/b");
+    const found = await scanCandidates([root, path.join(root, "org")]);
+    expect(found).toEqual([{ path: path.join(root, "org/b"), name: "b", root, stack: "generic" }]);
+  });
+
+  it("warns once for a missing root", async () => {
+    git("a");
+    const warn = vi.fn();
+    expect((await scanCandidates([path.join(root, "nope"), root], 2, warn)).map((c) => c.name)).toEqual(["a"]);
+    expect(warn).toHaveBeenCalledOnce();
   });
 });
