@@ -4,7 +4,7 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 
 - Discovers projects with a `.devcontainer/devcontainer.json` (or `.devcontainer.json`) under your roots (up to 2 levels deep). Git repos without one can be added with **Add project**.
 - Starts, stops and rebuilds one devcontainer per project and runs `opencode serve` inside it.
-- Shows live session status (running, idle, needs permission, question waiting) and sends browser notifications.
+- Shows live session status (running, idle, needs permission, question waiting) and sends [browser notifications](#notifications), even with the dashboard tab closed.
 - Opens each project's opencode web UI at `http://<project>.localhost:7777`, already authenticated.
 - Overview page puts sessions that need you first; each project has its own page with Sessions, Ports and Logs tabs. Press `Ctrl/⌘ K` to jump to any project or session.
 - Creates git worktrees for parallel agent sessions in a folder next to the project (`~/code/demo.worktrees/<branch>`), mounted into the container, so you can open and edit them on your machine. See [Worktrees](#worktrees).
@@ -134,6 +134,20 @@ The checkout page shows whether the agent is forwarded. To turn forwarding off f
 ```
 
 or, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "sshAgent": false } }`. It takes effect the next time the container starts or opendevhub restarts. An opencode server started before forwarding was set up picks up `SSH_AUTH_SOCK` after **Restart opencode**.
+
+## Notifications
+
+Click **Enable notifications** in the sidebar to get a notification when:
+
+- an agent asks for a permission. Chrome, Edge and other Chromium browsers show **Allow once** and **Reject** buttons that answer it without opening the dashboard; Firefox and Safari show the notification without buttons.
+- an agent asks a question.
+- a session finishes.
+
+Each permission and question gets its own notification. Clicking one takes you to its session, in an open dashboard tab or a new one. Notifications answered in the dashboard are closed.
+
+They arrive while the dashboard tab is closed, as long as the browser is running: opendevhub sends them by Web Push through the browser vendor's push service (Google's for Chrome, Edge and Brave, Mozilla's for Firefox, Apple's for Safari), so it needs internet access to that service. The contents are end-to-end encrypted. If it can't reach the service, the terminal says so. To check the setup, use **Send test notification** in `Ctrl/⌘ K`.
+
+Notifications are enabled per browser and address: opening the dashboard on another host name or port (`127.0.0.1` instead of `localhost`, or `--port`) means enabling them again there. The keys and subscriptions are in `~/.local/state/opendevhub/push.json`.
 
 ## Development
 

@@ -9,11 +9,8 @@ the live server's `/openapi.json`.
 
 ## High value
 
-- **Notifications that reach you when the dashboard tab is closed.** Browser notifications
-  only fire while the tab is open.
-  - Add Web Push through a service worker, with Approve / Reject buttons in the notification
-    itself (this follows on from respond inline).
-  - Add outgoing webhooks to ntfy, Pushover, Slack or a generic URL.
+- **Notifications on your phone.** Web Push reaches this computer's browser. Add outgoing
+  webhooks to ntfy, Pushover, Slack or a generic URL.
 - **Remote access.** An opt-in bind beyond loopback (e.g. a Tailscale IP) with dashboard
   authentication, so you can approve from your phone. Today the server binds 127.0.0.1 and only
   checks the Host header. This pairs with the notifications item.
