@@ -121,12 +121,14 @@ the relay step and before launching opencode:
 container, which don't inherit opencode's environment:
 
 ```sh
-git config --global --get core.sshCommand ||
-  git config --global core.sshCommand "ssh -o IdentityAgent=/tmp/opendevhub-ssh-agent.sock"
+sh -c 'if [ -S /tmp/opendevhub-ssh-agent.sock ]; then SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock ssh-add -l >/dev/null 2>&1; [ $? -eq 2 ] || export SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock; fi; exec ssh "$@"' ssh
 ```
 
-To remove it, opendevhub runs `git config --global --unset core.sshCommand`, but only when the
-current value equals the one above.
+It uses the forwarded agent while it answers, and the shell's own `SSH_AUTH_SOCK` otherwise, so
+git in VS Code keeps working with VS Code's agent when opendevhub isn't running. It is set when
+`core.sshCommand` is unset or names `/tmp/opendevhub-ssh-agent.sock` (an earlier opendevhub
+value). To remove it, opendevhub runs `git config --global --unset core.sshCommand`, but only when
+the current value names that socket.
 
 The other git commands opendevhub runs in a container (worktree add and remove, review, the
 Publish container fallback) go through `devcontainer exec` as the remote user, so they pick up

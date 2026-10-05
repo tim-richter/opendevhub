@@ -5,8 +5,14 @@ import { type RelayTarget, acceptAgentConnection, openAgentControl } from "./cli
 
 /** Where the relay serves the forwarded agent inside the container. */
 export const AGENT_SOCKET = "/tmp/opendevhub-ssh-agent.sock";
-/** git's ssh command in containers with forwarding on; opendevhub only removes the setting when it still has this value. */
-export const AGENT_SSH_COMMAND = `ssh -o IdentityAgent=${AGENT_SOCKET}`;
+/**
+ * git's ssh command in containers with forwarding on: ssh with the forwarded agent while it answers, and with the
+ * shell's own SSH_AUTH_SOCK otherwise (opendevhub not running, a stale socket after a restart, VS Code's agent).
+ * ssh-add exits 2 when it can't reach an agent. opendevhub only removes the setting when it still has this value.
+ */
+export const AGENT_SSH_COMMAND =
+  `sh -c 'if [ -S ${AGENT_SOCKET} ]; then SSH_AUTH_SOCK=${AGENT_SOCKET} ssh-add -l >/dev/null 2>&1; ` +
+  `[ $? -eq 2 ] || export SSH_AUTH_SOCK=${AGENT_SOCKET}; fi; exec ssh "$@"' ssh`;
 
 export interface AgentStatus {
   state: Exclude<SshAgentState, "off">;

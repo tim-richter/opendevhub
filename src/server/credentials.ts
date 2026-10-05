@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { type Containers, type ExecTarget, tailLines } from "./containers";
 import type { Runner } from "./exec";
-import { AGENT_SSH_COMMAND } from "./relay/agent";
+import { AGENT_SOCKET, AGENT_SSH_COMMAND } from "./relay/agent";
 
 const HOST_TIMEOUT_MS = 10_000;
 const CONTAINER_TIMEOUT_MS = 30_000;
@@ -32,17 +32,21 @@ printf "%s\\n" "$ODH_LINES" | while IFS= read -r line; do
 done
 exit 0`;
 
-/** Points git's ssh at the forwarded agent unless the container has its own core.sshCommand (then prints `kept`). */
+/** Points git's ssh at the forwarded agent unless the container has its own core.sshCommand (then prints `kept`). A value naming $ODH_AGENT_SOCK is opendevhub's, from this or an earlier version. */
 export const SSH_COMMAND_ON = `command -v git >/dev/null 2>&1 || exit 0
 current="$(git config --global --get core.sshCommand)"
-if [ -z "$current" ]; then git config --global core.sshCommand "$ODH_SSH_COMMAND"
-elif [ "$current" != "$ODH_SSH_COMMAND" ]; then echo kept
-fi
+case "$current" in
+  "$ODH_SSH_COMMAND") ;;
+  ""|*"$ODH_AGENT_SOCK"*) git config --global core.sshCommand "$ODH_SSH_COMMAND" ;;
+  *) echo kept ;;
+esac
 exit 0`;
 
-/** Removes core.sshCommand, but only when it is still opendevhub's. */
+/** Removes core.sshCommand, but only when it is opendevhub's (it names $ODH_AGENT_SOCK). */
 export const SSH_COMMAND_OFF = `command -v git >/dev/null 2>&1 || exit 0
-if [ "$(git config --global --get core.sshCommand)" = "$ODH_SSH_COMMAND" ]; then git config --global --unset core.sshCommand; fi
+case "$(git config --global --get core.sshCommand)" in
+  *"$ODH_AGENT_SOCK"*) git config --global --unset core.sshCommand ;;
+esac
 exit 0`;
 
 function sshHostOf(url: string): string | undefined {
@@ -169,7 +173,7 @@ export class Credentials {
 
   private async sshCommand(target: ExecTarget, sshAgent: boolean, onLine: (line: string) => void): Promise<void> {
     const r = await this.deps.containers.exec(target, ["sh", "-c", sshAgent ? SSH_COMMAND_ON : SSH_COMMAND_OFF], {
-      env: { ODH_SSH_COMMAND: AGENT_SSH_COMMAND },
+      env: { ODH_SSH_COMMAND: AGENT_SSH_COMMAND, ODH_AGENT_SOCK: AGENT_SOCKET },
       timeoutMs: CONTAINER_TIMEOUT_MS,
     });
     if (r.exitCode !== 0) throw failure("could not set git's ssh command", r);
