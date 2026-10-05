@@ -4,6 +4,7 @@ import {
   checkoutCounts,
   checkoutOf,
   checkoutPath,
+  checkoutRuntime,
   checkouts,
   checkoutTone,
   legacyPath,
@@ -106,5 +107,32 @@ describe("checkouts", () => {
     expect(legacyPath("p 1", "ports")).toBe("/p/p%201/main/ports");
     expect(legacyPath("p 1", "logs")).toBe("/p/p%201/main/logs");
     expect(legacyPath("p 1", "worktrees")).toBe("/p/p%201");
+  });
+});
+
+describe("checkouts with their own container", () => {
+  const own = (containerState: "running" | "stopped" | "starting", opencode: "healthy" | "absent" | "unhealthy" = "healthy") => ({
+    ...view(),
+    environments: [
+      {
+        id: "p-login-0a1b",
+        worktree: { path: wt("login"), hostPath: "/src/demo.worktrees/login", branch: "feature/login" },
+        runtime: { projectId: "p 1", containerState, opencode, ports: [{ status: "forwarded" as const, containerPort: 3000, hostPort: 3001 }] },
+        openUrl: "http://p-login-0a1b.localhost:7777/",
+      },
+    ],
+  });
+
+  it("reads a worktree's container state, ports and opencode from its own container", () => {
+    expect(checkoutRuntime(own("running"), wt("login")).ports).toEqual([{ status: "forwarded", containerPort: 3000, hostPort: 3001 }]);
+    expect(checkoutRuntime(own("running"), wt("main"))).toEqual(own("running").runtime);
+    expect(checkoutRuntime(own("running"), "/workspaces/demo").workspaceFolder).toBe("/workspaces/demo");
+  });
+
+  it("tones a worktree by its own container", () => {
+    expect(checkoutTone(own("stopped", "absent"), wt("login"))).toBe("off");
+    expect(checkoutTone(own("stopped", "absent"), wt("main"))).toBe("ok");
+    expect(checkoutTone(own("starting", "absent"), wt("login"))).toBe("busy");
+    expect(checkoutTone(own("running"), wt("login"))).toBe("ok");
   });
 });

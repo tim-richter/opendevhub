@@ -1,15 +1,17 @@
 import { type FormEvent, useCallback, useState } from "react";
 import { useNavigate } from "react-router";
-import type { ProjectView } from "../../shared/types";
-import { createWorktree, removeWorktree, startSession } from "../api";
-import { PlusIcon } from "lucide-react";
+import type { EnvironmentView, ProjectView } from "../../shared/types";
+import { createEnv, createWorktree, envAction, removeEnv, removeWorktree, startSession } from "../api";
+import { BoxIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { type Checkout, checkoutPath } from "../checkouts";
 import { useDash } from "../DashboardContext";
+import { envOfDirectory } from "../derive";
 import { openSessionTab, projectFlags } from "./ProjectActions";
 
 /** Runs one checkout action at a time, reporting failures to the error banner. */
@@ -31,7 +33,10 @@ export function useCheckoutActions(view: ProjectView) {
 
   /** Removes a worktree after confirming, asking again before discarding uncommitted changes. */
   const remove = (c: Checkout, after?: () => void) => {
-    if (!confirm(`Remove the worktree ${c.label}? Its folder is deleted; the branch is kept.`)) return;
+    const what = envOfDirectory(view, c.directory)
+      ? "Its folder, its container and the container's sessions are deleted"
+      : "Its folder is deleted";
+    if (!confirm(`Remove the worktree ${c.label}? ${what}; the branch is kept.`)) return;
     busy(c.directory, async () => {
       try {
         await removeWorktree(view.project.id, c.directory, false);
@@ -44,7 +49,75 @@ export function useCheckoutActions(view: ProjectView) {
     });
   };
 
-  return { pending, busy, newSession, remove };
+  const ownContainer = (c: Checkout) => busy(`env:${c.directory}`, () => createEnv(view.project.id, c.directory));
+  const containerAction = (env: EnvironmentView, action: "start" | "stop") =>
+    busy(`env:${env.id}`, () => envAction(view.project.id, env.id, action));
+  const removeContainer = (env: EnvironmentView, label: string) => {
+    if (!confirm(`Remove the container of ${label}? Its sessions are deleted; the worktree and its files stay.`)) return;
+    busy(`env:${env.id}`, () => removeEnv(view.project.id, env.id));
+  };
+
+  return { pending, busy, newSession, remove, ownContainer, containerAction, removeContainer };
+}
+
+/** Whether new sessions can start in a checkout: its own container's opencode, or the project's. */
+export function checkoutReady(view: ProjectView, c: Checkout): boolean {
+  const env = envOfDirectory(view, c.directory);
+  return env ? env.runtime.opencode === "healthy" : projectFlags(view, false).canOpen;
+}
+
+/** A worktree's container: run it in its own, or start, stop and remove the one it has. */
+export function ContainerMenu({ view, checkout: c, compact }: { view: ProjectView; checkout: Checkout; compact?: boolean }) {
+  const { running } = projectFlags(view, false);
+  const { pending, ownContainer, containerAction, removeContainer } = useCheckoutActions(view);
+  if (!c.worktree) return null;
+  const env = envOfDirectory(view, c.directory);
+  const unsupported = view.isolation?.unsupported;
+  const state = env?.runtime.containerState;
+  const settling = state === "starting" || state === "stopping";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size={compact ? "icon-sm" : "icon"}
+          className="text-muted-foreground"
+          aria-label={`Container of ${c.label}`}
+          title="Container"
+          disabled={!!pending}
+        >
+          <BoxIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {env ? (
+          <>
+            {state === "running" ? (
+              <DropdownMenuItem onSelect={() => containerAction(env, "stop")}>Stop container</DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem disabled={!running || settling} onSelect={() => containerAction(env, "start")}>
+                Start container
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem disabled={settling} onSelect={() => removeContainer(env, c.label)}>
+              Remove container
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <DropdownMenuItem
+            disabled={!running || !!unsupported || !c.hostPath}
+            title={unsupported ?? (c.hostPath ? "Run this worktree in its own devcontainer" : "Only worktrees in the mounted folder can")}
+            onSelect={() => ownContainer(c)}
+          >
+            <span className="flex flex-col">
+              Run in its own container
+              {unsupported && <span className="max-w-64 text-xs text-muted-foreground">{unsupported}</span>}
+            </span>
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 /** Shown when the container predates the worktree mount, so worktrees can't be opened on this machine. */

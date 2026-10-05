@@ -14,10 +14,11 @@ import { OpenInMenu } from "../components/OpenInMenu";
 import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL } from "../components/Status";
-import { NewWorktreeForm, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
+import { EnvBadge } from "../components/EnvBadge";
+import { checkoutReady, ContainerMenu, NewWorktreeForm, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
 import { type Checkout, checkoutCounts, checkoutOf, checkoutPath, checkouts, checkoutTone, orphanSessions, projectTasks } from "../checkouts";
 import { useDash } from "../DashboardContext";
-import { compareSessions, needsAttention, projectTone, workspaceFolderOf } from "../derive";
+import { compareSessions, envOfDirectory, needsAttention, projectTone, workspaceFolderOf } from "../derive";
 import { useProjectView } from "./ProjectLayout";
 
 export function ProjectOverview() {
@@ -147,8 +148,9 @@ export function ProjectOverview() {
 
 function CheckoutCard({ view, checkout: c }: { view: ProjectView; checkout: Checkout }) {
   const navigate = useNavigate();
-  const { canOpen, running } = projectFlags(view, false);
+  const { running } = projectFlags(view, false);
   const { pending, newSession, remove } = useCheckoutActions(view);
+  const env = envOfDirectory(view, c.directory);
   const tone = checkoutTone(view, c.directory);
   const n = checkoutCounts(view, c.directory);
   const to = checkoutPath(view.project.id, c.target);
@@ -188,11 +190,17 @@ function CheckoutCard({ view, checkout: c }: { view: ProjectView; checkout: Chec
           {n.idle > 0 && <span>{n.idle} idle</span>}
           {n.attention + n.running + n.idle === 0 && <span>No sessions</span>}
         </div>
+        {env && (
+          <div>
+            <EnvBadge env={env} />
+          </div>
+        )}
         <div className="mt-auto flex cursor-default items-center gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
-          <Button variant="outline" size="sm" disabled={!canOpen || !!pending} onClick={() => newSession(c)}>
+          <Button variant="outline" size="sm" disabled={!checkoutReady(view, c) || !!pending} onClick={() => newSession(c)}>
             New session
           </Button>
           <OpenInMenu view={view} directory={c.directory} hostPath={c.hostPath} compact />
+          <ContainerMenu view={view} checkout={c} compact />
           {c.worktree && (
             <Button
               variant="ghost"

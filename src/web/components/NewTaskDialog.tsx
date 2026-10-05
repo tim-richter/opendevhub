@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { branchSlug, deriveTitle, MAX_VARIANTS, taskBranches } from "../../shared/tasks";
-import type { ModelsInfo, TaskVariantSpec, TaskWhere } from "../../shared/types";
+import type { Isolation, ModelsInfo, TaskVariantSpec, TaskWhere } from "../../shared/types";
 import { createTask, fetchModels } from "../api";
 import { useDash } from "../DashboardContext";
 import { modelFromKey, modelKey, taskDestination, taskFailures } from "../tasks";
@@ -50,6 +50,7 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const [where, setWhere] = useState<TaskWhere>("worktree");
+  const [environment, setEnvironment] = useState<Isolation>();
   const [rows, setRows] = useState<Row[]>([EMPTY_ROW]);
   const [models, setModels] = useState<ModelsInfo>();
   const [busy, setBusy] = useState(false);
@@ -61,6 +62,8 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
   const canOpen = flags?.canOpen ?? false;
   const worktreesReady = view?.runtime.worktreeRoot?.mounted === true;
   const effectiveWhere: TaskWhere = worktreesReady ? where : "workspace";
+  const isolation = view?.isolation;
+  const chosenEnv: Isolation = isolation?.unsupported ? "shared" : (environment ?? isolation?.default ?? "shared");
   const shownRows = effectiveWhere === "worktree" ? rows : rows.slice(0, 1);
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
@@ -107,6 +110,7 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
       prompt,
       ...(title.trim() ? { title: title.trim() } : {}),
       where: effectiveWhere,
+      ...(worktree ? { environment: chosenEnv } : {}),
       ...(worktree && branch.trim() ? { branch: branch.trim() } : {}),
       ...(worktree && base.trim() ? { base: base.trim() } : {}),
       variants,
@@ -154,6 +158,7 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
               onChange={(id) => {
                 setProjectId(id);
                 setRows([EMPTY_ROW]);
+                setEnvironment(undefined);
               }}
             />
           </div>
@@ -213,6 +218,26 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
             </RadioGroup>
             {view && canOpen && !worktreesReady && <span className="text-muted-foreground">Rebuild the container to enable worktrees.</span>}
           </div>
+
+          {effectiveWhere === "worktree" && (
+            <div className="flex flex-wrap items-center gap-4 text-sm">
+              <span className="text-muted-foreground">Environment</span>
+              <RadioGroup
+                className="flex flex-wrap gap-4"
+                value={chosenEnv}
+                onValueChange={(v) => setEnvironment(v as Isolation)}
+                aria-label="Environment"
+              >
+                <Label className="font-normal">
+                  <RadioGroupItem value="shared" /> Shared container
+                </Label>
+                <Label className="font-normal" title={isolation?.unsupported}>
+                  <RadioGroupItem value="isolated" disabled={!!isolation?.unsupported} /> Own container
+                </Label>
+              </RadioGroup>
+              {isolation?.unsupported && <span className="text-muted-foreground">{isolation.unsupported}</span>}
+            </div>
+          )}
 
           <div className="flex flex-col items-start gap-2">
             {shownRows.map((row, i) => {

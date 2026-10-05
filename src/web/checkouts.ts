@@ -1,5 +1,5 @@
-import type { ProjectView, SessionSummary, Worktree } from "../shared/types";
-import { needsAttention, type Tone, workspaceFolderOf } from "./derive";
+import type { ProjectView, PublicRuntime, SessionSummary, Worktree } from "../shared/types";
+import { envOfDirectory, envTone, needsAttention, type Tone, workspaceFolderOf } from "./derive";
 
 /** A place a project is checked out: the main checkout or one of its worktrees. */
 export interface Checkout {
@@ -65,11 +65,18 @@ export function checkoutCounts(view: ProjectView, directory: string): { attentio
   return counts;
 }
 
-/** Like projectTone, but from one checkout's sessions; the container state is shared. */
+/** The container a checkout runs in: its own when it has one, else the project's. */
+export function checkoutRuntime(view: ProjectView, directory: string): PublicRuntime {
+  return envOfDirectory(view, directory)?.runtime ?? view.runtime;
+}
+
+/** Like projectTone, but from one checkout's sessions and the container it runs in. */
 export function checkoutTone(view: ProjectView, directory: string): Tone {
   const c = checkoutCounts(view, directory);
   if (c.attention > 0) return "attention";
   if (c.running > 0) return "running";
+  const env = envOfDirectory(view, directory);
+  if (env) return envTone(env);
   return view.runtime.containerState === "running" ? "ok" : "off";
 }
 

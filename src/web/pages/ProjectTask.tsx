@@ -11,7 +11,8 @@ import { Empty, muted } from "../components/Page";
 import { SessionBadge } from "../components/Status";
 import { useDash } from "../DashboardContext";
 import { checkoutOf, checkoutPath } from "../checkouts";
-import { sessionHref } from "../derive";
+import { envOfDirectory, sessionHref } from "../derive";
+import { EnvBadge } from "../components/EnvBadge";
 import { useProjectView } from "./ProjectLayout";
 import { diffStats, formatCost, formatTokens, pickPrompts, removals, taskSessions, variantName } from "../tasks";
 
@@ -114,6 +115,7 @@ export function ProjectTask() {
           const review = reviews[s.directory];
           const stats = review ? diffStats(review) : undefined;
           const checkout = checkoutOf(view, s.directory);
+          const env = envOfDirectory(view, s.directory);
           return (
             <Card key={s.id} className="min-w-0 gap-3 px-4 py-3">
               <header className="flex min-w-0 items-center gap-2">
@@ -123,6 +125,8 @@ export function ProjectTask() {
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm [&_dd]:truncate [&_dt]:text-muted-foreground">
                 <dt>Branch</dt>
                 <dd className="font-mono text-xs">{review === undefined ? <Skeleton className="h-4 w-24" /> : (review?.branch ?? "—")}</dd>
+                <dt>Container</dt>
+                <dd>{env ? <EnvBadge env={env} /> : "Shared"}</dd>
                 <dt>Cost</dt>
                 <dd>{formatCost(s.cost)}</dd>
                 <dt>Tokens</dt>

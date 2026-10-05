@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate, useOutletContext, useParams, useSearchParams
 import type { ForwardedPort, ProjectView } from "../../shared/types";
 import { refreshWorktrees } from "../api";
 import { CopyButton } from "../components/CopyButton";
-import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, PlusIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,10 +16,11 @@ import { OpenInMenu } from "../components/OpenInMenu";
 import { projectFlags, StartStopButton } from "../components/ProjectActions";
 import { SessionList } from "../components/SessionList";
 import { Count, StatusDot } from "../components/Status";
-import { useCheckoutActions } from "../components/Worktrees";
-import { type Checkout, checkoutCounts, checkoutPath, checkouts, checkoutTone } from "../checkouts";
+import { EnvBadge } from "../components/EnvBadge";
+import { checkoutReady, ContainerMenu, useCheckoutActions } from "../components/Worktrees";
+import { type Checkout, checkoutCounts, checkoutPath, checkoutRuntime, checkouts, checkoutTone } from "../checkouts";
 import { useDash } from "../DashboardContext";
-import { compareSessions, matches, needsAttention, type SessionEntry } from "../derive";
+import { compareSessions, envOfDirectory, matches, needsAttention, type SessionEntry } from "../derive";
 import { useProjectView } from "./ProjectLayout";
 
 const IDLE_LIMIT = 8;
@@ -36,8 +37,8 @@ export function CheckoutPage() {
   const view = useProjectView();
   const { worktree = "" } = useParams();
   const navigate = useNavigate();
-  const { running, canOpen } = projectFlags(view, false);
-  const { pending, newSession, remove } = useCheckoutActions(view);
+  const { running } = projectFlags(view, false);
+  const { pending, newSession, remove, containerAction } = useCheckoutActions(view);
   const checkout = checkouts(view).find((c) => c.target === worktree);
   const projectPath = `/p/${encodeURIComponent(view.project.id)}`;
 
@@ -59,6 +60,7 @@ export function CheckoutPage() {
 
   const base = checkoutPath(view.project.id, checkout.target);
   const n = checkoutCounts(view, checkout.directory);
+  const env = envOfDirectory(view, checkout.directory);
 
   return (
     <>
@@ -85,18 +87,28 @@ export function CheckoutPage() {
             ) : (
               <span className="truncate">only in container ({checkout.directory})</span>
             )}
+            {env && <EnvBadge env={env} />}
           </p>
         }
         actions={
           <>
-            {canOpen ? (
+            {checkoutReady(view, checkout) ? (
               <Button variant="outline" disabled={!!pending} onClick={() => newSession(checkout)}>
                 <PlusIcon /> New session
+              </Button>
+            ) : env && running ? (
+              <Button
+                variant="outline"
+                disabled={!!pending || env.runtime.containerState === "starting" || env.runtime.containerState === "stopping"}
+                onClick={() => containerAction(env, "start")}
+              >
+                <PlayIcon className="size-3" /> {env.runtime.containerState === "starting" ? "Starting…" : "Start container"}
               </Button>
             ) : (
               <StartStopButton view={view} />
             )}
             <OpenInMenu view={view} directory={checkout.directory} hostPath={checkout.hostPath} />
+            <ContainerMenu view={view} checkout={checkout} />
             {checkout.worktree && (
               <Button
                 variant="ghost"
@@ -121,7 +133,7 @@ export function CheckoutPage() {
         </TabLink>
         <TabLink to={`${base}/review`}>Review</TabLink>
         <TabLink to={`${base}/ports`}>
-          Ports <Count n={view.runtime.ports?.length ?? 0} tone="muted" />
+          Ports <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
         </TabLink>
         <TabLink to={`${base}/logs`}>Logs</TabLink>
       </TabBar>
@@ -138,7 +150,8 @@ export function CheckoutSessions() {
   const highlight = params.get("session") ?? undefined;
   const [query, setQuery] = useState("");
   const [showAllIdle, setShowAllIdle] = useState(false);
-  const { canOpen } = projectFlags(view, false);
+  const canOpen = checkoutReady(view, checkout);
+  const own = envOfDirectory(view, checkout.directory);
   const { pending, newSession } = useCheckoutActions(view);
 
   const mine = useMemo(() => view.sessions.filter((s) => s.directory === checkout.directory), [view.sessions, checkout.directory]);
@@ -172,8 +185,10 @@ export function CheckoutSessions() {
       </Empty>
     ) : (
       <Empty title="Not running">
-        <p className={muted}>Start the container to see this checkout's opencode sessions.</p>
-        <StartStopButton view={view} />
+        <p className={muted}>
+          {own ? "Start this worktree's container" : "Start the container"} to see this checkout's opencode sessions.
+        </p>
+        {!own && <StartStopButton view={view} />}
       </Empty>
     );
   }
@@ -218,14 +233,15 @@ function Group(props: { title: string; entries: SessionEntry[]; highlight?: stri
   );
 }
 
-/** Until tasks get environments of their own, every checkout runs in the project's one container. */
+/** Checkouts without their own container share the project's. */
 function SharedNote() {
-  return <Note>Every worktree of this project runs in the same container, so these are shared with the other worktrees.</Note>;
+  return <Note>This checkout runs in the project's container, so these are shared with the other checkouts that do.</Note>;
 }
 
 export function CheckoutPorts() {
-  const { view } = useCheckout();
-  const { runtime } = view;
+  const { view, checkout } = useCheckout();
+  const own = envOfDirectory(view, checkout.directory);
+  const runtime = checkoutRuntime(view, checkout.directory);
   const ports = runtime.ports ?? [];
   if (ports.length === 0) {
     return (
@@ -239,7 +255,7 @@ export function CheckoutPorts() {
   }
   return (
     <div className="flex flex-col gap-5">
-      <SharedNote />
+      {own ? <Note>This worktree runs in its own container; these ports are its own.</Note> : <SharedNote />}
       {runtime.relay && (
         <Note warn={runtime.relay === "unavailable"}>
           {runtime.relay === "active"
@@ -326,13 +342,20 @@ function PortRow({ port: p }: { port: ForwardedPort }) {
 }
 
 export function CheckoutLogs() {
-  const { view } = useCheckout();
+  const { view, checkout } = useCheckout();
+  const own = envOfDirectory(view, checkout.directory);
   const { logs, loadLogs } = useDash();
   const id = view.project.id;
   useEffect(() => loadLogs(id), [id, loadLogs]);
   return (
     <div className="flex flex-col gap-5">
-      <SharedNote />
+      {own ? (
+        <Note>
+          This is the project's log. Lines from this worktree's own container start with <code className="font-mono">[{own.worktree.branch}]</code>.
+        </Note>
+      ) : (
+        <SharedNote />
+      )}
       <LogPanel lines={logs[id] ?? []} />
     </div>
   );
