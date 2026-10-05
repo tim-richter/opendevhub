@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Chip, GroupTitle, muted, Note, PageHeader, Section } from "../components/Page";
 import { OpenInMenu } from "../components/OpenInMenu";
 import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
+import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL } from "../components/Status";
 import { EnvBadge } from "../components/EnvBadge";
@@ -20,6 +21,7 @@ import { type Checkout, checkoutCounts, checkoutOf, checkoutPath, checkouts, che
 import { useDash } from "../DashboardContext";
 import { formatCost, formatTokens } from "../tasks";
 import { projectUsage } from "../usage";
+import { checkoutResources } from "../resources";
 import { compareSessions, envOfDirectory, needsAttention, projectTone, workspaceFolderOf } from "../derive";
 import { useProjectView } from "./ProjectLayout";
 
@@ -165,6 +167,8 @@ function CheckoutCard({ view, checkout: c }: { view: ProjectView; checkout: Chec
   const tone = checkoutTone(view, c.directory);
   const n = checkoutCounts(view, c.directory);
   const to = checkoutPath(view.project.id, c.target);
+  const { snapshot } = useDash();
+  const resources = checkoutResources(snapshot, view, c);
 
   return (
     <li>
@@ -200,6 +204,7 @@ function CheckoutCard({ view, checkout: c }: { view: ProjectView; checkout: Chec
           {n.running > 0 && <span>{n.running} working</span>}
           {n.idle > 0 && <span>{n.idle} idle</span>}
           {n.attention + n.running + n.idle === 0 && <span>No sessions</span>}
+          {resources && <ResourceStat {...resources} />}
         </div>
         {env && (
           <div>

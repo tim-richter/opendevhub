@@ -8,10 +8,12 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Empty, muted, Page, PageHeader, Section, Segmented } from "../components/Page";
 import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
+import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL, TONE_TEXT } from "../components/Status";
 import { useDash } from "../DashboardContext";
 import { formatUsage } from "../usage";
+import { projectResources } from "../resources";
 import { allSessions, matches, needsAttention, projectCounts, projectTone } from "../derive";
 
 type Filter = "all" | "running" | "stopped";
@@ -137,6 +139,8 @@ function Stat(props: { label: string; value: number; of?: number; tone?: "attent
 
 function ProjectTile({ view }: { view: ProjectView }) {
   const navigate = useNavigate();
+  const { snapshot } = useDash();
+  const resources = projectResources(snapshot, view);
   const tone = projectTone(view);
   const c = projectCounts(view);
   const { canOpen, running } = projectFlags(view, false);
@@ -176,6 +180,7 @@ function ProjectTile({ view }: { view: ProjectView }) {
           ) : (
             view.runtime.containerState === "stopped" && <span>Container not running</span>
           )}
+          {resources && <ResourceStat {...resources} />}
         </div>
         {view.runtime.error && (
           <p className="truncate text-xs text-destructive" title={view.runtime.error}>
