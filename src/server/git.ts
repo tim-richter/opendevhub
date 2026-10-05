@@ -25,6 +25,15 @@ function failure(args: string[], r: RunResult): CommandError {
 export class GitOps {
   constructor(private readonly deps: { containers: Pick<Containers, "exec"> }) {}
 
+  /** The object id of each path at HEAD (a tree for folders, a blob for files); undefined where it doesn't exist. */
+  async headObjects(p: Project, dir: string, paths: string[]): Promise<(string | undefined)[]> {
+    const script = 'd="$1"; shift; for p in "$@"; do git -C "$d" rev-parse --verify --quiet "HEAD:$p" || echo -; done';
+    const r = await this.deps.containers.exec(p, ["sh", "-c", script, "sh", dir, ...paths], { timeoutMs: GIT_TIMEOUT_MS });
+    if (r.exitCode !== 0) throw failure(["rev-parse"], r);
+    const lines = r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+    return paths.map((_, i) => (lines[i] && lines[i] !== "-" ? lines[i] : undefined));
+  }
+
   private exec(p: Project, dir: string, args: string[]): Promise<RunResult> {
     return this.deps.containers.exec(p, ["git", "-C", dir, ...args], { timeoutMs: GIT_TIMEOUT_MS });
   }

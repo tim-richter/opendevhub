@@ -3,6 +3,14 @@ import type { RunResult, Runner } from "./exec";
 
 export const LABEL = "opendevhub.project";
 
+/** Task containers carry these instead of LABEL, so a project's own lookups never find them. */
+export const ENV_LABEL = "opendevhub.env";
+export const ENV_PROJECT_LABEL = "opendevhub.env-project";
+
+export function envLabels(envId: string, projectId: string): string[] {
+  return [`${ENV_LABEL}=${envId}`, `${ENV_PROJECT_LABEL}=${projectId}`];
+}
+
 /**
  * The container a devcontainer CLI call addresses. A Project is one: its main environment, found by
  * `opendevhub.project=<id>`. A task environment sets its own labels and the generated config.
@@ -78,6 +86,8 @@ export function parseUpOutput(result: RunResult, fallbackFolder: string): UpResu
 export interface PortConfig {
   forwardPorts: unknown[];
   portsAttributes: Record<string, unknown>;
+  /** The devcontainer.json as read, before features and the image label are merged in. */
+  configuration?: Record<string, unknown>;
 }
 
 export interface ContainerInfo {
@@ -90,6 +100,11 @@ export interface ContainerInfo {
   projectId?: string;
   /** Bind mount targets inside the container, keyed by target with their host source. */
   binds?: Record<string, string>;
+  /** Set on task containers. */
+  envId?: string;
+  envProjectId?: string;
+  /** The image it was created from. */
+  image?: string;
 }
 
 export function parseInspect(json: string): ContainerInfo {
@@ -98,7 +113,7 @@ export function parseInspect(json: string): ContainerInfo {
     Name?: string;
     State?: { Running?: boolean };
     Mounts?: { Type?: string; Source?: string; Destination?: string }[] | null;
-    Config?: { Labels?: Record<string, string> | null };
+    Config?: { Image?: string; Labels?: Record<string, string> | null };
     NetworkSettings?: { Networks?: Record<string, { IPAddress?: string }> };
   };
   const [network, ip] =
@@ -113,10 +128,28 @@ export function parseInspect(json: string): ContainerInfo {
     running: c.State?.Running === true,
     ip,
     projectId: c.Config?.Labels?.[LABEL],
+    envId: c.Config?.Labels?.[ENV_LABEL],
+    envProjectId: c.Config?.Labels?.[ENV_PROJECT_LABEL],
+    image: c.Config?.Image,
     binds,
   };
+  for (const k of ["envId", "envProjectId", "image"] as const) if (info[k] === undefined) delete info[k];
   if (network) info.network = network;
   return info;
+}
+
+/** The last `{"outcome": …}` line the devcontainer CLI printed. */
+function lastOutcome(stdout: string): Record<string, unknown> | undefined {
+  const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("{"));
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]) as Record<string, unknown>;
+      if (typeof parsed.outcome === "string") return parsed;
+    } catch {
+      // not JSON
+    }
+  }
+  return undefined;
 }
 
 export class Containers {
@@ -161,6 +194,7 @@ export class Containers {
     return {
       forwardPorts: Array.isArray(cfg.forwardPorts) ? cfg.forwardPorts : [],
       portsAttributes: attrs && typeof attrs === "object" ? (attrs as Record<string, unknown>) : {},
+      ...(parsed.configuration ? { configuration: parsed.configuration } : {}),
     };
   }
 
@@ -186,13 +220,64 @@ export class Containers {
   }
 
   async listManaged(): Promise<ContainerInfo[]> {
-    const r = await this.run("docker", ["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{.ID}}"], {
-      timeoutMs: DOCKER_TIMEOUT_MS,
-    });
-    if (r.exitCode !== 0) throw new CommandError(`docker ps failed: ${r.stderr.trim()}`, tailLines(r.stderr));
-    const ids = r.stdout.split(/\s+/).filter(Boolean);
+    const ids: string[] = [];
+    for (const label of [LABEL, ENV_LABEL]) {
+      const r = await this.run("docker", ["ps", "-a", "--filter", `label=${label}`, "--format", "{{.ID}}"], {
+        timeoutMs: DOCKER_TIMEOUT_MS,
+      });
+      if (r.exitCode !== 0) throw new CommandError(`docker ps failed: ${r.stderr.trim()}`, tailLines(r.stderr));
+      for (const id of r.stdout.split(/\s+/).filter(Boolean)) if (!ids.includes(id)) ids.push(id);
+    }
     const infos = await Promise.all(ids.map((id) => this.inspect(id)));
     return infos.filter((i): i is ContainerInfo => i !== undefined);
+  }
+
+  /** The devcontainer.json a folder would use, with the CLI's variables filled in, and where it would mount the folder. */
+  async readConfig(folder: string): Promise<{ configuration: Record<string, unknown>; workspaceFolder?: string }> {
+    const r = await this.run("devcontainer", ["read-configuration", "--workspace-folder", folder], { timeoutMs: 60_000 });
+    if (r.exitCode !== 0) {
+      throw new CommandError(`devcontainer read-configuration failed (exit ${r.exitCode})`, tailLines(r.stderr));
+    }
+    let parsed: { configuration?: Record<string, unknown>; workspace?: { workspaceFolder?: unknown } };
+    try {
+      parsed = JSON.parse(r.stdout.trim()) as typeof parsed;
+    } catch {
+      throw new CommandError("devcontainer read-configuration returned invalid JSON", tailLines(r.stdout));
+    }
+    const { configFilePath: _file, ...configuration } = parsed.configuration ?? {};
+    const workspaceFolder = parsed.workspace?.workspaceFolder;
+    return { configuration, ...(typeof workspaceFolder === "string" ? { workspaceFolder } : {}) };
+  }
+
+  /** Builds the image a folder's config describes (Dockerfile and features), without a container or lifecycle commands. */
+  async build(folder: string, imageName: string, onLine: (line: string) => void): Promise<void> {
+    const r = await this.run("devcontainer", ["build", "--workspace-folder", folder, "--image-name", imageName], {
+      timeoutMs: UP_TIMEOUT_MS,
+      onLine,
+    });
+    const outcome = lastOutcome(r.stdout);
+    if (r.exitCode === 0 && outcome?.outcome === "success") return;
+    const reason = outcome?.message ?? outcome?.description ?? (r.timedOut ? "timed out after 15 minutes" : `exit ${r.exitCode}`);
+    throw new CommandError(`devcontainer build failed: ${String(reason)}`, tailLines(`${r.stderr}\n${r.stdout}`));
+  }
+
+  async imageExists(ref: string): Promise<boolean> {
+    const r = await this.run("docker", ["image", "inspect", "--format", "{{.Id}}", ref], { timeoutMs: DOCKER_TIMEOUT_MS });
+    return r.exitCode === 0;
+  }
+
+  /** Removes a container, stopping it first. One that is already gone counts as removed. */
+  async remove(containerId: string): Promise<void> {
+    const r = await this.run("docker", ["rm", "-f", containerId], { timeoutMs: 30_000 });
+    if (r.exitCode !== 0 && !/No such container/i.test(r.stderr)) {
+      throw new CommandError(`docker rm failed: ${r.stderr.trim()}`, tailLines(r.stderr));
+    }
+  }
+
+  /** Best effort: false when the image is in use or gone. */
+  async removeImage(ref: string): Promise<boolean> {
+    const r = await this.run("docker", ["image", "rm", ref], { timeoutMs: 30_000 });
+    return r.exitCode === 0;
   }
 
   async stop(containerId: string): Promise<void> {

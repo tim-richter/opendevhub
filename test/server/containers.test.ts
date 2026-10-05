@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, Containers, LABEL, parseUpOutput } from "../../src/server/containers";
+import { CommandError, Containers, ENV_LABEL, ENV_PROJECT_LABEL, envLabels, LABEL, parseInspect, parseUpOutput } from "../../src/server/containers";
 import type { Project } from "../../src/shared/types";
 import { fakeRunner } from "../helpers/fake-runner";
 
@@ -156,12 +156,12 @@ describe("Containers.readConfiguration", () => {
       "--include-merged-configuration",
     ]);
     expect(calls[0].opts?.timeoutMs).toBe(60_000);
-    expect(cfg).toEqual({ forwardPorts: [3000, "db:5432"], portsAttributes: { "3000": { label: "web" } } });
+    expect(cfg).toEqual({ forwardPorts: [3000, "db:5432"], portsAttributes: { "3000": { label: "web" } }, configuration: { forwardPorts: [1] } });
   });
 
   it("falls back to configuration and defaults missing fields", async () => {
     const { run } = fakeRunner(() => ({ stdout: JSON.stringify({ configuration: { forwardPorts: [8080] } }) }));
-    expect(await new Containers(run).readConfiguration(project)).toEqual({ forwardPorts: [8080], portsAttributes: {} });
+    expect(await new Containers(run).readConfiguration(project)).toEqual({ forwardPorts: [8080], portsAttributes: {}, configuration: { forwardPorts: [8080] } });
     const empty = fakeRunner(() => ({ stdout: "{}" }));
     expect(await new Containers(empty.run).readConfiguration(project)).toEqual({ forwardPorts: [], portsAttributes: {} });
   });
@@ -198,5 +198,80 @@ describe("exec targets", () => {
       "--override-config", "/state/envs/demo-1a2b3c-feat-0a1b/devcontainer.json",
       "pwd",
     ]);
+  });
+});
+
+describe("task environment containers", () => {
+  const taskInspect = JSON.stringify({
+    Id: "def456",
+    Name: "/task",
+    State: { Running: true },
+    Config: { Image: "vsc-feat-1234-uid", Labels: { [ENV_LABEL]: "demo-1a2b3c-feat-0a1b", [ENV_PROJECT_LABEL]: "demo-1a2b3c" } },
+    NetworkSettings: { Networks: { bridge: { IPAddress: "172.17.0.6" } } },
+  });
+
+  it("reads a task container's labels without making it look like a project's", () => {
+    const info = parseInspect(taskInspect);
+    expect(info).toMatchObject({ id: "def456", envId: "demo-1a2b3c-feat-0a1b", envProjectId: "demo-1a2b3c", image: "vsc-feat-1234-uid" });
+    expect(info.projectId).toBeUndefined();
+  });
+
+  it("labels task containers with their environment and project", () => {
+    expect(envLabels("e", "p")).toEqual([`${ENV_LABEL}=e`, `${ENV_PROJECT_LABEL}=p`]);
+  });
+
+  it("lists project and task containers", async () => {
+    const { run, calls } = fakeRunner(({ args }) => {
+      if (args[0] === "ps") return { stdout: args.includes(`label=${LABEL}`) ? "abc123\n" : "def456\n" };
+      return { stdout: args.at(-1) === "abc123" ? inspectJson : taskInspect };
+    });
+    const list = await new Containers(run).listManaged();
+    expect(list.map((c) => c.id)).toEqual(["abc123", "def456"]);
+    expect(calls.filter((c) => c.args[0] === "ps").map((c) => c.args)).toEqual([
+      ["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{.ID}}"],
+      ["ps", "-a", "--filter", `label=${ENV_LABEL}`, "--format", "{{.ID}}"],
+    ]);
+  });
+
+  it("reads a folder's configuration and the workspace folder the CLI would use", async () => {
+    const stdout = JSON.stringify({
+      configuration: { image: "node", configFilePath: { fsPath: "/x" } },
+      workspace: { workspaceFolder: "/workspaces/feat" },
+    });
+    const { run, calls } = fakeRunner(() => ({ stdout }));
+    expect(await new Containers(run).readConfig("/src/demo.worktrees/feat")).toEqual({ configuration: { image: "node" }, workspaceFolder: "/workspaces/feat" });
+    expect(calls[0].args).toEqual(["read-configuration", "--workspace-folder", "/src/demo.worktrees/feat"]);
+  });
+
+  it("builds an image and reports the CLI's error", async () => {
+    const ok = fakeRunner(() => ({ stdout: '{"outcome":"success","imageName":["img"]}\n' }));
+    await new Containers(ok.run).build("/f", "img", () => {});
+    expect(ok.calls[0].args).toEqual(["build", "--workspace-folder", "/f", "--image-name", "img"]);
+    const bad = fakeRunner(() => ({ exitCode: 1, stdout: '{"outcome":"error","message":"no Dockerfile"}\n', stderr: "boom" }));
+    await expect(new Containers(bad.run).build("/f", "img", () => {})).rejects.toThrow(/devcontainer build failed: no Dockerfile/);
+  });
+
+  it("checks for an image, removes containers (a missing one is fine) and removes images", async () => {
+    const { run, calls } = fakeRunner(({ args }) => {
+      if (args[0] === "image" && args[1] === "inspect") return { exitCode: args.at(-1) === "there" ? 0 : 1 };
+      if (args[0] === "rm" && args.at(-1) === "gone") return { exitCode: 1, stderr: "Error: No such container: gone" };
+      return {};
+    });
+    const c = new Containers(run);
+    expect(await c.imageExists("there")).toBe(true);
+    expect(await c.imageExists("missing")).toBe(false);
+    await c.remove("gone");
+    await c.remove("c2");
+    expect(calls.at(-1)?.args).toEqual(["rm", "-f", "c2"]);
+    expect(await c.removeImage("img")).toBe(true);
+    expect(calls.at(-1)?.args).toEqual(["image", "rm", "img"]);
+  });
+
+  it("returns the raw configuration with the port settings", async () => {
+    const stdout = JSON.stringify({ configuration: { customizations: { opendevhub: { isolation: "isolated" } } }, mergedConfiguration: { forwardPorts: [3000] } });
+    const { run } = fakeRunner(() => ({ stdout }));
+    const cfg = await new Containers(run).readConfiguration(project);
+    expect(cfg.forwardPorts).toEqual([3000]);
+    expect(cfg.configuration).toEqual({ customizations: { opendevhub: { isolation: "isolated" } } });
   });
 });

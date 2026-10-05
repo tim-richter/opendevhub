@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandError } from "../../src/server/containers";
 import { spawnRunner } from "../../src/server/exec";
 import { GitOps, IDENTITY_HINT, parseAheadBehind } from "../../src/server/git";
@@ -224,5 +224,15 @@ describe("deleteBranch", () => {
     await expect(ops.deleteBranch(project, repo, "side")).rejects.toBeInstanceOf(CommandError);
     await ops.deleteBranch(project, repo, "side", true);
     expect(git(repo, "branch", "--list", "side").trim()).toBe("");
+  });
+});
+
+describe("headObjects", () => {
+  it("returns the object id of each path at HEAD, undefined where it is missing", async () => {
+    const exec = vi.fn(async (_p: Project, _cmd: string[], _o?: { timeoutMs?: number }) => ({ exitCode: 0, stdout: "aaa\n-\nbbb\n", stderr: "", timedOut: false }));
+    const ops = new GitOps({ containers: { exec } });
+    expect(await ops.headObjects(project, "/w/x", [".devcontainer", ".devcontainer.json", "package-lock.json"])).toEqual(["aaa", undefined, "bbb"]);
+    expect(exec.mock.calls[0][1].slice(0, 2)).toEqual(["sh", "-c"]);
+    expect(exec.mock.calls[0][1].slice(3)).toEqual(["sh", "/w/x", ".devcontainer", ".devcontainer.json", "package-lock.json"]);
   });
 });
