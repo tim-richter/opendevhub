@@ -2,7 +2,7 @@
 
 Features discussed but not specced yet. Each one is a sketch; it gets a spec in `specs/`
 once it's picked up. Specced so far: respond inline, tasks, review, publish, per-task
-environments.
+environments, git identity and ssh-agent forwarding (the git half of credential setup).
 
 opencode 2.0.22 endpoints that make an item cheaper are noted where they exist. They come from
 the live server's `/openapi.json`.
@@ -18,9 +18,9 @@ the live server's `/openapi.json`.
   authentication, so you can approve from your phone. Today the server binds 127.0.0.1 and only
   checks the Host header. This pairs with the notifications item.
 - **Credential setup.** The biggest onboarding wall: today every user wires up LLM keys, git
-  and ssh by hand.
-  - Mount or inject provider keys, forward ssh-agent, and pass git credentials through to
-    containers.
+  and ssh by hand. Git identity and ssh-agent forwarding are specced
+  (`2026-10-05-git-ssh-credentials-design.md`). What's left:
+  - Mount or inject provider keys, and https git credentials.
   - opencode exposes `/api/credential` and `/api/integration/*/connect/{key,oauth}`, so the
     dashboard could connect providers in each container without touching files.
 - **Bootstrap repos that have no devcontainer.** Discovery hides them today. Offer
