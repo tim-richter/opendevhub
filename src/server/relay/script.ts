@@ -3,15 +3,19 @@
  * 0.0.0.0:$ODH_RELAY_PORT to the container's loopback. Protocol: see the container relay spec §3.
  * With ODH_RELAY_REMOTE=1 it is the gateway (see gateway.ts) and also accepts `<token> <ip> <port>`,
  * connecting to that IP instead of loopback.
- * Constraints: CommonJS, node:net/node:crypto only, no single quotes (it is shell-quoted as one arg).
+ * `agent-listen` / `agent-accept <id>` forward the host's ssh-agent: the relay serves a unix socket at
+ * $ODH_AGENT_SOCK and hands each client to opendevhub (see the git and ssh credentials spec §1).
+ * Constraints: CommonJS, node:net/node:crypto/node:fs only, no single quotes (it is shell-quoted as one arg).
  */
 export const RELAY_SCRIPT = `/*odh-relay*/
 "use strict";
 const net = require("node:net");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const token = process.env.ODH_RELAY_TOKEN || "";
 const port = Number(process.env.ODH_RELAY_PORT || "4097");
 const remote = process.env.ODH_RELAY_REMOTE === "1";
+const agentPath = process.env.ODH_AGENT_SOCK || "/tmp/opendevhub-ssh-agent.sock";
 if (!token) {
   console.error("odh-relay: ODH_RELAY_TOKEN is not set");
   process.exit(2);
@@ -41,6 +45,103 @@ function connectTo(hosts, target, done) {
   };
   attempt(0);
 }
+const agent = { server: null, control: null, closeTimer: null, nextId: 1, pending: new Map() };
+function announce(id) {
+  if (agent.control) agent.control.write("CONN " + id + "\\n");
+}
+function closeAgent() {
+  if (agent.server) {
+    agent.server.close();
+    agent.server = null;
+    try { fs.unlinkSync(agentPath); } catch (e) {}
+  }
+  for (const p of agent.pending.values()) {
+    clearTimeout(p.timer);
+    p.client.destroy();
+  }
+  agent.pending.clear();
+}
+function onAgentClient(c) {
+  if (!agent.control) return c.destroy();
+  const id = agent.nextId++;
+  c.pause();
+  c.on("error", () => c.destroy());
+  const timer = setTimeout(() => {
+    agent.pending.delete(id);
+    c.destroy();
+  }, 5000);
+  agent.pending.set(id, { client: c, timer });
+  c.once("close", () => {
+    const p = agent.pending.get(id);
+    if (p && p.client === c) {
+      clearTimeout(timer);
+      agent.pending.delete(id);
+    }
+  });
+  announce(id);
+}
+function listenAgent(conn) {
+  if (agent.closeTimer) {
+    clearTimeout(agent.closeTimer);
+    agent.closeTimer = null;
+  }
+  const previous = agent.control;
+  agent.control = conn;
+  if (previous) previous.destroy();
+  conn.on("error", () => conn.destroy());
+  conn.on("end", () => conn.destroy());
+  conn.on("data", () => {});
+  conn.on("close", () => {
+    if (agent.control !== conn) return;
+    agent.control = null;
+    agent.closeTimer = setTimeout(() => {
+      agent.closeTimer = null;
+      if (!agent.control) closeAgent();
+    }, 2000);
+  });
+  conn.resume();
+  const ready = () => {
+    conn.write("OK\\n");
+    for (const id of agent.pending.keys()) announce(id);
+  };
+  if (agent.server) return ready();
+  try { fs.unlinkSync(agentPath); } catch (e) {}
+  const server = net.createServer({ allowHalfOpen: true }, onAgentClient);
+  agent.server = server;
+  const umask = process.umask(0o177);
+  server.on("error", (err) => {
+    process.umask(umask);
+    console.error("odh-relay: agent socket: " + err.message);
+    if (agent.server === server) agent.server = null;
+    conn.end("ERR " + (err.code || "EUNKNOWN") + "\\n");
+  });
+  server.listen(agentPath, () => {
+    process.umask(umask);
+    try { fs.chmodSync(agentPath, 0o600); } catch (e) {}
+    if (agent.control === conn) ready();
+  });
+}
+function acceptAgent(conn, idArg, rest) {
+  const id = /^[0-9]+$/.test(idArg) ? Number(idArg) : -1;
+  const p = agent.pending.get(id);
+  if (!p) return conn.end("ERR ENOENT\\n");
+  clearTimeout(p.timer);
+  agent.pending.delete(id);
+  const c = p.client;
+  const close = () => {
+    c.destroy();
+    conn.destroy();
+  };
+  c.on("close", close);
+  conn.on("close", close);
+  conn.on("error", close);
+  conn.write("OK\\n");
+  if (rest.length) c.write(rest);
+  c.pipe(conn);
+  conn.pipe(c);
+  c.resume();
+  conn.resume();
+}
 const server = net.createServer({ allowHalfOpen: true }, (client) => {
   let buf = Buffer.alloc(0);
   const timer = setTimeout(() => client.destroy(), 5000);
@@ -60,8 +161,15 @@ const server = net.createServer({ allowHalfOpen: true }, (client) => {
     client.pause();
     const parts = buf.subarray(0, nl).toString("utf8").trim().split(" ");
     const rest = buf.subarray(nl + 1);
-    if (parts.length < 2 || parts.length > (remote ? 3 : 2) || !tokenOk(parts[0])) return client.destroy();
-    if (parts.length === 2 && parts[1] === "ping") return client.end("PONG\\n");
+    if (parts.length < 2 || !tokenOk(parts[0])) return client.destroy();
+    if (parts[1] === "agent-listen" || parts[1] === "agent-accept") {
+      if (remote) return client.destroy();
+      if (parts[1] === "agent-listen" && parts.length === 2) return listenAgent(client);
+      if (parts[1] === "agent-accept" && parts.length === 3) return acceptAgent(client, parts[2], rest);
+      return client.destroy();
+    }
+    if (parts.length > (remote ? 3 : 2)) return client.destroy();
+    if (parts.length === 2 && parts[1] === "ping") return client.end("PONG 2\\n");
     const hosts = parts.length === 3 ? [parts[1]] : ["127.0.0.1", "::1"];
     if (parts.length === 3 && !net.isIP(parts[1])) return client.destroy();
     const portArg = parts[parts.length - 1];

@@ -48,8 +48,8 @@ describe("RELAY_SCRIPT", () => {
     expect(RELAY_SCRIPT).toContain('require("node:net")');
   });
 
-  it("answers ping with PONG", async () => {
-    expect(await talk("secret ping\n")).toBe("PONG\n");
+  it("answers ping with PONG and the protocol version", async () => {
+    expect(await talk("secret ping\n")).toBe("PONG 2\n");
   });
 
   it("pipes to a 127.0.0.1 target, forwarding bytes sent together with the header", async () => {
@@ -118,7 +118,7 @@ describe("RELAY_SCRIPT", () => {
 
     it("still answers ping and the loopback form", async () => {
       const port = await echoOn("127.0.0.1");
-      expect(await talkGateway("secret ping\n")).toBe("PONG\n");
+      expect(await talkGateway("secret ping\n")).toBe("PONG 2\n");
       expect(await talkGateway(`secret ${port}\n`, "lo", /echo:lo/)).toBe("OK\necho:lo");
     });
 

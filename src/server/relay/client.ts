@@ -52,11 +52,14 @@ function handshake(
   });
 }
 
+/** The relay's answer to ping; older relays answer a bare PONG and are replaced (they have no agent verbs). */
+const PONG = "PONG 2";
+
 export async function pingRelay(target: RelayTarget, timeoutMs = 1000): Promise<boolean> {
   try {
     const { socket, reply } = await handshake(target, `${target.token} ping\n`, timeoutMs);
     socket.destroy();
-    return reply === "PONG";
+    return reply === PONG;
   } catch {
     return false;
   }
