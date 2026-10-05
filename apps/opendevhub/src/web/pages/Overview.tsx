@@ -11,6 +11,7 @@ import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../componen
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL, TONE_TEXT } from "../components/Status";
 import { useDash } from "../DashboardContext";
+import { formatUsage } from "../usage";
 import { allSessions, matches, needsAttention, projectCounts, projectTone } from "../derive";
 
 type Filter = "all" | "running" | "stopped";
@@ -38,7 +39,12 @@ export function Overview() {
     <Page>
       <PageHeader
         title="Overview"
-        description={snapshot.roots.join(" · ") || "No roots configured"}
+        description={
+          <>
+            {snapshot.roots.join(" · ") || "No roots configured"}
+            {snapshot.usage && <p className="tabular-nums">Today {formatUsage(snapshot.usage.today)}</p>}
+          </>
+        }
         actions={
           <Button onClick={() => newTask()} title="New task (n)">
             <PlusIcon /> New task

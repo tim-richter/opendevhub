@@ -18,14 +18,17 @@ import { EnvBadge } from "../components/EnvBadge";
 import { checkoutReady, ContainerMenu, NewWorktreeForm, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
 import { type Checkout, checkoutCounts, checkoutOf, checkoutPath, checkouts, checkoutTone, orphanSessions, projectTasks } from "../checkouts";
 import { useDash } from "../DashboardContext";
+import { formatCost, formatTokens } from "../tasks";
+import { projectUsage } from "../usage";
 import { compareSessions, envOfDirectory, needsAttention, projectTone, workspaceFolderOf } from "../derive";
 import { useProjectView } from "./ProjectLayout";
 
 export function ProjectOverview() {
   const view = useProjectView();
-  const { newTask } = useDash();
+  const { newTask, snapshot } = useDash();
   const [params] = useSearchParams();
   const { runtime, project } = view;
+  const usage = projectUsage(snapshot, project.id);
   const { running } = projectFlags(view, false);
   const root = runtime.worktreeRoot;
 
@@ -68,6 +71,14 @@ export function ProjectOverview() {
                 </Badge>
               )}
             </div>
+            {usage && (
+              <p
+                className="text-xs tabular-nums"
+                title={`Tokens today ${formatTokens(usage.today.tokens)} · all time ${formatTokens(usage.total.tokens)}`}
+              >
+                Today {formatCost(usage.today.cost)} · All time {formatCost(usage.total.cost)}
+              </p>
+            )}
           </div>
         }
         actions={

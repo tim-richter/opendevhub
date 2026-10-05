@@ -14,12 +14,14 @@ import { checkoutOf, checkoutPath } from "../checkouts";
 import { envOfDirectory, sessionHref } from "../derive";
 import { EnvBadge } from "../components/EnvBadge";
 import { useProjectView } from "./ProjectLayout";
+import { formatUsage, taskUsage } from "../usage";
 import { diffStats, formatCost, formatTokens, pickPrompts, removals, taskSessions, variantName } from "../tasks";
 
 export function ProjectTask() {
   const view = useProjectView();
   const { task = "" } = useParams();
-  const { report } = useDash();
+  const { report, snapshot } = useDash();
+  const total = taskUsage(snapshot, task);
   const sessions = taskSessions(view, task);
   // null: the changes couldn't be read.
   const [reviews, setReviews] = useState<Record<string, ReviewData | null>>({});
@@ -103,6 +105,7 @@ export function ProjectTask() {
         <h2 className="text-lg font-semibold">{sessions[0].task?.title || "Task"}</h2>
         <span className={muted}>
           {sessions.length} variant{sessions.length === 1 ? "" : "s"}
+          {total && <span className="tabular-nums"> · Total {formatUsage(total)}</span>}
         </span>
       </div>
       {notice && (
