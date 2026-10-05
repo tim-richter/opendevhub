@@ -68,8 +68,40 @@ function tokensOf(s: RawSession): number | undefined {
   return t ? (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0) : undefined;
 }
 
+export interface RolledUp {
+  /** USD; undefined when no session in the tree reports it. */
+  cost?: number;
+  /** Input, output and reasoning tokens; undefined when no session in the tree reports them. */
+  tokens?: number;
+  /** The latest `time.updated` in the tree. */
+  updatedAt: number;
+}
+
+const plus = (a: number | undefined, b: number | undefined) => (b === undefined ? a : (a ?? 0) + b);
+
+/** Each root session with its subagents' (child sessions') cost and tokens added in, by root id. */
+export function rollUp(sessions: RawSession[]): Map<string, RolledUp> {
+  const ids = new Set(sessions.map((s) => s.id));
+  // A child whose parent isn't listed is its own root.
+  const parents = new Map(sessions.map((s) => [s.id, s.parentID && ids.has(s.parentID) ? s.parentID : undefined]));
+  const out = new Map<string, RolledUp>();
+  for (const s of sessions) {
+    const root = rootOf(s.id, parents);
+    const acc = out.get(root) ?? { updatedAt: 0 };
+    const cost = plus(acc.cost, typeof s.cost === "number" ? s.cost : undefined);
+    const tokens = plus(acc.tokens, tokensOf(s));
+    out.set(root, {
+      ...(cost !== undefined ? { cost } : {}),
+      ...(tokens !== undefined ? { tokens } : {}),
+      updatedAt: Math.max(acc.updatedAt, s.time.updated),
+    });
+  }
+  return out;
+}
+
 export function deriveSessions(projectId: string, input: StatusInput): SessionSummary[] {
   const parents = new Map(input.sessions.map((s) => [s.id, s.parentID]));
+  const totals = rollUp(input.sessions);
   const flags = new Map<string, SessionStatus>();
   const pending = new Map<string, PendingItems>();
   const raise = (sessionId: string, status: SessionStatus) => {
@@ -103,7 +135,7 @@ export function deriveSessions(projectId: string, input: StatusInput): SessionSu
     .map(({ s, task }) => {
       const items = pending.get(s.id);
       const model = modelOf(s);
-      const tokens = tokensOf(s);
+      const { cost, tokens } = totals.get(s.id) ?? {};
       return {
         id: s.id,
         projectId,
@@ -117,7 +149,7 @@ export function deriveSessions(projectId: string, input: StatusInput): SessionSu
           : {}),
         ...(task ? { task } : {}),
         ...(model ? { model } : {}),
-        ...(typeof s.cost === "number" ? { cost: s.cost } : {}),
+        ...(cost !== undefined ? { cost } : {}),
         ...(tokens !== undefined ? { tokens } : {}),
       };
     })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveSessions } from "../../src/server/status";
+import { deriveSessions, rollUp } from "../../src/server/status";
 import { rawSession } from "../helpers/fake-opencode";
 
 const base = { active: new Set<string>(), permissions: [], forms: [] };
@@ -153,5 +153,49 @@ describe("deriveSessions", () => {
     expect(out[0].model).not.toHaveProperty("variant");
     expect(out[1]).not.toHaveProperty("task");
     expect(out[1].model).toEqual({ id: "n", providerID: "p", variant: "high" });
+  });
+});
+
+const tokens = (input: number, output = 0, reasoning = 0) => ({ input, output, reasoning, cache: { read: 7, write: 7 } });
+
+describe("rollUp", () => {
+  it("adds children and grandchildren into the root, without cache tokens", () => {
+    const out = rollUp([
+      rawSession("root", { cost: 1, tokens: tokens(10, 5, 1), time: { created: 1, updated: 100 } }),
+      rawSession("child", { parentID: "root", cost: 0.5, tokens: tokens(4), time: { created: 1, updated: 300 } }),
+      rawSession("grand", { parentID: "child", cost: 0.25, tokens: tokens(2), time: { created: 1, updated: 200 } }),
+    ]);
+    expect([...out.keys()]).toEqual(["root"]);
+    expect(out.get("root")).toEqual({ cost: 1.75, tokens: 22, updatedAt: 300 });
+  });
+
+  it("leaves cost and tokens undefined when nobody reports them, and counts a missing one as absent", () => {
+    const out = rollUp([rawSession("a"), rawSession("b", { cost: 2 })]);
+    expect(out.get("a")).toEqual({ updatedAt: 1 });
+    expect(out.get("b")).toEqual({ cost: 2, updatedAt: 1 });
+  });
+
+  it("treats a child whose parent is missing as its own root", () => {
+    const out = rollUp([rawSession("orphan", { parentID: "gone", cost: 1 })]);
+    expect(out.get("orphan")).toEqual({ cost: 1, updatedAt: 1 });
+  });
+
+  it("survives parent cycles", () => {
+    const out = rollUp([rawSession("x", { parentID: "y", cost: 1 }), rawSession("y", { parentID: "x", cost: 1 })]);
+    expect([...out.values()].reduce((n, r) => n + (r.cost ?? 0), 0)).toBe(2);
+  });
+});
+
+describe("deriveSessions cost", () => {
+  it("includes the subagents' cost and tokens in the root's summary", () => {
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [
+        rawSession("root", { cost: 1, tokens: tokens(10) }),
+        rawSession("child", { parentID: "root", cost: 0.5, tokens: tokens(5) }),
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ id: "root", cost: 1.5, tokens: 15 });
   });
 });

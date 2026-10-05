@@ -324,9 +324,9 @@ export interface SessionSummary {
   /** Set when the session belongs to a task. */
   task?: TaskMeta;
   model?: ModelRef;
-  /** USD so far. */
+  /** USD so far, its subagents included. */
   cost?: number;
-  /** Input, output and reasoning tokens so far. */
+  /** Input, output and reasoning tokens so far, its subagents included. */
   tokens?: number;
 }
 
