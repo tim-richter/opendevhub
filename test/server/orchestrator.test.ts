@@ -1862,6 +1862,24 @@ describe("git and ssh credentials", () => {
     expect(s.credentials.prepare.mock.calls[1][0]).toMatchObject({ id: s.envId });
   });
 
+  it("honours sshAgent: false in a task container's own configuration, whatever the main one said", async () => {
+    const s = setup();
+    s.worktrees.list.mockResolvedValue([feat]);
+    s.containers.readConfiguration.mockImplementation(async (t?: ExecTarget) => ({
+      forwardPorts: [],
+      portsAttributes: {},
+      configuration: t?.idLabels ? { customizations: { opendevhub: { sshAgent: false } } } : undefined,
+    }));
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    const { envId } = await s.orch.createEnv(project.id, feat.path);
+    await vi.waitFor(() => expect(s.store.runtime(envId).opencode).toBe("healthy"));
+    expect(s.agentTunnel).toHaveBeenCalledTimes(1);
+    expect(s.store.runtime(envId).sshAgent).toBe("off");
+    expect(s.credentials.prepare.mock.calls[1][2].sshAgent).toBe(false);
+    expect(s.runtime.ensureRunning.mock.calls[1][1].env).toBeUndefined();
+  });
+
   it("asks for relay recovery when the tunnel loses the relay", async () => {
     const { orch, relay, tunnels } = setup();
     await orch.rescan();

@@ -192,6 +192,8 @@ export class Orchestrator {
   private readonly tunnels = new Map<EnvId, AgentTunnelHandle>();
   /** Isolation settings per project, read when its main container forwards ports. */
   private readonly settings = new Map<ProjectId, EnvSettings>();
+  /** Each environment's sshAgent setting, from the configuration it was started with. */
+  private readonly sshAgents = new Map<EnvId, boolean>();
   private defaultEnvFiles?: EnvFilesPort;
   /**
    * Task containers come up one at a time: concurrent `devcontainer up` calls race on the CLI's shared
@@ -1181,7 +1183,7 @@ export class Orchestrator {
       password,
       workspaceFolder: this.envDirectory(env),
       onLine: (l) => this.envLog(env, l),
-      ...(this.settingsOf(env.project).sshAgent ? { env: { SSH_AUTH_SOCK: AGENT_SOCKET } } : {}),
+      ...(this.sshAgentOf(env) ? { env: { SSH_AUTH_SOCK: AGENT_SOCKET } } : {}),
     });
     store.updateRuntime(env.id, {
       password: result.password,
@@ -1254,6 +1256,11 @@ export class Orchestrator {
     return rec ? this.taskEnv(project, rec) : this.mainEnv(project);
   }
 
+  /** Whether to forward the ssh-agent into this environment: its own configuration first, then the project's settings. */
+  private sshAgentOf(env: Env): boolean {
+    return this.sshAgents.get(env.id) ?? this.settingsOf(env.project).sshAgent;
+  }
+
   private settingsOf(project: Project): EnvSettings {
     return this.settings.get(project.id) ?? resolveEnvSettings(undefined, this.deps.projectSettings?.(project));
   }
@@ -1300,9 +1307,12 @@ export class Orchestrator {
       this.envLog(env, `ports: could not read devcontainer configuration: ${message}`);
       store.updateRuntime(env.id, { ports: [] });
       if (!env.worktree) this.noteSettings(env.project, undefined);
+      this.sshAgents.delete(env.id);
       return;
     }
     if (!env.worktree) this.noteSettings(env.project, config.configuration);
+    const custom = (config.configuration?.customizations as Record<string, unknown> | undefined)?.opendevhub;
+    this.sshAgents.set(env.id, resolveEnvSettings(custom, this.deps.projectSettings?.(env.project)).sshAgent);
     const { ports, skipped } = parseForwardPorts(config.forwardPorts, config.portsAttributes);
     for (const s of skipped) this.envLog(env, `ports: skipped ${s.entry} (${s.reason})`);
     const opened = await forwarder.open(env.id, target, ports, (line) => this.envLog(env, line), {
@@ -1353,7 +1363,7 @@ export class Orchestrator {
   /** Git identity, known_hosts and the ssh-agent tunnel. Never throws: each step logs what happened. */
   private async prepareCredentials(env: Env, target: ForwardTarget): Promise<void> {
     const { store, credentials } = this.deps;
-    const sshAgent = this.settingsOf(env.project).sshAgent;
+    const sshAgent = this.sshAgentOf(env);
     if (credentials) {
       try {
         await credentials.prepare(env.target, env.project.path, { sshAgent, onLine: (l) => this.envLog(env, l) });
@@ -1404,6 +1414,7 @@ export class Orchestrator {
 
   private async closePorts(id: EnvId): Promise<void> {
     this.stopTunnel(id);
+    this.sshAgents.delete(id);
     await this.deps.forwarder.close(id);
     this.deps.store.updateRuntime(id, { ports: undefined, relay: undefined, sshAgent: undefined, sshAgentReason: undefined });
   }
