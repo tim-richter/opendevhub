@@ -92,7 +92,9 @@ export interface DashboardSnapshot {
   2. None running: `store.setResources({})` and wait for the next round, with no docker call.
   3. Otherwise one `docker stats --no-stream --format '{{json .}}' <ids…>` call (15 s timeout).
      Match lines to environments by id prefix (docker prints 12 characters; `containerId` is the
-     full id).
+     full id). One missing container fails the whole call (`No such container: <id>`, exit 1, no
+     output), which happens when one stops between container refreshes; then drop the ids docker
+     names and try once more.
   4. `store.setResources(byEnvId)`. A non-zero exit or a timeout sets `{}`.
 - Rounds don't overlap: the next one is scheduled when the previous ends (`setTimeout`, not
   `setInterval`), since `--no-stream` itself takes about a second.
@@ -116,9 +118,10 @@ Start the sampler after the orchestrator, next to the 10 s container refresh, wi
 - `formatCpu(cpu)`: `"12%"`.
 - `formatMemory(bytes)`: binary units as docker shows them, one decimal from GiB up: `"512 MiB"`,
   `"1.3 GiB"`.
-- `projectResources(snapshot, view)`: sum of `cpu`, `memory` and `memoryLimit` over the main
-  environment and the project's task environments that have stats, with `count`; undefined
-  when none do.
+- `projectResources(snapshot, view)`: sum of `cpu` and `memory` over the main environment and
+  the project's task environments that have stats, with `count`; undefined when none do. Limits
+  aren't summed: a container without a limit reports the host's memory, so a sum would count the
+  host once per container.
 - `checkoutResources(snapshot, view, checkout)`: the stats of the environment the checkout runs
   in. A worktree with its own environment gets that environment's; the main checkout gets the
   main environment's; a worktree sharing the main container gets undefined, because its load is
@@ -128,7 +131,7 @@ Start the sampler after the orchestrator, next to the 10 s container refresh, wi
 
 - **Overview `ProjectTile`** (`src/web/pages/Overview.tsx`): when running and there are stats,
   `CPU 12% · 1.3 GiB` at the end of the stats row, `tabular-nums`. The tooltip:
-  `3 containers · 1.3 GiB of 31.2 GiB`.
+  `3 containers`.
 - **`CheckoutCard`** (`src/web/pages/ProjectOverview.tsx`): the same text in its stats row, with
   the tooltip `1.3 GiB of 31.2 GiB`.
 
