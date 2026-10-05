@@ -1,16 +1,18 @@
 name: Release
 
-# On every push to main:
+# After CI (unit + e2e) passes on main:
 # - pending changesets → open/update the "Version Packages" PR
 # - no pending changesets (i.e. that PR was just merged) → publish to npm,
 #   tag and create a GitHub release
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 permissions:
@@ -20,6 +22,7 @@ permissions:
 
 jobs:
   release:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,9 +34,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm --filter opendevhub typecheck
-      - run: pnpm --filter opendevhub test
 
       # Trusted publishing (OIDC) needs no token. Until it is configured on
       # npmjs.com (it can only be set up once the package exists), set an

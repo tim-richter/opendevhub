@@ -172,8 +172,8 @@ pnpm build              # apps/opendevhub/dist (bin.js + web) and apps/docs/dist
 Releases use [Changesets](https://github.com/changesets/changesets):
 
 1. In a PR that changes `opendevhub`, run `pnpm changeset`, pick the bump (patch/minor/major) and describe the change for users. Commit the generated `.changeset/*.md`.
-2. On merge to `main`, the Release workflow opens (or updates) a **chore: version packages** PR that bumps the version and writes `apps/opendevhub/CHANGELOG.md`.
-3. Merging that PR runs the workflow again: it builds, publishes to npm with provenance, pushes the `opendevhub@x.y.z` tag and creates a GitHub release.
+2. Once CI (typecheck, unit tests and the e2e suite on both routes) passes on `main`, the Release workflow opens (or updates) a **chore: version packages** PR that bumps the version and writes `apps/opendevhub/CHANGELOG.md`.
+3. Merging that PR runs CI and then the Release workflow again: it builds, publishes to npm with provenance, pushes the `opendevhub@x.y.z` tag and creates a GitHub release.
 
 npm auth: configure [trusted publishing](https://docs.npmjs.com/trusted-publishers) for `opendevhub` (repo `tim-richter/opendevhub`, workflow `release.yml`). The package has to exist on npm before that can be set up, so the first release needs an `NPM_TOKEN` repository secret (a granular token with publish rights); remove the secret once trusted publishing is configured.
 
