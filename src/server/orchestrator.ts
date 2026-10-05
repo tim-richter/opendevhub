@@ -5,6 +5,7 @@ import type {
   EnvWorktree,
   FormAnswer,
   ForwardedPort,
+  Isolation,
   ModelsInfo,
   PendingItems,
   PermissionDecision,
@@ -22,7 +23,11 @@ import type {
   Worktree,
   WorktreeRoot,
 } from "../shared/types";
-import { CommandError, type ContainerInfo, type Containers, type ExecTarget, type PortConfig } from "./containers";
+import { CommandError, type ContainerInfo, type Containers, type ExecTarget, type PortConfig, envLabels } from "./containers";
+import { stateDir } from "./config";
+import { buildOverrideConfig, envIdFor, type EnvSettings, isolationBlocker, resolveEnvSettings } from "./env-config";
+import { EnvFiles } from "./env-files";
+import type { Images } from "./images";
 import type { EditorLauncher } from "./editors";
 import { deriveTitle, taskBranches, variantLabels, variantTitle } from "../shared/tasks";
 import { splitTitleBody } from "./forge";
@@ -39,7 +44,7 @@ import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
 import type { Publisher } from "./publish";
 import { type RelayRuntime, generateRelayToken } from "./relay/runtime";
-import type { StateStore } from "./state";
+import type { EnvRecord, StateStore } from "./state";
 import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeRoot } from "./worktrees";
 
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
@@ -89,8 +94,10 @@ const DECISIONS: readonly string[] = ["once", "always", "reject"] satisfies Perm
 
 export type ContainersPort = Pick<
   Containers,
-  "up" | "inspect" | "listManaged" | "stop" | "readConfiguration" | "workspaceFolder"
+  "up" | "inspect" | "listManaged" | "stop" | "readConfiguration" | "workspaceFolder" | "readConfig" | "remove" | "removeImage"
 >;
+export type ImagesPort = Pick<Images, "ensureBase">;
+export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
 export type GitPort = Pick<
   GitOps,
   "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch" | "localBranches"
@@ -134,6 +141,12 @@ export interface OrchestratorDeps {
   now?: () => number;
   /** Waits between retries; tests pass their own. */
   delay?: (ms: number) => Promise<void>;
+  /** Base images for task environments. */
+  images?: ImagesPort;
+  /** Where task environments' generated configs live; defaults to the state folder. */
+  envFiles?: EnvFilesPort;
+  /** The project's entry in config.json `projects`. */
+  projectSettings?: (project: Project) => unknown;
 }
 
 /**
@@ -149,6 +162,8 @@ interface Env {
   worktree?: EnvWorktree;
 }
 
+type TaskEnv = Env & { worktree: EnvWorktree };
+
 export class Orchestrator {
   private readonly busy = new Set<EnvId>();
   private readonly monitors = new Map<EnvId, MonitorHandle>();
@@ -159,6 +174,9 @@ export class Orchestrator {
   /** Session directories already looked up as possible worktrees, so an unknown one triggers one refresh. */
   private readonly seenDirectories = new Map<ProjectId, Set<string>>();
   private readonly routes = new Map<EnvId, Route>();
+  /** Isolation settings per project, read when its main container forwards ports. */
+  private readonly settings = new Map<ProjectId, EnvSettings>();
+  private defaultEnvFiles?: EnvFilesPort;
   private readonly modelCache = new Map<ProjectId, { at: number; value: Promise<ModelsInfo> }>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
@@ -198,7 +216,49 @@ export class Orchestrator {
   }
 
   stop(id: ProjectId): Promise<void> {
-    return this.exclusive(id, (p) => this.stopContainer(this.mainEnv(p)));
+    return this.exclusive(id, async (p) => {
+      const { store } = this.deps;
+      for (const rec of store.environments(p.id)) {
+        const env = this.taskEnv(p, rec);
+        const rt = store.runtime(env.id);
+        if (this.busy.has(env.id) || !rt.containerId || rt.containerState === "stopped") continue;
+        await this.exclusiveEnv(env, () => this.stopContainer(env));
+      }
+      await this.stopContainer(this.mainEnv(p));
+    });
+  }
+
+  /** Gives a worktree its own container and starts it in the background. */
+  async createEnv(projectId: ProjectId, worktreePath: string): Promise<{ envId: EnvId }> {
+    const project = this.requireProject(projectId);
+    const { store } = this.deps;
+    if (store.runtime(projectId).containerState !== "running") {
+      throw new UnavailableError("the container is not running — start the project first");
+    }
+    const unsupported = store.isolation(projectId)?.unsupported;
+    if (unsupported) throw new InvalidRequestError(unsupported);
+    const wt = store.runtime(projectId).worktrees?.find((w) => w.path === worktreePath);
+    if (!wt) throw new InvalidRequestError(`unknown worktree ${worktreePath}`);
+    if (!wt.hostPath) throw new InvalidRequestError(`${worktreePath} is not in the mounted worktrees folder, so it can't get its own container`);
+    const env = this.recordTaskEnv(project, { path: wt.path, hostPath: wt.hostPath, branch: wt.branch ?? path.posix.basename(wt.path) });
+    void this.exclusiveEnv(env, () => this.bringUpTask(env)).catch(() => {});
+    return { envId: env.id };
+  }
+
+  startEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
+    const env = this.requireTaskEnv(projectId, envId);
+    return this.exclusiveEnv(env, () => this.bringUpTask(env));
+  }
+
+  stopEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
+    const env = this.requireTaskEnv(projectId, envId);
+    return this.exclusiveEnv(env, () => this.stopContainer(env));
+  }
+
+  /** Deletes a worktree's container; the worktree and its files stay, its sessions go. */
+  removeEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
+    const env = this.requireTaskEnv(projectId, envId);
+    return this.exclusiveEnv(env, () => this.destroyEnv(env));
   }
 
   async adopt(): Promise<void> {
@@ -210,6 +270,10 @@ export class Orchestrator {
       return;
     }
     for (const info of managed) {
+      if (info.envId) {
+        await this.adoptTask(info);
+        continue;
+      }
       const project = info.projectId ? store.project(info.projectId) : undefined;
       if (!project) continue;
       const env = this.mainEnv(project);
@@ -309,14 +373,14 @@ export class Orchestrator {
     });
   }
 
-  /** Starts an opencode session in the workspace or one of its worktrees, optionally with a first prompt, and returns its id. */
   async startSession(id: ProjectId, directory: string, title?: string, prompt?: string): Promise<string> {
-    this.requireProject(id);
+    const project = this.requireProject(id);
     this.checkDirectory(id, directory);
-    const client = this.opencodeClient(id);
+    const env = this.envForDirectory(project, directory);
+    const client = this.opencodeClient(env.id);
     const session = await client.createSession(directory, { title });
     if (prompt?.trim()) await client.prompt(session.id, prompt, undefined, directory);
-    this.monitors.get(id)?.reconcile?.();
+    this.monitors.get(env.id)?.reconcile?.();
     return session.id;
   }
 
@@ -326,8 +390,9 @@ export class Orchestrator {
     if (!text.trim()) throw new InvalidRequestError("the prompt is empty");
     const session = this.deps.store.sessionsOf(id).find((s) => s.id === sessionId);
     if (!session) throw new NotFoundError(sessionId, "session");
-    await this.opencodeClient(id).prompt(sessionId, text, session.status === "running" ? "queue" : undefined, session.directory);
-    this.monitors.get(id)?.reconcile?.();
+    const envId = session.envId ?? id;
+    await this.opencodeClient(envId).prompt(sessionId, text, session.status === "running" ? "queue" : undefined, session.directory);
+    this.monitors.get(envId)?.reconcile?.();
   }
 
   /** Models, the default model and the agents a new session can use; cached for a minute per project. */
@@ -436,14 +501,16 @@ export class Orchestrator {
     const all = this.deps.store.sessionsOf(id);
     const variants = all.filter((s) => s.task?.task === task);
     if (!variants.some((s) => s.id === keep)) throw new NotFoundError(keep, "variant");
-    const client = this.opencodeClient(id);
+    const clientOf = (s: SessionSummary) => this.opencodeClient(s.envId ?? id);
+    const kept = variants.find((s) => s.id === keep)!;
     // A concurrent pick may have discarded this variant since the dashboard last saw it.
-    if (parseTaskMeta((await client.session(keep)).metadata)?.discarded) throw new InvalidRequestError("that variant was already discarded");
+    if (parseTaskMeta((await clientOf(kept).session(keep)).metadata)?.discarded) throw new InvalidRequestError("that variant was already discarded");
     const others = variants.filter((s) => s.id !== keep);
     const result: PickResult = { discarded: [], removed: [], errors: [] };
     const discard = async () => {
       for (const s of others) {
         try {
+          const client = clientOf(s);
           const raw = await client.session(s.id);
           await client.updateSession(s.id, { metadata: discardMetadata(raw.metadata) }, s.directory);
           result.discarded.push(s.id);
@@ -453,7 +520,7 @@ export class Orchestrator {
           result.errors.push(`${s.title}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      this.monitors.get(id)?.reconcile?.();
+      for (const envId of new Set([id, ...others.map((s) => s.envId ?? id)])) this.monitors.get(envId)?.reconcile?.();
     };
     if (!removeWorktrees) {
       await discard();
@@ -509,7 +576,7 @@ export class Orchestrator {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
     const request = opts.base?.trim() ? validateBranch(opts.base) : undefined;
-    const client = this.opencodeClient(id);
+    const client = this.opencodeClient(this.envForDirectory(project, directory).id);
     const { git } = this.deps;
     const ws = this.workspaceFolder(project);
     const branch = await git.currentBranch(project, directory);
@@ -551,7 +618,7 @@ export class Orchestrator {
     const session = this.latestSession(id, directory);
     if (!session) return "";
     try {
-      return (await this.opencodeClient(id).generate(session.id, COMMIT_PROMPT, directory)).trim();
+      return (await this.opencodeClient(session.envId ?? id).generate(session.id, COMMIT_PROMPT, directory)).trim();
     } catch {
       return "";
     }
@@ -620,7 +687,7 @@ export class Orchestrator {
     const session = this.latestSession(id, directory);
     if (!session) return { title: "", description: "" };
     try {
-      return splitTitleBody(await this.opencodeClient(id).generate(session.id, PUBLISH_PROMPT, directory));
+      return splitTitleBody(await this.opencodeClient(session.envId ?? id).generate(session.id, PUBLISH_PROMPT, directory));
     } catch {
       return { title: "", description: "" };
     }
@@ -700,10 +767,11 @@ export class Orchestrator {
       directory === this.workspaceFolder(project)
         ? project.path
         : rt.worktrees?.find((w) => w.path === directory)?.hostPath;
+    const envRt = this.deps.store.runtime(this.envForDirectory(project, directory).id);
     return this.deps.editors.open(editorId, {
       containerPath: directory,
       hostPath,
-      containerName: rt.containerState === "running" ? rt.containerName : undefined,
+      containerName: envRt.containerState === "running" ? envRt.containerName : undefined,
     });
   }
 
@@ -866,6 +934,111 @@ export class Orchestrator {
     }
   }
 
+  private async adoptTask(info: ContainerInfo): Promise<void> {
+    const { store } = this.deps;
+    const rec = store.environment(info.envId!);
+    const project = rec && store.project(rec.projectId);
+    if (!rec || !project) {
+      const owner = info.envProjectId ? store.project(info.envProjectId) : undefined;
+      if (owner) this.log(owner.id, `environment: ignoring container ${info.name ?? info.id}: opendevhub has no record of ${info.envId}`);
+      return;
+    }
+    const env = this.taskEnv(project, rec);
+    if (!info.running) {
+      store.updateRuntime(env.id, { containerId: info.id, containerState: "stopped", opencode: "absent" });
+      return;
+    }
+    store.updateRuntime(env.id, { containerId: info.id, containerName: info.name, containerIp: info.ip, containerState: "running" });
+    await this.adoptRunning(env, info);
+  }
+
+  /** Records a worktree's own environment (or returns the one it has). */
+  private recordTaskEnv(project: Project, worktree: EnvWorktree): TaskEnv {
+    const { store } = this.deps;
+    const existing = store.environments(project.id).find((e) => e.worktree.path === worktree.path);
+    if (existing) return this.taskEnv(project, existing);
+    const rec: EnvRecord = { id: envIdFor(project.id, worktree.path, worktree.branch), projectId: project.id, worktree };
+    store.putEnvironment(rec);
+    return this.taskEnv(project, rec);
+  }
+
+  /** The worktree's own environment, started unless it already runs. */
+  private async ensureTaskEnv(project: Project, worktree: EnvWorktree): Promise<TaskEnv> {
+    const env = this.recordTaskEnv(project, worktree);
+    const rt = this.deps.store.runtime(env.id);
+    if (rt.containerState === "running" && rt.opencode === "healthy") return env;
+    await this.exclusiveEnv(env, () => this.bringUpTask(env));
+    return env;
+  }
+
+  /**
+   * Starts a task container: the base image for the worktree's config, the override config, `up`, then
+   * route, relay, ports and opencode as for the main container. Records the error and rethrows it.
+   */
+  private async bringUpTask(env: TaskEnv): Promise<void> {
+    const { store, containers } = this.deps;
+    store.updateRuntime(env.id, { containerState: "starting", opencode: "absent", error: undefined });
+    try {
+      if (store.runtime(env.project.id).containerState !== "running") {
+        throw new UnavailableError("start the project first: task containers are prepared from its container");
+      }
+      const images = this.deps.images;
+      if (!images) throw new UnavailableError("task environments are not available in this build");
+      const image = await images.ensureBase(env.project, env.worktree, this.settingsOf(env.project).keyFiles, (l) => this.envLog(env, l));
+      const read = await containers.readConfig(env.worktree.hostPath);
+      const blocker = isolationBlocker(read.configuration, read.workspaceFolder);
+      if (blocker) throw new UnavailableError(blocker);
+      const { config, notes } = buildOverrideConfig({
+        config: read.configuration,
+        guessedFolder: read.workspaceFolder,
+        image: image.ref,
+        worktree: env.worktree,
+        gitDir: { host: path.join(env.project.path, ".git"), container: path.posix.join(this.workspaceFolder(env.project), ".git") },
+      });
+      for (const note of notes) this.envLog(env, `environment: ${note}`);
+      await this.envFiles().write(env.id, config);
+      const rec = store.environment(env.id);
+      if (rec) store.putEnvironment({ ...rec, image });
+      const up = await containers.up(env.target, { rebuild: false, onLine: (l) => this.envLog(env, l) });
+      store.updateRuntime(env.id, { containerId: up.containerId });
+      const info = await containers.inspect(up.containerId);
+      if (!info?.running) throw new CommandError("container is not running after devcontainer up");
+      if (!info.ip) throw new CommandError("container has no bridge network IP (host networking is not supported)");
+      store.updateRuntime(env.id, {
+        containerId: up.containerId,
+        containerName: info.name,
+        containerIp: info.ip,
+        remoteUser: up.remoteUser,
+        workspaceFolder: up.remoteWorkspaceFolder,
+        containerState: "running",
+        opencode: "starting",
+      });
+      const route = await this.openRoute(env, { id: up.containerId, ip: info.ip, network: info.network });
+      await this.forwardPorts(env, await this.startRelay(env, info.ip, route));
+      await this.launchOpencode(env, store.runtime(env.id).password);
+    } catch (err) {
+      this.fail(env, err);
+      throw err;
+    }
+  }
+
+  /** Deletes a task container, its generated config and the UID image the CLI built for it. Throws when the container stays. */
+  private async destroyEnv(env: TaskEnv): Promise<void> {
+    const { store, containers } = this.deps;
+    this.stopMonitor(env.id);
+    await this.closePorts(env.id);
+    await this.closeRoute(env.id);
+    const containerId = store.runtime(env.id).containerId;
+    if (containerId) {
+      const image = (await containers.inspect(containerId).catch(() => undefined))?.image;
+      await containers.remove(containerId);
+      if (image && /^vsc-.+-uid$/.test(image.split(":")[0])) await containers.removeImage(image);
+    }
+    await this.envFiles().remove(env.id).catch(() => {});
+    store.removeEnvironment(env.id);
+    this.envLog(env, "environment: removed");
+  }
+
   private async bringUp(project: Project, rebuild: boolean): Promise<void> {
     const { store, containers } = this.deps;
     const env = this.mainEnv(project);
@@ -929,12 +1102,18 @@ export class Orchestrator {
   }
 
   private envOf(id: EnvId): Env | undefined {
-    const project = this.deps.store.project(id);
-    return project ? this.mainEnv(project) : undefined;
+    const { store } = this.deps;
+    const project = store.project(id);
+    if (project) return this.mainEnv(project);
+    const rec = store.environment(id);
+    const owner = rec && store.project(rec.projectId);
+    return rec && owner ? this.taskEnv(owner, rec) : undefined;
   }
 
   private allEnvs(): Env[] {
-    return this.deps.store.projects().map((p) => this.mainEnv(p));
+    return this.deps.store
+      .projects()
+      .flatMap((p) => [this.mainEnv(p), ...this.deps.store.environments(p.id).map((r) => this.taskEnv(p, r))]);
   }
 
   /** The checkout an environment's opencode serves and its monitor watches. */
@@ -942,9 +1121,58 @@ export class Orchestrator {
     return env.worktree?.path ?? this.workspaceFolder(env.project);
   }
 
-  /** Worktrees the main environment's opencode serves. */
+  /** Worktrees the main environment's opencode serves: all but those with their own container. */
   private sharedWorktrees(projectId: ProjectId): string[] {
-    return (this.deps.store.runtime(projectId).worktrees ?? []).map((w) => w.path);
+    const own = new Set(this.deps.store.environments(projectId).map((e) => e.worktree.path));
+    return (this.deps.store.runtime(projectId).worktrees ?? []).map((w) => w.path).filter((p) => !own.has(p));
+  }
+
+  private envFiles(): EnvFilesPort {
+    return this.deps.envFiles ?? (this.defaultEnvFiles ??= new EnvFiles(path.join(stateDir(), "envs")));
+  }
+
+  private taskEnv(project: Project, rec: EnvRecord): TaskEnv {
+    return {
+      id: rec.id,
+      project,
+      worktree: rec.worktree,
+      target: { id: rec.id, path: rec.worktree.hostPath, idLabels: envLabels(rec.id, project.id), overrideConfig: this.envFiles().path(rec.id) },
+    };
+  }
+
+  private requireTaskEnv(projectId: ProjectId, envId: EnvId): TaskEnv {
+    const project = this.requireProject(projectId);
+    const rec = this.deps.store.environment(envId);
+    if (!rec || rec.projectId !== projectId) throw new NotFoundError(envId, "environment");
+    return this.taskEnv(project, rec);
+  }
+
+  /** The environment whose opencode serves a checkout: the worktree's own, or the project's. */
+  private envForDirectory(project: Project, directory: string): Env {
+    const rec = this.deps.store.environments(project.id).find((e) => e.worktree.path === directory);
+    return rec ? this.taskEnv(project, rec) : this.mainEnv(project);
+  }
+
+  private settingsOf(project: Project): EnvSettings {
+    return this.settings.get(project.id) ?? resolveEnvSettings(undefined, this.deps.projectSettings?.(project));
+  }
+
+  /** Reads the project's isolation settings from its devcontainer.json (as read for ports) and config.json. */
+  private noteSettings(project: Project, configuration: Record<string, unknown> | undefined): void {
+    const custom = (configuration?.customizations as Record<string, unknown> | undefined)?.opendevhub;
+    const settings = resolveEnvSettings(custom, this.deps.projectSettings?.(project));
+    this.settings.set(project.id, settings);
+    const unsupported = configuration ? isolationBlocker(configuration) : undefined;
+    this.deps.store.setIsolation(project.id, unsupported ? { default: "shared", unsupported } : { default: settings.isolation });
+  }
+
+  /** Whether a task's worktrees get their own containers, and why not when that was asked for. */
+  private isolationFor(project: Project, requested: Isolation | undefined): { isolated: boolean; notice?: string } {
+    const info = this.deps.store.isolation(project.id);
+    const wanted = requested ?? info?.default ?? this.settingsOf(project).isolation;
+    if (wanted !== "isolated") return { isolated: false };
+    if (info?.unsupported) return { isolated: false, notice: `runs in the shared container: ${info.unsupported}` };
+    return { isolated: true };
   }
 
   /** The project's log; a task environment's lines start with its branch. */
@@ -970,8 +1198,10 @@ export class Orchestrator {
       const message = err instanceof Error ? err.message : String(err);
       this.envLog(env, `ports: could not read devcontainer configuration: ${message}`);
       store.updateRuntime(env.id, { ports: [] });
+      if (!env.worktree) this.noteSettings(env.project, undefined);
       return;
     }
+    if (!env.worktree) this.noteSettings(env.project, config.configuration);
     const { ports, skipped } = parseForwardPorts(config.forwardPorts, config.portsAttributes);
     for (const s of skipped) this.envLog(env, `ports: skipped ${s.entry} (${s.reason})`);
     const opened = await forwarder.open(env.id, target, ports, (line) => this.envLog(env, line), {
@@ -1070,7 +1300,11 @@ export class Orchestrator {
     const rt = this.deps.store.runtime(id);
     const route = this.routes.get(id);
     if (rt.containerState !== "running" || rt.opencode !== "healthy" || !route || !rt.password) {
-      throw new UnavailableError("opencode is not running — start the project first");
+      throw new UnavailableError(
+        this.deps.store.environment(id)
+          ? "this worktree's container is not running — start it from the Worktrees tab"
+          : "opencode is not running — start the project first",
+      );
     }
     return this.deps.clientFor(this.deps.runtime.endpoint(route.opencode, rt.password));
   }
@@ -1087,16 +1321,16 @@ export class Orchestrator {
     send: (client: OpencodeClient, item: T, directory: string) => Promise<void>,
   ): Promise<void> {
     this.requireProject(id);
-    let found: { item: T; directory: string } | undefined;
+    let found: { item: T; directory: string; envId: EnvId } | undefined;
     for (const s of this.deps.store.sessionsOf(id)) {
       const item = s.pending && find(s.pending);
       if (item) {
-        found = { item, directory: s.directory };
+        found = { item, directory: s.directory, envId: s.envId ?? id };
         break;
       }
     }
     if (!found) throw new NotFoundError(itemId, what);
-    const client = this.opencodeClient(id);
+    const client = this.opencodeClient(found.envId);
     try {
       await send(client, found.item, found.directory);
     } catch (err) {
@@ -1105,6 +1339,7 @@ export class Orchestrator {
       throw err;
     } finally {
       this.monitors.get(id)?.reconcile?.();
+      if (found.envId !== id) this.monitors.get(found.envId)?.reconcile?.();
     }
   }
 

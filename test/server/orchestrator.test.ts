@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PersistedState } from "../../src/server/config";
 import { CommandError, type ContainerInfo, type ExecTarget } from "../../src/server/containers";
+import { envIdFor } from "../../src/server/env-config";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
 import type { NewSession, OpencodeEndpoint, RawAgent, RawModel, RawSession } from "../../src/server/opencode/client";
@@ -14,7 +15,7 @@ import type { RelayStatus } from "../../src/server/relay/runtime";
 import type { OpenTarget } from "../../src/server/editors";
 import { type AddWorktreeArgs, InvalidRequestError } from "../../src/server/worktrees";
 import type { ForwardedPort, Worktree, WorktreeRoot } from "../../src/shared/types";
-import type { PendingItems, Project, SessionSummary, UpdateResult } from "../../src/shared/types";
+import type { EnvWorktree, PendingItems, Project, SessionSummary, UpdateResult } from "../../src/shared/types";
 
 const project: Project = {
   id: "demo-abc123",
@@ -30,28 +31,49 @@ const running: ContainerInfo = {
   projectId: project.id,
   binds: { "/workspaces/demo": "/src/demo", "/workspaces/demo.worktrees": "/src/demo.worktrees" },
 };
+// Untyped so it is both a Worktree and an EnvWorktree (hostPath is required in the latter).
+const feat = { path: "/workspaces/demo.worktrees/feat", hostPath: "/src/demo.worktrees/feat", branch: "feat" };
+const featEnv = envIdFor(project.id, feat.path, "feat");
+const runningTask: ContainerInfo = {
+  id: "c2",
+  name: "demo_feat",
+  running: true,
+  ip: "172.17.0.10",
+  envId: featEnv,
+  envProjectId: project.id,
+  image: "vsc-feat-1234-uid",
+  binds: {},
+};
 
 function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPort, projects = [project]) {
   const store = new StateStore({ port: 7777, persisted, persist: () => {} });
   const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean; reconciled: number }> = [];
   const containers = {
+    workspaceFolder: vi.fn(async (_p?: ExecTarget): Promise<string | undefined> => "/workspaces/demo"),
+    listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
     up: vi.fn(
       async (
-        _p: ExecTarget,
+        t: ExecTarget,
         o: { rebuild: boolean; onLine: (l: string) => void; mounts?: string[] },
       ): Promise<{ containerId: string; remoteWorkspaceFolder: string; remoteUser?: string }> => {
         o.onLine("building image");
+        if (t.idLabels) return { containerId: "c2", remoteWorkspaceFolder: feat.path, remoteUser: "node" };
         return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo", remoteUser: "node" };
       },
     ),
-    workspaceFolder: vi.fn(async (_p?: ExecTarget): Promise<string | undefined> => "/workspaces/demo"),
-    inspect: vi.fn(async (_id?: string): Promise<ContainerInfo | undefined> => running),
-    listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
-    stop: vi.fn(async () => {}),
-    readConfiguration: vi.fn(async (_p?: ExecTarget) => ({
+    inspect: vi.fn(async (id?: string): Promise<ContainerInfo | undefined> => (id === "c2" ? runningTask : running)),
+    stop: vi.fn(async (_id: string) => {}),
+    readConfiguration: vi.fn(async (_t?: ExecTarget) => ({
       forwardPorts: [3000, "db:5432"] as unknown[],
       portsAttributes: { "3000": { label: "web" } } as Record<string, unknown>,
+      configuration: undefined as Record<string, unknown> | undefined,
     })),
+    readConfig: vi.fn(async (_folder: string) => ({
+      configuration: { image: "node:22", postCreateCommand: "npm ci", forwardPorts: [3000] } as Record<string, unknown>,
+      workspaceFolder: "/workspaces/feat" as string | undefined,
+    })),
+    remove: vi.fn(async (_id: string) => {}),
+    removeImage: vi.fn(async (_ref: string) => true),
   };
   const runtime = {
     endpoint: (a: HostPort, password: string) => ({ baseUrl: `http://${a.host}:${a.port}`, password }),
@@ -136,6 +158,19 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       output: [],
     })),
   };
+
+  const images = {
+    ensureBase: vi.fn(async (p: Project, _w: EnvWorktree, _keyFiles: string[], _onLine: (l: string) => void) => ({
+      key: "k".repeat(64),
+      ref: `opendevhub/${p.id}:kkkkkkkkkkkk-base`,
+    })),
+  };
+  const envFiles = {
+    path: (id: string) => `/state/envs/${id}/devcontainer.json`,
+    write: vi.fn(async (id: string, _config: Record<string, unknown>) => `/state/envs/${id}/devcontainer.json`),
+    remove: vi.fn(async (_id: string) => {}),
+  };
+  const projectSettings = vi.fn((_p: Project): unknown => undefined);
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn((_ep: OpencodeEndpoint) => client as unknown as OpencodeClient);
   const clock = { now: 1_000_000 };
@@ -155,6 +190,9 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     clientFor,
     now: () => clock.now,
     delay,
+    images,
+    envFiles,
+    projectSettings,
     roots: () => ["/src"],
     scan: async () => projects,
     monitorFactory: (opts) => {
@@ -171,7 +209,24 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay, images, envFiles, projectSettings };
+}
+
+/** A started project whose worktree list has `feat`. */
+async function withWorktree(persisted?: PersistedState) {
+  const s = setup(persisted);
+  s.worktrees.list.mockResolvedValue([feat]);
+  await s.orch.rescan();
+  await s.orch.start(project.id);
+  return s;
+}
+
+/** …and `feat` running in its own container. */
+async function withEnv() {
+  const s = await withWorktree();
+  const { envId } = await s.orch.createEnv(project.id, feat.path);
+  await vi.waitFor(() => expect(s.store.runtime(envId).opencode).toBe("healthy"));
+  return { ...s, envId };
 }
 
 function waiting(pending: PendingItems): SessionSummary {
@@ -1473,5 +1528,149 @@ describe("Orchestrator", () => {
         expect(res.errors).toEqual(["fix-1: worktree removed, branch kept: not fully merged"]);
       });
     });
+  });
+});
+
+describe("task environments", () => {
+  it("gives a worktree its own container from the base image", async () => {
+    const { orch, store, containers, images, envFiles, runtime, forwarder, monitors, envId } = await withEnv();
+    expect(envId).toBe(featEnv);
+    expect(store.environment(envId)).toMatchObject({ projectId: project.id, worktree: feat, image: { ref: `opendevhub/${project.id}:kkkkkkkkkkkk-base` } });
+    expect(images.ensureBase.mock.calls[0].slice(0, 3)).toEqual([project, feat, []]);
+    expect(containers.readConfig).toHaveBeenCalledWith(feat.hostPath);
+    const written = envFiles.write.mock.calls[0][1];
+    expect(written).toMatchObject({
+      image: `opendevhub/${project.id}:kkkkkkkkkkkk-base`,
+      workspaceFolder: feat.path,
+      mounts: ["type=bind,source=/src/demo/.git,target=/workspaces/demo/.git"],
+    });
+    expect(written).not.toHaveProperty("postCreateCommand");
+    expect(containers.up.mock.calls.at(-1)![0]).toEqual({
+      id: envId,
+      path: feat.hostPath,
+      idLabels: [`opendevhub.env=${envId}`, `opendevhub.env-project=${project.id}`],
+      overrideConfig: `/state/envs/${envId}/devcontainer.json`,
+    });
+    expect(runtime.ensureRunning.mock.calls.at(-1)![1]).toMatchObject({ address: { host: "172.17.0.10", port: 4096 }, workspaceFolder: feat.path });
+    expect(forwarder.open.mock.calls.at(-1)![0]).toBe(envId);
+    expect(monitors.at(-1)!.opts).toMatchObject({ envId, projectId: project.id, directory: feat.path });
+    expect(monitors.at(-1)!.opts.extraDirectories).toBeUndefined();
+    expect(monitors[0].opts.extraDirectories!()).toEqual([]);
+    expect(orch.opencodeAddress(envId)).toEqual({ host: "172.17.0.10", port: 4096 });
+    expect(store.runtime(project.id).containerId).toBe("c1");
+  });
+
+  it("records why a worktree's config can't get its own container", async () => {
+    const s = await withWorktree();
+    s.containers.readConfig.mockResolvedValueOnce({ configuration: { dockerComposeFile: "c.yml" }, workspaceFolder: "/workspaces/feat" });
+    const { envId } = await s.orch.createEnv(project.id, feat.path);
+    await vi.waitFor(() => expect(s.store.runtime(envId).containerState).toBe("error"));
+    expect(s.store.runtime(envId).error).toMatch(/Docker Compose/);
+    expect(s.containers.up).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses its own container when the project's config can't run one per worktree", async () => {
+    const s = setup();
+    s.worktrees.list.mockResolvedValue([feat]);
+    s.containers.readConfiguration.mockResolvedValue({ forwardPorts: [], portsAttributes: {}, configuration: { appPort: 3000 } });
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    expect(s.store.isolation(project.id)).toEqual({ default: "shared", unsupported: expect.stringMatching(/appPort/) });
+    await expect(s.orch.createEnv(project.id, feat.path)).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+
+  it("reads the isolation default from devcontainer.json, with config.json taking precedence", async () => {
+    const s = setup();
+    s.containers.readConfiguration.mockResolvedValue({
+      forwardPorts: [],
+      portsAttributes: {},
+      configuration: { customizations: { opendevhub: { isolation: "isolated" } } },
+    });
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    expect(s.store.isolation(project.id)).toEqual({ default: "isolated" });
+    s.projectSettings.mockReturnValue({ isolation: "shared" });
+    await s.orch.rebuild(project.id);
+    expect(s.store.isolation(project.id)).toEqual({ default: "shared" });
+  });
+
+  it("only gives known worktrees in the mounted folder their own container, while the project runs", async () => {
+    const s = await withWorktree();
+    await expect(s.orch.createEnv(project.id, "/elsewhere")).rejects.toBeInstanceOf(InvalidRequestError);
+    s.store.updateRuntime(project.id, { worktrees: [{ path: "/tmp/wt", branch: "x" }] });
+    await expect(s.orch.createEnv(project.id, "/tmp/wt")).rejects.toThrow(/mounted worktrees folder/);
+    await s.orch.stop(project.id);
+    await expect(s.orch.createEnv(project.id, feat.path)).rejects.toBeInstanceOf(UnavailableError);
+  });
+
+  it("stops a task container on its own, and together with the project", async () => {
+    const { orch, store, containers, envId } = await withEnv();
+    store.setSessions(envId, [{ id: "t", projectId: project.id, envId, title: "t", directory: feat.path, updatedAt: 1, status: "idle" }]);
+    await orch.stopEnv(project.id, envId);
+    expect(containers.stop).toHaveBeenCalledWith("c2");
+    expect(store.runtime(envId).containerState).toBe("stopped");
+    expect(store.sessionsOf(project.id).map((s) => s.id)).not.toContain("t");
+    expect(store.runtime(project.id).containerState).toBe("running");
+    await orch.startEnv(project.id, envId);
+    expect(store.runtime(envId).opencode).toBe("healthy");
+    containers.stop.mockClear();
+    await orch.stop(project.id);
+    expect(containers.stop.mock.calls.map((c) => c[0])).toEqual(["c2", "c1"]);
+    expect(store.runtime(envId).containerState).toBe("stopped");
+  });
+
+  it("removes a task container, the image the CLI left for it, its config and its record", async () => {
+    const { orch, store, containers, envFiles, envId } = await withEnv();
+    containers.remove.mockRejectedValueOnce(new CommandError("docker rm failed: busy"));
+    await expect(orch.removeEnv(project.id, envId)).rejects.toThrow(/busy/);
+    expect(store.environment(envId)).toBeDefined();
+    await orch.removeEnv(project.id, envId);
+    expect(containers.remove).toHaveBeenLastCalledWith("c2");
+    expect(containers.removeImage).toHaveBeenCalledWith("vsc-feat-1234-uid");
+    expect(envFiles.remove).toHaveBeenCalledWith(envId);
+    expect(store.environment(envId)).toBeUndefined();
+    expect(orch.opencodeAddress(envId)).toBeUndefined();
+  });
+
+  it("re-adopts running task containers after a restart and ignores ones it has no record of", async () => {
+    const s = setup({
+      projects: { [project.id]: { password: "pw", workspaceFolder: "/workspaces/demo" } },
+      environments: { [featEnv]: { projectId: project.id, worktree: feat, containerId: "c2", password: "pw" } },
+    });
+    const stray: ContainerInfo = { ...runningTask, id: "c3", name: "stray", envId: "demo-abc123-old-ffff" };
+    s.containers.listManaged.mockResolvedValueOnce([running, runningTask, stray]);
+    await s.orch.rescan();
+    await s.orch.adopt();
+    expect(s.store.runtime(project.id)).toMatchObject({ containerId: "c1", opencode: "healthy" });
+    expect(s.store.runtime(featEnv)).toMatchObject({ containerId: "c2", containerState: "running", opencode: "healthy" });
+    expect(s.monitors.map((m) => m.opts.envId)).toEqual([project.id, featEnv]);
+    expect(s.orch.logLines(project.id).some((l) => l.includes("ignoring container stray"))).toBe(true);
+    expect(s.store.environments(project.id)).toHaveLength(1);
+    expect(s.store.runtime("demo-abc123-old-ffff").containerId).toBeUndefined();
+  });
+
+  it("notices a task container stopped outside opendevhub", async () => {
+    const { orch, store, containers, envId } = await withEnv();
+    containers.inspect.mockImplementation(async (id?: string) => (id === "c2" ? { ...runningTask, running: false } : running));
+    await orch.refreshContainers();
+    expect(store.runtime(envId).containerState).toBe("stopped");
+    expect(store.runtime(project.id).containerState).toBe("running");
+  });
+
+  it("sends a worktree's sessions and replies to its own opencode", async () => {
+    const { orch, store, clientFor, client, envId } = await withEnv();
+    clientFor.mockClear();
+    await orch.startSession(project.id, feat.path);
+    expect(clientFor.mock.calls[0][0].baseUrl).toBe("http://172.17.0.10:4096");
+    clientFor.mockClear();
+    await orch.startSession(project.id, "/workspaces/demo");
+    expect(clientFor.mock.calls[0][0].baseUrl).toBe("http://172.17.0.9:4096");
+    store.setSessions(envId, [{ ...waiting({ permissions: [permission], forms: [] }), envId, directory: feat.path }]);
+    clientFor.mockClear();
+    await orch.replyPermission(project.id, "per_1", { decision: "once" });
+    expect(clientFor.mock.calls[0][0].baseUrl).toBe("http://172.17.0.10:4096");
+    expect(client.replyPermission).toHaveBeenCalled();
+    await orch.stopEnv(project.id, envId);
+    await expect(orch.startSession(project.id, feat.path)).rejects.toThrow(/container is not running/);
   });
 });
