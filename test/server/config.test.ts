@@ -11,6 +11,7 @@ import {
   mergeRoots,
   saveConfig,
   saveState,
+  stateDir,
 } from "../../src/server/config";
 
 let dir: string;
@@ -111,5 +112,31 @@ describe("config forges", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("config projects", () => {
+  it("keeps per-project settings through the CLI's load and save", () => {
+    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: [], port: 1, projects: { "/src/demo": { isolation: "isolated" } } }));
+    saveConfig(dir, loadConfig(dir));
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8")).projects).toEqual({ "/src/demo": { isolation: "isolated" } });
+  });
+});
+
+describe("stateDir", () => {
+  it("uses XDG_STATE_HOME when absolute, else ~/.local/state", () => {
+    expect(stateDir({ XDG_STATE_HOME: "/xdg" })).toBe("/xdg/opendevhub");
+    expect(stateDir({ XDG_STATE_HOME: "rel" })).toBe(path.join(os.homedir(), ".local", "state", "opendevhub"));
+  });
+});
+
+describe("persisted environments", () => {
+  it("round-trips task environments in state.json", () => {
+    const state = {
+      projects: {},
+      environments: { "demo-feat-0a1b": { projectId: "demo", worktree: { path: "/w/demo.worktrees/feat", hostPath: "/src/demo.worktrees/feat", branch: "feat" }, containerId: "c2" } },
+    };
+    saveState(dir, state);
+    expect(loadState(dir)).toEqual(state);
   });
 });

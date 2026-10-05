@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ProjectId, ForgeKind } from "../shared/types";
+import type { EnvId, EnvWorktree, ForgeKind, ProjectId } from "../shared/types";
 import type { ForgeEntry } from "./forge";
 
 export interface Config {
@@ -9,6 +9,8 @@ export interface Config {
   port: number;
   /** Forge per git host: configured by hand or remembered after a probe. */
   forges?: Record<string, ForgeEntry>;
+  /** Per-project settings keyed by the project's path (`{ isolation, keyFiles }`), validated where used. */
+  projects?: Record<string, unknown>;
 }
 
 export interface PersistedRuntime {
@@ -19,8 +21,16 @@ export interface PersistedRuntime {
   remoteUser?: string;
 }
 
+/** A task environment as state.json keeps it. */
+export interface PersistedEnv extends PersistedRuntime {
+  projectId: ProjectId;
+  worktree: EnvWorktree;
+  image?: { key: string; ref: string };
+}
+
 export interface PersistedState {
   projects: Record<ProjectId, PersistedRuntime>;
+  environments?: Record<EnvId, PersistedEnv>;
 }
 
 export const DEFAULT_PORT = 7777;
@@ -28,6 +38,13 @@ export const DEFAULT_PORT = 7777;
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   const xdg = env.XDG_CONFIG_HOME;
   const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".config");
+  return path.join(base, "opendevhub");
+}
+
+/** Where opendevhub keeps generated files: `$XDG_STATE_HOME/opendevhub`, default `~/.local/state/opendevhub`. */
+export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
+  const xdg = env.XDG_STATE_HOME;
+  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".local", "state");
   return path.join(base, "opendevhub");
 }
 
@@ -75,6 +92,7 @@ export function loadConfig(dir: string): Config {
     roots: Array.isArray(raw.roots) ? raw.roots.filter((r) => typeof r === "string") : [],
     port: typeof raw.port === "number" ? raw.port : DEFAULT_PORT,
     ...(Object.keys(forges).length > 0 ? { forges } : {}),
+    ...(raw.projects && typeof raw.projects === "object" && !Array.isArray(raw.projects) ? { projects: raw.projects } : {}),
   };
 }
 
@@ -103,7 +121,8 @@ export class FileForgeStore implements ForgeStore {
 
 export function loadState(dir: string): PersistedState {
   const raw = readJson<Partial<PersistedState>>(path.join(dir, "state.json"), {});
-  return { projects: raw.projects && typeof raw.projects === "object" ? raw.projects : {} };
+  const environments = raw.environments && typeof raw.environments === "object" ? raw.environments : undefined;
+  return { projects: raw.projects && typeof raw.projects === "object" ? raw.projects : {}, ...(environments ? { environments } : {}) };
 }
 
 export function saveState(dir: string, state: PersistedState): void {
