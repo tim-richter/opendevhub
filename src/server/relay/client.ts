@@ -95,3 +95,22 @@ export async function openGatewayConnection(
   if (rest.length) socket.unshift(rest);
   return socket;
 }
+
+/** Opens the relay's agent control connection; resolves after OK with the socket paused and any bytes that came along. */
+export async function openAgentControl(target: RelayTarget, timeoutMs = 5000): Promise<{ socket: net.Socket; rest: Buffer }> {
+  const { socket, reply, rest } = await handshake(target, `${target.token} agent-listen\n`, timeoutMs);
+  if (reply === "OK") return { socket, rest };
+  socket.destroy();
+  throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
+}
+
+/** Takes the container client the relay announced as `CONN <id>`; the socket is returned paused, ready to pipe. */
+export async function acceptAgentConnection(target: RelayTarget, id: number, timeoutMs = 5000): Promise<net.Socket> {
+  const { socket, reply, rest } = await handshake(target, `${target.token} agent-accept ${id}\n`, timeoutMs);
+  if (reply !== "OK") {
+    socket.destroy();
+    throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
+  }
+  if (rest.length) socket.unshift(rest);
+  return socket;
+}
