@@ -4,13 +4,12 @@ import {
   allSessions,
   attentionCounts,
   compareSessions,
-  diffForNotifications,
   envOfDirectory,
   envTone,
   openUrlOf,
   sessionHref,
   sshAgentBadge,
-  pendingSummary,
+  staleNotificationTags,
   matches,
   projectCounts,
   projectTone,
@@ -44,29 +43,6 @@ function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
     ],
   };
 }
-
-describe("diffForNotifications", () => {
-  it("never notifies on the first snapshot, even if sessions need attention", () => {
-    expect(diffForNotifications(undefined, snap({ a: "needs-permission", b: "needs-answer" }))).toEqual([]);
-  });
-
-  it("notifies on entering needs-permission / needs-answer and on running -> idle", () => {
-    const notices = diffForNotifications(
-      snap({ a: "running", b: "running", c: "running", d: "idle" }),
-      snap({ a: "needs-permission", b: "needs-answer", c: "idle", d: "idle" }),
-    );
-    expect(notices.map((n) => [n.sessionId, n.title])).toEqual([
-      ["a", "demo: permission needed"],
-      ["b", "demo: question waiting"],
-      ["c", "demo: finished"],
-    ]);
-    expect(notices[0].body).toBe("T a");
-  });
-
-  it("does not repeat while the state is unchanged, and ignores new idle sessions", () => {
-    expect(diffForNotifications(snap({ a: "needs-permission" }), snap({ a: "needs-permission", z: "idle" }))).toEqual([]);
-  });
-});
 
 describe("attentionCounts", () => {
   it("counts sessions needing attention and running", () => {
@@ -159,29 +135,23 @@ describe("worktree helpers", () => {
   });
 });
 
-describe("pendingSummary and notifications", () => {
-  it("says what is being asked", () => {
-    const base = snap({ a: "needs-permission" }).projects[0].sessions[0];
-    expect(pendingSummary(base)).toBeUndefined();
-    expect(
-      pendingSummary({
-        ...base,
-        pending: { permissions: [{ id: "p", sessionId: "a", action: "bash", resources: ["npm test", "npm run lint"] }], forms: [] },
-      }),
-    ).toBe("wants bash: npm test (+1 more)");
-    expect(
-      pendingSummary({ ...base, pending: { permissions: [], forms: [{ id: "f", sessionId: "a", title: "Which DB?", fields: [] }] } }),
-    ).toBe("asks: Which DB?");
-  });
-
-  it("puts the ask in the notification title when it is known", () => {
+describe("staleNotificationTags", () => {
+  const pending = () => {
     const next = snap({ a: "needs-permission" });
     next.projects[0].sessions[0].pending = {
-      permissions: [{ id: "p", sessionId: "a", action: "bash", resources: ["npm test"] }],
-      forms: [],
+      permissions: [{ id: "r1", sessionId: "a", action: "bash", resources: [] }],
+      forms: [{ id: "f1", sessionId: "a", title: "Which DB?", fields: [] }],
     };
-    const [notice] = diffForNotifications(snap({ a: "running" }), next);
-    expect(notice).toMatchObject({ title: "demo · wants bash: npm test", body: "T a" });
+    return next;
+  };
+
+  it("closes answered permissions and questions, keeps pending ones", () => {
+    expect(staleNotificationTags(pending(), ["perm:r1", "perm:r0", "form:f1", "form:f0"])).toEqual(["perm:r0", "form:f0"]);
+    expect(staleNotificationTags(snap({ a: "idle" }), ["perm:r1", "form:f1"])).toEqual(["perm:r1", "form:f1"]);
+  });
+
+  it("never closes finished, test or failure notifications", () => {
+    expect(staleNotificationTags(snap({}), ["done:a", "test", "perm:r1:failed", ""])).toEqual([]);
   });
 });
 

@@ -1,55 +1,16 @@
 import type { DashboardSnapshot, EnvironmentView, ProjectView, PublicRuntime, SessionStatus, SessionSummary } from "../shared/types";
 import { sessionUrl } from "../shared/urls";
 
-export interface Notice {
-  key: string;
-  title: string;
-  body: string;
-  projectId: string;
-  sessionId: string;
-}
-
-const MESSAGES: Partial<Record<SessionStatus, string>> = {
-  "needs-permission": "permission needed",
-  "needs-answer": "question waiting",
-};
-
-/** What a session is waiting on, as plain text: "wants bash: npm test" or "asks: Which DB?". */
-export function pendingSummary(session: SessionSummary): string | undefined {
-  const p = session.pending?.permissions[0];
-  if (p) {
-    const first = p.resources[0] ? `: ${p.resources[0]}` : "";
-    const more = p.resources.length > 1 ? ` (+${p.resources.length - 1} more)` : "";
-    return `wants ${p.action}${first}${more}`;
-  }
-  const f = session.pending?.forms[0];
-  return f ? `asks: ${f.title}` : undefined;
-}
-
-export function diffForNotifications(prev: DashboardSnapshot | undefined, next: DashboardSnapshot): Notice[] {
-  if (!prev) return [];
-  const before = new Map<string, SessionSummary>();
-  for (const view of prev.projects) for (const s of view.sessions) before.set(s.id, s);
-
-  const notices: Notice[] = [];
-  for (const view of next.projects) {
+/** Tags of shown notifications whose permission or question is no longer pending; other tags never go stale. */
+export function staleNotificationTags(snapshot: DashboardSnapshot, tags: string[]): string[] {
+  const pending = new Set<string>();
+  for (const view of snapshot.projects) {
     for (const s of view.sessions) {
-      const old = before.get(s.id)?.status;
-      let what: string | undefined;
-      if (MESSAGES[s.status] && old !== s.status) what = MESSAGES[s.status];
-      else if (s.status === "idle" && old === "running") what = "finished";
-      if (!what) continue;
-      const ask = MESSAGES[s.status] ? pendingSummary(s) : undefined;
-      notices.push({
-        key: `${s.id}:${s.status}`,
-        title: ask ? `${view.project.name} · ${ask}` : `${view.project.name}: ${what}`,
-        body: s.title,
-        projectId: view.project.id,
-        sessionId: s.id,
-      });
+      for (const p of s.pending?.permissions ?? []) pending.add(`perm:${p.id}`);
+      for (const f of s.pending?.forms ?? []) pending.add(`form:${f.id}`);
     }
   }
-  return notices;
+  return tags.filter((tag) => /^(perm|form):[^:]+$/.test(tag) && !pending.has(tag));
 }
 
 export function attentionCounts(snapshot: DashboardSnapshot): { attention: number; running: number } {

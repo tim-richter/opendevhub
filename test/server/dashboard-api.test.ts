@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createDashboardApp, type DashboardOrchestrator } from "../../src/server/dashboard-api";
+import { createDashboardApp, type DashboardOrchestrator, type PushPort } from "../../src/server/dashboard-api";
+import { InvalidSubscriptionError, type PushMessage } from "../../src/server/push";
 import { CommandError } from "../../src/server/containers";
 import { EditorUnavailableError } from "../../src/server/editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
@@ -75,12 +76,40 @@ function setup(webDir?: string) {
     list: vi.fn(async () => ({ roots: ["/src"], candidates: [added] })),
     add: vi.fn(async (_path: string, _stack: unknown) => added),
   } satisfies OnboardingPort;
+  const push = {
+    publicKey: vi.fn(() => "BPubKey"),
+    subscribe: vi.fn((raw: unknown) => {
+      if (!(raw as { endpoint?: unknown }).endpoint) throw new InvalidSubscriptionError("subscription needs an endpoint");
+    }),
+    unsubscribe: vi.fn((_endpoint: string) => {}),
+    send: vi.fn(async (_m: PushMessage) => 2),
+  } satisfies PushPort;
   // Rescanning after a write discovers the new project.
   orchestrator.rescan.mockImplementation(async () => store.setProjects([project, newProject]));
-  return { store, orchestrator, onboarding, app: createDashboardApp({ store, orchestrator, onboarding, webDir }) };
+  return { store, orchestrator, onboarding, push, app: createDashboardApp({ store, orchestrator, onboarding, push, webDir }) };
 }
 
 describe("dashboard API", () => {
+  it("serves the push key and adds, removes and tests subscriptions", async () => {
+    const { app, push } = setup();
+    const post = (url: string, body?: unknown) =>
+      app.request(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    expect(await (await app.request("/api/push/key")).json()).toEqual({ publicKey: "BPubKey" });
+
+    const sub = { endpoint: "https://push.example.com/1", keys: { p256dh: "k", auth: "a" } };
+    expect((await post("/api/push/subscribe", sub)).status).toBe(200);
+    expect(push.subscribe).toHaveBeenCalledWith(sub);
+    const bad = await post("/api/push/subscribe", { keys: {} });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "subscription needs an endpoint" });
+
+    expect((await post("/api/push/unsubscribe", { endpoint: sub.endpoint })).status).toBe(200);
+    expect(push.unsubscribe).toHaveBeenCalledWith(sub.endpoint);
+
+    expect(await (await post("/api/push/test")).json()).toEqual({ sent: 2 });
+    expect(push.send).toHaveBeenCalledWith({ tag: "test", title: "opendevhub", body: "Notifications work.", url: "/" });
+  });
+
   it("GET /api/projects returns the snapshot without passwords", async () => {
     const { app } = setup();
     const res = await app.request("/api/projects");

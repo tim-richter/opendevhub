@@ -1,27 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { DashboardSnapshot } from "../shared/types";
 import { fetchLogs, subscribe } from "./api";
-import { type Notice, diffForNotifications } from "./derive";
+import { staleNotificationTags } from "./derive";
+import { closeNotifications } from "./push";
 
 const MAX_LOG_LINES = 500;
 const LOG_FLUSH_MS = 150;
-
-function showNotification(notice: Notice, onClick: () => void): void {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  const n = new Notification(notice.title, { body: notice.body, tag: notice.key });
-  n.onclick = () => {
-    window.focus();
-    onClick();
-    n.close();
-  };
-}
 
 export function useDashboard() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot>();
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<Record<string, string[]>>({});
-  const [highlight, setHighlight] = useState<Notice>();
-  const previous = useRef<DashboardSnapshot | undefined>(undefined);
 
   useEffect(() => {
     // A build can stream hundreds of lines a second; each state update re-renders every dashboard
@@ -40,10 +29,8 @@ export function useDashboard() {
     };
     const unsubscribe = subscribe({
       onSnapshot: (next) => {
-        for (const notice of diffForNotifications(previous.current, next)) {
-          showNotification(notice, () => setHighlight(notice));
-        }
-        previous.current = next;
+        // Notifications come from the server by Web Push; drop the ones answered meanwhile.
+        void closeNotifications((tags) => staleNotificationTags(next, tags)).catch(() => {});
         setSnapshot(next);
       },
       onLog: ({ projectId, line }) => {
@@ -63,5 +50,5 @@ export function useDashboard() {
     setLogs((all) => ({ ...all, [projectId]: lines }));
   }, []);
 
-  return { snapshot, connected, logs, loadLogs, highlight, setHighlight };
+  return { snapshot, connected, logs, loadLogs };
 }

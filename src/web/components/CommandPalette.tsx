@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/command";
 import { useDash } from "../DashboardContext";
 import { allSessions, matches, projectTone, sessionHref } from "../derive";
+import { sendTestNotification } from "../push";
 import { projectIdFromPath } from "../tasks";
 import { SESSION_LABEL, StatusDot } from "./Status";
 
@@ -27,7 +28,7 @@ interface Item {
 const LIMIT = 40;
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { snapshot, rescan, newTask, openAddProject } = useDash();
+  const { snapshot, rescan, newTask, openAddProject, permission, report } = useDash();
   const navigate = useNavigate();
   const location = useLocation();
   const [query, setQuery] = useState("");
@@ -46,6 +47,18 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { key: "act-rescan", group: "Actions", label: "Rescan projects", run: rescan },
       { key: "act-add-project", group: "Actions", label: "Add project…", run: openAddProject },
     ];
+    if (permission === "granted") {
+      list.push({
+        key: "act-test-notification",
+        group: "Actions",
+        label: "Send test notification",
+        // The notification itself is the success message.
+        run: () =>
+          void sendTestNotification().then((sent) => {
+            if (sent === 0) report(new Error("No browser is subscribed to notifications"));
+          }, report),
+      });
+    }
     for (const view of snapshot.projects) {
       const id = encodeURIComponent(view.project.id);
       list.push({
@@ -77,7 +90,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       });
     }
     return list;
-  }, [snapshot, navigate, rescan, newTask, openAddProject, location.pathname]);
+  }, [snapshot, navigate, rescan, newTask, openAddProject, permission, report, location.pathname]);
 
   // Filtering stays ours (substring match, capped) rather than cmdk's fuzzy ranking.
   const groups = useMemo(() => {

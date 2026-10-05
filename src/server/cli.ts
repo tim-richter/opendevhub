@@ -23,6 +23,8 @@ import { PortForwarder } from "./port-forwarder";
 import { Publisher } from "./publish";
 import { RelayRuntime } from "./relay/runtime";
 import { preflight } from "./preflight";
+import { startNotifier } from "./notifier";
+import { Push } from "./push";
 import type { ResolveTarget } from "./proxy";
 import { startServer } from "./server";
 import { StateStore } from "./state";
@@ -164,9 +166,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   await orchestrator.rescan();
   if (store.preflight().errors.length === 0) await orchestrator.adopt();
 
+  const push = new Push({ file: path.join(stateDir(), "push.json") });
+  const stopNotifier = startNotifier(store, push);
   const app = createDashboardApp({
     store,
     orchestrator,
+    push,
     onboarding: new Onboarding({ roots: () => config.roots }),
     webDir: findWebDir(),
   });
@@ -183,6 +188,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(refresh);
+    stopNotifier();
     await orchestrator.shutdown();
     await server.close();
     process.exit(0);

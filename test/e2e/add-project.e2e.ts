@@ -18,6 +18,7 @@ import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
 import { Publisher } from "../../src/server/publish";
+import { Push } from "../../src/server/push";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { StateStore } from "../../src/server/state";
 import { Worktrees } from "../../src/server/worktrees";
@@ -51,7 +52,12 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: add a repo without a devconta
       scan: (r) => scanRoots(r),
     });
     orch.onLog((_id, line) => console.log(`[e2e add] ${line}`));
-    const app = createDashboardApp({ store, orchestrator: orch, onboarding: new Onboarding({ roots }) });
+    const app = createDashboardApp({
+      store,
+      orchestrator: orch,
+      onboarding: new Onboarding({ roots }),
+      push: new Push({ file: path.join(root, "push.json") }),
+    });
 
     let projectId = "";
     try {

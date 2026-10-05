@@ -3,17 +3,23 @@ import { useNavigate } from "react-router";
 import type { DashboardSnapshot } from "../shared/types";
 import { type Action, postAction, rescan as postRescan } from "./api";
 import { attentionCounts } from "./derive";
-import type { Notice } from "./derive";
+import { enablePush, pushSupported, syncPush } from "./push";
 import { useDashboard } from "./useDashboard";
 
 type Permission = NotificationPermission | "unsupported";
+
+/** The session a clicked notification points at. */
+interface Highlight {
+  projectId: string;
+  sessionId: string;
+}
 
 interface DashboardContextValue {
   snapshot: DashboardSnapshot | undefined;
   connected: boolean;
   logs: Record<string, string[]>;
   loadLogs: (projectId: string) => void;
-  highlight: Notice | undefined;
+  highlight: Highlight | undefined;
   act: (projectId: string, action: Action) => void;
   rescan: () => void;
   scanning: boolean;
@@ -36,20 +42,31 @@ interface DashboardContextValue {
 const Ctx = createContext<DashboardContextValue | undefined>(undefined);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
-  const { snapshot, connected, logs, loadLogs: fetchLogs, highlight } = useDashboard();
+  const { snapshot, connected, logs, loadLogs: fetchLogs } = useDashboard();
+  const [highlight, setHighlight] = useState<Highlight>();
   const navigate = useNavigate();
   const [error, setError] = useState<string>();
   const [scanning, setScanning] = useState(false);
   const [newTaskFor, setNewTaskFor] = useState<{ projectId?: string }>();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
-  const [permission, setPermission] = useState<Permission>(() =>
-    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
-  );
+  const [permission, setPermission] = useState<Permission>(() => (pushSupported() ? Notification.permission : "unsupported"));
 
-  // A clicked notification takes the user straight to the session.
+  // A clicked notification takes the user straight to the session: the service worker focuses this
+  // tab and says which one.
   useEffect(() => {
-    if (highlight) void navigate(`/p/${encodeURIComponent(highlight.projectId)}?session=${highlight.sessionId}`);
+    if (highlight) void navigate(`/p/${encodeURIComponent(highlight.projectId)}?session=${encodeURIComponent(highlight.sessionId)}`);
   }, [highlight, navigate]);
+  useEffect(() => {
+    if (!pushSupported()) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; projectId?: unknown; sessionId?: unknown } | undefined;
+      if (data?.type === "open" && typeof data.projectId === "string" && typeof data.sessionId === "string") {
+        setHighlight({ projectId: data.projectId, sessionId: data.sessionId });
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
 
   const attention = snapshot ? attentionCounts(snapshot).attention : 0;
   useEffect(() => {
@@ -70,6 +87,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [fail]);
   const newTask = useCallback((projectId?: string) => setNewTaskFor({ projectId }), []);
   const loadLogs = useCallback((projectId: string) => void fetchLogs(projectId).catch(fail), [fetchLogs, fail]);
+  const requestPermission = useCallback(
+    () =>
+      void enablePush()
+        .then(setPermission)
+        .catch((err: unknown) => {
+          setPermission(Notification.permission);
+          fail(err);
+        }),
+    [fail],
+  );
+
+  // Keeps this browser subscribed (and moves it to new keys) without a click once permission is granted.
+  useEffect(() => {
+    syncPush().catch((err: unknown) => console.warn("opendevhub: push subscription failed", err));
+  }, []);
 
   const value = useMemo<DashboardContextValue>(
     () => ({
@@ -91,9 +123,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       openAddProject: () => setAddProjectOpen(true),
       closeAddProject: () => setAddProjectOpen(false),
       permission,
-      requestPermission: () => void Notification.requestPermission().then(setPermission),
+      requestPermission,
     }),
-    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, fail, newTask, newTaskFor, addProjectOpen],
+    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, requestPermission, fail, newTask, newTaskFor, addProjectOpen],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

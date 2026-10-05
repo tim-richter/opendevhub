@@ -8,6 +8,7 @@ import { EditorUnavailableError } from "./editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
 import { InvalidRequestError } from "./worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "./onboarding";
+import { InvalidSubscriptionError, type Push } from "./push";
 import type { StateStore } from "./state";
 
 export type DashboardOrchestrator = Pick<
@@ -45,10 +46,13 @@ export type DashboardOrchestrator = Pick<
   | "removeEnv"
 >;
 
+export type PushPort = Pick<Push, "publicKey" | "subscribe" | "unsubscribe" | "send">;
+
 export interface DashboardDeps {
   store: StateStore;
   orchestrator: DashboardOrchestrator;
   onboarding: OnboardingPort;
+  push: PushPort;
   webDir?: string;
 }
 
@@ -65,7 +69,7 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /** Maps the errors request handlers can expect to a status; anything else is a 500. */
 function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 {
-  if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError) return 400;
+  if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError || err instanceof InvalidSubscriptionError) return 400;
   if (err instanceof NotFoundError) return 404;
   if (err instanceof BusyError || err instanceof AlreadyAnsweredError || err instanceof DevcontainerExistsError) return 409;
   if (err instanceof UnavailableError) return 412;
@@ -78,7 +82,7 @@ function str(value: unknown): string | undefined {
 }
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
-  const { store, orchestrator, onboarding } = deps;
+  const { store, orchestrator, onboarding, push } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -136,6 +140,14 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       orchestrator.start(project.id).catch(() => {});
       return { projectId: project.id, started: true };
     }),
+  );
+
+  // Web Push: the worker's subscription, and a test notification.
+  app.get("/api/push/key", (c) => c.json({ publicKey: push.publicKey() }));
+  app.post("/api/push/subscribe", (c) => json(c, async (_id, b) => push.subscribe(b)));
+  app.post("/api/push/unsubscribe", (c) => json(c, async (_id, b) => push.unsubscribe(str(b.endpoint) ?? "")));
+  app.post("/api/push/test", (c) =>
+    json(c, async () => ({ sent: await push.send({ tag: "test", title: "opendevhub", body: "Notifications work.", url: "/" }) })),
   );
 
   const actions = {

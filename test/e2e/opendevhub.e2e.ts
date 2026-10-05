@@ -7,17 +7,21 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { Credentials } from "../../src/server/credentials";
+import { createDashboardApp } from "../../src/server/dashboard-api";
 import { EditorLauncher } from "../../src/server/editors";
 import { spawnRunner } from "../../src/server/exec";
 import { Gateway } from "../../src/server/gateway";
 import { GitOps } from "../../src/server/git";
 import { projectId } from "../../src/server/ids";
 import { Network, parseRouteMode } from "../../src/server/network";
+import { startNotifier } from "../../src/server/notifier";
+import { Onboarding } from "../../src/server/onboarding";
 import { OpencodeClient, basicAuth, isGone, isInvalidAnswer } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
 import { Publisher } from "../../src/server/publish";
+import { Push, type PushSender } from "../../src/server/push";
 import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { startServer } from "../../src/server/server";
@@ -137,13 +141,34 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
       });
     const pendingOf = () => store.snapshot().projects[0].sessions.find((s) => s.id === sid)?.pending;
 
+    // Push notifications: the notifier sends each new permission once, through a fake push service.
+    const pushed: { payload: string }[] = [];
+    const sender: PushSender = async (_sub, payload) => {
+      pushed.push({ payload });
+      return { statusCode: 201 };
+    };
+    const push = new Push({ file: path.join(agentDir, "push.json"), send: sender });
+    push.subscribe({ endpoint: "https://push.example.com/e2e", keys: { p256dh: "k", auth: "a" } });
+    const stopNotifier = startNotifier(store, push);
+    const dashboard = createDashboardApp({ store, orchestrator: orch, onboarding: new Onboarding({ roots: () => [] }), push });
+
     // opencode's default rules allow most actions outright; make this session ask.
     expect((await opencode("PATCH", "", { permissions: [{ action: "*", resource: "*", effect: "ask" }] })).ok).toBe(true);
     expect((await opencode("POST", "/permission", { action: "bash", resources: ["echo e2e"] })).ok).toBe(true);
     await vi.waitFor(() => expect(pendingOf()?.permissions).toHaveLength(1), { timeout: 15_000 });
     const rid = pendingOf()!.permissions[0].id;
-    await orch.replyPermission(project.id, rid, { decision: "once" });
+    await vi.waitFor(() => expect(pushed).toHaveLength(1));
+    expect(JSON.parse(pushed[0].payload)).toMatchObject({ tag: `perm:${rid}`, sessionId: sid, permission: { requestId: rid } });
+    // Allow once from the notification: the service worker posts to the reply route.
+    const allowed = await dashboard.request(`/api/projects/${project.id}/permissions/${rid}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "once" }),
+    });
+    expect(allowed.status).toBe(200);
     await vi.waitFor(() => expect(pendingOf()?.permissions ?? []).toHaveLength(0), { timeout: 15_000 });
+    expect(pushed).toHaveLength(1);
+    stopNotifier();
     // Answering again straight at opencode is how "answered in another client" looks.
     const direct = new OpencodeClient(ep);
     const again = await direct.replyPermission(sid, rid, { decision: "once" }).catch((e: unknown) => e);
