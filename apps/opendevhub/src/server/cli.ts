@@ -177,6 +177,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     orchestrator,
     push,
     onboarding: new Onboarding({ roots: () => config.roots }),
+    ...(usage ? { usage } : {}),
     webDir: findWebDir(),
   });
   const server = await startServer({

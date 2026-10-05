@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { AddProjectResult, CandidateList, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, Worktree } from "../shared/types";
+import type { AddProjectResult, CandidateList, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -117,6 +117,12 @@ export async function rescan(): Promise<DashboardSnapshot> {
   const res = await fetch("/api/projects/rescan", { method: "POST" });
   if (!res.ok) throw await failure(res, "rescan");
   return (await res.json()) as DashboardSnapshot;
+}
+
+export async function fetchUsage(day?: string): Promise<UsageReport> {
+  const res = await fetch(`/api/usage${day ? `?day=${encodeURIComponent(day)}` : ""}`);
+  if (!res.ok) throw await failure(res, "usage");
+  return (await res.json()) as UsageReport;
 }
 
 export async function fetchLogs(projectId: string): Promise<string[]> {

@@ -369,6 +369,19 @@ export interface UsageTotals {
   tasks: Record<string, Usage>;
 }
 
+/** The Usage page: all-time and today's spend, one day by project, and the daily spend leading up to today. */
+export interface UsageReport {
+  total: Usage;
+  today: Usage;
+  /** YYYY-MM-DD, the day `dayTotal` and `projects` are for. */
+  day: string;
+  dayTotal: Usage;
+  /** Most expensive first. */
+  projects: ({ projectId: ProjectId } & Usage)[];
+  /** One entry per day, oldest first, ending today; days without spend are zeros. */
+  days: ({ day: string } & Usage)[];
+}
+
 export interface DashboardSnapshot {
   roots: string[];
   preflight: Preflight;

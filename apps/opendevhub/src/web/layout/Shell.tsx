@@ -1,4 +1,4 @@
-import { BellIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { BellIcon, CircleDollarSignIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -35,7 +35,8 @@ import { useDash } from "../DashboardContext";
 import { checkoutCounts, checkoutPath, checkouts, checkoutTone } from "../checkouts";
 import { attentionCounts, matches, projectCounts, projectTone } from "../derive";
 import type { ProjectView } from "../../shared/types";
-import { opensNewTask, projectIdFromPath } from "../tasks";
+import { formatCost, opensNewTask, projectIdFromPath } from "../tasks";
+import { formatUsage } from "../usage";
 
 const FILTER_THRESHOLD = 8;
 
@@ -163,6 +164,13 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
             </NavItem>
             <NavItem to="/sessions" badge={counts.attention > 0 && <Count n={counts.attention} tone="attention" />}>
               <ListIcon /> Sessions
+            </NavItem>
+            <NavItem
+              to="/usage"
+              title={snapshot.usage ? `Spent today: ${formatUsage(snapshot.usage.today)}` : "Usage"}
+              badge={snapshot.usage && <span className="text-xs text-muted-foreground tabular-nums">{formatCost(snapshot.usage.today.cost)}</span>}
+            >
+              <CircleDollarSignIcon /> Usage
             </NavItem>
           </SidebarMenu>
         </SidebarGroup>

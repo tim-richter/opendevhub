@@ -1,5 +1,5 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import type { ProjectId, Usage, UsageTotals } from "../shared/types";
+import type { ProjectId, Usage, UsageReport, UsageTotals } from "../shared/types";
 import type { RawSession } from "./opencode/client";
 import { rollUp } from "./status";
 import { parseTaskMeta } from "./tasks";
@@ -35,6 +35,13 @@ export function localDay(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The `n` days ending at `day` (YYYY-MM-DD), oldest first. */
+export function daysBefore(day: string, n: number): string[] {
+  const [y, m, d] = day.split("-").map(Number);
+  // Noon keeps a DST change from pushing the date across midnight.
+  return Array.from({ length: n }, (_, i) => localDay(new Date(y, m - 1, d - (n - 1 - i), 12).getTime()));
 }
 
 /** Each root session among `sessions`, with its subagents rolled in and its task, if any. */
@@ -191,6 +198,28 @@ export class UsageStore {
         projectRows.map((r) => [r.id, { today: { cost: r.todayCost, tokens: r.todayTokens }, total: usageOf(r) }]),
       ),
       tasks: Object.fromEntries(taskRows.map((r) => [r.id, usageOf(r)])),
+    };
+  }
+
+  /** All time, `today`, `day` by project, and the `window` days ending `today`. */
+  report(day: string, today: string, window = 30): UsageReport {
+    const sum = (where: string, ...args: string[]) =>
+      usageOf(this.db.prepare(`SELECT SUM(cost) AS cost, SUM(tokens) AS tokens FROM usage ${where}`).get(...args) as SumRow | undefined);
+    const projects = this.db
+      .prepare("SELECT project_id AS projectId, SUM(cost) AS cost, SUM(tokens) AS tokens FROM usage WHERE day = ? GROUP BY project_id ORDER BY cost DESC, tokens DESC")
+      .all(day) as unknown as UsageReport["projects"];
+    const days = daysBefore(today, window);
+    const rows = this.db
+      .prepare("SELECT day, SUM(cost) AS cost, SUM(tokens) AS tokens FROM usage WHERE day BETWEEN ? AND ? GROUP BY day")
+      .all(days[0], today) as unknown as UsageReport["days"];
+    const byDay = new Map(rows.map((r) => [r.day, r]));
+    return {
+      total: sum(""),
+      today: sum("WHERE day = ?", today),
+      day,
+      dayTotal: sum("WHERE day = ?", day),
+      projects: projects.map((p) => ({ projectId: p.projectId, cost: p.cost, tokens: p.tokens })),
+      days: days.map((d) => ({ day: d, ...usageOf(byDay.get(d)) })),
     };
   }
 

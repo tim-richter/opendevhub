@@ -6,6 +6,7 @@ import type { AddProjectResult, LogEvent } from "../shared/types";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
+import { localDay, type UsageStore } from "./usage";
 import { InvalidRequestError } from "./worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "./onboarding";
 import { InvalidSubscriptionError, type Push } from "./push";
@@ -53,6 +54,8 @@ export interface DashboardDeps {
   orchestrator: DashboardOrchestrator;
   onboarding: OnboardingPort;
   push: PushPort;
+  /** Absent when the usage ledger couldn't be opened. */
+  usage?: Pick<UsageStore, "report">;
   webDir?: string;
 }
 
@@ -77,12 +80,17 @@ function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 {
   return 500;
 }
 
+/** A real YYYY-MM-DD date. */
+function isDay(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && localDay(new Date(`${value}T12:00:00`).getTime()) === value;
+}
+
 function str(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
-  const { store, orchestrator, onboarding, push } = deps;
+  const { store, orchestrator, onboarding, push, usage } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -141,6 +149,14 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       return { projectId: project.id, started: true };
     }),
   );
+
+  app.get("/api/usage", (c) => {
+    if (!usage) return c.json({ error: "usage tracking is off" }, 412);
+    const today = localDay(Date.now());
+    const day = c.req.query("day") ?? today;
+    if (!isDay(day)) return c.json({ error: `not a date: ${day}` }, 400);
+    return c.json(usage.report(day, today));
+  });
 
   // Web Push: the worker's subscription, and a test notification.
   app.get("/api/push/key", (c) => c.json({ publicKey: push.publicKey() }));

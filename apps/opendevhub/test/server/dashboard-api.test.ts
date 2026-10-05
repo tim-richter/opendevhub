@@ -90,6 +90,26 @@ function setup(webDir?: string) {
 }
 
 describe("dashboard API", () => {
+  it("serves a usage report for a day, today by default", async () => {
+    const report = { total: { cost: 1, tokens: 1 }, today: { cost: 0, tokens: 0 }, day: "2026-10-01", dayTotal: { cost: 1, tokens: 1 }, projects: [], days: [] };
+    const usage = { report: vi.fn((_day: string, _today: string) => report) };
+    const { store, orchestrator, onboarding, push } = setup();
+    const app = createDashboardApp({ store, orchestrator, onboarding, push, usage });
+    const res = await app.request("/api/usage?day=2026-10-01");
+    expect(await res.json()).toEqual(report);
+    const today = usage.report.mock.calls[0][1];
+    expect(today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await app.request("/api/usage");
+    expect(usage.report).toHaveBeenLastCalledWith(today, today);
+    expect((await app.request("/api/usage?day=2026-13-40")).status).toBe(400);
+    expect((await app.request("/api/usage?day=yesterday")).status).toBe(400);
+  });
+
+  it("says usage is unavailable when there is no ledger", async () => {
+    const { app } = setup();
+    expect((await app.request("/api/usage")).status).toBe(412);
+  });
+
   it("serves the push key and adds, removes and tests subscriptions", async () => {
     const { app, push } = setup();
     const post = (url: string, body?: unknown) =>

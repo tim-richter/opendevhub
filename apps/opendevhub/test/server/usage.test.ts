@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Observed, UsageStore, book, localDay, observe, trackUsage } from "../../src/server/usage";
+import { type Observed, UsageStore, book, daysBefore, localDay, observe, trackUsage } from "../../src/server/usage";
 import { rawSession } from "../helpers/fake-opencode";
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime();
@@ -19,6 +19,13 @@ describe("localDay", () => {
   it("uses local time, not UTC, around midnight", () => {
     expect(localDay(new Date(2026, 9, 5, 23, 59).getTime())).toBe("2026-10-05");
     expect(localDay(new Date(2026, 9, 6, 0, 1).getTime())).toBe("2026-10-06");
+  });
+});
+
+describe("daysBefore", () => {
+  it("lists the days ending at a day, across month ends and a DST change", () => {
+    expect(daysBefore("2026-03-02", 3)).toEqual(["2026-02-28", "2026-03-01", "2026-03-02"]);
+    expect(daysBefore("2026-10-26", 2)).toEqual(["2026-10-25", "2026-10-26"]);
   });
 });
 
@@ -122,6 +129,36 @@ describe("UsageStore", () => {
     expect(u.totals(today).today.cost).toBe(3);
     expect(u.record("p", [s("a", 1), s("b", 2)])).toBe(false);
     expect(u.totals(today).today.cost).toBe(3);
+  });
+
+  it("reports all time, today, a chosen day by project, and the last days ending today", () => {
+    const u = UsageStore.open(":memory:")!;
+    u.record("p", [s("old", 2, { time: { created: 1, updated: at(2026, 10, 1) } }), s("a", 1)]);
+    u.record("q", [s("b", 4, { time: { created: 1, updated: at(2026, 10, 1) } })]);
+    const r = u.report("2026-10-01", today, 3);
+    expect(r).toEqual({
+      total: { cost: 7, tokens: 700 },
+      today: { cost: 1, tokens: 100 },
+      day: "2026-10-01",
+      dayTotal: { cost: 6, tokens: 600 },
+      projects: [
+        { projectId: "q", cost: 4, tokens: 400 },
+        { projectId: "p", cost: 2, tokens: 200 },
+      ],
+      days: [
+        { day: "2026-10-03", cost: 0, tokens: 0 },
+        { day: "2026-10-04", cost: 0, tokens: 0 },
+        { day: "2026-10-05", cost: 1, tokens: 100 },
+      ],
+    });
+    expect(UsageStore.open(":memory:")!.report("2026-09-01", today, 1)).toEqual({
+      total: { cost: 0, tokens: 0 },
+      today: { cost: 0, tokens: 0 },
+      day: "2026-09-01",
+      dayTotal: { cost: 0, tokens: 0 },
+      projects: [],
+      days: [{ day: today, cost: 0, tokens: 0 }],
+    });
   });
 
   it("reports zeros when nothing was booked", () => {
