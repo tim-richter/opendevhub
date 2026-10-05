@@ -76,7 +76,14 @@ export class OpencodeRuntime {
 
   async ensureRunning(
     target: ExecTarget,
-    args: { address: HostPort; password?: string; workspaceFolder: string; onLine: (line: string) => void },
+    args: {
+      address: HostPort;
+      password?: string;
+      workspaceFolder: string;
+      onLine: (line: string) => void;
+      /** Extra environment for `opencode serve` (and so for every tool the agent runs). */
+      env?: Record<string, string>;
+    },
   ): Promise<{ password: string; version: string }> {
     if (args.password) {
       try {
@@ -106,7 +113,7 @@ export class OpencodeRuntime {
     const script =
       `cd ${shellQuote(args.workspaceFolder)} && ` +
       `nohup ${shellQuote(binary)} serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
-    const launch = await containers.exec(target, ["sh", "-c", script], { env: { OPENCODE_PASSWORD: password } });
+    const launch = await containers.exec(target, ["sh", "-c", script], { env: { ...args.env, OPENCODE_PASSWORD: password } });
     if (launch.exitCode !== 0) {
       throw new CommandError("failed to launch opencode serve", tailLines(launch.stderr + launch.stdout));
     }

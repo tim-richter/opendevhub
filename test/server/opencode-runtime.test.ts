@@ -51,6 +51,14 @@ describe("parseBinaryPath", () => {
 });
 
 describe("OpencodeRuntime.ensureRunning", () => {
+  it("launches opencode serve with the extra environment", async () => {
+    const { runtime, calls } = runtimeWith({ stdout: "2.0.20" });
+    await runtime.ensureRunning(project, { ...args(), env: { SSH_AUTH_SOCK: "/tmp/opendevhub-ssh-agent.sock" } });
+    const launch = calls.find((c) => c.args.at(-1)?.includes(" serve --hostname"))!;
+    expect(launch.args).toContain("SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock");
+    expect(launch.args).toContain("OPENCODE_PASSWORD=pw");
+  });
+
   it("searches PATH, the installer dirs and bash/zsh login shells for the binary", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
     await runtime.ensureRunning(project, args());
