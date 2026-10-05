@@ -13,6 +13,7 @@ import { Empty, GroupTitle, muted, Note, PageHeader, TabBar, TabLink } from "../
 import { LogPanel } from "../components/LogPanel";
 import { OpenInMenu } from "../components/OpenInMenu";
 import { projectFlags, StartStopButton } from "../components/ProjectActions";
+import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { Count, StatusDot } from "../components/Status";
 import { EnvBadge } from "../components/EnvBadge";
@@ -20,6 +21,7 @@ import { checkoutReady, ContainerMenu, useCheckoutActions } from "../components/
 import { type Checkout, checkoutCounts, checkoutPath, checkoutRuntime, checkouts, checkoutTone } from "../checkouts";
 import { useDash } from "../DashboardContext";
 import { compareSessions, envOfDirectory, matches, needsAttention, type SessionEntry, sshAgentBadge } from "../derive";
+import { checkoutResources } from "../resources";
 import { useProjectView } from "./ProjectLayout";
 
 const IDLE_LIMIT = 8;
@@ -38,6 +40,7 @@ export function CheckoutPage() {
   const navigate = useNavigate();
   const { running } = projectFlags(view, false);
   const { pending, newSession, remove, containerAction } = useCheckoutActions(view);
+  const { snapshot } = useDash();
   const checkout = checkouts(view).find((c) => c.target === worktree);
   const projectPath = `/p/${encodeURIComponent(view.project.id)}`;
 
@@ -61,6 +64,7 @@ export function CheckoutPage() {
   const n = checkoutCounts(view, checkout.directory);
   const env = envOfDirectory(view, checkout.directory);
   const agent = sshAgentBadge(checkoutRuntime(view, checkout.directory));
+  const resources = checkoutResources(snapshot, view, checkout);
 
   return (
     <>
@@ -97,6 +101,7 @@ export function CheckoutPage() {
                 <KeyRoundIcon className="size-3" /> {agent.label}
               </Badge>
             )}
+            {resources && <ResourceStat {...resources} className="ml-1 font-sans whitespace-nowrap" />}
           </p>
         }
         actions={
