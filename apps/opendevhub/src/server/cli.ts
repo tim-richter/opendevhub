@@ -28,6 +28,7 @@ import { Push } from "./push";
 import type { ResolveTarget } from "./proxy";
 import { startServer } from "./server";
 import { StateStore } from "./state";
+import { UsageStore, trackUsage } from "./usage";
 import { Worktrees } from "./worktrees";
 
 const USAGE = `Usage: opendevhub [--root <dir>]... [--port <n>] [--no-open]
@@ -129,6 +130,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const store = new StateStore({ port: config.port, persisted: loadState(dir), persist: (s) => saveState(dir, s) });
   store.setRoots(config.roots);
+  const usage = UsageStore.open(path.join(dir, "usage.db"));
+  const usageTracker = usage ? trackUsage(usage, store) : undefined;
   const containers = new Containers(spawnRunner);
   const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
   const runtime = new OpencodeRuntime({ containers, clientFor });
@@ -156,6 +159,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }),
     publisher: new Publisher({ containers, run: spawnRunner, forges: new FileForgeStore(dir) }),
     credentials: new Credentials({ run: spawnRunner, containers }),
+    ...(usageTracker ? { recordUsage: usageTracker.record } : {}),
     editors,
     clientFor,
     roots: () => config.roots,
@@ -189,7 +193,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const shutdown = async () => {
     clearInterval(refresh);
     stopNotifier();
+    usageTracker?.stop();
     await orchestrator.shutdown();
+    usage?.close();
     await server.close();
     process.exit(0);
   };

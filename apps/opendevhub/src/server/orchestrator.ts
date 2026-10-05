@@ -39,7 +39,7 @@ import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./revi
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import { type HostPort, type Network, type Route, type RouteContainer, directRoute } from "./network";
-import { type OpencodeClient, type OpencodeEndpoint, isGone, isInvalidAnswer } from "./opencode/client";
+import { type OpencodeClient, type OpencodeEndpoint, type RawSession, isGone, isInvalidAnswer } from "./opencode/client";
 import type { OpencodeRuntime } from "./opencode/runtime";
 import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
@@ -159,6 +159,8 @@ export interface OrchestratorDeps {
   projectSettings?: (project: Project) => unknown;
   /** Git identity, known_hosts and git's ssh command in containers; skipped when absent. */
   credentials?: CredentialsPort;
+  /** Books what each poll's sessions spent; skipped when absent (no usage ledger). */
+  recordUsage?: (projectId: ProjectId, sessions: RawSession[]) => void;
   /** Defaults to a real AgentTunnel; tests pass their own. */
   agentTunnel?: AgentTunnelFactory;
 }
@@ -1508,6 +1510,7 @@ export class Orchestrator {
         store.setSessions(env.id, sessions);
         this.noticeDirectories(env.project.id, [...new Set(sessions.map((s) => s.directory))]);
       },
+      onRawSessions: (sessions) => this.deps.recordUsage?.(env.project.id, sessions),
       onHealth: (healthy) => {
         if (store.runtime(env.id).opencode === "starting") return;
         store.updateRuntime(env.id, { opencode: healthy ? "healthy" : "unhealthy" });

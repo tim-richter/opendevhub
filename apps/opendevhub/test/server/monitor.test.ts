@@ -36,6 +36,13 @@ function start(over: Partial<MonitorOptions> = {}) {
 }
 
 describe("Monitor", () => {
+  it("hands every poll's raw sessions, subagents included, to onRawSessions", async () => {
+    fake.state.sessions = [rawSession("ses_1", { cost: 1 }), rawSession("ses_2", { parentID: "ses_1", cost: 2 })];
+    const raw: string[][] = [];
+    start({ onRawSessions: (s) => raw.push(s.map((x) => x.id)) });
+    await vi.waitFor(() => expect(raw.at(-1)).toEqual(["ses_1", "ses_2"]));
+  });
+
   it("reconciles immediately on start", async () => {
     fake.state.sessions = [rawSession("ses_1")];
     fake.state.active = ["ses_1"];

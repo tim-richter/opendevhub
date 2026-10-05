@@ -7,7 +7,7 @@ import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/net
 import type { NewSession, OpencodeEndpoint, RawAgent, RawModel, RawSession } from "../../src/server/opencode/client";
 import { AlreadyAnsweredError, BusyError, type NetworkPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
 import { OpencodeClient, OpencodeHttpError } from "../../src/server/opencode/client";
-import { startFakeOpencode } from "../helpers/fake-opencode";
+import { rawSession, startFakeOpencode } from "../helpers/fake-opencode";
 import { StateStore } from "../../src/server/state";
 import type { PortSpec } from "../../src/server/ports";
 import type { ForwardTarget } from "../../src/server/port-forwarder";
@@ -186,6 +186,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     tunnels.push(t);
     return t;
   });
+  const recordUsage = vi.fn();
   const orch = new Orchestrator({
     store,
     containers,
@@ -206,6 +207,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     projectSettings,
     credentials,
     agentTunnel,
+    recordUsage,
     roots: () => ["/src"],
     scan: async () => projects,
     monitorFactory: (opts) => {
@@ -222,7 +224,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
       return m;
     },
   });
-  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay, images, envFiles, projectSettings, credentials, agentTunnel, tunnels };
+  return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay, images, envFiles, projectSettings, credentials, agentTunnel, tunnels, recordUsage };
 }
 
 /** A started project whose worktree list has `feat`. */
@@ -457,6 +459,18 @@ describe("Orchestrator", () => {
     expect(store.runtime(project.id).opencode).toBe("unhealthy");
     monitors[0].opts.onSessions([{ id: "s", projectId: project.id, title: "t", directory: "/w", updatedAt: 1, status: "running" }]);
     expect(store.snapshot().projects[0].sessions).toHaveLength(1);
+  });
+
+  it("records usage from every monitor under the project's id", async () => {
+    const s = await withEnv();
+    const main = s.monitors.find((m) => m.opts.envId === project.id)!;
+    const env = s.monitors.find((m) => m.opts.envId !== project.id)!;
+    main.opts.onRawSessions!([rawSession("a")]);
+    env.opts.onRawSessions!([rawSession("b")]);
+    expect(s.recordUsage.mock.calls.map(([id, sessions]) => [id, sessions.map((x: { id: string }) => x.id)])).toEqual([
+      [project.id, ["a"]],
+      [project.id, ["b"]],
+    ]);
   });
 
   it("notifies log listeners and caps the log buffer at 500 lines", async () => {

@@ -11,6 +11,8 @@ export interface MonitorOptions {
   /** Other checkouts (worktrees) whose permission requests and questions should be watched too. */
   extraDirectories?: () => string[];
   onSessions: (sessions: SessionSummary[]) => void;
+  /** Every poll's sessions as opencode lists them, subagents and archived ones included (for usage tracking). */
+  onRawSessions?: (sessions: RawSession[]) => void;
   onHealth: (healthy: boolean) => void;
   pollMs?: number;
   debounceMs?: number;
@@ -107,6 +109,7 @@ export class Monitor {
       if (this.stopped) return;
       this.failures = 0;
       this.opts.onHealth(true);
+      this.opts.onRawSessions?.(all);
       this.opts.onSessions(
         deriveSessions(projectId, { envId: this.opts.envId, sessions: all, active, permissions, forms, firstSeen: this.firstSeen }),
       );
