@@ -38,6 +38,10 @@ export type DashboardOrchestrator = Pick<
   | "models"
   | "createTask"
   | "pickVariant"
+  | "createEnv"
+  | "startEnv"
+  | "stopEnv"
+  | "removeEnv"
 >;
 
 export interface DashboardDeps {
@@ -156,6 +160,26 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   app.post("/api/projects/:id/worktrees/remove", (c) =>
     json(c, (id, b) => orchestrator.removeWorktree(id, str(b.path) ?? "", b.force === true, b.deleteBranch === true)),
   );
+  // A worktree's own container.
+  app.post("/api/projects/:id/envs", (c) => json(c, (id, b) => orchestrator.createEnv(id, str(b.path) ?? "")));
+  const envActions = {
+    start: (id: string, envId: string) => orchestrator.startEnv(id, envId),
+    stop: (id: string, envId: string) => orchestrator.stopEnv(id, envId),
+  } as const;
+  for (const [route, run] of Object.entries(envActions)) {
+    app.post(`/api/projects/:id/envs/:env/${route}`, (c) => {
+      if (store.preflight().errors.length > 0) {
+        return c.json({ error: store.preflight().errors.join("; ") }, 412);
+      }
+      try {
+        run(c.req.param("id"), c.req.param("env")).catch(() => {});
+        return c.json({ accepted: true }, 202);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+      }
+    });
+  }
+  app.post("/api/projects/:id/envs/:env/remove", (c) => json(c, (id) => orchestrator.removeEnv(id, c.req.param("env") ?? "")));
   app.post("/api/projects/:id/sessions", (c) =>
     json(c, async (id, b) => ({
       sessionId: await orchestrator.startSession(id, str(b.directory) ?? "", str(b.title), str(b.prompt)),

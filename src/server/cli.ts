@@ -3,14 +3,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import open from "open";
-import { type Config, FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
+import { type Config, FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState, stateDir } from "./config";
 import { Containers } from "./containers";
 import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
+import { EnvFiles } from "./env-files";
 import { spawnRunner } from "./exec";
 import { Gateway } from "./gateway";
 import { GitOps } from "./git";
+import { Images } from "./images";
 import { Network, parseRouteMode } from "./network";
 import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
@@ -19,6 +21,7 @@ import { PortForwarder } from "./port-forwarder";
 import { Publisher } from "./publish";
 import { RelayRuntime } from "./relay/runtime";
 import { preflight } from "./preflight";
+import type { ResolveTarget } from "./proxy";
 import { startServer } from "./server";
 import { StateStore } from "./state";
 import { Worktrees } from "./worktrees";
@@ -58,6 +61,19 @@ export function parseCli(argv: string[]): CliOptions {
     throw new Error(`invalid --port: ${values.port}`);
   }
   return { roots: values.root ?? [], port, open: !values["no-open"], help: values.help === true };
+}
+
+/** The proxy's upstream for `<envId>.localhost`: a running environment's opencode, main or task. */
+export function proxyTargets(
+  store: Pick<StateStore, "runtime">,
+  orchestrator: Pick<Orchestrator, "opencodeAddress">,
+): ResolveTarget {
+  return (envId) => {
+    const rt = store.runtime(envId);
+    const address = orchestrator.opencodeAddress(envId);
+    if (rt.containerState !== "running" || !address || !rt.password) return undefined;
+    return { ...address, password: rt.password };
+  };
 }
 
 /** Merges the command line into the saved config and saves it, keeping every other saved key (forges). */
@@ -114,6 +130,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const runtime = new OpencodeRuntime({ containers, clientFor });
   const editors = new EditorLauncher(await detectEditors(pathWhich()));
   store.setEditors(editors.list());
+  const git = new GitOps({ containers });
   const orchestrator = new Orchestrator({
     store,
     containers,
@@ -124,7 +141,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       mode: routeMode,
       gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
     }),
-    git: new GitOps({ containers }),
+    git,
+    images: new Images({ run: spawnRunner, containers, git }),
+    envFiles: new EnvFiles(path.join(stateDir(), "envs")),
+    projectSettings: (p) => loadConfig(dir).projects?.[p.path],
     worktrees: new Worktrees({
       containers,
       run: spawnRunner,
@@ -145,12 +165,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const server = await startServer({
     port: config.port,
     app,
-    resolveTarget: (id) => {
-      const rt = store.runtime(id);
-      const address = orchestrator.opencodeAddress(id);
-      if (rt.containerState !== "running" || !address || !rt.password) return undefined;
-      return { ...address, password: rt.password };
-    },
+    resolveTarget: proxyTargets(store, orchestrator),
   });
   const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);
 

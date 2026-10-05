@@ -8,7 +8,7 @@ export interface ProxyTarget {
   password: string;
 }
 
-export type ResolveTarget = (projectId: string) => ProxyTarget | undefined;
+export type ResolveTarget = (envId: string) => ProxyTarget | undefined;
 
 const DROPPED_RESPONSE_HEADERS = new Set(["www-authenticate", "connection", "keep-alive"]);
 const UPSTREAM_UPGRADE_TIMEOUT_MS = 10_000;
@@ -51,7 +51,7 @@ function upstreamHeaders(req: IncomingMessage, target: ProxyTarget): OutgoingHtt
 export function proxyRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  projectId: string,
+  envId: string,
   resolve: ResolveTarget,
   dashboardUrl: string,
 ): void {
@@ -60,9 +60,9 @@ export function proxyRequest(
     res.end("Forbidden: cross-site request blocked");
     return;
   }
-  const target = resolve(projectId);
+  const target = resolve(envId);
   if (!target) {
-    sendPage(res, 503, "Project not running", "Start it from the dashboard, then reload this page.", dashboardUrl);
+    sendPage(res, 503, "Not running", "Start it from the dashboard, then reload this page.", dashboardUrl);
     return;
   }
   const upstream = http.request(
@@ -90,14 +90,14 @@ export function proxyUpgrade(
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
-  projectId: string,
+  envId: string,
   resolve: ResolveTarget,
 ): void {
   if (isCrossSite(req)) {
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
-  const target = resolve(projectId);
+  const target = resolve(envId);
   if (!target) {
     socket.end("HTTP/1.1 503 Service Unavailable\r\n\r\n");
     return;

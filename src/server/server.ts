@@ -22,13 +22,13 @@ export async function startServer(opts: { port: number; app: FetchApp; resolveTa
   const server = http.createServer((req, res) => {
     const route = classifyHost(req.headers.host, port);
     if (route.kind === "dashboard") return void dashboard(req, res);
-    if (route.kind === "project") return proxyRequest(req, res, route.projectId, opts.resolveTarget, dashboardUrl());
+    if (route.kind === "env") return proxyRequest(req, res, route.envId, opts.resolveTarget, dashboardUrl());
     res.writeHead(421, { "content-type": "text/plain" });
     res.end("Misdirected Request");
   });
   server.on("upgrade", (req, socket, head) => {
     const route = classifyHost(req.headers.host, port);
-    if (route.kind === "project") return proxyUpgrade(req, socket, head, route.projectId, opts.resolveTarget);
+    if (route.kind === "env") return proxyUpgrade(req, socket, head, route.envId, opts.resolveTarget);
     socket.end("HTTP/1.1 421 Misdirected Request\r\n\r\n");
   });
 

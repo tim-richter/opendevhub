@@ -17,6 +17,10 @@ function setup(webDir?: string) {
   store.setProjects([project]);
   store.updateRuntime(project.id, { password: "secret" });
   const orchestrator = {
+    createEnv: vi.fn(async (_id: string, _path: string) => ({ envId: "demo-abc123-x-0a1b" })),
+    startEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+    stopEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+    removeEnv: vi.fn(async (_id: string, _env: string) => {}),
     start: vi.fn(() => Promise.resolve()),
     stop: vi.fn(() => Promise.resolve()),
     rebuild: vi.fn(() => Promise.resolve()),
@@ -99,6 +103,25 @@ describe("dashboard API", () => {
       throw new NotFoundError("x");
     });
     expect((await app.request(`/api/projects/x/start`, { method: "POST" })).status).toBe(404);
+  });
+
+  it("creates, starts, stops and removes a worktree's own container", async () => {
+    const { app, orchestrator } = setup();
+    const post = (url: string, body?: unknown) =>
+      app.request(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    const created = await post(`/api/projects/${project.id}/envs`, { path: "/w/x" });
+    expect(await created.json()).toEqual({ envId: "demo-abc123-x-0a1b" });
+    expect(orchestrator.createEnv).toHaveBeenCalledWith(project.id, "/w/x");
+    expect((await post(`/api/projects/${project.id}/envs/e1/start`)).status).toBe(202);
+    expect(orchestrator.startEnv).toHaveBeenCalledWith(project.id, "e1");
+    expect((await post(`/api/projects/${project.id}/envs/e1/stop`)).status).toBe(202);
+    expect(orchestrator.stopEnv).toHaveBeenCalledWith(project.id, "e1");
+    expect((await post(`/api/projects/${project.id}/envs/e1/remove`)).status).toBe(200);
+    expect(orchestrator.removeEnv).toHaveBeenCalledWith(project.id, "e1");
+    orchestrator.startEnv.mockImplementationOnce(() => {
+      throw new NotFoundError("e9", "environment");
+    });
+    expect((await post(`/api/projects/${project.id}/envs/e9/start`)).status).toBe(404);
   });
 
   it("worktree routes pass the JSON body and return the result", async () => {

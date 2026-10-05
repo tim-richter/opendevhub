@@ -1,4 +1,5 @@
-export type HostRoute = { kind: "dashboard" } | { kind: "project"; projectId: string } | { kind: "reject" };
+/** `<envId>.localhost` reaches an environment's opencode; a main environment's id is its project's. */
+export type HostRoute = { kind: "dashboard" } | { kind: "env"; envId: string } | { kind: "reject" };
 
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
@@ -9,7 +10,7 @@ export function classifyHost(host: string | undefined, port: number): HostRoute 
   const suffix = `.localhost:${port}`;
   if (h.endsWith(suffix)) {
     const label = h.slice(0, -suffix.length);
-    if (LABEL.test(label)) return { kind: "project", projectId: label };
+    if (LABEL.test(label)) return { kind: "env", envId: label };
   }
   return { kind: "reject" };
 }
