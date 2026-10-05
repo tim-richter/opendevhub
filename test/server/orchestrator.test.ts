@@ -189,6 +189,13 @@ const permission = { id: "per_1", sessionId: "ses_child", action: "bash", resour
 const form = { id: "frm_1", sessionId: "ses_root", title: "Which DB?", fields: [] };
 
 describe("Orchestrator", () => {
+  it("runs the main container as the project's main environment", async () => {
+    const { orch, monitors } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    expect(monitors[0].opts).toMatchObject({ projectId: project.id, envId: project.id, directory: "/workspaces/demo" });
+  });
+
   it("start brings up the container, launches opencode and starts a monitor", async () => {
     const { store, containers, runtime, orch, monitors } = setup();
     await orch.rescan();
