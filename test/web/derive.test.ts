@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DashboardSnapshot, EnvironmentView, ProjectView, SessionStatus } from "../../src/shared/types";
+import type { DashboardSnapshot, EnvironmentView, ProjectView, PublicRuntime, SessionStatus } from "../../src/shared/types";
 import {
   allSessions,
   attentionCounts,
@@ -9,6 +9,7 @@ import {
   envTone,
   openUrlOf,
   sessionHref,
+  sshAgentBadge,
   pendingSummary,
   matches,
   projectCounts,
@@ -216,5 +217,22 @@ describe("task environments", () => {
     expect(envTone({ ...env, runtime: { ...env.runtime, containerState: "starting" } })).toBe("busy");
     expect(envTone({ ...env, runtime: { ...env.runtime, opencode: "unhealthy" } })).toBe("error");
     expect(envTone({ ...env, runtime: { ...env.runtime, containerState: "stopped" } })).toBe("off");
+  });
+});
+
+describe("sshAgentBadge", () => {
+  const rt = (patch: Partial<PublicRuntime>): PublicRuntime => ({ projectId: "p", containerState: "running", opencode: "healthy", ...patch });
+  it("shows a forwarded agent quietly and an unavailable one as a warning with its reason", () => {
+    expect(sshAgentBadge(rt({ sshAgent: "forwarded" }))).toMatchObject({ label: "ssh-agent forwarded", warn: false });
+    expect(sshAgentBadge(rt({ sshAgent: "unavailable", sshAgentReason: "relay not running" }))).toEqual({
+      label: "ssh-agent unavailable",
+      warn: true,
+      title: "relay not running",
+    });
+  });
+  it("shows nothing when off, unknown or the container isn't running", () => {
+    expect(sshAgentBadge(rt({ sshAgent: "off" }))).toBeUndefined();
+    expect(sshAgentBadge(rt({}))).toBeUndefined();
+    expect(sshAgentBadge(rt({ containerState: "stopped", sshAgent: "forwarded" }))).toBeUndefined();
   });
 });

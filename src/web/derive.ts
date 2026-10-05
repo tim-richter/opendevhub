@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, EnvironmentView, ProjectView, SessionStatus, SessionSummary } from "../shared/types";
+import type { DashboardSnapshot, EnvironmentView, ProjectView, PublicRuntime, SessionStatus, SessionSummary } from "../shared/types";
 import { sessionUrl } from "../shared/urls";
 
 export interface Notice {
@@ -185,4 +185,16 @@ export function envTone(env: EnvironmentView): Tone {
   if (containerState === "error" || (containerState === "running" && opencode === "unhealthy")) return "error";
   if (containerState === "starting" || containerState === "stopping" || opencode === "starting") return "busy";
   return containerState === "running" ? "ok" : "off";
+}
+
+/** The ssh-agent badge for a running container; nothing when forwarding is off or not known yet. */
+export function sshAgentBadge(runtime: PublicRuntime): { label: string; warn: boolean; title: string } | undefined {
+  if (runtime.containerState !== "running") return undefined;
+  if (runtime.sshAgent === "forwarded") {
+    return { label: "ssh-agent forwarded", warn: false, title: "Your ssh-agent is forwarded into this container while opendevhub runs" };
+  }
+  if (runtime.sshAgent === "unavailable") {
+    return { label: "ssh-agent unavailable", warn: true, title: runtime.sshAgentReason ?? "See the Logs tab" };
+  }
+  return undefined;
 }

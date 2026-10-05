@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate, useOutletContext, useParams, useSearchParams
 import type { ForwardedPort, ProjectView } from "../../shared/types";
 import { refreshWorktrees } from "../api";
 import { CopyButton } from "../components/CopyButton";
-import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, KeyRoundIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import { EnvBadge } from "../components/EnvBadge";
 import { checkoutReady, ContainerMenu, useCheckoutActions } from "../components/Worktrees";
 import { type Checkout, checkoutCounts, checkoutPath, checkoutRuntime, checkouts, checkoutTone } from "../checkouts";
 import { useDash } from "../DashboardContext";
-import { compareSessions, envOfDirectory, matches, needsAttention, type SessionEntry } from "../derive";
+import { compareSessions, envOfDirectory, matches, needsAttention, type SessionEntry, sshAgentBadge } from "../derive";
 import { useProjectView } from "./ProjectLayout";
 
 const IDLE_LIMIT = 8;
@@ -61,6 +61,7 @@ export function CheckoutPage() {
   const base = checkoutPath(view.project.id, checkout.target);
   const n = checkoutCounts(view, checkout.directory);
   const env = envOfDirectory(view, checkout.directory);
+  const agent = sshAgentBadge(checkoutRuntime(view, checkout.directory));
 
   return (
     <>
@@ -88,6 +89,15 @@ export function CheckoutPage() {
               <span className="truncate">only in container ({checkout.directory})</span>
             )}
             {env && <EnvBadge env={env} />}
+            {agent && (
+              <Badge
+                variant="outline"
+                className={cn("gap-1 font-normal", agent.warn ? "text-warn" : "text-muted-foreground")}
+                title={agent.title}
+              >
+                <KeyRoundIcon className="size-3" /> {agent.label}
+              </Badge>
+            )}
           </p>
         }
         actions={
