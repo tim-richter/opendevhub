@@ -19,6 +19,7 @@
     "react-dom": "^19.3.0",
     "react-server-dom-webpack": "^19.3.0",
     "takumi-js": "^2.14.0",
+    "three": "^0.186.1",
     "waku": "1.0.0-rc.2"
   },
   "devDependencies": {
@@ -27,6 +28,7 @@
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"

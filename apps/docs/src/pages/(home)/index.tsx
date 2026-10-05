@@ -1,10 +1,10 @@
 import { Link } from 'waku';
-import { Logo } from '@/components/logo';
+import { Logo3D } from '@/components/logo-3d';
 
 export default function Home() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-16 gap-6">
-      <Logo size={72} className="text-fd-primary" />
+      <Logo3D size={160} className="text-fd-primary" />
       <h1 className="font-semibold text-3xl sm:text-4xl">opendevhub</h1>
       <p className="max-w-xl text-fd-muted-foreground">
         A local dashboard that runs opencode agents inside your projects&apos; devcontainers. Watch every
