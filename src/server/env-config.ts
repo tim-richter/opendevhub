@@ -16,6 +16,8 @@ export interface EnvSettings {
   isolation: Isolation;
   /** Files whose change invalidates the image, relative to the repository root. */
   keyFiles: string[];
+  /** Forward the host's ssh-agent into the project's containers. */
+  sshAgent: boolean;
 }
 
 const KEY_FILE = /^[\w.@+][\w.@+/-]*$/;
@@ -30,9 +32,11 @@ export function resolveEnvSettings(custom: unknown, override: unknown): EnvSetti
   const o = record(override);
   const isolation = [o.isolation, c.isolation].find((v): v is Isolation => v === "shared" || v === "isolated") ?? "shared";
   const files = Array.isArray(o.keyFiles) ? o.keyFiles : Array.isArray(c.keyFiles) ? c.keyFiles : [];
+  const sshAgent = [o.sshAgent, c.sshAgent].find((v): v is boolean => typeof v === "boolean") ?? true;
   return {
     isolation,
     keyFiles: files.filter((f): f is string => typeof f === "string" && KEY_FILE.test(f) && !f.split("/").includes("..")),
+    sshAgent,
   };
 }
 

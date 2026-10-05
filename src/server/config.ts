@@ -9,7 +9,7 @@ export interface Config {
   port: number;
   /** Forge per git host: configured by hand or remembered after a probe. */
   forges?: Record<string, ForgeEntry>;
-  /** Per-project settings keyed by the project's path (`{ isolation, keyFiles }`), validated where used. */
+  /** Per-project settings keyed by the project's path (`{ isolation, keyFiles, sshAgent }`), validated where used. */
   projects?: Record<string, unknown>;
 }
 

@@ -23,16 +23,30 @@ describe("envIdFor", () => {
 });
 
 describe("resolveEnvSettings", () => {
-  it("defaults to shared with no key files", () => {
-    expect(resolveEnvSettings(undefined, undefined)).toEqual({ isolation: "shared", keyFiles: [] });
+  it("defaults to shared with no key files and the ssh-agent forwarded", () => {
+    expect(resolveEnvSettings(undefined, undefined)).toEqual({ isolation: "shared", keyFiles: [], sshAgent: true });
   });
   it("reads the devcontainer customization, and the config.json override wins", () => {
-    expect(resolveEnvSettings({ isolation: "isolated", keyFiles: ["package-lock.json"] }, undefined)).toEqual({ isolation: "isolated", keyFiles: ["package-lock.json"] });
+    expect(resolveEnvSettings({ isolation: "isolated", keyFiles: ["package-lock.json"] }, undefined)).toEqual({
+      isolation: "isolated",
+      keyFiles: ["package-lock.json"],
+      sshAgent: true,
+    });
     expect(resolveEnvSettings({ isolation: "isolated" }, { isolation: "shared" }).isolation).toBe("shared");
     expect(resolveEnvSettings({ keyFiles: ["a"] }, { keyFiles: ["b"] }).keyFiles).toEqual(["b"]);
   });
+  it("turns the ssh-agent off from either place, config.json first", () => {
+    expect(resolveEnvSettings({ sshAgent: false }, undefined).sshAgent).toBe(false);
+    expect(resolveEnvSettings(undefined, { sshAgent: false }).sshAgent).toBe(false);
+    expect(resolveEnvSettings({ sshAgent: false }, { sshAgent: true }).sshAgent).toBe(true);
+    expect(resolveEnvSettings({ sshAgent: true }, { sshAgent: false }).sshAgent).toBe(false);
+  });
   it("ignores invalid values and unsafe key files", () => {
-    expect(resolveEnvSettings({ isolation: "yes", keyFiles: ["ok.lock", "/etc/passwd", "../x", "-x", 3, "a b"] }, null)).toEqual({ isolation: "shared", keyFiles: ["ok.lock"] });
+    expect(resolveEnvSettings({ isolation: "yes", keyFiles: ["ok.lock", "/etc/passwd", "../x", "-x", 3, "a b"], sshAgent: "no" }, null)).toEqual({
+      isolation: "shared",
+      keyFiles: ["ok.lock"],
+      sshAgent: true,
+    });
   });
 });
 
