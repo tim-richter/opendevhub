@@ -10,7 +10,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev": "tsx src/server/bin.ts --no-open",

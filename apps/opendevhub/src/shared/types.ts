@@ -354,6 +354,21 @@ export interface EditorInfo {
   target: EditorTarget;
 }
 
+export interface Usage {
+  /** USD. */
+  cost: number;
+  /** Input, output and reasoning tokens. */
+  tokens: number;
+}
+
+/** Spend from opendevhub's ledger; "today" is the server's local date. */
+export interface UsageTotals {
+  today: Usage;
+  projects: Record<ProjectId, { today: Usage; total: Usage }>;
+  /** By TaskMeta.task, discarded variants included. */
+  tasks: Record<string, Usage>;
+}
+
 export interface DashboardSnapshot {
   roots: string[];
   preflight: Preflight;

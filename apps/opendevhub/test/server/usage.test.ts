@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { type Observed, book, localDay, observe } from "../../src/server/usage";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Observed, UsageStore, book, localDay, observe } from "../../src/server/usage";
 import { rawSession } from "../helpers/fake-opencode";
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime();
@@ -68,5 +72,89 @@ describe("book", () => {
 
   it("books nothing for a session that hasn't spent anything", () => {
     expect(book([obs({ cost: 0, tokens: 0 })], new Map())).toEqual([]);
+  });
+});
+
+describe("UsageStore", () => {
+  const today = localDay(at(2026, 10, 5));
+  const s = (id: string, cost: number, over: Parameters<typeof rawSession>[1] = {}) =>
+    rawSession(id, { cost, tokens: tokens(cost * 100), time: { created: 1, updated: at(2026, 10, 5) }, ...over });
+  const dirs: string[] = [];
+  const tmp = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "odh-usage-"));
+    dirs.push(d);
+    return path.join(d, "usage.db");
+  };
+  afterEach(() => {
+    for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it("books only the increase across two records, and says whether it booked", () => {
+    const u = UsageStore.open(":memory:")!;
+    expect(u.record("p", [s("a", 1)])).toBe(true);
+    expect(u.record("p", [s("a", 1)])).toBe(false);
+    expect(u.record("p", [s("a", 1.5)])).toBe(true);
+    expect(u.totals(today).today).toEqual({ cost: 1.5, tokens: 150 });
+  });
+
+  it("sums per project (today and all time), per task and for today", () => {
+    const u = UsageStore.open(":memory:")!;
+    u.record("p", [
+      s("old", 2, { time: { created: 1, updated: at(2026, 10, 1) } }),
+      s("v1", 1, { metadata: { opendevhub: { task: "tsk_1", variant: 1, of: 2, title: "t" } } }),
+      s("v2", 0.5, { metadata: { opendevhub: { task: "tsk_1", variant: 2, of: 2, title: "t", discarded: true } } }),
+    ]);
+    u.record("q", [s("other", 4)]);
+    expect(u.totals(today)).toEqual({
+      today: { cost: 5.5, tokens: 550 },
+      projects: {
+        p: { today: { cost: 1.5, tokens: 150 }, total: { cost: 3.5, tokens: 350 } },
+        q: { today: { cost: 4, tokens: 400 }, total: { cost: 4, tokens: 400 } },
+      },
+      tasks: { tsk_1: { cost: 1.5, tokens: 150 } },
+    });
+  });
+
+  it("keeps a session's spend after it disappears, and books nothing twice when it comes back", () => {
+    const u = UsageStore.open(":memory:")!;
+    u.record("p", [s("a", 1), s("b", 2)]);
+    u.record("p", [s("b", 2)]);
+    expect(u.totals(today).today.cost).toBe(3);
+    expect(u.record("p", [s("a", 1), s("b", 2)])).toBe(false);
+    expect(u.totals(today).today.cost).toBe(3);
+  });
+
+  it("reports zeros when nothing was booked", () => {
+    expect(UsageStore.open(":memory:")!.totals(today)).toEqual({ today: { cost: 0, tokens: 0 }, projects: {}, tasks: {} });
+  });
+
+  it("books nothing twice after reopening the file", () => {
+    const file = tmp();
+    const first = UsageStore.open(file)!;
+    first.record("p", [s("a", 1)]);
+    first.close();
+    const second = UsageStore.open(file)!;
+    expect(second.record("p", [s("a", 1)])).toBe(false);
+    expect(second.totals(today).today.cost).toBe(1);
+    second.close();
+  });
+
+  it("returns undefined and logs once for a file that isn't a database", () => {
+    const file = tmp();
+    fs.writeFileSync(file, "not a database, just text that is long enough to be read as a header".repeat(10));
+    const log = vi.fn();
+    expect(UsageStore.open(file, log)).toBeUndefined();
+    expect(log).toHaveBeenCalledOnce();
+    expect(log.mock.calls[0][0]).toMatch(/usage tracking is off/);
+  });
+
+  it("returns undefined for a database written by a newer opendevhub", () => {
+    const file = tmp();
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA user_version = 2");
+    db.close();
+    const log = vi.fn();
+    expect(UsageStore.open(file, log)).toBeUndefined();
+    expect(log.mock.calls[0][0]).toMatch(/newer opendevhub/);
   });
 });
