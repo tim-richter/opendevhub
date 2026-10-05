@@ -17,7 +17,7 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 - Docker (on macOS: Docker Desktop, OrbStack, Colima or similar), and the devcontainer CLI: `npm i -g @devcontainers/cli`
 - Node.js 20 or newer
 - opencode v2 installed in each project's devcontainer, either with `npm i -g @opencode/cli@2` (for example in `postCreateCommand`) or with the official installer (`curl -fsSL https://opencode.ai/install | bash`). opendevhub looks for the binary on `PATH`, in `~/.opencode/bin`, `~/.local/bin` and `~/.bun/bin`, and in the `PATH` that bash or zsh set up from their startup files.
-- LLM provider credentials available inside the container (via `containerEnv`, `remoteEnv` or mounts). opendevhub does not manage credentials.
+- LLM provider credentials available inside the container (via `containerEnv`, `remoteEnv` or mounts). Git and ssh are set up for you: see [Git and ssh in containers](#git-and-ssh-in-containers).
 
 ## Usage
 
@@ -101,6 +101,22 @@ A worktree can run in its own devcontainer, with its own opencode, processes, po
 - Git commands (review, commit, merge, worktree add and remove) still run in the project's container, which has to be running.
 - Removing a worktree's container deletes the sessions that ran in it; the worktree and its files stay.
 
+## Git and ssh in containers
+
+Every container opendevhub starts (the project's and each worktree's own) is set up for git when it starts or is reconnected:
+
+- **Identity.** `user.name` and `user.email` are copied from git on your machine, read in the project folder so `includeIf` identities apply. They are only set when the container has none; values it already has are kept.
+- **ssh-agent.** Your agent (`SSH_AUTH_SOCK`) is forwarded into the container at `/tmp/opendevhub-ssh-agent.sock` through the relay, so `git fetch`, `git pull`, `git push` and private git dependencies work over ssh. opencode gets `SSH_AUTH_SOCK`, and git's `core.sshCommand` points at the socket so terminals and VS Code use it too (unless the container sets its own `core.sshCommand`). The agent is only reachable while opendevhub runs. Your private keys never enter the container, but anything running in it, the agent included, can use them while it's forwarded.
+- **known_hosts.** For each ssh remote of the project, the matching entries from your `~/.ssh/known_hosts` are added to the container's. Hosts you haven't connected to from your machine are skipped; the log says to `ssh` to them once.
+
+The checkout page shows whether the agent is forwarded. To turn forwarding off for a project:
+
+```jsonc
+"customizations": { "opendevhub": { "sshAgent": false } }
+```
+
+or, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "sshAgent": false } }`. It takes effect the next time the container starts or opendevhub restarts. An opencode server started before forwarding was set up picks up `SSH_AUTH_SOCK` after **Restart opencode**.
+
 ## Development
 
 ```bash
@@ -126,3 +142,6 @@ On macOS, the port forwarder tests use `127.0.0.2` and `127.0.0.3`, which macOS 
 - The opencode password is passed through `devcontainer exec --remote-env`, so other users on the same machine can see it in the process list while the command runs.
 - Own containers don't support Docker Compose configs, `appPort`, `runArgs` that publish ports, host networking, or lifecycle commands that use `${containerWorkspaceFolder}`; such projects run tasks in the shared container and say why.
 - A Dockerfile whose build context reaches outside `.devcontainer` can change without opendevhub noticing; remove the `opendevhub/<project>:*` images to force a rebuild.
+- ssh host aliases from `~/.ssh/config` (remotes like `work:team/app.git`) are not resolved inside containers.
+- ssh-agent forwarding needs the relay; when the relay can't run, the agent isn't forwarded (the checkout page and log say so).
+- https git credentials and commit signing (GPG or ssh) are not set up in containers.

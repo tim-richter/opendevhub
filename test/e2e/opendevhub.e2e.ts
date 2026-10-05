@@ -1,8 +1,12 @@
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
+import { Credentials } from "../../src/server/credentials";
 import { EditorLauncher } from "../../src/server/editors";
 import { spawnRunner } from "../../src/server/exec";
 import { Gateway } from "../../src/server/gateway";
@@ -14,6 +18,7 @@ import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { PortForwarder } from "../../src/server/port-forwarder";
 import { Publisher } from "../../src/server/publish";
+import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
@@ -36,6 +41,17 @@ function getViaHost(port: number, host: string, urlPath: string): Promise<string
 
 describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode v2", () => {
   it("starts, reports sessions, proxies and stops", async () => {
+    // A throwaway ssh-agent with one key stands in for the developer's.
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-e2e-agent-"));
+    const agentSock = path.join(agentDir, "agent.sock");
+    const sshAgent = spawn("ssh-agent", ["-D", "-a", agentSock], { stdio: "ignore" });
+    await vi.waitFor(() => expect(fs.existsSync(agentSock)).toBe(true));
+    const keyFile = path.join(agentDir, "key");
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", keyFile]);
+    execFileSync("ssh-add", [keyFile], { env: { ...process.env, SSH_AUTH_SOCK: agentSock }, stdio: "ignore" });
+    const fingerprint = execFileSync("ssh-keygen", ["-lf", `${keyFile}.pub`]).toString().split(" ")[1];
+    const previousSock = process.env.SSH_AUTH_SOCK;
+    process.env.SSH_AUTH_SOCK = agentSock;
     const project: Project = {
       id: projectId(fixture),
       name: "fixture",
@@ -48,7 +64,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const runtime = new OpencodeRuntime({ containers, clientFor });
     // OPENDEVHUB_ROUTE=gateway runs the same test through the gateway container (the macOS path).
     const network = new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) });
-    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), git: new GitOps({ containers }), publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }), editors: new EditorLauncher([]), clientFor, roots: () => [], scan: async () => [project] });
+    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), git: new GitOps({ containers }), publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }), editors: new EditorLauncher([]), credentials: new Credentials({ run: spawnRunner, containers }), clientFor, roots: () => [], scan: async () => [project] });
     orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
     await orch.rescan();
@@ -57,6 +73,27 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     expect(rt.error).toBeUndefined();
     expect(rt).toMatchObject({ containerState: "running", opencode: "healthy" });
     expect(rt.relay).toBe("active");
+    // Git and ssh: the forwarded agent, git's ssh command, opencode's environment and the identity.
+    await vi.waitFor(() => expect(store.runtime(project.id).sshAgent).toBe("forwarded"), { timeout: 15_000 });
+    const listed = await containers.exec(project, ["sh", "-c", "SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock ssh-add -l"]);
+    expect(listed.stdout).toContain(fingerprint);
+    const sshCommand = await containers.exec(project, ["git", "config", "--global", "--get", "core.sshCommand"]);
+    expect(sshCommand.stdout.trim()).toBe(AGENT_SSH_COMMAND);
+    const opencodeEnv = await containers.exec(project, [
+      "sh",
+      "-c",
+      "tr '\\0' '\\n' < /proc/$(pgrep -f 'opencode [s]erve' | head -n 1)/environ",
+    ]);
+    expect(opencodeEnv.stdout).toContain("SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock");
+    const hostEmail = spawnSync("git", ["-C", fixture, "config", "user.email"], { encoding: "utf8" }).stdout.trim();
+    if (hostEmail) {
+      const email = await containers.exec(project, ["git", "config", "--global", "--get", "user.email"]);
+      expect(email.stdout.trim()).toBe(hostEmail);
+      const commit = await containers.exec(project, ["sh", "-c", 'cd "$(mktemp -d)" && git init -q && git commit -q --allow-empty -m e2e']);
+      expect(commit.exitCode).toBe(0);
+    } else {
+      console.log("[e2e] no git identity on this machine; skipping the commit check");
+    }
     // A server backgrounded from postStartCommand does not outlive the lifecycle command under the
     // devcontainer CLI, so start it the same way opendevhub starts opencode. It binds the container's
     // loopback only, so it is reachable from the host only through the relay.
@@ -147,5 +184,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     await expect(fetch(`http://127.0.0.1:${webPort}/`)).rejects.toThrow();
     expect(store.runtime(project.id).containerState).toBe("stopped");
     await orch.shutdown();
+    sshAgent.kill();
+    if (previousSock === undefined) delete process.env.SSH_AUTH_SOCK;
+    else process.env.SSH_AUTH_SOCK = previousSock;
+    fs.rmSync(agentDir, { recursive: true, force: true });
   });
 });
