@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { parseStats, sampleResources } from "../../src/server/resources";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RunResult } from "../../src/server/exec";
+import { parseStats, sampleResources, startResourceSampler } from "../../src/server/resources";
 import { fakeRunner } from "../helpers/fake-runner";
 
 const MiB = 1024 ** 2;
@@ -94,5 +95,55 @@ describe("sampleResources", () => {
     expect(failing.calls).toHaveLength(1);
     const slow = fakeRunner(() => ({ exitCode: 1, timedOut: true }));
     expect(await sampleResources(slow.run, [{ envId: "p", containerId: FULL_A }])).toEqual({});
+  });
+});
+
+describe("startResourceSampler", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const storeWith = (running: { envId: string; containerId: string }[]) => {
+    const writes: Record<string, unknown>[] = [];
+    return { writes, store: { runningContainers: () => running, setResources: (r: Record<string, never>) => void writes.push(r) } };
+  };
+
+  it("samples at once, then every interval", async () => {
+    vi.useFakeTimers();
+    const { run, calls } = fakeRunner(() => ({ stdout: line("aaaaaaaaaaaa", "5%", "1GiB / 2GiB") }));
+    const { store, writes } = storeWith([{ envId: "proj", containerId: FULL_A }]);
+    const sampler = startResourceSampler({ run, store, intervalMs: 5000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    expect(writes).toEqual([{ proj: { cpu: 5, memory: GiB, memoryLimit: 2 * GiB } }]);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls).toHaveLength(2);
+    sampler.stop();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("clears the stats when nothing runs", async () => {
+    vi.useFakeTimers();
+    const { run, calls } = fakeRunner();
+    const { store, writes } = storeWith([]);
+    const sampler = startResourceSampler({ run, store });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(0);
+    expect(writes).toEqual([{}]);
+    sampler.stop();
+  });
+
+  it("never overlaps rounds and writes nothing after stop", async () => {
+    vi.useFakeTimers();
+    let finish!: (r: Partial<RunResult>) => void;
+    const { run, calls } = fakeRunner(() => new Promise<Partial<RunResult>>((resolve) => (finish = resolve)));
+    const { store, writes } = storeWith([{ envId: "proj", containerId: FULL_A }]);
+    const sampler = startResourceSampler({ run, store, intervalMs: 5000 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls).toHaveLength(1);
+    sampler.stop();
+    finish({ stdout: line("aaaaaaaaaaaa", "5%", "1GiB / 2GiB") });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(writes).toEqual([]);
+    expect(calls).toHaveLength(1);
   });
 });

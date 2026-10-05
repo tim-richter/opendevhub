@@ -1,5 +1,6 @@
 import type { EnvId, ResourceStats } from "../shared/types";
 import type { Runner } from "./exec";
+import type { StateStore } from "./state";
 
 const STATS_TIMEOUT_MS = 15_000;
 const MiB = 1024 ** 2;
@@ -79,4 +80,29 @@ export async function sampleResources(run: Runner, running: RunningContainer[]):
     targets = targets.filter((t) => !gone.some((g) => sameContainer(t.containerId, g)));
   }
   return {};
+}
+
+export interface SamplerOptions {
+  run: Runner;
+  store: Pick<StateStore, "runningContainers" | "setResources">;
+  intervalMs?: number;
+}
+
+/** Samples now and then `intervalMs` after each round ends, so slow `docker stats` calls never overlap. */
+export function startResourceSampler(opts: SamplerOptions): { stop(): void } {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const round = async () => {
+    const stats = await sampleResources(opts.run, opts.store.runningContainers()).catch(() => ({}));
+    if (stopped) return;
+    opts.store.setResources(stats);
+    timer = setTimeout(() => void round(), opts.intervalMs ?? 5000);
+  };
+  void round();
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(timer);
+    },
+  };
 }

@@ -22,6 +22,7 @@ import { Orchestrator } from "./orchestrator";
 import { PortForwarder } from "./port-forwarder";
 import { Publisher } from "./publish";
 import { RelayRuntime } from "./relay/runtime";
+import { startResourceSampler } from "./resources";
 import { preflight } from "./preflight";
 import { startNotifier } from "./notifier";
 import { Push } from "./push";
@@ -186,6 +187,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     resolveTarget: proxyTargets(store, orchestrator),
   });
   const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);
+  const sampler = startResourceSampler({ run: spawnRunner, store });
 
   console.log(`opendevhub running at ${server.url}`);
   for (const e of store.preflight().errors) console.warn(`warning: ${e}`);
@@ -193,6 +195,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(refresh);
+    sampler.stop();
     stopNotifier();
     usageTracker?.stop();
     await orchestrator.shutdown();
