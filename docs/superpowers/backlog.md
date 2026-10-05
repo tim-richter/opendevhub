@@ -2,7 +2,8 @@
 
 Features discussed but not specced yet. Each one is a sketch; it gets a spec in `specs/`
 once it's picked up. Specced so far: respond inline, tasks, review, publish, per-task
-environments, git identity and ssh-agent forwarding (the git half of credential setup), add project.
+environments, git identity and ssh-agent forwarding (the git half of credential setup), add project,
+usage tracking.
 
 opencode 2.0.22 endpoints that make an item cheaper are noted where they exist. They come from
 the live server's `/openapi.json`.
@@ -28,8 +29,6 @@ the live server's `/openapi.json`.
 
 ## Medium
 
-- **Cost and token tracking** per session, task and project, plus daily totals.
-  `Session.Info` already has `cost` and `tokens`, and `/api/experimental/session/stats` exists.
 - **Terminal in the browser** (xterm.js), to step in when an agent is stuck. opencode has a PTY
   API (`/api/pty`, `/api/pty/:id/connect` over WebSocket) and persistent PTYs, so this needs no
   `docker exec` plumbing.
