@@ -129,11 +129,14 @@ To remove it, opendevhub runs `git config --global --unset core.sshCommand`, but
 current value equals the one above.
 
 The other git commands opendevhub runs in a container (worktree add and remove, review, the
-Publish container fallback) get `SSH_AUTH_SOCK` in their `--remote-env` when `sshAgent` is on.
+Publish container fallback) go through `devcontainer exec` as the remote user, so they pick up
+`core.sshCommand` too and need no extra environment. A project that sets its own
+`core.sshCommand` has chosen its own ssh setup and keeps it.
 
 Stopping an environment, removing its container, and opendevhub shutting down all call
-`tunnel.stop()`. The relay recovery path stops the tunnel and starts it again after the relay
-comes back.
+`tunnel.stop()`. When the relay restarts, the tunnel's control connection drops and it
+reconnects on its own. The tunnel's failure to connect also triggers the existing relay
+recovery, which is rate-limited.
 
 Changing `sshAgent` takes effect the next time the environment is started or adopted
 (restarting opendevhub is enough). No rebuild is needed.
