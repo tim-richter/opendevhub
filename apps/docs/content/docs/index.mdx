@@ -1,0 +1,29 @@
+---
+title: Introduction
+description: A local dashboard that runs opencode agents inside your projects' devcontainers.
+icon: Rocket
+---
+
+opendevhub is a dashboard that runs on your machine and orchestrates [opencode](https://opencode.ai) v2 agents. Each agent runs inside its project's devcontainer, so it gets the project's toolchain and can't touch the rest of your machine. You watch, answer and review all of them from one page.
+
+## What it does
+
+- **Finds your projects.** It discovers every folder with a `.devcontainer/devcontainer.json` (or `.devcontainer.json`) under your roots, up to two levels deep. Git repos without one can be set up with [Add project](/docs/add-project).
+- **Runs the containers.** It starts, stops and rebuilds one devcontainer per project and runs `opencode serve` inside it. Containers keep running when opendevhub exits, and it reconnects to them on the next start.
+- **Shows what needs you.** Live session status (running, idle, needs permission, question waiting) with the sessions that need you first, plus [notifications](/docs/notifications) that arrive even with the dashboard tab closed.
+- **Opens opencode.** Each project's opencode web UI is at `http://<project>.localhost:7777`, already authenticated.
+- **Runs agents in parallel.** [Tasks](/docs/tasks) start agent work from a prompt in its own git [worktree](/docs/worktrees), and can compare up to four models on the same prompt. A worktree can run in its [own container](/docs/worktrees#own-containers).
+- **Ships the result.** Review the changes, then [publish](/docs/publish) a branch and open a pull request, with no `gh` and no tokens.
+- **Opens your editor.** The "Open in…" menu attaches VS Code to the container, or opens the checkout in VS Code, Cursor, Zed, JetBrains IDEs, Neovide or Neovim. Only editors found on your machine are listed.
+- **Forwards ports.** The ports listed in a project's `forwardPorts` are forwarded to `localhost` while the project runs, using the next free port if one is taken.
+
+## Find your way around
+
+The **Overview** page puts the sessions that need you first. Each project has its own page with **Sessions**, **Ports** and **Logs** tabs. Press `Ctrl/⌘ K` to jump to any project or session, and `n` to start a new task.
+
+<Cards>
+  <Card title="Getting started" href="/docs/getting-started" />
+  <Card title="Tasks" href="/docs/tasks" />
+  <Card title="Worktrees" href="/docs/worktrees" />
+  <Card title="Publish" href="/docs/publish" />
+</Cards>

@@ -1,0 +1,41 @@
+---
+title: Git and ssh
+description: How containers get your git identity, ssh-agent and known hosts.
+icon: KeyRound
+---
+
+Every container opendevhub starts (the project's and each worktree's own) is set up for git when it starts or is reconnected.
+
+## Identity
+
+`user.name` and `user.email` are copied from git on your machine, read in the project folder so `includeIf` identities apply. They are only set when the container has none; values it already has are kept.
+
+## ssh-agent
+
+Your agent (`SSH_AUTH_SOCK`) is forwarded into the container at `/tmp/opendevhub-ssh-agent.sock` through the relay, so `git fetch`, `git pull`, `git push` and private git dependencies work over ssh.
+
+- opencode gets `SSH_AUTH_SOCK`, and git's `core.sshCommand` uses the socket so terminals and VS Code use it too (unless the container sets its own `core.sshCommand`).
+- The agent is only reachable while opendevhub runs. When it isn't, git falls back to the shell's own `SSH_AUTH_SOCK` (VS Code's forwarded agent, for example).
+- Your private keys never enter the container, but anything running in it can use them while the agent is forwarded.
+
+The checkout page shows whether the agent is forwarded.
+
+## known_hosts
+
+For each ssh remote of the project, the matching entries from your `~/.ssh/known_hosts` are added to the container's. Hosts you haven't connected to from your machine are skipped; the log says to `ssh` to them once.
+
+## Turn forwarding off
+
+In the project's `devcontainer.json`:
+
+```jsonc
+"customizations": { "opendevhub": { "sshAgent": false } }
+```
+
+or in `~/.config/opendevhub/config.json`:
+
+```json
+{ "projects": { "/path/to/repo": { "sshAgent": false } } }
+```
+
+It takes effect the next time the container starts or opendevhub restarts. An opencode server started before forwarding was set up picks up `SSH_AUTH_SOCK` after **Restart opencode**.

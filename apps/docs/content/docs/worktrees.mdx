@@ -1,0 +1,46 @@
+---
+title: Worktrees
+description: Run agents in parallel on separate branches you can open on your machine.
+icon: GitBranch
+---
+
+When opendevhub starts a container it bind-mounts `<project>.worktrees` (created next to the project) at `<workspaceFolder>.worktrees` in the container. For a project at `~/code/demo`, worktrees live in `~/code/demo.worktrees/<branch>`, so you can open and edit them on your machine.
+
+The project's **Worktrees** tab creates a branch and worktree there with `git worktree add` inside the container, and can start an opencode session in it straight away.
+
+- Because the folder sits next to the checkout on both sides, worktrees are created with `--relative-paths`, so git works in them on your machine too. This needs git 2.48 or newer on your machine and in the container, and the workspace folder must have the same name as the project folder (the default `/workspaces/<name>`). Otherwise opendevhub falls back to absolute links: the files are still on your machine, but git commands in the worktree only work inside the container.
+- Relative links set `extensions.relativeWorktrees` in the repository. Tools built on libgit2 (some git GUIs and editor git integrations) can't open such a repository yet. Set `OPENDEVHUB_RELATIVE_WORKTREES=0` to always use absolute links.
+- Containers created before this feature don't have the mount. The Worktrees tab offers a rebuild.
+- Worktrees that opencode or a shell create elsewhere in the container are listed too, but they only exist inside the container. VS Code can still attach to them.
+- Sessions running in a worktree are tagged with its branch, and their permission requests and questions show up like any other session's.
+
+## Open in your editor
+
+The "Open in…" menu on the project and each worktree attaches VS Code to the container, or opens the checkout in VS Code, Cursor, Zed, JetBrains IDEs, Neovide or Neovim in your terminal. Only editors found on your machine are listed.
+
+Editors are launched by the opendevhub process, so it needs your desktop session's environment (`DISPLAY`/`WAYLAND_DISPLAY`). Neovim opens in `$TERMINAL`, or the first of kitty, ghostty, wezterm, alacritty, foot, gnome-terminal, konsole or xfce4-terminal it finds. Attaching VS Code needs the Dev Containers extension.
+
+## Own containers
+
+A worktree can run in its own devcontainer, with its own opencode, processes, ports and `$HOME`, so parallel agents don't trip over each other's dev servers or databases. Choose **Run in its own container** from a worktree's container menu (the box icon on its card or page), or **Environment: Own container** in the New task dialog.
+
+- The container starts from an image built once per project and devcontainer config (`opendevhub/<project>:<key>-base`). All lifecycle commands run in each container, so a task gets its own `npm ci`.
+- Git commands (review, commit, merge, worktree add and remove) still run in the project's container, which has to be running.
+- Removing a worktree's container deletes the sessions that ran in it; the worktree and its files stay.
+
+Make it the default for a project in `devcontainer.json`:
+
+```jsonc
+"customizations": {
+  "opendevhub": {
+    "isolation": "isolated",            // "shared" (default) | "isolated"
+    "keyFiles": ["package-lock.json"]   // files whose change means a new image
+  }
+}
+```
+
+or, for a repo you don't own, in `~/.config/opendevhub/config.json`:
+
+```json
+{ "projects": { "/path/to/repo": { "isolation": "isolated" } } }
+```

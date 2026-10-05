@@ -1,0 +1,16 @@
+{
+  "title": "opendevhub",
+  "pages": [
+    "index",
+    "getting-started",
+    "---Features---",
+    "add-project",
+    "tasks",
+    "worktrees",
+    "publish",
+    "git-and-ssh",
+    "notifications",
+    "---Reference---",
+    "known-limitations"
+  ]
+}

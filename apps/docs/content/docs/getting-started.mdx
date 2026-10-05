@@ -1,0 +1,49 @@
+---
+title: Getting started
+description: Install the requirements and start the dashboard.
+icon: Play
+---
+
+## Requirements
+
+- Linux or macOS
+- Docker (on macOS: Docker Desktop, OrbStack, Colima or similar), and the devcontainer CLI:
+
+  ```bash
+  npm i -g @devcontainers/cli
+  ```
+
+- Node.js 20 or newer
+- opencode v2 installed in each project's devcontainer. [Add project](/docs/add-project) sets this up for you. Otherwise install it with `npm i -g @opencode/cli@2` (for example in `postCreateCommand`) or with the v2 installer:
+
+  ```bash
+  curl -fsSL https://opencode.ai/v2/install | bash
+  ```
+
+  `opencode.ai/install` installs v1. opendevhub looks for the binary on `PATH`, in `~/.opencode/bin`, `~/.local/bin` and `~/.bun/bin`, and in the `PATH` that bash or zsh set up from their startup files.
+- LLM provider credentials available inside the container, via `containerEnv`, `remoteEnv` or mounts. Git and ssh are set up for you: see [Git and ssh](/docs/git-and-ssh).
+
+## Start the dashboard
+
+```bash
+npx opendevhub --root ~/code --root ~/work   # roots and port are remembered
+npx opendevhub                               # reuse the saved roots
+npx opendevhub --port 8080 --no-open
+```
+
+The dashboard opens at `http://localhost:7777`. Containers keep running when opendevhub exits. The next time it starts, it reconnects to them.
+
+## How opendevhub reaches containers
+
+On Linux with a native Docker engine, opendevhub connects to each container's IP directly.
+
+When that IP is not reachable from the host (macOS, where containers live in a VM; rootless Docker; Docker Desktop on Linux), it starts one `opendevhub-gateway` container (`node:22-alpine`). The gateway publishes a single port on `127.0.0.1` and relays to the project containers, joining their Docker networks as needed. The project log says which route a project uses. The gateway is left running when opendevhub exits and is replaced when opendevhub needs a newer one.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `OPENDEVHUB_ROUTE` | `auto` (default) probes each container IP; `direct` or `gateway` forces a route. On macOS, `auto` only goes direct when something already answers on the container IP, so OrbStack users who want to skip the gateway can set `direct`. |
+| `OPENDEVHUB_GATEWAY_IMAGE` | Image for the gateway container (default `node:22-alpine`; it needs `node` on `PATH`). |
+| `OPENDEVHUB_PUSH` | Where [Publish](/docs/publish) runs git: `host` or `container`. Default: the host when the checkout works there, else the container. |
+| `OPENDEVHUB_RELATIVE_WORKTREES` | Set to `0` to always create [worktrees](/docs/worktrees) with absolute links. |

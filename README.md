@@ -151,14 +151,20 @@ Notifications are enabled per browser and address: opening the dashboard on anot
 
 ## Development
 
+This is a pnpm workspace:
+
+- `apps/opendevhub`: the CLI, server and dashboard (published to npm as `opendevhub`)
+- `apps/docs`: the documentation site at https://tim-richter.github.io/opendevhub/ ([Waku](https://waku.gg) + [Fumadocs](https://fumadocs.dev)), content in `apps/docs/content/docs`
+
 ```bash
-npm install
-npm test                # unit + integration tests
-npm run test:e2e        # real devcontainer + opencode (slow, needs Docker)
-OPENDEVHUB_ROUTE=gateway npm run test:e2e   # the same, through the gateway (the macOS path)
-npm run dev             # API server on :7777
-npm run dev:web         # Vite dev server that proxies /api to :7777
-npm run build           # dist/bin.js + dist/web
+pnpm install
+pnpm test               # unit + integration tests
+pnpm test:e2e           # real devcontainer + opencode (slow, needs Docker)
+OPENDEVHUB_ROUTE=gateway pnpm test:e2e   # the same, through the gateway (the macOS path)
+pnpm dev                # API server on :7777
+pnpm dev:web            # Vite dev server that proxies /api to :7777
+pnpm dev:docs           # docs site
+pnpm build              # apps/opendevhub/dist (bin.js + web) and apps/docs/dist
 ```
 
 On macOS, the port forwarder tests use `127.0.0.2` and `127.0.0.3`, which macOS does not configure by default: `sudo ifconfig lo0 alias 127.0.0.2 up && sudo ifconfig lo0 alias 127.0.0.3 up`.
