@@ -2,7 +2,7 @@
 
 Features discussed but not specced yet. Each one is a sketch; it gets a spec in `specs/`
 once it's picked up. Specced so far: respond inline, tasks, review, publish, per-task
-environments, git identity and ssh-agent forwarding (the git half of credential setup).
+environments, git identity and ssh-agent forwarding (the git half of credential setup), add project.
 
 opencode 2.0.22 endpoints that make an item cheaper are noted where they exist. They come from
 the live server's `/openapi.json`.
@@ -23,9 +23,6 @@ the live server's `/openapi.json`.
   - Mount or inject provider keys, and https git credentials.
   - opencode exposes `/api/credential` and `/api/integration/*/connect/{key,oauth}`, so the
     dashboard could connect providers in each container without touching files.
-- **Bootstrap repos that have no devcontainer.** Discovery hides them today. Offer
-  **Add devcontainer**, which writes a template with opencode (plus optionally the egress
-  firewall below) and turns any repo into a usable one in one click.
 - **Network egress allowlist + auto-approve policy.** Default-deny outbound traffic with an
   allowlist (iptables in the container, as in Anthropic's `init-firewall.sh`, or a proxy in
   the gateway). Once egress is fenced, a per-project "auto-approve" policy becomes reasonable,

@@ -2,7 +2,7 @@
 
 A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, each running inside its project's devcontainer.
 
-- Discovers projects with a `.devcontainer/devcontainer.json` (or `.devcontainer.json`) under your roots (up to 2 levels deep).
+- Discovers projects with a `.devcontainer/devcontainer.json` (or `.devcontainer.json`) under your roots (up to 2 levels deep). Git repos without one can be added with **Add project**.
 - Starts, stops and rebuilds one devcontainer per project and runs `opencode serve` inside it.
 - Shows live session status (running, idle, needs permission, question waiting) and sends browser notifications.
 - Opens each project's opencode web UI at `http://<project>.localhost:7777`, already authenticated.
@@ -16,7 +16,7 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 - Linux or macOS
 - Docker (on macOS: Docker Desktop, OrbStack, Colima or similar), and the devcontainer CLI: `npm i -g @devcontainers/cli`
 - Node.js 20 or newer
-- opencode v2 installed in each project's devcontainer, either with `npm i -g @opencode/cli@2` (for example in `postCreateCommand`) or with the official installer (`curl -fsSL https://opencode.ai/install | bash`). opendevhub looks for the binary on `PATH`, in `~/.opencode/bin`, `~/.local/bin` and `~/.bun/bin`, and in the `PATH` that bash or zsh set up from their startup files.
+- opencode v2 installed in each project's devcontainer (**Add project** sets this up for you), either with `npm i -g @opencode/cli@2` (for example in `postCreateCommand`) or with the v2 installer (`curl -fsSL https://opencode.ai/v2/install | bash`; `opencode.ai/install` installs v1). opendevhub looks for the binary on `PATH`, in `~/.opencode/bin`, `~/.local/bin` and `~/.bun/bin`, and in the `PATH` that bash or zsh set up from their startup files.
 - LLM provider credentials available inside the container (via `containerEnv`, `remoteEnv` or mounts). Git and ssh are set up for you: see [Git and ssh in containers](#git-and-ssh-in-containers).
 
 ## Usage
@@ -38,6 +38,24 @@ On Linux with a native Docker engine, opendevhub connects to each container's IP
 | `OPENDEVHUB_ROUTE` | `auto` (default) probes each container IP; `direct` or `gateway` forces a route. On macOS, `auto` only goes direct when something already answers on the container IP, so OrbStack users who want to skip the gateway can set `direct`. |
 | `OPENDEVHUB_GATEWAY_IMAGE` | Image for the gateway container (default `node:22-alpine`; it needs `node` on `PATH`). |
 | `OPENDEVHUB_PUSH` | Where Publish runs git: `host` or `container`. Default: the host when the checkout works there, else the container. |
+
+## Add project
+
+The **+** next to Projects in the sidebar (or **Add project…** in `⌘K`) lists the git repos under your roots that have no devcontainer. Pick one and opendevhub writes `.devcontainer/devcontainer.json` with a base image for its stack and the opencode v2 installer (`curl -fsSL https://opencode.ai/v2/install | bash`) as `postCreateCommand`, then starts the project. The file is left uncommitted, so you can change it, commit it or delete it.
+
+| Found in the repo | Image (`mcr.microsoft.com/devcontainers/…`) |
+| --- | --- |
+| `package.json` | `javascript-node:22` |
+| `pyproject.toml`, `requirements.txt`, `setup.py` | `python:3` |
+| `go.mod` | `go:1` |
+| `Cargo.toml` | `rust:1` |
+| `Gemfile` | `ruby:3` |
+| `pom.xml`, `build.gradle(.kts)` | `java:21` |
+| `*.csproj`, `*.sln` | `dotnet:8.0` |
+| `composer.json` | `php:8` |
+| anything else | `base:ubuntu` |
+
+The first match wins, and you can pick another image in the dialog.
 
 ## Publish
 
