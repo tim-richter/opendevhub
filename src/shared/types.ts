@@ -1,3 +1,5 @@
+import type { StackId } from "./stacks";
+
 export type ProjectId = string;
 
 /** One devcontainer with its own opencode. A project's main environment has the project's id. */
@@ -362,4 +364,26 @@ export interface DashboardSnapshot {
 export interface LogEvent {
   projectId: ProjectId;
   line: string;
+}
+
+/** A git repo under a root that has no devcontainer yet. */
+export interface Candidate {
+  path: string;
+  name: string;
+  /** The root it was found under. */
+  root: string;
+  /** Detected from marker files; the user can pick another. */
+  stack: StackId;
+}
+
+export interface CandidateList {
+  roots: string[];
+  candidates: Candidate[];
+}
+
+export interface AddProjectResult {
+  projectId: ProjectId;
+  started: boolean;
+  /** Why the project wasn't started. */
+  error?: string;
 }
