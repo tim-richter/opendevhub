@@ -18,6 +18,7 @@ const EXTENT = Math.sqrt(3) + STROKE + 0.05;
 /**
  * The opendevhub mark as a 3D wireframe cube with an "O" inside. It starts in the exact pose of the
  * flat logo (looking down the cube's diagonal), then turns around itself so every side shows.
+ * Click and drag to stop the animation and turn the cube by hand.
  * Renders the flat SVG until three.js has loaded, and keeps it when reduced motion is requested.
  */
 export function Logo3D({ size = 160, className }: { size?: number; className?: string }) {
@@ -38,6 +39,8 @@ export function Logo3D({ size = 160, className }: { size?: number; className?: s
       renderer.setSize(size, size);
       renderer.domElement.style.position = 'absolute';
       renderer.domElement.style.inset = '0';
+      renderer.domElement.style.cursor = 'grab';
+      renderer.domElement.style.touchAction = 'none';
       host.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
@@ -103,7 +106,44 @@ export function Logo3D({ size = 160, className }: { size?: number; className?: s
 
       const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
       const clock = new THREE.Clock();
+
+      // Grabbing the cube ends the animation for good; dragging then turns it around the screen axes.
+      const canvas = renderer.domElement;
+      let auto = true;
+      let last: { x: number; y: number } | null = null;
+      const turn = new THREE.Quaternion();
+      const xAxis = new THREE.Vector3(1, 0, 0);
+      const yAxis = new THREE.Vector3(0, 1, 0);
+      const radiansPerPixel = (Math.PI * 1.5) / size;
+      const onDown = (e: PointerEvent) => {
+        auto = false;
+        last = { x: e.clientX, y: e.clientY };
+        canvas.setPointerCapture(e.pointerId);
+        canvas.style.cursor = 'grabbing';
+      };
+      const onMove = (e: PointerEvent) => {
+        if (!last) return;
+        const dx = e.clientX - last.x;
+        const dy = e.clientY - last.y;
+        last = { x: e.clientX, y: e.clientY };
+        spin.quaternion.premultiply(turn.setFromAxisAngle(yAxis, dx * radiansPerPixel));
+        spin.quaternion.premultiply(turn.setFromAxisAngle(xAxis, dy * radiansPerPixel));
+      };
+      const onUp = (e: PointerEvent) => {
+        last = null;
+        if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+        canvas.style.cursor = 'grab';
+      };
+      canvas.addEventListener('pointerdown', onDown);
+      canvas.addEventListener('pointermove', onMove);
+      canvas.addEventListener('pointerup', onUp);
+      canvas.addEventListener('pointercancel', onUp);
+
       renderer.setAnimationLoop(() => {
+        if (!auto) {
+          renderer.render(scene, camera);
+          return;
+        }
         const t = clock.getElapsedTime() % (HOLD + SPIN);
         const p = t < HOLD ? 0 : ease((t - HOLD) / SPIN);
         // One full turn on two axes brings every face past the camera and lands back in the logo pose.
@@ -114,6 +154,10 @@ export function Logo3D({ size = 160, className }: { size?: number; className?: s
 
       cleanup = () => {
         themeObserver.disconnect();
+        canvas.removeEventListener('pointerdown', onDown);
+        canvas.removeEventListener('pointermove', onMove);
+        canvas.removeEventListener('pointerup', onUp);
+        canvas.removeEventListener('pointercancel', onUp);
         renderer.setAnimationLoop(null);
         for (const g of geometries) g.dispose();
         material.dispose();
