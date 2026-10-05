@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router";
 import { legacyPath } from "./checkouts";
 import { Shell } from "./layout/Shell";
-import { CheckoutLogs, CheckoutPage, CheckoutPorts, CheckoutSessions } from "./pages/CheckoutPage";
+import { CheckoutPage, CheckoutRuntime, CheckoutSessions } from "./pages/CheckoutPage";
 import { NotFound } from "./pages/NotFound";
 import { Overview } from "./pages/Overview";
 import { ProjectLayout } from "./pages/ProjectLayout";
@@ -14,8 +14,9 @@ const checkoutTabs = (
   <>
     <Route index element={<CheckoutSessions />} />
     <Route path="review" element={<ProjectReview />} />
-    <Route path="ports" element={<CheckoutPorts />} />
-    <Route path="logs" element={<CheckoutLogs />} />
+    <Route path="runtime" element={<CheckoutRuntime />} />
+    <Route path="ports" element={<Navigate replace to="../runtime" relative="path" />} />
+    <Route path="logs" element={<Navigate replace to="../runtime" relative="path" />} />
   </>
 );
 

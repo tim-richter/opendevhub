@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { Empty, GroupTitle, muted, Note, PageHeader, TabBar, TabLink } from "../components/Page";
 import { LogPanel } from "../components/LogPanel";
@@ -142,10 +141,9 @@ export function CheckoutPage() {
           {n.attention === 0 && <Count n={n.running + n.idle} tone="muted" />}
         </TabLink>
         <TabLink to={`${base}/review`}>Review</TabLink>
-        <TabLink to={`${base}/ports`}>
-          Ports <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
+        <TabLink to={`${base}/runtime`}>
+          Runtime <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
         </TabLink>
-        <TabLink to={`${base}/logs`}>Logs</TabLink>
       </TabBar>
 
       <Outlet context={{ view, checkout } satisfies CheckoutContext} />
@@ -243,130 +241,110 @@ function Group(props: { title: string; entries: SessionEntry[]; highlight?: stri
   );
 }
 
-/** Checkouts without their own container share the project's. */
-function SharedNote() {
-  return <Note>This checkout runs in the project's container, so these are shared with the other checkouts that do.</Note>;
-}
-
-export function CheckoutPorts() {
-  const { view, checkout } = useCheckout();
-  const own = envOfDirectory(view, checkout.directory);
-  const runtime = checkoutRuntime(view, checkout.directory);
-  const ports = runtime.ports ?? [];
-  if (ports.length === 0) {
-    return (
-      <Empty title="No forwarded ports">
-        <p className={muted}>
-          Add <code className="font-mono">forwardPorts</code> to the project's devcontainer.json to reach its apps from{" "}
-          <code className="font-mono">localhost</code>.
-        </p>
-      </Empty>
-    );
-  }
+/** The checkout's container at work: its forwarded ports beside its log. */
+export function CheckoutRuntime() {
   return (
-    <div className="flex flex-col gap-5">
-      {own ? <Note>This worktree runs in its own container; these ports are its own.</Note> : <SharedNote />}
-      {runtime.relay && (
-        <Note warn={runtime.relay === "unavailable"}>
-          {runtime.relay === "active"
-            ? "Connections go through a relay inside the container, so apps bound to localhost there are reachable."
-            : "No relay in the container: only apps listening on 0.0.0.0 are reachable. See the Logs tab for why."}
-        </Note>
-      )}
-      <Card className="py-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="px-4">Name</TableHead>
-              <TableHead>Container</TableHead>
-              <TableHead>Local</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {ports.map((p) => (
-              <PortRow key={p.status === "skipped" ? `s-${p.entry}` : `${p.status}-${p.containerPort}`} port={p} />
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
+    <div className="grid items-start gap-8 lg:grid-cols-2">
+      <CheckoutPorts />
+      <CheckoutLogs />
     </div>
   );
 }
 
+function CheckoutPorts() {
+  const { view, checkout } = useCheckout();
+  const own = envOfDirectory(view, checkout.directory);
+  const runtime = checkoutRuntime(view, checkout.directory);
+  const ports = runtime.ports ?? [];
+  const forwarded = ports.filter((p) => p.status === "forwarded").length;
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-lg font-semibold">Forwarded ports</h2>
+        {ports.length > 0 && (
+          <p className={muted}>
+            {own ? "This worktree runs in its own container; these ports are its own." : "Shared with the other checkouts in the project's container."}
+            {runtime.relay === "active" && " Relayed from inside the container, so apps bound to localhost there are reachable."}
+          </p>
+        )}
+      </div>
+      {runtime.relay === "unavailable" && ports.length > 0 && (
+        <Note warn>No relay in the container: only apps listening on 0.0.0.0 are reachable. The log says why.</Note>
+      )}
+      {ports.length === 0 ? (
+        <Empty title="No forwarded ports">
+          <p className={muted}>
+            Add <code className="font-mono">forwardPorts</code> to the project's devcontainer.json to reach its apps from{" "}
+            <code className="font-mono">localhost</code>.
+          </p>
+        </Empty>
+      ) : (
+        <Card className="gap-0 py-0">
+          <ul className="divide-y">
+            {ports.map((p) => (
+              <PortRow key={p.status === "skipped" ? `s-${p.entry}` : `${p.status}-${p.containerPort}`} port={p} />
+            ))}
+          </ul>
+          <p className={cn("border-t px-4 py-3 text-sm", forwarded === ports.length ? "text-ok" : "text-muted-foreground")}>
+            {forwarded === ports.length ? `All ${forwarded} forwarded` : `${forwarded} of ${ports.length} forwarded`}
+          </p>
+        </Card>
+      )}
+    </section>
+  );
+}
+
 function PortRow({ port: p }: { port: ForwardedPort }) {
-  if (p.status === "skipped") {
+  const row = "flex min-h-12 items-center gap-4 px-4 py-2 text-sm";
+  if (p.status !== "forwarded") {
+    const skipped = p.status === "skipped";
     return (
-      <TableRow className="text-muted-foreground">
-        <TableCell className="px-4">—</TableCell>
-        <TableCell className="font-mono">{p.entry}</TableCell>
-        <TableCell>—</TableCell>
-        <TableCell title={p.reason}>
-          <Badge variant="secondary" className="bg-muted text-muted-foreground">Skipped</Badge> {p.reason}
-        </TableCell>
-      </TableRow>
-    );
-  }
-  if (p.status === "failed") {
-    return (
-      <TableRow className="text-muted-foreground">
-        <TableCell className="px-4">{p.label ?? "—"}</TableCell>
-        <TableCell className="font-mono">{p.containerPort}</TableCell>
-        <TableCell>—</TableCell>
-        <TableCell>
-          <Badge variant="secondary" className="bg-destructive/15 text-destructive">
-            Failed
-          </Badge>{" "}
-          {p.reason}
-        </TableCell>
-      </TableRow>
+      <li className={cn(row, "text-muted-foreground")}>
+        <StatusDot tone={skipped ? "off" : "error"} label={skipped ? "Skipped" : "Failed"} />
+        <span className="w-14 font-mono">{skipped ? p.entry : p.containerPort}</span>
+        <span className="min-w-0 flex-1 truncate" title={p.reason}>
+          {skipped ? "Skipped" : "Failed"}: {p.reason}
+        </span>
+        {!skipped && p.label && <span>{p.label}</span>}
+      </li>
     );
   }
   const url = `http://localhost:${p.hostPort}/`;
   const moved = p.hostPort !== p.containerPort;
   return (
-    <TableRow>
-      <TableCell className="px-4">{p.label ?? "—"}</TableCell>
-      <TableCell className="font-mono">{p.containerPort}</TableCell>
-      <TableCell className="font-mono">
-        <span className="inline-flex items-center gap-1">
-          <a className="inline-flex items-center gap-1 hover:underline" href={url} target="_blank" rel="noreferrer">
-            localhost:{p.hostPort} <ExternalLinkIcon className="size-3" />
-          </a>
-          <CopyButton text={url} label="Copy URL" />
+    <li className={row}>
+      <StatusDot tone="ok" label="Forwarded" />
+      <span className="w-14 font-mono">{p.containerPort}</span>
+      <a className="inline-flex min-w-0 items-center gap-1 font-mono text-primary hover:underline" href={url} target="_blank" rel="noreferrer">
+        localhost:{p.hostPort} <ExternalLinkIcon className="size-3" />
+      </a>
+      {moved && (
+        <span className="text-muted-foreground" title={`Port ${p.containerPort} was taken on this machine`}>
+          moved
         </span>
-      </TableCell>
-      <TableCell>
-        <Badge variant="secondary" className="bg-ok/15 text-ok">
-          Forwarded
-        </Badge>
-        {moved && (
-          <span className="text-muted-foreground" title={`Port ${p.containerPort} was taken on this machine`}>
-            {" "}
-            · moved
-          </span>
-        )}
-      </TableCell>
-    </TableRow>
+      )}
+      <span className="ml-auto truncate text-muted-foreground">{p.label}</span>
+      <CopyButton text={url} label="Copy URL" />
+    </li>
   );
 }
 
-export function CheckoutLogs() {
+function CheckoutLogs() {
   const { view, checkout } = useCheckout();
   const own = envOfDirectory(view, checkout.directory);
   const { logs, loadLogs } = useDash();
   const id = view.project.id;
   useEffect(() => loadLogs(id), [id, loadLogs]);
   return (
-    <div className="flex flex-col gap-5">
-      {own ? (
-        <Note>
-          This is the project's log. Lines from this worktree's own container start with <code className="font-mono">[{own.worktree.branch}]</code>.
-        </Note>
-      ) : (
-        <SharedNote />
-      )}
-      <LogPanel lines={logs[id] ?? []} />
-    </div>
+    <LogPanel
+      lines={logs[id] ?? []}
+      hint={
+        own ? (
+          <>
+            The project's log; lines from this worktree's own container start with <code className="font-mono">[{own.worktree.branch}]</code>.
+          </>
+        ) : undefined
+      }
+    />
   );
 }

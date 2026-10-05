@@ -104,8 +104,8 @@ describe("checkouts", () => {
   it("maps the old project tab URLs to worktree URLs", () => {
     expect(legacyPath("p 1", "review")).toBe("/p/p%201/main/review");
     expect(legacyPath("p 1", "review", "login")).toBe("/p/p%201/w/login/review");
-    expect(legacyPath("p 1", "ports")).toBe("/p/p%201/main/ports");
-    expect(legacyPath("p 1", "logs")).toBe("/p/p%201/main/logs");
+    expect(legacyPath("p 1", "ports")).toBe("/p/p%201/main/runtime");
+    expect(legacyPath("p 1", "logs")).toBe("/p/p%201/main/runtime");
     expect(legacyPath("p 1", "worktrees")).toBe("/p/p%201");
   });
 });

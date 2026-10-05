@@ -155,7 +155,7 @@ export function sshAgentBadge(runtime: PublicRuntime): { label: string; warn: bo
     return { label: "ssh-agent forwarded", warn: false, title: "Your ssh-agent is forwarded into this container while opendevhub runs" };
   }
   if (runtime.sshAgent === "unavailable") {
-    return { label: "ssh-agent unavailable", warn: true, title: runtime.sshAgentReason ?? "See the Logs tab" };
+    return { label: "ssh-agent unavailable", warn: true, title: runtime.sshAgentReason ?? "See the log on the Runtime tab" };
   }
   return undefined;
 }

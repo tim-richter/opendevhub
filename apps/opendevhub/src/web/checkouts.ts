@@ -13,7 +13,7 @@ export interface Checkout {
   worktree?: Worktree;
 }
 
-export type CheckoutTab = "review" | "ports" | "logs";
+export type CheckoutTab = "review" | "runtime";
 
 const folderName = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
 
@@ -107,5 +107,6 @@ export function projectTasks(view: ProjectView): ProjectTask[] {
 
 /** Where the project tabs of earlier versions went. */
 export function legacyPath(projectId: string, tab: "review" | "ports" | "logs" | "worktrees", target = ""): string {
-  return tab === "worktrees" ? `/p/${encodeURIComponent(projectId)}` : checkoutPath(projectId, target, tab);
+  if (tab === "worktrees") return `/p/${encodeURIComponent(projectId)}`;
+  return checkoutPath(projectId, target, tab === "review" ? "review" : "runtime");
 }
