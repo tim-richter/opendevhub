@@ -26,6 +26,7 @@ import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
 import { RelayRuntime } from "../../src/server/relay/runtime";
 import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
+import { UsageStore, trackUsage } from "../../src/server/usage";
 import { Worktrees } from "../../src/server/worktrees";
 import type { Project } from "../../src/shared/types";
 
@@ -68,7 +69,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const runtime = new OpencodeRuntime({ containers, clientFor });
     // OPENDEVHUB_ROUTE=gateway runs the same test through the gateway container (the macOS path).
     const network = new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) });
-    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), git: new GitOps({ containers }), publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }), editors: new EditorLauncher([]), credentials: new Credentials({ run: spawnRunner, containers }), clientFor, roots: () => [], scan: async () => [project] });
+    const usage = UsageStore.open(":memory:")!;
+    const usageTracker = trackUsage(usage, store);
+    const orch = new Orchestrator({ store, containers, runtime, forwarder: new PortForwarder(), relay: new RelayRuntime({ containers }), network, worktrees: new Worktrees({ containers, run: spawnRunner }), git: new GitOps({ containers }), publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }), editors: new EditorLauncher([]), credentials: new Credentials({ run: spawnRunner, containers }), recordUsage: usageTracker.record, clientFor, roots: () => [], scan: async () => [project] });
     orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
     await orch.rescan();
@@ -126,6 +129,10 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
       () => expect(store.snapshot().projects[0].sessions.map((s) => s.title)).toContain("e2e session"),
       { timeout: 15_000 },
     );
+    // Real opencode v2 sessions carry the cost and tokens fields the ledger reads (zero before any prompt).
+    const e2eSession = store.snapshot().projects[0].sessions.find((s) => s.title === "e2e session")!;
+    expect(typeof (e2eSession.cost ?? 0)).toBe("number");
+    expect(store.snapshot().usage).toMatchObject({ today: { cost: expect.any(Number), tokens: expect.any(Number) } });
 
     // Respond inline: create real pending items through opencode's own endpoints, answer them through opendevhub.
     const sid = store.snapshot().projects[0].sessions.find((s) => s.title === "e2e session")!.id;
@@ -209,6 +216,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     await expect(fetch(`http://127.0.0.1:${webPort}/`)).rejects.toThrow();
     expect(store.runtime(project.id).containerState).toBe("stopped");
     await orch.shutdown();
+    usageTracker.stop();
+    usage.close();
     sshAgent.kill();
     if (previousSock === undefined) delete process.env.SSH_AUTH_SOCK;
     else process.env.SSH_AUTH_SOCK = previousSock;
