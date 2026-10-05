@@ -178,6 +178,11 @@ export class Orchestrator {
   /** Isolation settings per project, read when its main container forwards ports. */
   private readonly settings = new Map<ProjectId, EnvSettings>();
   private defaultEnvFiles?: EnvFilesPort;
+  /**
+   * Task containers come up one at a time: concurrent `devcontainer up` calls race on the CLI's shared
+   * temp files (its UID Dockerfile) and one of them fails.
+   */
+  private taskUps: Promise<unknown> = Promise.resolve();
   private readonly modelCache = new Map<ProjectId, { at: number; value: Promise<ModelsInfo> }>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
@@ -1061,7 +1066,7 @@ export class Orchestrator {
       await this.envFiles().write(env.id, config);
       const rec = store.environment(env.id);
       if (rec) store.putEnvironment({ ...rec, image });
-      const up = await containers.up(env.target, { rebuild: false, onLine: (l) => this.envLog(env, l) });
+      const up = await this.upTask(env);
       store.updateRuntime(env.id, { containerId: up.containerId });
       const info = await containers.inspect(up.containerId);
       if (!info?.running) throw new CommandError("container is not running after devcontainer up");
@@ -1082,6 +1087,12 @@ export class Orchestrator {
       this.fail(env, err);
       throw err;
     }
+  }
+
+  private upTask(env: TaskEnv): ReturnType<ContainersPort["up"]> {
+    const next = this.taskUps.then(() => this.deps.containers.up(env.target, { rebuild: false, onLine: (l) => this.envLog(env, l) }));
+    this.taskUps = next.catch(() => {});
+    return next;
   }
 
   /** Deletes a task container, its generated config and the UID image the CLI built for it. Throws when the container stays. */
@@ -1183,10 +1194,12 @@ export class Orchestrator {
     return env.worktree?.path ?? this.workspaceFolder(env.project);
   }
 
-  /** Worktrees the main environment's opencode serves: all but those with their own container. */
+  /**
+   * Worktrees whose sessions the main environment's monitor lists: all of them, so sessions its opencode
+   * ran in a worktree before the worktree got its own container stay visible (and answerable).
+   */
   private sharedWorktrees(projectId: ProjectId): string[] {
-    const own = new Set(this.deps.store.environments(projectId).map((e) => e.worktree.path));
-    return (this.deps.store.runtime(projectId).worktrees ?? []).map((w) => w.path).filter((p) => !own.has(p));
+    return (this.deps.store.runtime(projectId).worktrees ?? []).map((w) => w.path);
   }
 
   private envFiles(): EnvFilesPort {

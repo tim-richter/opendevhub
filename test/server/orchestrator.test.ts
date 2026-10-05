@@ -1543,6 +1543,24 @@ describe("task environments", () => {
     expect(s.store.environments(project.id).map((e) => e.worktree.branch).sort()).toEqual(["iso-1", "iso-2"]);
   });
 
+  it("brings task containers up one at a time (concurrent devcontainer up calls race in the CLI)", async () => {
+    const s = await withWorktree();
+    let active = 0;
+    let most = 0;
+    const plain = s.containers.up.getMockImplementation()!;
+    s.containers.up.mockImplementation(async (t, o) => {
+      if (!t.idLabels) return plain(t, o);
+      active++;
+      most = Math.max(most, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      return plain(t, o);
+    });
+    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", environment: "isolated", variants: [{}, {}, {}] });
+    expect(r.variants.every((v) => v.envId && !v.error)).toBe(true);
+    expect(most).toBe(1);
+  });
+
   it("uses the project's default when the task doesn't choose", async () => {
     const s = setup();
     s.projectSettings.mockReturnValue({ isolation: "isolated" });
@@ -1617,9 +1635,13 @@ describe("task environments", () => {
     expect(forwarder.open.mock.calls.at(-1)![0]).toBe(envId);
     expect(monitors.at(-1)!.opts).toMatchObject({ envId, projectId: project.id, directory: feat.path });
     expect(monitors.at(-1)!.opts.extraDirectories).toBeUndefined();
-    expect(monitors[0].opts.extraDirectories!()).toEqual([]);
     expect(orch.opencodeAddress(envId)).toEqual({ host: "172.17.0.10", port: 4096 });
     expect(store.runtime(project.id).containerId).toBe("c1");
+  });
+
+  it("keeps listing sessions the project's opencode ran in a worktree before it got its own container", async () => {
+    const { monitors } = await withEnv();
+    expect(monitors[0].opts.extraDirectories!()).toEqual([feat.path]);
   });
 
   it("records why a worktree's config can't get its own container", async () => {
