@@ -1,8 +1,8 @@
 import { type FormEvent, Fragment, type KeyboardEvent, type ReactNode, useCallback, useRef, useState } from "react";
 import type { FormField, PendingForm, PendingPermission, PermissionDecision, ProjectView, SessionSummary } from "../../shared/types";
-import { sessionUrl } from "../../shared/urls";
 import { dismissForm, type ReplyOutcome, replyForm, replyPermission } from "../api";
 import { type CardAction, canTakeFocus, cardAction } from "../card-keys";
+import { sessionHref } from "../derive";
 import {
   buildAnswer,
   type FieldValue,
@@ -121,7 +121,7 @@ export function PendingStack(props: { session: SessionSummary; view: ProjectView
           key={current.item.id}
           projectId={view.project.id}
           form={current.item}
-          openUrl={sessionUrl(view.openUrl, session.id)}
+          openUrl={sessionHref(view, session)}
           takeFocus={takeFocus}
           onDone={done}
         />

@@ -151,3 +151,16 @@ export function subscribe(handlers: {
   source.onerror = () => handlers.onConnection(false);
   return () => source.close();
 }
+
+export function createEnv(projectId: string, path: string): Promise<{ envId: string }> {
+  return postJson(projectId, "envs", { path }, "create container");
+}
+
+export async function envAction(projectId: string, envId: string, action: "start" | "stop"): Promise<void> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/envs/${encodeURIComponent(envId)}/${action}`, { method: "POST" });
+  if (!res.ok) throw await failure(res, `${action} container`);
+}
+
+export function removeEnv(projectId: string, envId: string): Promise<unknown> {
+  return postJson(projectId, `envs/${encodeURIComponent(envId)}/remove`, {}, "remove container");
+}

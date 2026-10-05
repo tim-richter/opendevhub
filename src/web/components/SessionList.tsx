@@ -4,7 +4,7 @@ import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { useNow } from "../DashboardContext";
 import { checkoutOf, checkoutPath } from "../checkouts";
-import { relativeTime, type SessionEntry, worktreeLabel } from "../derive";
+import { openUrlOf, relativeTime, type SessionEntry, worktreeLabel } from "../derive";
 import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Chip } from "./Page";
@@ -105,7 +105,7 @@ export function SessionList(props: {
         <Fragment key={session.id}>
           <SessionRow
             session={session}
-            openUrl={view.openUrl}
+            openUrl={openUrlOf(view, session.envId)}
             project={props.showProject ? { id: view.project.id, name: view.project.name } : undefined}
             worktree={props.hideWorktree ? undefined : worktreeLabel(view, session.directory)}
             highlighted={session.id === props.highlight}

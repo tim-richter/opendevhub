@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { ReviewData, SessionSummary } from "../../shared/types";
-import { sessionUrl } from "../../shared/urls";
 import { fetchReview, pickVariant } from "../api";
 import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -12,6 +11,7 @@ import { Empty, muted } from "../components/Page";
 import { SessionBadge } from "../components/Status";
 import { useDash } from "../DashboardContext";
 import { checkoutOf, checkoutPath } from "../checkouts";
+import { sessionHref } from "../derive";
 import { useProjectView } from "./ProjectLayout";
 import { diffStats, formatCost, formatTokens, pickPrompts, removals, taskSessions, variantName } from "../tasks";
 
@@ -149,7 +149,7 @@ export function ProjectTask() {
                   </Button>
                 )}
                 <Button asChild variant="outline" size="sm">
-                  <a href={sessionUrl(view.openUrl, s.id)} target="_blank" rel="noreferrer">
+                  <a href={sessionHref(view, s)} target="_blank" rel="noreferrer">
                     Open <ExternalLinkIcon />
                   </a>
                 </Button>

@@ -27,7 +27,7 @@ export function useCheckoutActions(view: ProjectView) {
   );
 
   const newSession = (c: Checkout) =>
-    busy(`session:${c.directory}`, () => openSessionTab(view, () => startSession(view.project.id, c.directory, c.worktree?.branch)));
+    busy(`session:${c.directory}`, () => openSessionTab(view, () => startSession(view.project.id, c.directory, c.worktree?.branch), c.directory));
 
   /** Removes a worktree after confirming, asking again before discarding uncommitted changes. */
   const remove = (c: Checkout, after?: () => void) => {

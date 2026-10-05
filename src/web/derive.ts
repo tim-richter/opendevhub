@@ -1,4 +1,5 @@
-import type { DashboardSnapshot, ProjectView, SessionStatus, SessionSummary } from "../shared/types";
+import type { DashboardSnapshot, EnvironmentView, ProjectView, SessionStatus, SessionSummary } from "../shared/types";
+import { sessionUrl } from "../shared/urls";
 
 export interface Notice {
   key: string;
@@ -157,9 +158,31 @@ export function shellQuote(value: string): string {
 
 /** A shell inside the container at `directory`, as the dev container's user, preferring bash. */
 export function containerShellCommand(view: ProjectView, directory: string): string | undefined {
-  const { containerName, remoteUser } = view.runtime;
+  const { containerName, remoteUser } = (envOfDirectory(view, directory) ?? view).runtime;
   if (!containerName) return undefined;
   const user = remoteUser ? ` -u ${shellQuote(remoteUser)}` : "";
   const shell = "command -v bash >/dev/null && exec bash -l || exec sh -l";
   return `docker exec -it${user} -w ${shellQuote(directory)} ${shellQuote(containerName)} sh -c ${shellQuote(shell)}`;
+}
+
+/** The worktree's own container, when it has one. */
+export function envOfDirectory(view: ProjectView, directory: string): EnvironmentView | undefined {
+  return view.environments.find((e) => e.worktree.path === directory);
+}
+
+/** The opencode URL of an environment; the project's for the main one or one that is gone. */
+export function openUrlOf(view: ProjectView, envId: string | undefined): string {
+  return (envId && view.environments.find((e) => e.id === envId)?.openUrl) || view.openUrl;
+}
+
+/** A session in the opencode that runs it. */
+export function sessionHref(view: ProjectView, session: SessionSummary): string {
+  return sessionUrl(openUrlOf(view, session.envId), session.id);
+}
+
+export function envTone(env: EnvironmentView): Tone {
+  const { containerState, opencode } = env.runtime;
+  if (containerState === "error" || (containerState === "running" && opencode === "unhealthy")) return "error";
+  if (containerState === "starting" || containerState === "stopping" || opencode === "starting") return "busy";
+  return containerState === "running" ? "ok" : "off";
 }

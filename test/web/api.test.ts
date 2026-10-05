@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   commitChanges,
+  createEnv,
   createTask,
+  envAction,
   dismissForm,
   fetchModels,
   fetchPublishInfo,
@@ -9,6 +11,7 @@ import {
   mergeIntoBase,
   pickVariant,
   publishChanges,
+  removeEnv,
   removeWorktree,
   replyForm,
   replyPermission,
@@ -121,5 +124,19 @@ describe("publish API", () => {
       ["/api/projects/p/publish/suggest", { directory: "/w" }],
       ["/api/projects/p/publish", { directory: "/w", remote: "origin", base: "main", strategy: "branch", title: "T", description: "D" }],
     ]);
+  });
+});
+
+describe("environment API", () => {
+  it("creates, starts, stops and removes a worktree's container", async () => {
+    const fetchMock = stubFetch(200, { envId: "e1" });
+    expect(await createEnv("demo-1", "/w/x")).toEqual({ envId: "e1" });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/demo-1/envs");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ path: "/w/x" });
+    await envAction("demo-1", "e1", "stop");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/demo-1/envs/e1/stop");
+    expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
+    await removeEnv("demo-1", "e1");
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/projects/demo-1/envs/e1/remove");
   });
 });

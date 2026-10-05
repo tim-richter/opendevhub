@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { DashboardSnapshot, ProjectView, SessionStatus } from "../../src/shared/types";
+import type { DashboardSnapshot, EnvironmentView, ProjectView, SessionStatus } from "../../src/shared/types";
 import {
   allSessions,
   attentionCounts,
   compareSessions,
   diffForNotifications,
+  envOfDirectory,
+  envTone,
+  openUrlOf,
+  sessionHref,
   pendingSummary,
   matches,
   projectCounts,
@@ -177,5 +181,40 @@ describe("pendingSummary and notifications", () => {
     };
     const [notice] = diffForNotifications(snap({ a: "running" }), next);
     expect(notice).toMatchObject({ title: "demo · wants bash: npm test", body: "T a" });
+  });
+});
+
+describe("task environments", () => {
+  const env: EnvironmentView = {
+    id: "p-feat-0a1b",
+    worktree: { path: "/w.worktrees/feat", hostPath: "/p.worktrees/feat", branch: "feat" },
+    runtime: { projectId: "p", containerState: "running", opencode: "healthy", containerName: "task_c", remoteUser: "node" },
+    openUrl: "http://p-feat-0a1b.localhost:7777/",
+  };
+  const view = (): ProjectView => ({ ...snap({}).projects[0], environments: [env] });
+
+  it("finds a checkout's environment and its opencode URL", () => {
+    expect(envOfDirectory(view(), "/w.worktrees/feat")?.id).toBe(env.id);
+    expect(envOfDirectory(view(), "/w")).toBeUndefined();
+    expect(openUrlOf(view(), env.id)).toBe(env.openUrl);
+    expect(openUrlOf(view(), undefined)).toBe("http://p.localhost:7777/");
+    expect(openUrlOf(view(), "gone")).toBe("http://p.localhost:7777/");
+  });
+
+  it("links a session to the opencode that runs it", () => {
+    const s = { id: "ses_1", projectId: "p", envId: env.id, title: "t", directory: "/w.worktrees/feat", updatedAt: 1, status: "idle" as const };
+    expect(sessionHref(view(), s)).toMatch(/^http:\/\/p-feat-0a1b\.localhost:7777\/server\/.+\/session\/ses_1$/);
+    expect(sessionHref(view(), { ...s, envId: undefined })).toMatch(/^http:\/\/p\.localhost:7777\//);
+  });
+
+  it("opens a shell in the worktree's own container", () => {
+    expect(containerShellCommand(view(), "/w.worktrees/feat")).toContain(" task_c ");
+  });
+
+  it("tones a container by its state", () => {
+    expect(envTone(env)).toBe("ok");
+    expect(envTone({ ...env, runtime: { ...env.runtime, containerState: "starting" } })).toBe("busy");
+    expect(envTone({ ...env, runtime: { ...env.runtime, opencode: "unhealthy" } })).toBe("error");
+    expect(envTone({ ...env, runtime: { ...env.runtime, containerState: "stopped" } })).toBe("off");
   });
 });

@@ -4,7 +4,7 @@ import type { ProjectView, SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { startSession } from "../api";
 import { useDash } from "../DashboardContext";
-import { workspaceFolderOf } from "../derive";
+import { envOfDirectory, openUrlOf, sessionHref, workspaceFolderOf } from "../derive";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,11 +36,12 @@ export function projectFlags(view: ProjectView, blocked: boolean) {
  * Opens a tab synchronously (inside the click) so popup blockers allow it, then points it at the
  * session once the server has created it.
  */
-export async function openSessionTab(view: ProjectView, create: () => Promise<string | undefined>): Promise<void> {
+export async function openSessionTab(view: ProjectView, create: () => Promise<string | undefined>, directory?: string): Promise<void> {
   const tab = window.open("about:blank", "_blank");
   try {
     const id = await create();
-    if (id && tab) tab.location.href = sessionUrl(view.openUrl, id);
+    const base = directory ? openUrlOf(view, envOfDirectory(view, directory)?.id) : view.openUrl;
+    if (id && tab) tab.location.href = sessionUrl(base, id);
     else tab?.close();
   } catch (err) {
     tab?.close();
@@ -65,7 +66,7 @@ export function OpenButton({ view, compact }: { view: ProjectView; compact?: boo
   return (
     <Button asChild size={compact ? "sm" : "default"} className={cn(!enabled && "pointer-events-none opacity-50")}>
       <a
-        href={enabled ? (latest ? sessionUrl(view.openUrl, latest.id) : view.openUrl) : undefined}
+        href={enabled ? (latest ? sessionHref(view, latest) : view.openUrl) : undefined}
         target="_blank"
         rel="noreferrer"
         aria-disabled={!enabled}

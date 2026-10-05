@@ -1,7 +1,6 @@
 import { checkoutPath, checkouts, checkoutTone } from "../checkouts";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { sessionUrl } from "../../shared/urls";
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,7 +11,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { useDash } from "../DashboardContext";
-import { allSessions, matches, projectTone } from "../derive";
+import { allSessions, matches, projectTone, sessionHref } from "../derive";
 import { projectIdFromPath } from "../tasks";
 import { SESSION_LABEL, StatusDot } from "./Status";
 
@@ -73,7 +72,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         group: "Sessions",
         label: session.title || "Untitled session",
         hint: `${view.project.name} · ${SESSION_LABEL[session.status]}`,
-        run: () => window.open(sessionUrl(view.openUrl, session.id), "_blank", "noreferrer"),
+        run: () => window.open(sessionHref(view, session), "_blank", "noreferrer"),
       });
     }
     return list;
