@@ -27,7 +27,7 @@ interface Item {
 const LIMIT = 40;
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { snapshot, rescan, newTask } = useDash();
+  const { snapshot, rescan, newTask, openAddProject } = useDash();
   const navigate = useNavigate();
   const location = useLocation();
   const [query, setQuery] = useState("");
@@ -44,6 +44,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { key: "nav-sessions", group: "Go to", label: "All sessions", run: go("/sessions") },
       { key: "act-new-task", group: "Actions", label: "New task", hint: "n", run: () => newTask(projectIdFromPath(location.pathname)) },
       { key: "act-rescan", group: "Actions", label: "Rescan projects", run: rescan },
+      { key: "act-add-project", group: "Actions", label: "Add project…", run: openAddProject },
     ];
     for (const view of snapshot.projects) {
       const id = encodeURIComponent(view.project.id);
@@ -76,7 +77,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       });
     }
     return list;
-  }, [snapshot, navigate, rescan, newTask, location.pathname]);
+  }, [snapshot, navigate, rescan, newTask, openAddProject, location.pathname]);
 
   // Filtering stays ours (substring match, capped) rather than cmdk's fuzzy ranking.
   const groups = useMemo(() => {

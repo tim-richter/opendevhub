@@ -1,4 +1,4 @@
-import { BellIcon, LayoutGridIcon, ListIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { BellIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,6 +9,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarInput,
@@ -25,6 +26,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { AddProjectDialog } from "../components/AddProjectDialog";
 import { CommandPalette } from "../components/CommandPalette";
 import { Logo } from "../components/Logo";
 import { NewTaskDialog } from "../components/NewTaskDialog";
@@ -38,7 +40,7 @@ import { opensNewTask, projectIdFromPath } from "../tasks";
 const FILTER_THRESHOLD = 8;
 
 export function Shell() {
-  const { snapshot, connected, newTask, newTaskFor } = useDash();
+  const { snapshot, connected, newTask, newTaskFor, addProjectOpen } = useDash();
   const [palette, setPalette] = useState(false);
   const location = useLocation();
 
@@ -49,14 +51,14 @@ export function Shell() {
         setPalette((p) => !p);
         return;
       }
-      if (!palette && !newTaskFor && opensNewTask(e)) {
+      if (!palette && !newTaskFor && !addProjectOpen && opensNewTask(e)) {
         e.preventDefault();
         newTask(projectIdFromPath(location.pathname));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [palette, newTaskFor, newTask, location.pathname]);
+  }, [palette, newTaskFor, addProjectOpen, newTask, location.pathname]);
 
   if (!snapshot) {
     return (
@@ -79,6 +81,7 @@ export function Shell() {
       </SidebarInset>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <NewTaskDialog />
+      <AddProjectDialog />
     </SidebarProvider>
   );
 }
@@ -125,7 +128,7 @@ function CheckoutItems({ view }: { view: ProjectView }) {
 }
 
 function AppSidebar({ onSearch }: { onSearch: () => void }) {
-  const { snapshot, connected, rescan, scanning, permission, requestPermission } = useDash();
+  const { snapshot, connected, rescan, scanning, permission, requestPermission, openAddProject } = useDash();
   const { setOpenMobile } = useSidebar();
   const [filter, setFilter] = useState("");
   const location = useLocation();
@@ -165,10 +168,13 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel className="justify-between">
+          <SidebarGroupLabel className="justify-between pr-8">
             <span>Projects</span>
             <span>{snapshot.projects.length}</span>
           </SidebarGroupLabel>
+          <SidebarGroupAction title="Add project" aria-label="Add project" onClick={openAddProject}>
+            <PlusIcon />
+          </SidebarGroupAction>
           {snapshot.projects.length > FILTER_THRESHOLD && (
             <SidebarInput className="mb-2" placeholder="Filter projects" value={filter} onChange={(e) => setFilter(e.target.value)} />
           )}

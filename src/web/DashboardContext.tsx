@@ -25,6 +25,10 @@ interface DashboardContextValue {
   newTask: (projectId?: string) => void;
   newTaskFor: { projectId?: string } | undefined;
   closeNewTask: () => void;
+  /** Whether the Add project dialog is open. */
+  addProjectOpen: boolean;
+  openAddProject: () => void;
+  closeAddProject: () => void;
   permission: Permission;
   requestPermission: () => void;
 }
@@ -37,6 +41,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string>();
   const [scanning, setScanning] = useState(false);
   const [newTaskFor, setNewTaskFor] = useState<{ projectId?: string }>();
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [permission, setPermission] = useState<Permission>(() =>
     typeof Notification === "undefined" ? "unsupported" : Notification.permission,
   );
@@ -82,10 +87,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       newTask,
       newTaskFor,
       closeNewTask: () => setNewTaskFor(undefined),
+      addProjectOpen,
+      openAddProject: () => setAddProjectOpen(true),
+      closeAddProject: () => setAddProjectOpen(false),
       permission,
       requestPermission: () => void Notification.requestPermission().then(setPermission),
     }),
-    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, fail, newTask, newTaskFor],
+    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, fail, newTask, newTaskFor, addProjectOpen],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

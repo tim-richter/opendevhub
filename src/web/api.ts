@@ -1,4 +1,5 @@
-import type { DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, Worktree } from "../shared/types";
+import type { StackId } from "../shared/stacks";
+import type { AddProjectResult, CandidateList, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -163,4 +164,20 @@ export async function envAction(projectId: string, envId: string, action: "start
 
 export function removeEnv(projectId: string, envId: string): Promise<unknown> {
   return postJson(projectId, `envs/${encodeURIComponent(envId)}/remove`, {}, "remove container");
+}
+
+export async function fetchCandidates(): Promise<CandidateList> {
+  const res = await fetch("/api/onboarding/candidates");
+  if (!res.ok) throw await failure(res, "list repos");
+  return (await res.json()) as CandidateList;
+}
+
+export async function addProject(path: string, stack: StackId): Promise<AddProjectResult> {
+  const res = await fetch("/api/onboarding", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, stack }),
+  });
+  if (!res.ok) throw await failure(res, "add project");
+  return (await res.json()) as AddProjectResult;
 }
