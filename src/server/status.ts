@@ -3,6 +3,8 @@ import type { RawForm, RawPermissionRequest, RawSession } from "./opencode/clien
 import { parseTaskMeta } from "./tasks";
 
 export interface StatusInput {
+  /** The environment these sessions come from; copied onto each session. */
+  envId?: string;
   sessions: RawSession[];
   active: Set<string>;
   permissions: RawPermissionRequest[];
@@ -105,6 +107,7 @@ export function deriveSessions(projectId: string, input: StatusInput): SessionSu
       return {
         id: s.id,
         projectId,
+        ...(input.envId ? { envId: input.envId } : {}),
         title: s.title?.trim() || "Untitled session",
         directory: s.location.directory,
         updatedAt: s.time.updated,

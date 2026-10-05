@@ -5,6 +5,12 @@ import { rawSession } from "../helpers/fake-opencode";
 const base = { active: new Set<string>(), permissions: [], forms: [] };
 
 describe("deriveSessions", () => {
+  it("tags sessions with the environment they run in, when given", () => {
+    const sessions = [rawSession("ses_1")];
+    expect(deriveSessions("p", { ...base, envId: "p-feat-0a1b", sessions })[0].envId).toBe("p-feat-0a1b");
+    expect(deriveSessions("p", { ...base, sessions })[0]).not.toHaveProperty("envId");
+  });
+
   it("maps sessions to idle summaries with titles and directories", () => {
     const out = deriveSessions("p", { ...base, sessions: [rawSession("ses_1", { title: "  " })] });
     expect(out).toEqual([

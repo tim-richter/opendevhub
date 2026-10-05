@@ -5,6 +5,8 @@ import { deriveSessions } from "./status";
 export interface MonitorOptions {
   client: OpencodeClient;
   projectId: string;
+  /** Copied onto every session it reports. */
+  envId?: string;
   directory: string;
   /** Other checkouts (worktrees) whose permission requests and questions should be watched too. */
   extraDirectories?: () => string[];
@@ -106,7 +108,7 @@ export class Monitor {
       this.failures = 0;
       this.opts.onHealth(true);
       this.opts.onSessions(
-        deriveSessions(projectId, { sessions: all, active, permissions, forms, firstSeen: this.firstSeen }),
+        deriveSessions(projectId, { envId: this.opts.envId, sessions: all, active, permissions, forms, firstSeen: this.firstSeen }),
       );
     } catch {
       if (this.stopped) return;
