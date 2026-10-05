@@ -10,6 +10,13 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter opendevhub test",
-    "test:e2e": "pnpm --filter opendevhub test:e2e"
+    "test:e2e": "pnpm --filter opendevhub test:e2e",
+    "changeset": "changeset",
+    "version-packages": "changeset version && pnpm install --lockfile-only",
+    "release": "pnpm --filter opendevhub build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3"
   }
 }
