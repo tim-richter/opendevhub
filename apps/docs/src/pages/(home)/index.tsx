@@ -1,16 +1,18 @@
 import { Link } from 'waku';
+import { HomeBackground } from '@/components/home-background';
 import { Logo3D } from '@/components/logo-3d';
 
 export default function Home() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-16 gap-6">
+    <div className="relative isolate flex-1 flex flex-col items-center justify-center text-center px-4 py-16 gap-6">
+      <HomeBackground />
       <Logo3D size={160} className="text-fd-primary" />
       <h1 className="font-semibold text-3xl sm:text-4xl">opendevhub</h1>
       <p className="max-w-xl text-fd-muted-foreground">
         A local dashboard that runs opencode agents inside your projects&apos; devcontainers. Watch every
         session, answer permissions, run tasks in parallel worktrees and publish the result as a pull request.
       </p>
-      <pre className="rounded-lg border bg-fd-card px-4 py-2 text-sm">
+      <pre className="rounded-lg border bg-fd-card/70 backdrop-blur-sm px-4 py-2 text-sm">
         <code>npx opendevhub --root ~/code</code>
       </pre>
       <div className="flex gap-3">
@@ -22,7 +24,7 @@ export default function Home() {
         </Link>
         <Link
           to="/docs/getting-started"
-          className="px-3 py-2 rounded-lg border font-medium text-sm"
+          className="px-3 py-2 rounded-lg border bg-fd-background/60 backdrop-blur-sm font-medium text-sm"
         >
           Getting started
         </Link>

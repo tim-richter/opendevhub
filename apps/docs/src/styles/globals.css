@@ -10,3 +10,14 @@ html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
 }
+
+@keyframes home-drift {
+  from {
+    translate: 0 0;
+    scale: 1;
+  }
+  to {
+    translate: 4rem 2.5rem;
+    scale: 1.15;
+  }
+}
