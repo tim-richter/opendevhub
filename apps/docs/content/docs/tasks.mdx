@@ -8,9 +8,13 @@ icon: ListChecks
 
 By default a task creates a [worktree](/docs/worktrees) on a branch named after the prompt's first line (`-2`, `-3`… when the name is taken), starts a session there and sends the prompt. **Main checkout** runs it in the project folder instead. **Environment: Own container** runs it in its [own container](/docs/worktrees#own-containers).
 
+![The New task dialog with a prompt, a new worktree in the shared container, and two models to compare](./images/new-task.webp)
+
 ## Compare models
 
 **Compare with another model** runs the same prompt on up to four models, each in its own worktree (`<branch>-<model>`). The task page shows each variant's status, cost, tokens and changes, with a Review link.
+
+![A task page comparing two variants side by side, each with its branch, cost, tokens and changes](./images/task-variants.webp)
 
 **Pick this one** hides the other variants. It can also remove their worktrees and branches, after a confirmation that lists any uncommitted changes.
 
@@ -21,3 +25,5 @@ A task is stored in its sessions' opencode metadata (`metadata.opendevhub`), so 
 ## Review and publish
 
 Each checkout has a **Review** tab that shows the changes. When you're happy with them, [Publish](/docs/publish) pushes the branch and opens a pull request.
+
+![The Review tab of a task worktree: the changed files and the diff, with Commit, Merge and Publish actions](./images/review.webp)
