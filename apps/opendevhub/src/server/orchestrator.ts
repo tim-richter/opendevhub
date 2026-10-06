@@ -17,6 +17,7 @@ import type {
   PublishInfo,
   PublishResult,
   ReviewData,
+  ReviewMode,
   SessionCleanupItem,
   SessionSummary,
   TaskMeta,
@@ -766,7 +767,7 @@ export class Orchestrator {
   }
 
   /** What changed in a checkout compared with its base, for the Review tab. */
-  async review(id: ProjectId, directory: string, opts: { base?: string; file?: string } = {}): Promise<ReviewData> {
+  async review(id: ProjectId, directory: string, opts: { base?: string; mode?: ReviewMode; file?: string } = {}): Promise<ReviewData> {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
     const request = opts.base?.trim() ? validateBranch(opts.base) : undefined;
@@ -780,7 +781,7 @@ export class Orchestrator {
       client.vcsInfo(directory).catch((): { default?: string } => ({})),
     ]);
     const base = resolveBase({ request, config, opencode: opencodeBase, defaultBranch: info.default });
-    const mode = diffMode(directory === ws, branch, base);
+    const mode = diffMode(opts.mode, base);
     const [raw, status, counts, pushed, wsBranch, wsClean] = await Promise.all([
       client.vcsDiff(directory, mode, mode === "branch" ? base?.name : undefined),
       client.vcsStatus(directory),

@@ -1203,11 +1203,11 @@ describe("Orchestrator", () => {
       expect(await orch.publishSuggestion(project.id, wt)).toEqual({ title: "Add login", description: "Adds the form." });
     });
 
-    it("diffs a worktree against its recorded base", async () => {
+    it("compares a worktree with its recorded base on request", async () => {
       const { orch, client, git } = await running();
       git.isClean.mockImplementation(async (_p, dir) => dir === "/workspaces/demo");
       client.vcsStatus.mockResolvedValueOnce([{ file: "a.ts" }]);
-      const r = await orch.review(project.id, wt);
+      const r = await orch.review(project.id, wt, { mode: "branch" });
       expect(client.vcsDiff).toHaveBeenCalledWith(wt, "branch", "main");
       expect(git.aheadBehind).toHaveBeenCalledWith(project, wt, "main");
       expect(r).toMatchObject({
@@ -1224,17 +1224,21 @@ describe("Orchestrator", () => {
       expect(r.files.map((f) => f.file)).toEqual(["a.ts", "b.ts"]);
     });
 
-    it("shows the main checkout's working copy when it is on its base", async () => {
+    it("shows uncommitted changes by default, still resolving the base", async () => {
       const { orch, client, git } = await running();
       git.recordedBase.mockResolvedValue(undefined);
       const r = await orch.review(project.id, "/workspaces/demo");
       expect(r.base).toEqual({ name: "main", source: "default" });
+      expect(r.mode).toBe("working");
       expect(client.vcsDiff).toHaveBeenCalledWith("/workspaces/demo", "working", undefined);
+      const w = await orch.review(project.id, wt);
+      expect(w).toMatchObject({ mode: "working", base: { name: "main", source: "default" }, ahead: 2 });
+      expect(client.vcsDiff).toHaveBeenLastCalledWith(wt, "working", undefined);
     });
 
     it("takes a base override, returns one file on request, and rejects option-like bases and unknown folders", async () => {
       const { orch, client } = await running();
-      const r = await orch.review(project.id, wt, { base: "develop", file: "b.ts" });
+      const r = await orch.review(project.id, wt, { base: "develop", mode: "branch", file: "b.ts" });
       expect(client.vcsDiff).toHaveBeenLastCalledWith(wt, "branch", "develop");
       expect(r.base).toEqual({ name: "develop", source: "request" });
       expect(r.files.map((f) => f.file)).toEqual(["b.ts"]);

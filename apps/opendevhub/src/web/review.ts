@@ -1,6 +1,6 @@
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs/react";
 import type { FileTreeRowDecoration, GitStatusEntry } from "@pierre/trees";
-import type { ProjectView, ReviewData, ReviewFile, UpdateStrategy } from "../shared/types";
+import type { ProjectView, ReviewData, ReviewFile, ReviewMode, UpdateStrategy } from "../shared/types";
 import { workspaceFolderOf } from "./derive";
 
 export interface DiffLine {
@@ -95,9 +95,13 @@ export function linesLabel(c: Pick<ReviewComment, "line" | "side" | "start" | "s
 }
 
 /** The spec's review prompt: line comments ordered by file and line, then general comments. */
-export function composeReviewPrompt(o: { branch?: string; base?: string; comments: ReviewComment[] }): string {
-  const what = o.branch ? `Review feedback on ${o.branch}` : "Review feedback on the working copy";
-  const vs = o.base && o.base !== o.branch ? ` (compared with ${o.base})` : "";
+export function composeReviewPrompt(o: { branch?: string; base?: string; uncommitted?: boolean; comments: ReviewComment[] }): string {
+  const what = !o.branch
+    ? "Review feedback on the working copy"
+    : o.uncommitted
+      ? `Review feedback on the uncommitted changes on ${o.branch}`
+      : `Review feedback on ${o.branch}`;
+  const vs = !o.uncommitted && o.base && o.base !== o.branch ? ` (compared with ${o.base})` : "";
   const withText = o.comments.filter((c) => c.text.trim());
   const ordered = [
     ...withText.filter((c) => c.file).sort((a, b) => a.file!.localeCompare(b.file!) || (a.line ?? 0) - (b.line ?? 0)),
@@ -119,8 +123,43 @@ export function conflictPrompt(o: { branch: string; base: string; strategy: Upda
   return `${how} and resolve the conflicts in ${o.files.join(", ")}. Run the tests afterwards, then reply with what you changed.`;
 }
 
-export function draftKey(projectId: string, target: string, base: string | undefined): string {
-  return `opendevhub:review:${projectId}:${target || "main-checkout"}:${base ?? ""}`;
+/** Drafts per diff: ends in the base when comparing with it, empty for uncommitted changes. */
+export function draftKey(projectId: string, target: string, mode: ReviewMode, base: string | undefined): string {
+  return `opendevhub:review:${projectId}:${target || "main-checkout"}:${mode === "branch" ? (base ?? "") : ""}`;
+}
+
+function modeKey(projectId: string, target: string): string {
+  return `opendevhub:review-mode:${projectId}:${target || "main-checkout"}`;
+}
+
+/** The diff a checkout's review shows; uncommitted changes unless comparing with the base was chosen there. */
+export function readReviewMode(projectId: string, target: string, storage: Pick<Storage, "getItem"> | undefined = defaultStorage()): ReviewMode {
+  try {
+    return storage?.getItem(modeKey(projectId, target)) === "branch" ? "branch" : "working";
+  } catch {
+    return "working";
+  }
+}
+
+export function writeReviewMode(
+  projectId: string,
+  target: string,
+  mode: ReviewMode,
+  storage: Pick<Storage, "setItem" | "removeItem"> | undefined = defaultStorage(),
+): void {
+  try {
+    if (mode === "working") storage?.removeItem(modeKey(projectId, target));
+    else storage?.setItem(modeKey(projectId, target), mode);
+  } catch {
+    // storage blocked: the choice lasts until reload
+  }
+}
+
+/** The hint when there is nothing uncommitted but the branch has commits its base doesn't. */
+export function aheadHint(data: ReviewData): string | undefined {
+  if (data.mode !== "working" || data.files.length > 0 || !data.base || !data.branch || data.ahead === 0) return undefined;
+  if (data.branch === data.base.name) return undefined;
+  return `${data.branch} is ${data.ahead} commit${data.ahead === 1 ? "" : "s"} ahead of ${data.base.name}.`;
 }
 
 export function sentKey(projectId: string, target: string): string {

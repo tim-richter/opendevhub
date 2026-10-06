@@ -374,12 +374,15 @@ describe("dashboard API", () => {
         body: JSON.stringify(body),
       });
 
-    it("serves review data for a directory with an optional base and file", async () => {
+    it("serves review data for a directory with an optional base, mode and file", async () => {
       const { app, orchestrator } = setup();
-      const res = await app.request(`/api/projects/${project.id}/review?directory=%2Fw%2Fx&base=main&file=a.ts`);
+      const res = await app.request(`/api/projects/${project.id}/review?directory=%2Fw%2Fx&base=main&mode=branch&file=a.ts`);
       expect(res.status).toBe(200);
       expect((await res.json()).directory).toBe("/w/x");
-      expect(orchestrator.review).toHaveBeenCalledWith(project.id, "/w/x", { base: "main", file: "a.ts" });
+      expect(orchestrator.review).toHaveBeenCalledWith(project.id, "/w/x", { base: "main", mode: "branch", file: "a.ts" });
+      await app.request(`/api/projects/${project.id}/review?directory=%2Fw%2Fx`);
+      expect(orchestrator.review).toHaveBeenLastCalledWith(project.id, "/w/x", { base: undefined, mode: "working", file: undefined });
+      expect((await app.request(`/api/projects/${project.id}/review?directory=%2Fw%2Fx&mode=committed`)).status).toBe(400);
       orchestrator.review.mockRejectedValueOnce(new InvalidRequestError("/etc is neither the workspace nor a known worktree"));
       expect((await app.request(`/api/projects/${project.id}/review?directory=%2Fetc`)).status).toBe(400);
     });

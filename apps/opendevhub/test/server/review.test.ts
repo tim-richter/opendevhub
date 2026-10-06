@@ -29,12 +29,11 @@ describe("resolveBase", () => {
 
 describe("diffMode", () => {
   const main = { name: "main", source: "config" as const };
-  it("diffs the working copy when the main checkout is on its base, else the branch", () => {
-    expect(diffMode(true, "main", main)).toBe("working");
-    expect(diffMode(true, "feature", main)).toBe("branch");
-    expect(diffMode(true, "main", undefined)).toBe("working");
-    expect(diffMode(false, "feature", main)).toBe("branch");
-    expect(diffMode(false, undefined, undefined)).toBe("working");
+  it("shows uncommitted changes unless a comparison with a known base is asked for", () => {
+    expect(diffMode(undefined, main)).toBe("working");
+    expect(diffMode("working", main)).toBe("working");
+    expect(diffMode("branch", main)).toBe("branch");
+    expect(diffMode("branch", undefined)).toBe("working");
   });
 });
 

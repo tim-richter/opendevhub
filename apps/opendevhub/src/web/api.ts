@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
+import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -86,8 +86,17 @@ export function dismissForm(projectId: string, formId: string): Promise<ReplyOut
   return reply(projectId, `forms/${encodeURIComponent(formId)}`, "DELETE", undefined, "dismiss");
 }
 
-export async function fetchReview(projectId: string, directory: string, opts: { base?: string; file?: string } = {}): Promise<ReviewData> {
-  const query = new URLSearchParams({ directory, ...(opts.base ? { base: opts.base } : {}), ...(opts.file ? { file: opts.file } : {}) });
+export async function fetchReview(
+  projectId: string,
+  directory: string,
+  opts: { base?: string; mode?: ReviewMode; file?: string } = {},
+): Promise<ReviewData> {
+  const query = new URLSearchParams({
+    directory,
+    ...(opts.base ? { base: opts.base } : {}),
+    ...(opts.mode ? { mode: opts.mode } : {}),
+    ...(opts.file ? { file: opts.file } : {}),
+  });
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/review?${query}`);
   if (!res.ok) throw await failure(res, "review");
   return (await res.json()) as ReviewData;

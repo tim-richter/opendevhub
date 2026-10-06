@@ -281,8 +281,11 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   // Review: what a checkout changed, and the local git actions on it.
   app.get("/api/projects/:id/review", async (c) => {
     try {
+      const mode = c.req.query("mode") ?? "working";
+      if (mode !== "working" && mode !== "branch") throw new InvalidRequestError(`unknown review mode ${mode}`);
       const data = await orchestrator.review(c.req.param("id"), c.req.query("directory") ?? "", {
         base: c.req.query("base"),
+        mode,
         file: c.req.query("file"),
       });
       return c.json(data);

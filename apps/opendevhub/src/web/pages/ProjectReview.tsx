@@ -1,6 +1,6 @@
 import { type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import type { ProjectView, PublishResult, ReviewData, ReviewFile, UpdateResult } from "../../shared/types";
+import type { ProjectView, PublishResult, ReviewData, ReviewFile, ReviewMode, UpdateResult } from "../../shared/types";
 import { useCheckout } from "./CheckoutPage";
 import { fetchReview, mergeIntoBase, removeWorktree, sendPrompt, startSession, updateFromBase } from "../api";
 import { type DiffLineAnnotation, type SelectedLineRange, useStableCallback } from "@pierre/diffs/react";
@@ -48,6 +48,7 @@ import { BaseDialog, CommentsDialog, CommitDialog, MergeDialog } from "../compon
 import { DiffLinesSkeleton, ReviewSkeleton } from "../components/Skeletons";
 import { workspaceFolderOf } from "../derive";
 import {
+  aheadHint,
   anchorFromRange,
   annotationsFor,
   composeReviewPrompt,
@@ -61,12 +62,14 @@ import {
   newId,
   readComments,
   readDiffView,
+  readReviewMode,
   selectionFor,
   type ReviewAnnotation,
   type ReviewComment,
   sentKey,
   writeComments,
   writeDiffView,
+  writeReviewMode,
 } from "../review";
 
 export function ProjectReview() {
@@ -88,6 +91,12 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const isWorktree = directory !== workspaceFolderOf(view);
 
   const [baseOverride, setBaseOverride] = useState<string>();
+  // The diff shown: uncommitted changes, or everything since the base; remembered per checkout.
+  const [mode, setMode] = useState(() => readReviewMode(projectId, target));
+  const changeMode = (next: ReviewMode) => {
+    setMode(next);
+    writeReviewMode(projectId, target, next);
+  };
   const [baseInput, setBaseInput] = useState("");
   const [data, setData] = useState<ReviewData>();
   const [loading, setLoading] = useState(false);
@@ -97,7 +106,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
 
   const load = useCallback(() => {
     setLoading(true);
-    fetchReview(projectId, directory, { base: baseOverride })
+    fetchReview(projectId, directory, { base: baseOverride, mode })
       .then(
         (d) => {
           setData(d);
@@ -106,7 +115,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
       )
       .finally(() => setLoading(false));
-  }, [projectId, directory, baseOverride]);
+  }, [projectId, directory, baseOverride, mode]);
   useEffect(load, [load]);
 
   // Refresh when an agent working here finishes its turn.
@@ -126,8 +135,9 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const baseName = data?.base?.name;
   useEffect(() => setBaseInput(baseName ?? ""), [baseName]);
 
-  // Comments: drafts per project, target and base; sent ones per target.
-  const key = draftKey(projectId, target, baseName);
+  // Comments: drafts per project, target and diff; sent ones per target.
+  const shownMode = data?.mode ?? mode;
+  const key = draftKey(projectId, target, shownMode, baseName);
   const [comments, setComments] = useState<ReviewComment[]>([]);
   useEffect(() => setComments(readComments(key)), [key]);
   // Comment boxes live inside @pierre/diffs annotations, which can hold on to an older render's callbacks; the
@@ -172,7 +182,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
 
   const sendComments = () =>
     run("Sending", async () => {
-      await deliver(composeReviewPrompt({ branch: data?.branch, base: baseName, comments }));
+      await deliver(composeReviewPrompt({ branch: data?.branch, base: baseName, uncommitted: shownMode === "working", comments }));
       const nextSent = [...sent, ...comments];
       setSent(nextSent);
       writeComments(sentKey(projectId, target), nextSent);
@@ -279,11 +289,37 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
                 <span className="truncate">{data.branch ?? "detached HEAD"}</span>
               </span>
             </Tip>
-            <Tip label={`Compared with ${base}${data.base ? ` (from ${data.base.source})` : ""}. Click to change.`}>
-              <Button variant="ghost" size="sm" className="h-7 px-1.5 font-normal text-muted-foreground" onClick={() => setDialog("base")}>
-                <GitCompareArrowsIcon /> {base}
-              </Button>
-            </Tip>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              aria-label="Changes shown"
+              value={data.mode}
+              onValueChange={(v) => v && changeMode(v as ReviewMode)}
+            >
+              <Tip label="Uncommitted changes, like git diff">
+                <ToggleGroupItem className={cn(checkedItem, "font-normal")} value="working">
+                  Uncommitted
+                </ToggleGroupItem>
+              </Tip>
+              <Tip
+                label={
+                  data.base
+                    ? `Everything since ${base} (from ${data.base.source}), committed or not.${data.mode === "branch" ? " Click to change the base." : ""}`
+                    : "No base branch to compare with"
+                }
+              >
+                <ToggleGroupItem
+                  className={cn(checkedItem, "font-normal")}
+                  value="branch"
+                  aria-label={`Compare with ${base}`}
+                  disabled={!data.base}
+                  onClick={() => data.mode === "branch" && setDialog("base")}
+                >
+                  <GitCompareArrowsIcon /> {base}
+                </ToggleGroupItem>
+              </Tip>
+            </ToggleGroup>
             <Tip label={`${data.ahead} commit${data.ahead === 1 ? "" : "s"} ahead of ${base}, ${data.behind} behind`}>
               <span className="inline-flex items-center gap-1.5 text-muted-foreground tabular-nums">
                 <span className="inline-flex items-center">
@@ -493,7 +529,17 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
           }}
         />
       )}
-      {dialog === "base" && <BaseDialog current={baseOverride ?? baseName} options={baseOptions} onClose={() => setDialog(undefined)} onChange={setBaseOverride} />}
+      {dialog === "base" && (
+        <BaseDialog
+          current={baseOverride ?? baseName}
+          options={baseOptions}
+          onClose={() => setDialog(undefined)}
+          onChange={(b) => {
+            setBaseOverride(b);
+            changeMode("branch");
+          }}
+        />
+      )}
       {dialog === "comments" && (
         <CommentsDialog
           comments={comments}
@@ -516,7 +562,18 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
       )}
 
       {!data && !error && <ReviewSkeleton />}
-      {data && data.files.length === 0 && <p className={muted}>No changes compared with {baseName ?? "the last commit"}.</p>}
+      {data && data.files.length === 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className={muted}>
+            {data.mode === "branch" ? `No changes compared with ${base}.` : "No uncommitted changes."} {aheadHint(data)}
+          </p>
+          {aheadHint(data) && (
+            <Button variant="outline" size="sm" onClick={() => changeMode("branch")}>
+              <GitCompareArrowsIcon /> Compare with {base}
+            </Button>
+          )}
+        </div>
+      )}
       {data && data.files.length > 0 && (
         <div className={cn("grid items-start gap-4", !diffView.hideFiles && "md:grid-cols-[minmax(14rem,22rem)_minmax(0,1fr)]")}>
           {!diffView.hideFiles && (
@@ -533,10 +590,10 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
           <div className="flex min-w-0 flex-col gap-3">
             {data.files.map((f, i) => (
               <FileDiff
-                key={`${diffKey(f)}:${baseName}`}
+                key={`${diffKey(f)}:${data.mode}:${baseName}`}
                 id={`review-file-${i}`}
                 file={f}
-                load={() => fetchReview(projectId, directory, { base: baseOverride, file: f.file }).then((d) => d.files[0]?.patch)}
+                load={() => fetchReview(projectId, directory, { base: baseOverride, mode, file: f.file }).then((d) => d.files[0]?.patch)}
                 view={diffView}
                 comments={comments}
                 open={open?.file === f.file ? open.anchor : undefined}

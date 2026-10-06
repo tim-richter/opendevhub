@@ -1,4 +1,4 @@
-import type { ReviewBase, ReviewFile } from "../shared/types";
+import type { ReviewBase, ReviewFile, ReviewMode } from "../shared/types";
 import type { RawFileDiff } from "./opencode/client";
 
 export const PATCH_BUDGET_BYTES = 2 * 1024 * 1024;
@@ -20,10 +20,9 @@ export function resolveBase(c: { request?: string; config?: string; opencode?: s
   return undefined;
 }
 
-/** The main checkout on its base shows its uncommitted work; anything else shows everything since the base. */
-export function diffMode(isMain: boolean, branch: string | undefined, base: ReviewBase | undefined): "working" | "branch" {
-  if (!base) return "working";
-  return isMain && branch === base.name ? "working" : "branch";
+/** The diff asked for; comparing with the base needs one, so without it the review shows uncommitted changes. */
+export function diffMode(requested: ReviewMode | undefined, base: ReviewBase | undefined): ReviewMode {
+  return requested === "branch" && base ? "branch" : "working";
 }
 
 export function isBinaryPatch(patch: string): boolean {

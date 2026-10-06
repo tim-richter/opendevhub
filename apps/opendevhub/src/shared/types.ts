@@ -161,6 +161,9 @@ export interface ReviewBase {
   source: "request" | "config" | "opencode" | "default";
 }
 
+/** `working`: uncommitted changes. `branch`: everything since the merge-base with the base. */
+export type ReviewMode = "working" | "branch";
+
 export interface ReviewFile {
   file: string;
   status: "added" | "deleted" | "modified";
@@ -176,7 +179,7 @@ export interface ReviewData {
   /** Undefined on a detached HEAD. */
   branch?: string;
   base?: ReviewBase;
-  mode: "working" | "branch";
+  mode: ReviewMode;
   ahead: number;
   behind: number;
   /** Uncommitted changes in the target. */

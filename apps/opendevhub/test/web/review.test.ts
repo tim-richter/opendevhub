@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "../../src/shared/types";
 import {
+  aheadHint,
   acceptSuggestion,
   anchorFor,
   anchorFromRange,
@@ -21,9 +22,11 @@ import {
   parsePatch,
   readComments,
   readDiffView,
+  readReviewMode,
   targetOf,
   writeComments,
   writeDiffView,
+  writeReviewMode,
 } from "../../src/web/review";
 
 const patch = [
@@ -101,6 +104,11 @@ describe("composeReviewPrompt", () => {
     );
   });
 
+  it("names the uncommitted changes and leaves out the base when reviewing them", () => {
+    const text = composeReviewPrompt({ branch: "feature/login", base: "main", uncommitted: true, comments: [{ id: "g", text: "ok" }] });
+    expect(text.split("\n")[0]).toBe("Review feedback on the uncommitted changes on feature/login. Address each point, then reply with what you changed.");
+  });
+
   it("marks removed lines, indents multi-line comments and skips empty ones", () => {
     const text = composeReviewPrompt({
       comments: [
@@ -142,10 +150,11 @@ describe("draft storage", () => {
     return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), m };
   };
 
-  it("round-trips comments per project, target and base, and clears empty lists", () => {
+  it("round-trips comments per project, target and diff, and clears empty lists", () => {
     const s = memory();
-    const key = draftKey("p", "", "main");
+    const key = draftKey("p", "", "branch", "main");
     expect(key).toBe("opendevhub:review:p:main-checkout:main");
+    expect(draftKey("p", "wt", "working", "main")).toBe("opendevhub:review:p:wt:");
     writeComments(key, [{ id: "1", text: "hi" }], s);
     expect(readComments(key, s)).toEqual([{ id: "1", text: "hi" }]);
     writeComments(key, [], s);
@@ -264,6 +273,43 @@ describe("@pierre/diffs adapters", () => {
   it("gives a bare hunk the file headers the patch parser needs", () => {
     expect(ensurePatchHeader("@@ -1 +1 @@\n-a\n+b\n", "src/x.ts")).toBe("--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1 +1 @@\n-a\n+b\n");
     expect(ensurePatchHeader(patch, "ignored")).toBe(patch);
+  });
+});
+
+describe("review mode", () => {
+  it("defaults to uncommitted changes and remembers a comparison per checkout", () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+    expect(readReviewMode("p", "wt", storage)).toBe("working");
+    writeReviewMode("p", "wt", "branch", storage);
+    expect(readReviewMode("p", "wt", storage)).toBe("branch");
+    expect(readReviewMode("p", "", storage)).toBe("working");
+    writeReviewMode("p", "wt", "working", storage);
+    expect(store.size).toBe(0);
+    expect(readReviewMode("p", "wt", { getItem: () => { throw new Error("blocked"); } })).toBe("working");
+  });
+});
+
+describe("aheadHint", () => {
+  const data = {
+    directory: "/w",
+    branch: "feature/x",
+    base: { name: "main", source: "config" as const },
+    mode: "working" as const,
+    ahead: 3,
+    behind: 0,
+    dirty: false,
+    pushed: false,
+    workspace: { clean: true },
+    files: [],
+  };
+  it("points at the commits when nothing is uncommitted", () => {
+    expect(aheadHint(data)).toBe("feature/x is 3 commits ahead of main.");
+    expect(aheadHint({ ...data, ahead: 1 })).toBe("feature/x is 1 commit ahead of main.");
+    expect(aheadHint({ ...data, ahead: 0 })).toBeUndefined();
+    expect(aheadHint({ ...data, mode: "branch" })).toBeUndefined();
+    expect(aheadHint({ ...data, files: [{ file: "a", status: "modified", additions: 1, deletions: 0 }] })).toBeUndefined();
+    expect(aheadHint({ ...data, branch: "main" })).toBeUndefined();
   });
 });
 
