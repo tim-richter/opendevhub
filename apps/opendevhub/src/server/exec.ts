@@ -15,6 +15,8 @@ export interface RunOptions {
   cwd?: string;
   /** Run in a new session without a controlling terminal, so ssh can't open /dev/tty to prompt. */
   detached?: boolean;
+  /** Written to the command's stdin, which is then closed. Without it stdin is ignored. */
+  input?: string;
 }
 
 export type Runner = (cmd: string, args: string[], opts?: RunOptions) => Promise<RunResult>;
@@ -26,10 +28,17 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     let timedOut = false;
     let settled = false;
     const carry = { out: "", err: "" };
-    const child = spawn(cmd, args, { env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"],
+    const child = spawn(cmd, args, {
+      env: { ...process.env, ...opts.env },
+      stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       detached: opts.detached === true,
     });
+    if (opts.input !== undefined) {
+      // A child that exits without reading would otherwise raise EPIPE here.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(opts.input);
+    }
     const kill = (signal: NodeJS.Signals) => {
       try {
         if (opts.detached && child.pid) process.kill(-child.pid, signal);

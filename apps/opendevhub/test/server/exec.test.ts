@@ -6,6 +6,12 @@ import { spawnRunner } from "../../src/server/exec";
 const node = process.execPath;
 
 describe("spawnRunner", () => {
+  it("writes input to stdin and closes it", async () => {
+    const r = await spawnRunner(node, ["-e", "process.stdin.pipe(process.stdout)"], { input: "hello\nworld" });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("hello\nworld");
+  });
+
   it("captures stdout, stderr and exit code", async () => {
     const r = await spawnRunner(node, ["-e", "console.log('out'); console.error('err'); process.exit(3)"]);
     expect(r).toMatchObject({ exitCode: 3, timedOut: false });
