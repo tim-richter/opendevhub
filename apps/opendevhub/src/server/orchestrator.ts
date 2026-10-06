@@ -902,6 +902,29 @@ export class Orchestrator {
     });
   }
 
+  /** Where git runs for a checkout: the project's container, or a remote environment's own. */
+  private gitFor(project: Project, directory: string): { git: GitPort; target: ExecTarget; remote?: TaskEnv } {
+    const remote = this.remoteEnvAt(project, directory);
+    if (!remote) return { git: this.deps.git, target: project };
+    return { git: this.kit(remote).git, target: remote.target, remote };
+  }
+
+  /** Fetches a remote environment's branch into this machine's repository. */
+  bringHome(id: ProjectId, directory: string): Promise<{ branch: string }> {
+    this.checkDirectory(id, directory);
+    return this.withGit(id, (p) => this.fetchHome(p, directory));
+  }
+
+  private async fetchHome(p: Project, directory: string): Promise<{ branch: string }> {
+    const remote = this.remoteEnvAt(p, directory);
+    if (!remote) throw new InvalidRequestError(`${directory} is on this machine already`);
+    const kit = this.kit(remote);
+    const branch = validateBranch((await kit.git.currentBranch(remote.target, directory)) ?? remote.worktree.branch);
+    const layout = kit.repo!.layout(p, this.workspaceFolder(p));
+    await this.gitAction(p.id, `bring ${branch} home from node ${remote.node}`, () => kit.repo!.bringHome(p, layout, branch));
+    return { branch };
+  }
+
   /** What changed in a checkout compared with its base, for the Review tab. */
   async review(id: ProjectId, directory: string, opts: { base?: string; mode?: ReviewMode; file?: string } = {}): Promise<ReviewData> {
     const project = this.requireProject(id);
@@ -910,9 +933,10 @@ export class Orchestrator {
     const client = this.opencodeClient(this.envForDirectory(project, directory).id);
     const { git } = this.deps;
     const ws = this.workspaceFolder(project);
-    const branch = await git.currentBranch(project, directory);
+    const on = this.gitFor(project, directory);
+    const branch = await on.git.currentBranch(on.target, directory);
     const [config, opencodeBase, info] = await Promise.all([
-      branch ? git.recordedBase(project, directory, branch) : undefined,
+      branch ? on.git.recordedBase(on.target, directory, branch) : undefined,
       client.vcsBase(directory).catch(() => undefined),
       client.vcsInfo(directory).catch((): { default?: string } => ({})),
     ]);
@@ -921,8 +945,8 @@ export class Orchestrator {
     const [raw, status, counts, pushed, wsBranch, wsClean] = await Promise.all([
       client.vcsDiff(directory, mode, mode === "branch" ? base?.name : undefined),
       client.vcsStatus(directory),
-      base ? git.aheadBehind(project, directory, base.name).catch(() => ({ ahead: 0, behind: 0 })) : { ahead: 0, behind: 0 },
-      branch ? git.isPushed(project, directory, branch) : false,
+      base ? on.git.aheadBehind(on.target, directory, base.name).catch(() => ({ ahead: 0, behind: 0 })) : { ahead: 0, behind: 0 },
+      branch ? on.git.isPushed(on.target, directory, branch) : false,
       git.currentBranch(project, ws),
       git.isClean(project, ws),
     ]);
@@ -960,8 +984,9 @@ export class Orchestrator {
     if (!msg) throw new InvalidRequestError("the commit message is empty");
     this.checkDirectory(id, directory);
     await this.withGit(id, async (p) => {
-      if (await this.deps.git.isClean(p, directory)) throw new InvalidRequestError("there is nothing to commit");
-      await this.gitAction(id, `commit in ${directory}`, () => this.deps.git.commit(p, directory, msg));
+      const on = this.gitFor(p, directory);
+      if (await on.git.isClean(on.target, directory)) throw new InvalidRequestError("there is nothing to commit");
+      await this.gitAction(id, `commit in ${directory}`, () => on.git.commit(on.target, directory, msg));
     });
   }
 
@@ -970,12 +995,18 @@ export class Orchestrator {
     const ref = validateBranch(base);
     this.checkDirectory(id, directory);
     return this.withGit(id, async (p) => {
-      const { git } = this.deps;
-      const branch = await git.currentBranch(p, directory);
+      const on = this.gitFor(p, directory);
+      const git = on.git;
+      if (on.remote) {
+        const kit = this.kit(on.remote);
+        // The base is always what this machine has, never a branch of the node's repository.
+        await kit.repo!.pushBase(p, kit.repo!.layout(p, this.workspaceFolder(p)), ref);
+      }
+      const branch = await git.currentBranch(on.target, directory);
       if (!branch) throw new InvalidRequestError(`${directory} is not on a branch`);
-      if (!(await git.isClean(p, directory))) throw new InvalidRequestError("commit or discard the uncommitted changes first");
-      const strategy = (await git.isPushed(p, directory, branch)) ? "merge" : "rebase";
-      const result = await this.gitAction(id, `${strategy} ${branch} with ${ref}`, () => git.update(p, directory, ref, strategy));
+      if (!(await git.isClean(on.target, directory))) throw new InvalidRequestError("commit or discard the uncommitted changes first");
+      const strategy = (await git.isPushed(on.target, directory, branch)) ? "merge" : "rebase";
+      const result = await this.gitAction(id, `${strategy} ${branch} with ${ref}`, () => git.update(on.target, directory, ref, strategy));
       if (result.conflicts) this.log(id, `review: conflicts in ${result.conflicts.join(", ")}; aborted, nothing changed`);
       return result;
     });
@@ -989,12 +1020,14 @@ export class Orchestrator {
       const { git } = this.deps;
       const ws = this.workspaceFolder(p);
       if (directory === ws) throw new InvalidRequestError("merge a worktree into its base; the main checkout is the base");
-      const branch = await git.currentBranch(p, directory);
+      const on = this.gitFor(p, directory);
+      const branch = await on.git.currentBranch(on.target, directory);
       if (!branch) throw new InvalidRequestError(`${directory} is not on a branch`);
-      if (!(await git.isClean(p, directory))) throw new InvalidRequestError(`${branch} has uncommitted changes; commit them first`);
+      if (!(await on.git.isClean(on.target, directory))) throw new InvalidRequestError(`${branch} has uncommitted changes; commit them first`);
       const wsBranch = await git.currentBranch(p, ws);
       if (wsBranch !== ref) throw new InvalidRequestError(`the main checkout is on ${wsBranch ?? "a detached HEAD"}, not ${ref}`);
       if (!(await git.isClean(p, ws))) throw new InvalidRequestError("the main checkout has uncommitted changes");
+      if (on.remote) await this.fetchHome(p, directory);
       await this.gitAction(id, `merge ${branch} into ${ref}${ffOnly ? " (fast-forward only)" : ""}`, () =>
         git.mergeInto(p, ws, branch, ffOnly),
       );
@@ -1006,6 +1039,8 @@ export class Orchestrator {
   checkTarget(id: ProjectId, directory: string): CheckTarget {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
+    const remote = this.remoteEnvAt(project, directory);
+    if (remote) return { project, exec: remote.target, unavailable: "checks don't run on other nodes yet", checkout: { container: directory }, isMain: false };
     const env = this.envForDirectory(project, directory);
     const running = this.deps.store.runtime(env.id).containerState === "running";
     return {
@@ -1029,8 +1064,11 @@ export class Orchestrator {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
     if (remote !== undefined && !REMOTE_NAME.test(remote)) throw new InvalidRequestError(`invalid remote "${remote}"`);
-    const branch = await this.deps.git.currentBranch(project, directory);
-    return this.deps.publisher.info(project, this.checkout(project, directory), branch, remote);
+    const on = this.gitFor(project, directory);
+    const branch = await on.git.currentBranch(on.target, directory);
+    // A node's repository has no remotes: its branch is published from this machine's checkout.
+    const checkout = this.checkout(project, on.remote ? this.workspaceFolder(project) : directory);
+    return this.deps.publisher.info(project, checkout, branch, remote);
   }
 
   /** A PR title and description suggested by the target's latest session; empty when there is none or it fails. */
@@ -1059,11 +1097,14 @@ export class Orchestrator {
     if (!title || title.length > 200) throw new InvalidRequestError("the title must be 1 to 200 characters");
     this.checkDirectory(id, directory);
     return this.withGit(id, async (p) => {
-      const branch = await this.deps.git.currentBranch(p, directory);
+      const on = this.gitFor(p, directory);
+      const branch = await on.git.currentBranch(on.target, directory);
       if (!branch) throw new InvalidRequestError(`${directory} is not on a branch`);
       if (branch === base) throw new InvalidRequestError(`publish a branch, not the base itself (${base})`);
+      if (on.remote) await this.fetchHome(p, directory);
+      const checkout = this.checkout(p, on.remote ? this.workspaceFolder(p) : directory);
       return this.gitAction(id, `publish ${branch} to ${req.remote} (${req.strategy})`, () =>
-        this.deps.publisher.publish(p, this.checkout(p, directory), branch, {
+        this.deps.publisher.publish(p, checkout, branch, {
           remote: req.remote,
           base,
           strategy: req.strategy as "branch" | "agit",
@@ -1115,6 +1156,9 @@ export class Orchestrator {
   openInEditor(id: ProjectId, editorId: string, directory: string): Promise<void> {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
+    if (this.remoteEnvAt(project, directory)) {
+      throw new InvalidRequestError("opening an editor isn't available for environments on other nodes");
+    }
     const rt = this.deps.store.runtime(id);
     const hostPath =
       directory === this.workspaceFolder(project)

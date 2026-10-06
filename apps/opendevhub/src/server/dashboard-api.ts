@@ -40,6 +40,7 @@ export type DashboardOrchestrator = Pick<
   | "commit"
   | "updateFromBase"
   | "mergeIntoBase"
+  | "bringHome"
   | "publishInfo"
   | "publishSuggestion"
   | "publish"
@@ -316,6 +317,7 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   app.post("/api/projects/:id/review/merge", (c) =>
     json(c, (id, b) => orchestrator.mergeIntoBase(id, str(b.directory) ?? "", str(b.base) ?? "", b.ffOnly === true)),
   );
+  app.post("/api/projects/:id/review/bring-home", (c) => json(c, (id, b) => orchestrator.bringHome(id, str(b.directory) ?? "")));
 
   // Publish: push the branch and open its pull request.
   app.get("/api/projects/:id/publish", async (c) => {

@@ -26,6 +26,7 @@ function setup(webDir?: string) {
     startEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
     stopEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
     removeEnv: vi.fn(async (_id: string, _env: string) => {}),
+    bringHome: vi.fn(async (_id: string, _dir: string) => ({ branch: "fix" })),
     start: vi.fn(() => Promise.resolve()),
     stop: vi.fn(() => Promise.resolve()),
     rebuild: vi.fn(() => Promise.resolve()),
@@ -660,5 +661,18 @@ describe("node endpoints", () => {
   it("answers 412 when nodes aren't available", async () => {
     const { app } = setup();
     expect((await post(app, { ssh: "tim@box" })).status).toBe(412);
+  });
+});
+
+describe("bring home", () => {
+  it("fetches a remote checkout's branch", async () => {
+    const { app, orchestrator } = setup();
+    const res = await app.request(`/api/projects/${project.id}/review/bring-home`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ directory: "/workspaces/demo.worktrees/fix" }),
+    });
+    expect(await res.json()).toEqual({ branch: "fix" });
+    expect(orchestrator.bringHome).toHaveBeenCalledWith(project.id, "/workspaces/demo.worktrees/fix");
   });
 });

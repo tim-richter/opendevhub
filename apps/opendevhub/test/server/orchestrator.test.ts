@@ -2194,6 +2194,56 @@ describe("git and ssh credentials", () => {
 });
 
 describe("environments on another node", () => {
+  it("review and commit with git in their own container", async () => {
+    const { orch, box } = await withRemoteRunning();
+    const data = await orch.review(project.id, remoteFix.path);
+    expect(data).toMatchObject({ branch: "fix", ahead: 3 });
+    expect(box.kit.git.currentBranch.mock.calls[0][0]).toMatchObject({ id: remoteEnv, path: remoteFix.hostPath });
+    box.kit.git.isClean.mockResolvedValueOnce(false);
+    await orch.commit(project.id, remoteFix.path, "fix: login");
+    expect(box.kit.git.commit).toHaveBeenCalledWith(expect.objectContaining({ id: remoteEnv }), remoteFix.path, "fix: login");
+  });
+
+  it("update from the base after pushing it again", async () => {
+    const { orch, box } = await withRemoteRunning();
+    box.kit.repo.pushBase.mockClear();
+    await orch.updateFromBase(project.id, remoteFix.path, "main");
+    expect(box.kit.repo.pushBase).toHaveBeenCalledWith(project, box.layout(project, "/workspaces/demo"), "main");
+    expect(box.kit.git.update).toHaveBeenCalledWith(expect.objectContaining({ id: remoteEnv }), remoteFix.path, "main", "rebase");
+  });
+
+  it("bring their branch home", async () => {
+    const { orch, box } = await withRemoteRunning();
+    expect(await orch.bringHome(project.id, remoteFix.path)).toEqual({ branch: "fix" });
+    expect(box.kit.repo.bringHome).toHaveBeenCalledWith(project, box.layout(project, "/workspaces/demo"), "fix");
+    await expect(orch.bringHome(project.id, "/workspaces/demo")).rejects.toThrow(/on this machine already/);
+  });
+
+  it("merge into the base after bringing the branch home", async () => {
+    const { orch, box, git } = await withRemoteRunning();
+    expect(await orch.mergeIntoBase(project.id, remoteFix.path, "main", true)).toEqual({ branch: "fix" });
+    expect(box.kit.repo.bringHome).toHaveBeenCalled();
+    expect(git.mergeInto).toHaveBeenCalledWith(project, "/workspaces/demo", "fix", true);
+    expect(box.kit.repo.bringHome.mock.invocationCallOrder[0]).toBeLessThan(git.mergeInto.mock.invocationCallOrder[0]);
+  });
+
+  it("publish from the main checkout after bringing the branch home", async () => {
+    const { orch, box, publisher } = await withRemoteRunning();
+    const main = { container: "/workspaces/demo", host: project.path };
+    await orch.publishInfo(project.id, remoteFix.path);
+    expect(publisher.info).toHaveBeenCalledWith(project, main, "fix", undefined);
+    await orch.publish(project.id, remoteFix.path, { remote: "origin", base: "main", strategy: "branch", title: "Fix", description: "" });
+    expect(box.kit.repo.bringHome).toHaveBeenCalled();
+    expect(publisher.publish).toHaveBeenCalledWith(project, main, "fix", expect.objectContaining({ remote: "origin" }));
+  });
+
+  it("don't run checks or open editors yet", async () => {
+    const { orch, editors } = await withRemoteRunning();
+    expect(orch.checkTarget(project.id, remoteFix.path).unavailable).toBe("checks don't run on other nodes yet");
+    expect(() => orch.openInEditor(project.id, "code", remoteFix.path)).toThrow(/isn't available for environments on other nodes/);
+    expect(editors.open).not.toHaveBeenCalled();
+  });
+
   it("are removed with their worktree and branch on the node", async () => {
     const { orch, store, box } = await withRemoteRunning();
     await orch.removeEnv(project.id, remoteEnv);
@@ -2299,7 +2349,7 @@ describe("environments on another node", () => {
 
   it("accept their checkouts as known directories", async () => {
     const { orch, result } = await remoteTask();
-    await expect(orch.review(project.id, result.variants[0].directory!)).resolves.toBeDefined();
+    await expect(orch.review(project.id, result.variants[0].directory!)).resolves.toMatchObject({ branch: "fix" });
   });
 
   it("keep a local worktree from taking a remote environment's path", async () => {
