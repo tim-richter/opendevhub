@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { type BranchGit, branchChanged, FRESH_IMAGE_MS, scanBranches, staleDocker } from "../../src/server/cleanup";
+import { type BranchGit, branchChanged, Cleanup, FRESH_IMAGE_MS, parseCleanupItems, scanBranches, staleDocker } from "../../src/server/cleanup";
 import type { ContainerInfo, ImageInfo } from "../../src/server/containers";
 import type { BranchRef } from "../../src/server/git";
-import type { BranchCleanupItem, Project, Worktree } from "../../src/shared/types";
+import { BusyError } from "../../src/server/orchestrator";
+import { StateStore } from "../../src/server/state";
+import { InvalidRequestError } from "../../src/server/worktrees";
+import type { BranchCleanupItem, CleanupItem, Project, Worktree } from "../../src/shared/types";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const OLD = NOW - 2 * FRESH_IMAGE_MS;
@@ -204,5 +207,161 @@ describe("branchChanged", () => {
       "changed since scan: the worktree has uncommitted changes",
     );
     expect(await branchChanged(dirty, project, WS, item({ worktree: wt("feat").path, dirty: true }), [wt("feat")])).toBeUndefined();
+  });
+});
+
+function service(o: { containers?: ContainerInfo[]; images?: ImageInfo[]; running?: boolean } = {}) {
+  const store = new StateStore({ port: 0, persisted: { projects: {} }, persist: () => {} });
+  store.setProjects([project]);
+  store.updateRuntime(project.id, { containerState: o.running === false ? "stopped" : "running" });
+  let containerList = o.containers ?? [];
+  let imageList = o.images ?? [];
+  const order: string[] = [];
+  const containers = {
+    listManaged: vi.fn(async () => containerList),
+    listImages: vi.fn(async (_f: string[]) => imageList),
+    remove: vi.fn(async (id: string) => {
+      order.push(`container:${id}`);
+      containerList = containerList.filter((c) => c.id !== id);
+    }),
+    removeImage: vi.fn(async (ref: string) => {
+      imageList = imageList.filter((i) => !i.refs.includes(ref));
+      return true;
+    }),
+  };
+  const branches = {
+    cleanupScan: vi.fn(async (_id: string) => ({ items: [branchItem] as BranchCleanupItem[] }) as { warning?: string; items: BranchCleanupItem[] }),
+    cleanupBranch: vi.fn(async (_id: string, item: BranchCleanupItem) => {
+      order.push(item.id);
+      return { outcome: "removed" as const };
+    }),
+    appendLog: vi.fn((_id: string, _line: string) => {}),
+  };
+  const cleanup = new Cleanup({ store, containers, branches, now: () => NOW });
+  return { cleanup, containers, branches, store, order };
+}
+const branchItem: BranchCleanupItem = {
+  id: "branch:demo:feat", kind: "branch", checked: true, reason: "merged into main", projectId: "demo", branch: "feat", base: "main", why: "merged",
+};
+const orphan = ctr("c1", { envId: "demo-x", envProjectId: "demo", imageId: "sha256:uid" });
+const uidImage = img("sha256:uid", ["vsc-x-uid:latest"], { labels: { "opendevhub.base-project": "demo" } });
+
+describe("Cleanup.scan", () => {
+  it("combines each project's branches with the Docker items", async () => {
+    const { cleanup, containers } = service({ containers: [orphan], images: [uidImage] });
+    const plan = await cleanup.scan();
+    expect(containers.listImages).toHaveBeenCalledWith(["reference=opendevhub/*", "label=opendevhub.base-project"]);
+    expect(plan).toMatchObject({ scannedAt: NOW, projects: [{ id: "demo", name: "demo" }] });
+    expect(plan.items.map((i) => i.id)).toEqual(["branch:demo:feat", "container:c1", "image:vsc-x-uid:latest"]);
+  });
+
+  it("skips branches of a stopped project but still scans Docker", async () => {
+    const { cleanup, branches } = service({ running: false, containers: [orphan] });
+    const plan = await cleanup.scan();
+    expect(branches.cleanupScan).not.toHaveBeenCalled();
+    expect(plan.projects).toEqual([{ id: "demo", name: "demo", skipped: "not running" }]);
+    expect(plan.items.map((i) => i.id)).toEqual(["container:c1"]);
+  });
+
+  it("shows a busy or failing project as a warning", async () => {
+    const { cleanup, branches } = service();
+    branches.cleanupScan.mockImplementation(() => {
+      throw new BusyError("demo");
+    });
+    expect((await cleanup.scan()).projects[0].warning).toBe("busy with another git action; scan again in a moment");
+    branches.cleanupScan.mockRejectedValue(new Error("boom"));
+    expect((await cleanup.scan()).projects[0].warning).toBe("could not scan branches: boom");
+  });
+
+  it("reports Docker being unreachable without losing the branches", async () => {
+    const { cleanup, containers } = service();
+    containers.listManaged.mockRejectedValue(new Error("Cannot connect to the Docker daemon"));
+    const plan = await cleanup.scan();
+    expect(plan.dockerError).toBe("Cannot connect to the Docker daemon");
+    expect(plan.items.map((i) => i.id)).toEqual(["branch:demo:feat"]);
+  });
+});
+
+describe("Cleanup.apply", () => {
+  it("removes branches, then containers, then the images they freed", async () => {
+    const { cleanup, containers, order } = service({ containers: [orphan], images: [uidImage] });
+    const plan = await cleanup.scan();
+    const result = await cleanup.apply(plan.items);
+    expect(order).toEqual(["branch:demo:feat", "container:c1"]);
+    expect(containers.removeImage).toHaveBeenCalledWith("vsc-x-uid:latest");
+    expect(result).toEqual({
+      results: [
+        { id: "branch:demo:feat", outcome: "removed" },
+        { id: "container:c1", outcome: "removed" },
+        { id: "image:vsc-x-uid:latest", outcome: "removed" },
+      ],
+      freedBytes: 100,
+    });
+  });
+
+  it("skips an image a kept container started using since the scan", async () => {
+    const { cleanup, containers } = service({ images: [uidImage] });
+    const plan = await cleanup.scan();
+    containers.listManaged.mockResolvedValue([ctr("new", { projectId: "demo", imageId: "sha256:uid" })]);
+    const result = await cleanup.apply(plan.items.filter((i) => i.kind === "image"));
+    expect(result.results).toEqual([{ id: "image:vsc-x-uid:latest", outcome: "skipped", message: "in use, or already gone" }]);
+    expect(containers.removeImage).not.toHaveBeenCalled();
+  });
+
+  it("never removes a Docker item the fresh scan doesn't list, whatever the request says", async () => {
+    const { cleanup, containers } = service({ containers: [ctr("kept", { projectId: "demo" })] });
+    const forged: CleanupItem = { id: "container:kept", kind: "container", checked: true, reason: "x", containerId: "kept", running: false, why: "orphan-env" };
+    const result = await cleanup.apply([forged]);
+    expect(result.results[0]).toMatchObject({ outcome: "skipped" });
+    expect(containers.remove).not.toHaveBeenCalled();
+  });
+
+  it("goes on after a failure, and maps a busy project to skipped", async () => {
+    const { cleanup, branches, containers } = service({ containers: [orphan] });
+    branches.cleanupBranch.mockImplementationOnce(() => {
+      throw new BusyError("demo");
+    });
+    containers.remove.mockRejectedValueOnce(new Error("docker rm failed: boom"));
+    const plan = await cleanup.scan();
+    const result = await cleanup.apply(plan.items.filter((i) => i.kind !== "image"));
+    expect(result.results).toEqual([
+      { id: "branch:demo:feat", outcome: "skipped", message: "project busy" },
+      { id: "container:c1", outcome: "failed", message: "docker rm failed: boom" },
+    ]);
+    expect(branches.appendLog).toHaveBeenCalledWith("demo", "cleanup: could not remove container n-c1: docker rm failed: boom");
+  });
+
+  it("logs Docker removals to the owning project", async () => {
+    const { cleanup, branches } = service({ containers: [orphan] });
+    await cleanup.apply((await cleanup.scan()).items.filter((i) => i.kind === "container"));
+    expect(branches.appendLog).toHaveBeenCalledWith("demo", "cleanup: removed container n-c1 (opendevhub has no record of its worktree environment)");
+  });
+
+  it("runs one apply at a time", async () => {
+    const { cleanup, branches } = service();
+    let release!: () => void;
+    branches.cleanupBranch.mockImplementation(() => new Promise((r) => (release = () => r({ outcome: "removed" }))));
+    const first = cleanup.apply([branchItem]);
+    await expect(cleanup.apply([branchItem])).rejects.toThrow(BusyError);
+    await vi.waitFor(() => expect(release).toBeDefined());
+    release();
+    await first;
+  });
+});
+
+describe("parseCleanupItems", () => {
+  it("keeps the identity fields and drops the rest", () => {
+    expect(parseCleanupItems([{ ...branchItem, extra: 1 }, { kind: "container", containerId: "c1" }, { kind: "image", ref: "opendevhub/demo:1-base" }])).toEqual([
+      { id: "branch:demo:feat", kind: "branch", checked: true, reason: "merged into main", projectId: "demo", branch: "feat", base: "main", why: "merged" },
+      { id: "container:c1", kind: "container", checked: true, reason: "", containerId: "c1", running: false, why: "orphan-env" },
+      { id: "image:opendevhub/demo:1-base", kind: "image", checked: true, reason: "", ref: "opendevhub/demo:1-base", bytes: 0, why: "superseded" },
+    ]);
+  });
+
+  it("rejects what isn't a list of known items", () => {
+    expect(() => parseCleanupItems("x")).toThrow(InvalidRequestError);
+    expect(() => parseCleanupItems([{ kind: "volume" }])).toThrow(InvalidRequestError);
+    expect(() => parseCleanupItems([{ kind: "branch", projectId: "demo", branch: "-x", why: "merged" }])).toThrow(InvalidRequestError);
+    expect(() => parseCleanupItems([{ kind: "branch", projectId: "demo", branch: "x", why: "whatever" }])).toThrow(InvalidRequestError);
   });
 });

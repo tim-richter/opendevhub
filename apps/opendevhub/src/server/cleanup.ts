@@ -1,6 +1,22 @@
-import type { BranchCleanupItem, ContainerCleanupItem, EnvId, ImageCleanupItem, Project, ProjectId, Worktree } from "../shared/types";
-import type { ContainerInfo, ImageInfo } from "./containers";
+import type {
+  BranchCleanupItem,
+  CleanupItem,
+  CleanupOutcome,
+  CleanupPlan,
+  CleanupProject,
+  CleanupResult,
+  ContainerCleanupItem,
+  EnvId,
+  ImageCleanupItem,
+  Project,
+  ProjectId,
+  Worktree,
+} from "../shared/types";
+import type { ContainerInfo, Containers, ImageInfo } from "./containers";
 import type { BranchRef, GitOps } from "./git";
+import { BusyError, type Orchestrator } from "./orchestrator";
+import type { StateStore } from "./state";
+import { InvalidRequestError } from "./worktrees";
 import { BASE_PROJECT_LABEL } from "./images";
 
 /** A task environment may be starting from an image this new, before its record names it. */
@@ -173,4 +189,178 @@ export async function branchChanged(
     return "changed since scan: the worktree has uncommitted changes";
   }
   return undefined;
+}
+
+/** opendevhub's base images by name, and the UID images built on them by label. */
+export const CLEANUP_IMAGE_FILTERS = [`reference=${BASE_REPO}*`, `label=${BASE_PROJECT_LABEL}`];
+
+export interface CleanupDeps {
+  store: Pick<StateStore, "projects" | "project" | "runtime" | "environments" | "environment">;
+  containers: Pick<Containers, "listManaged" | "listImages" | "remove" | "removeImage">;
+  branches: Pick<Orchestrator, "cleanupScan" | "cleanupBranch" | "appendLog">;
+  now?: () => number;
+}
+
+type DockerItem = ContainerCleanupItem | ImageCleanupItem;
+
+export class Cleanup {
+  private applying = false;
+
+  constructor(private readonly deps: CleanupDeps) {}
+
+  async scan(): Promise<CleanupPlan> {
+    const scannedAt = this.now();
+    const [perProject, docker] = await Promise.all([
+      Promise.all(this.deps.store.projects().map((p) => this.scanProject(p))),
+      this.docker().then(
+        (items) => ({ items, error: undefined }),
+        (err: unknown) => ({ items: [] as DockerItem[], error: message(err) }),
+      ),
+    ]);
+    return {
+      scannedAt,
+      projects: perProject.map((r) => r.summary),
+      ...(docker.error ? { dockerError: docker.error } : {}),
+      items: [...perProject.flatMap((r) => r.items), ...docker.items],
+    };
+  }
+
+  /** Removes the selected items: branches first, then containers, then images, each re-checked first. */
+  async apply(items: CleanupItem[]): Promise<CleanupResult> {
+    if (this.applying) throw new BusyError("cleanup");
+    this.applying = true;
+    try {
+      const results: CleanupResult["results"] = [];
+      let freedBytes = 0;
+      for (const item of items) if (item.kind === "branch") results.push({ id: item.id, ...(await this.removeBranch(item)) });
+      for (const kind of ["container", "image"] as const) {
+        const selected = items.filter((i) => i.kind === kind);
+        if (selected.length === 0) continue;
+        // Scanned again per kind, since removing containers frees their images. Only an item the fresh scan lists is
+        // removed, and the fresh item (not the request's) supplies the reason, owner and size.
+        let fresh: Map<string, DockerItem>;
+        try {
+          fresh = new Map((await this.docker()).map((i) => [i.id, i]));
+        } catch (err) {
+          for (const item of selected) results.push({ id: item.id, outcome: "failed", message: message(err) });
+          continue;
+        }
+        for (const item of selected) {
+          const current = fresh.get(item.id);
+          const outcome = current ? await this.removeDocker(current) : { outcome: "skipped" as const, message: "in use, or already gone" };
+          if (current?.kind === "image" && outcome.outcome === "removed") freedBytes += current.bytes;
+          results.push({ id: item.id, ...outcome });
+        }
+      }
+      return { results, freedBytes };
+    } finally {
+      this.applying = false;
+    }
+  }
+
+  private async scanProject(p: Project): Promise<{ summary: CleanupProject; items: CleanupItem[] }> {
+    const summary: CleanupProject = { id: p.id, name: p.name };
+    if (this.deps.store.runtime(p.id).containerState !== "running") return { summary: { ...summary, skipped: "not running" }, items: [] };
+    try {
+      const r = await this.deps.branches.cleanupScan(p.id);
+      return { summary: { ...summary, ...(r.warning ? { warning: r.warning } : {}) }, items: r.items };
+    } catch (err) {
+      const warning = err instanceof BusyError ? "busy with another git action; scan again in a moment" : `could not scan branches: ${message(err)}`;
+      return { summary: { ...summary, warning }, items: [] };
+    }
+  }
+
+  private async docker(): Promise<DockerItem[]> {
+    const { store, containers } = this.deps;
+    const [list, images] = await Promise.all([containers.listManaged(), containers.listImages(CLEANUP_IMAGE_FILTERS)]);
+    const projects = store.projects();
+    const recordedRefs = new Set(projects.flatMap((p) => store.environments(p.id)).flatMap((e) => (e.image ? [e.image.ref] : [])));
+    return staleDocker({
+      containers: list,
+      images,
+      projects: new Set(projects.map((p) => p.id)),
+      hasEnv: (id) => store.environment(id) !== undefined,
+      recordedRefs,
+      now: this.now(),
+    });
+  }
+
+  private async removeBranch(item: BranchCleanupItem): Promise<CleanupOutcome> {
+    try {
+      return await this.deps.branches.cleanupBranch(item.projectId, item);
+    } catch (err) {
+      if (err instanceof BusyError) return { outcome: "skipped", message: "project busy" };
+      if (this.deps.store.project(item.projectId)) {
+        this.deps.branches.appendLog(item.projectId, `cleanup: could not delete branch ${item.branch}: ${message(err)}`);
+      }
+      return { outcome: "failed", message: message(err) };
+    }
+  }
+
+  private async removeDocker(item: DockerItem): Promise<CleanupOutcome> {
+    const what = item.kind === "container" ? `container ${item.name ?? item.containerId}` : `image ${item.ref}`;
+    const log = (line: string) => {
+      if (item.projectId && this.deps.store.project(item.projectId)) this.deps.branches.appendLog(item.projectId, line);
+    };
+    try {
+      if (item.kind === "container") {
+        await this.deps.containers.remove(item.containerId);
+      } else if (!(await this.deps.containers.removeImage(item.ref))) {
+        return { outcome: "skipped", message: "in use, or already gone" };
+      }
+      log(`cleanup: removed ${what} (${item.reason})`);
+      return { outcome: "removed" };
+    } catch (err) {
+      log(`cleanup: could not remove ${what}: ${message(err)}`);
+      return { outcome: "failed", message: message(err) };
+    }
+  }
+
+  private now(): number {
+    return this.deps.now?.() ?? Date.now();
+  }
+}
+
+function field(o: Record<string, unknown>, key: string): string {
+  const v = o[key];
+  if (typeof v !== "string" || v === "" || v.startsWith("-")) throw new InvalidRequestError(`cleanup item needs a valid ${key}`);
+  return v;
+}
+
+/**
+ * The selected items of `POST /api/cleanup`. Only kind and identity matter: apply re-derives everything else from
+ * fresh state, so a forged reason or verdict changes nothing.
+ */
+export function parseCleanupItems(value: unknown): CleanupItem[] {
+  if (!Array.isArray(value)) throw new InvalidRequestError("items must be a list");
+  return value.map((raw): CleanupItem => {
+    const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    if (o.kind === "branch") {
+      const projectId = field(o, "projectId");
+      const branch = field(o, "branch");
+      if (o.why !== "merged" && o.why !== "upstream-gone") throw new InvalidRequestError("cleanup item needs a valid why");
+      const worktree = typeof o.worktree === "string" ? o.worktree : undefined;
+      return {
+        id: `branch:${projectId}:${branch}`,
+        kind: "branch",
+        checked: true,
+        reason: typeof o.reason === "string" ? o.reason : "",
+        projectId,
+        branch,
+        base: typeof o.base === "string" ? o.base : "",
+        why: o.why,
+        ...(worktree ? { worktree } : {}),
+        ...(o.dirty === true ? { dirty: true } : {}),
+      };
+    }
+    if (o.kind === "container") {
+      const containerId = field(o, "containerId");
+      return { id: `container:${containerId}`, kind: "container", checked: true, reason: "", containerId, running: false, why: "orphan-env" };
+    }
+    if (o.kind === "image") {
+      const ref = field(o, "ref");
+      return { id: `image:${ref}`, kind: "image", checked: true, reason: "", ref, bytes: 0, why: "superseded" };
+    }
+    throw new InvalidRequestError(`unknown cleanup item kind ${String(o.kind)}`);
+  });
 }
