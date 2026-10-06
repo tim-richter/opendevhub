@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
+import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, NodeView, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -240,4 +240,19 @@ export async function applyCleanup(items: CleanupItem[]): Promise<CleanupResult>
   });
   if (!res.ok) throw await failure(res, "cleanup");
   return (await res.json()) as CleanupResult;
+}
+
+export async function addNode(ssh: string, label?: string): Promise<NodeView> {
+  const res = await fetch("/api/nodes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ssh, ...(label ? { label } : {}) }),
+  });
+  if (!res.ok) throw await failure(res, "add node");
+  return (await res.json()) as NodeView;
+}
+
+export async function removeNode(id: string): Promise<void> {
+  const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) throw await failure(res, "remove node");
 }

@@ -1,4 +1,4 @@
-import { BellIcon, CircleDollarSignIcon, EraserIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { BellIcon, CircleDollarSignIcon, EraserIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, ServerIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -35,6 +35,7 @@ import { useDash } from "../DashboardContext";
 import { checkoutCounts, checkoutPath, checkouts, checkoutTone } from "../checkouts";
 import { attentionCounts, matches, projectCounts, projectTone } from "../derive";
 import type { ProjectView } from "../../shared/types";
+import { nodesNeedingAttention } from "../nodes";
 import { formatCost, opensNewTask, projectIdFromPath } from "../tasks";
 import { formatUsage } from "../usage";
 
@@ -174,6 +175,9 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
             </NavItem>
             <NavItem to="/cleanup">
               <EraserIcon /> Cleanup
+            </NavItem>
+            <NavItem to="/nodes" badge={nodesNeedingAttention(snapshot.nodes) > 0 && <Count n={nodesNeedingAttention(snapshot.nodes)} tone="attention" />}>
+              <ServerIcon /> Nodes
             </NavItem>
           </SidebarMenu>
         </SidebarGroup>
