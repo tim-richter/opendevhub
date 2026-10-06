@@ -379,6 +379,37 @@ export class Orchestrator {
     }
   }
 
+  /** A node came (back) online: adopt its containers as at startup; environments whose container is gone stop. */
+  async nodeOnline(node: NodeId): Promise<void> {
+    const kit = this.kitOf(node);
+    if (!kit || node === LOCAL_NODE) return;
+    let managed: ContainerInfo[];
+    try {
+      managed = await kit.containers.listManaged();
+    } catch {
+      return;
+    }
+    const { store } = this.deps;
+    for (const project of store.projects()) {
+      for (const rec of store.environments(project.id)) {
+        if (rec.node !== node || this.busy.has(rec.id)) continue;
+        const info = managed.find((i) => i.envId === rec.id);
+        if (info) await this.adoptTask(info);
+        else if (store.runtime(rec.id).containerState !== "stopped") await this.markStopped(this.taskEnv(project, rec));
+      }
+    }
+  }
+
+  /** A node dropped: stop watching its environments and close their routes. Their state and sessions stay as last seen. */
+  async nodeOffline(node: NodeId): Promise<void> {
+    for (const env of this.allEnvs()) {
+      if (env.node !== node) continue;
+      this.stopMonitor(env.id);
+      await this.closePorts(env.id);
+      await this.closeRoute(env.id);
+    }
+  }
+
   /** Re-reads `git worktree list` in the container. */
   refreshWorktrees(id: ProjectId): Promise<Worktree[]> {
     return this.withGit(id, async (p) => {

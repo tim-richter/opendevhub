@@ -2194,6 +2194,50 @@ describe("git and ssh credentials", () => {
 });
 
 describe("environments on another node", () => {
+  it("are parked when their node drops: watching stops, state and sessions stay", async () => {
+    const { orch, store, monitors, forwarder, box } = await withRemoteRunning();
+    const session = { ...waiting({ permissions: [], forms: [] }), id: "ses_r", envId: remoteEnv, directory: remoteFix.path, status: "idle" as const };
+    store.setSessions(remoteEnv, [session]);
+    box.online.box = false;
+    await orch.nodeOffline("box");
+    expect(monitors.find((m) => m.opts.envId === remoteEnv)?.stopped).toBe(true);
+    expect(forwarder.close).toHaveBeenCalledWith(remoteEnv);
+    expect(box.routes[0].close).toHaveBeenCalled();
+    expect(store.runtime(remoteEnv).containerState).toBe("running");
+    expect(store.sessionsOf(project.id).map((s) => s.id)).toContain("ses_r");
+    await expect(orch.promptSession(project.id, "ses_r", "hi")).rejects.toThrow("node box is unreachable");
+  });
+
+  it("are adopted again when their node comes back", async () => {
+    const { orch, store, monitors, box } = await withRemoteRunning();
+    box.online.box = false;
+    await orch.nodeOffline("box");
+    box.online.box = true;
+    box.kit.containers.listManaged.mockResolvedValue([box.info]);
+    await orch.nodeOnline("box");
+    expect(store.runtime(remoteEnv)).toMatchObject({ containerState: "running", opencode: "healthy" });
+    expect(monitors.filter((m) => m.opts.envId === remoteEnv && m.started && !m.stopped)).toHaveLength(1);
+  });
+
+  it("are marked stopped when their container is gone after the node comes back", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    box.kit.containers.listManaged.mockResolvedValue([]);
+    await orch.nodeOnline("box");
+    expect(store.runtime(remoteEnv).containerState).toBe("stopped");
+  });
+
+  it("are left alone by the refresh while offline, or when ssh fails", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    box.kit.containers.inspect.mockRejectedValueOnce(new CommandError("docker inspect could not run: ssh exited 255"));
+    await orch.refreshContainers();
+    expect(store.runtime(remoteEnv).containerState).toBe("running");
+    box.online.box = false;
+    box.kit.containers.inspect.mockClear();
+    await orch.refreshContainers();
+    expect(box.kit.containers.inspect).not.toHaveBeenCalled();
+    expect(store.runtime(remoteEnv).containerState).toBe("running");
+  });
+
   it("start with that node's tools, mounting the node's repository", async () => {
     const { orch, store, containers, images, box } = await withRemote();
     await orch.startEnv(project.id, remoteEnv);
