@@ -9,6 +9,7 @@ import type {
   ForwardedPort,
   Isolation,
   ModelsInfo,
+  NodeId,
   PendingItems,
   PermissionDecision,
   PickResult,
@@ -41,6 +42,8 @@ import { splitTitleBody } from "./forge";
 import { newTaskId } from "./ids";
 import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "./tasks";
 import type { GitOps } from "./git";
+import { LOCAL_NODE } from "./host";
+import type { NodeRepoPort } from "./node-repo";
 import { diffMode, NO_LIMITS, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
@@ -136,6 +139,30 @@ export interface AgentTunnelHandle {
 }
 export type AgentTunnelFactory = (target: RelayTarget, opts: AgentTunnelOptions) => AgentTunnelHandle;
 
+/** Everything that acts on one node's Docker and files; the local node's come from the deps below. */
+export interface NodeKit {
+  containers: ContainersPort;
+  runtime: RuntimePort;
+  relay: RelayPort;
+  images: ImagesPort;
+  envFiles: EnvFilesPort;
+  credentials?: CredentialsPort;
+  network: NetworkPort;
+  git: GitPort;
+  repo: NodeRepoPort;
+}
+
+/** The other nodes: a kit while a node is online. */
+export interface NodeKitsPort {
+  known(node: NodeId): boolean;
+  kit(node: NodeId): NodeKit | undefined;
+}
+
+/** The local node's kit: the deps as they are, where images and a repo may be missing. */
+type Kit = Omit<NodeKit, "images" | "repo"> & { images?: ImagesPort; repo?: NodeRepoPort };
+
+const DIRECT: NetworkPort = { route: async (c: RouteContainer) => directRoute(c.ip) };
+
 export interface OrchestratorDeps {
   store: StateStore;
   containers: ContainersPort;
@@ -170,6 +197,8 @@ export interface OrchestratorDeps {
   recordUsage?: (projectId: ProjectId, sessions: RawSession[]) => void;
   /** Defaults to a real AgentTunnel; tests pass their own. */
   agentTunnel?: AgentTunnelFactory;
+  /** Other nodes' kits; absent when nodes aren't wired (and then every environment is local). */
+  nodes?: NodeKitsPort;
 }
 
 /**
@@ -179,6 +208,8 @@ export interface OrchestratorDeps {
 interface Env {
   id: EnvId;
   project: Project;
+  /** Where its container runs. */
+  node: NodeId;
   /** What `devcontainer up` and `exec` address: the project itself for the main environment. */
   target: ExecTarget;
   /** Set on task environments. */
@@ -205,10 +236,10 @@ export class Orchestrator {
   private readonly sshAgents = new Map<EnvId, boolean>();
   private defaultEnvFiles?: EnvFilesPort;
   /**
-   * Task containers come up one at a time: concurrent `devcontainer up` calls race on the CLI's shared
+   * Task containers come up one at a time per node: concurrent `devcontainer up` calls race on the CLI's shared
    * temp files (its UID Dockerfile) and one of them fails.
    */
-  private taskUps: Promise<unknown> = Promise.resolve();
+  private readonly taskUps = new Map<NodeId, Promise<unknown>>();
   private readonly modelCache = new Map<ProjectId, { at: number; value: Promise<ModelsInfo> }>();
 
   constructor(private readonly deps: OrchestratorDeps) {}
@@ -252,6 +283,7 @@ export class Orchestrator {
       const { store } = this.deps;
       for (const rec of store.environments(p.id)) {
         const env = this.taskEnv(p, rec);
+        if (!this.kitOf(env.node)) continue;
         const rt = store.runtime(env.id);
         if (this.busy.has(env.id) || !rt.containerId || rt.containerState === "stopped") continue;
         await this.exclusiveEnv(env, () => this.stopContainer(env));
@@ -279,17 +311,20 @@ export class Orchestrator {
 
   startEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
     const env = this.requireTaskEnv(projectId, envId);
+    this.kit(env);
     return this.exclusiveEnv(env, () => this.bringUpTask(env));
   }
 
   stopEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
     const env = this.requireTaskEnv(projectId, envId);
+    this.kit(env);
     return this.exclusiveEnv(env, () => this.stopContainer(env));
   }
 
   /** Deletes a worktree's container; the worktree and its files stay, its sessions go. */
   removeEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
     const env = this.requireTaskEnv(projectId, envId);
+    this.kit(env);
     return this.exclusiveEnv(env, () => this.destroyEnv(env));
   }
 
@@ -325,12 +360,14 @@ export class Orchestrator {
   }
 
   async refreshContainers(): Promise<void> {
-    const { store, containers } = this.deps;
+    const { store } = this.deps;
     for (const env of this.allEnvs()) {
+      const kit = this.kitOf(env.node);
+      if (!kit) continue;
       const rt = store.runtime(env.id);
       if (this.busy.has(env.id) || rt.containerState !== "running" || !rt.containerId) continue;
       try {
-        const info = await containers.inspect(rt.containerId);
+        const info = await kit.containers.inspect(rt.containerId);
         // A lifecycle action (start/stop/rebuild/...) may have started while inspect() was in
         // flight; if so it owns the environment's state now, so don't race it with a stale write.
         if (this.busy.has(env.id)) continue;
@@ -1083,7 +1120,8 @@ export class Orchestrator {
 
   /** Route, relay, ports and opencode health of a running container found at startup. */
   private async adoptRunning(env: Env, info: ContainerInfo): Promise<void> {
-    const { store, runtime } = this.deps;
+    const { store } = this.deps;
+    const { runtime } = this.kit(env);
     let route: Route | undefined;
     if (info.ip) {
       try {
@@ -1116,7 +1154,8 @@ export class Orchestrator {
   }
 
   private async stopContainer(env: Env): Promise<void> {
-    const { store, runtime, containers } = this.deps;
+    const { store } = this.deps;
+    const { runtime, relay, containers } = this.kit(env);
     this.stopMonitor(env.id);
     await this.closePorts(env.id);
     const rt = store.runtime(env.id);
@@ -1124,7 +1163,7 @@ export class Orchestrator {
     try {
       if (rt.containerState === "running") {
         await runtime.stopServer(env.target).catch(() => {});
-        await this.deps.relay.stop(env.target).catch(() => {});
+        await relay.stop(env.target).catch(() => {});
       }
       if (rt.containerId) await containers.stop(rt.containerId);
       await this.closeRoute(env.id);
@@ -1199,13 +1238,15 @@ export class Orchestrator {
    * route, relay, ports and opencode as for the main container. Records the error and rethrows it.
    */
   private async bringUpTask(env: TaskEnv): Promise<void> {
-    const { store, containers } = this.deps;
+    const { store } = this.deps;
+    const kit = this.kit(env);
+    const { containers } = kit;
     store.updateRuntime(env.id, { containerState: "starting", opencode: "absent", error: undefined });
     try {
-      if (store.runtime(env.project.id).containerState !== "running") {
+      if (env.node === LOCAL_NODE && store.runtime(env.project.id).containerState !== "running") {
         throw new UnavailableError("start the project first: task containers are prepared from its container");
       }
-      const images = this.deps.images;
+      const images = kit.images;
       if (!images) throw new UnavailableError("task environments are not available in this build");
       const image = await images.ensureBase(env.project, env.worktree, this.settingsOf(env.project).keyFiles, (l) => this.envLog(env, l));
       const read = await containers.readConfig(env.worktree.hostPath);
@@ -1216,10 +1257,10 @@ export class Orchestrator {
         guessedFolder: read.workspaceFolder,
         image: image.ref,
         worktree: env.worktree,
-        gitDir: { host: path.join(env.project.path, ".git"), container: path.posix.join(this.workspaceFolder(env.project), ".git") },
+        gitDir: this.gitDirOf(env),
       });
       for (const note of notes) this.envLog(env, `environment: ${note}`);
-      await this.envFiles().write(env.id, config);
+      await kit.envFiles.write(env.id, config);
       const rec = store.environment(env.id);
       if (rec) store.putEnvironment({ ...rec, image });
       const up = await this.upTask(env);
@@ -1248,8 +1289,11 @@ export class Orchestrator {
   }
 
   private upTask(env: TaskEnv): ReturnType<ContainersPort["up"]> {
-    const next = this.taskUps.then(() => this.deps.containers.up(env.target, { rebuild: false, onLine: (l) => this.envLog(env, l) }));
-    this.taskUps = next.catch(() => {});
+    const { containers } = this.kit(env);
+    const next = (this.taskUps.get(env.node) ?? Promise.resolve()).then(() =>
+      containers.up(env.target, { rebuild: false, onLine: (l) => this.envLog(env, l) }),
+    );
+    this.taskUps.set(env.node, next.catch(() => {}));
     return next;
   }
 
@@ -1271,7 +1315,9 @@ export class Orchestrator {
   }
 
   private async destroyEnv(env: TaskEnv): Promise<void> {
-    const { store, containers } = this.deps;
+    const { store } = this.deps;
+    const kit = this.kit(env);
+    const { containers } = kit;
     this.stopMonitor(env.id);
     await this.closePorts(env.id);
     await this.closeRoute(env.id);
@@ -1281,7 +1327,7 @@ export class Orchestrator {
       await containers.remove(containerId);
       if (image && /^vsc-.+-uid$/.test(image.split(":")[0])) await containers.removeImage(image);
     }
-    await this.envFiles().remove(env.id).catch(() => {});
+    await kit.envFiles.remove(env.id).catch(() => {});
     store.removeEnvironment(env.id);
     this.envLog(env, "environment: removed");
   }
@@ -1324,7 +1370,8 @@ export class Orchestrator {
   }
 
   private async launchOpencode(env: Env, password: string | undefined): Promise<void> {
-    const { store, runtime } = this.deps;
+    const { store } = this.deps;
+    const { runtime } = this.kit(env);
     const route = this.routes.get(env.id);
     if (!route) throw new Error("container is not running — start the project first");
     const result = await runtime.ensureRunning(env.target, {
@@ -1348,7 +1395,7 @@ export class Orchestrator {
   }
 
   private mainEnv(project: Project): Env {
-    return { id: project.id, project, target: project };
+    return { id: project.id, project, node: LOCAL_NODE, target: project };
   }
 
   private envOf(id: EnvId): Env | undefined {
@@ -1384,12 +1431,51 @@ export class Orchestrator {
   }
 
   private taskEnv(project: Project, rec: EnvRecord): TaskEnv {
+    const node = rec.node ?? LOCAL_NODE;
+    // An offline node has no kit, so no config path; every action on it fails in kit() first.
+    const files = node === LOCAL_NODE ? this.envFiles() : this.deps.nodes?.kit(node)?.envFiles;
     return {
       id: rec.id,
       project,
+      node,
       worktree: rec.worktree,
-      target: { id: rec.id, path: rec.worktree.hostPath, idLabels: envLabels(rec.id, project.id), overrideConfig: this.envFiles().path(rec.id) },
+      target: {
+        id: rec.id,
+        path: rec.worktree.hostPath,
+        idLabels: envLabels(rec.id, project.id),
+        ...(files ? { overrideConfig: files.path(rec.id) } : {}),
+      },
     };
+  }
+
+  /** The tools for an environment's node; throws while that node is offline. */
+  private kit(env: Env): Kit {
+    const kit = this.kitOf(env.node);
+    if (!kit) throw new UnavailableError(`node ${env.node} is unreachable`);
+    return kit;
+  }
+
+  private kitOf(node: NodeId): Kit | undefined {
+    if (node !== LOCAL_NODE) return this.deps.nodes?.kit(node);
+    const d = this.deps;
+    return {
+      containers: d.containers,
+      runtime: d.runtime,
+      relay: d.relay,
+      images: d.images,
+      envFiles: this.envFiles(),
+      credentials: d.credentials,
+      network: d.network ?? DIRECT,
+      git: d.git,
+    };
+  }
+
+  /** The project's .git as a task container mounts it: from this machine, or from the node's repository. */
+  private gitDirOf(env: TaskEnv): { host: string; container: string } {
+    const ws = this.workspaceFolder(env.project);
+    const container = path.posix.join(ws, ".git");
+    if (env.node === LOCAL_NODE) return { host: path.join(env.project.path, ".git"), container };
+    return { host: this.kit(env).repo!.layout(env.project, ws).gitDir, container };
   }
 
   private requireTaskEnv(projectId: ProjectId, envId: EnvId): TaskEnv {
@@ -1447,7 +1533,8 @@ export class Orchestrator {
   }
 
   private async forwardPorts(env: Env, target: ForwardTarget): Promise<void> {
-    const { store, containers, forwarder } = this.deps;
+    const { store, forwarder } = this.deps;
+    const { containers } = this.kit(env);
     let config: PortConfig;
     try {
       config = await containers.readConfiguration(env.target);
@@ -1477,8 +1564,7 @@ export class Orchestrator {
 
   private async openRoute(env: Env, container: RouteContainer): Promise<Route> {
     await this.closeRoute(env.id);
-    const network = this.deps.network ?? { route: async (c: RouteContainer) => directRoute(c.ip) };
-    const route = await network.route(container, (line) => this.envLog(env, line));
+    const route = await this.kit(env).network.route(container, (line) => this.envLog(env, line));
     this.routes.set(env.id, route);
     return route;
   }
@@ -1490,7 +1576,8 @@ export class Orchestrator {
   }
 
   private async startRelay(env: Env, ip: string, route: Route): Promise<ForwardTarget> {
-    const { store, runtime, relay } = this.deps;
+    const { store } = this.deps;
+    const { runtime, relay } = this.kit(env);
     let token = store.runtime(env.id).relayToken;
     if (!token) {
       token = generateRelayToken();
@@ -1511,7 +1598,8 @@ export class Orchestrator {
 
   /** Git identity, known_hosts and the ssh-agent tunnel. Never throws: each step logs what happened. */
   private async prepareCredentials(env: Env, target: ForwardTarget): Promise<void> {
-    const { store, credentials } = this.deps;
+    const { store } = this.deps;
+    const { credentials } = this.kit(env);
     const sshAgent = this.sshAgentOf(env);
     if (credentials) {
       try {
@@ -1596,6 +1684,8 @@ export class Orchestrator {
   }
 
   private opencodeClient(id: EnvId): OpencodeClient {
+    const env = this.envOf(id);
+    if (env && env.node !== LOCAL_NODE && !this.kitOf(env.node)) throw new UnavailableError(`node ${env.node} is unreachable`);
     const rt = this.deps.store.runtime(id);
     const route = this.routes.get(id);
     if (rt.containerState !== "running" || rt.opencode !== "healthy" || !route || !rt.password) {

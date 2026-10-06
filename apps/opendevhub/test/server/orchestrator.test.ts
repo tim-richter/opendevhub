@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PersistedState } from "../../src/server/config";
-import { CommandError, type ContainerInfo, type ExecTarget } from "../../src/server/containers";
+import { CommandError, type ContainerInfo, type ExecTarget, envLabels } from "../../src/server/containers";
+import type { NodeRepoLayout } from "../../src/server/node-repo";
 import { envIdFor } from "../../src/server/env-config";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
 import type { NewSession, OpencodeEndpoint, RawAgent, RawModel, RawSession } from "../../src/server/opencode/client";
-import { AlreadyAnsweredError, BusyError, type NetworkPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
+import { AlreadyAnsweredError, BusyError, type NetworkPort, type NodeKit, type NodeKitsPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
 import { OpencodeClient, OpencodeHttpError } from "../../src/server/opencode/client";
 import { rawSession, startFakeOpencode } from "../helpers/fake-opencode";
 import { StateStore } from "../../src/server/state";
@@ -47,7 +48,120 @@ const runningTask: ContainerInfo = {
   binds: {},
 };
 
-function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPort, projects = [project]) {
+const remoteFix = {
+  path: "/workspaces/demo.worktrees/fix",
+  hostPath: "/home/tim/.opendevhub/repos/demo-abc123/demo.worktrees/fix",
+  branch: "fix",
+};
+const remoteEnv = envIdFor(project.id, `box:${remoteFix.path}`, "fix");
+
+/** Fakes for node "box", shaped like setup()'s; `online.box` turns it off. */
+function boxKit() {
+  const layout = (p: Project, ws: string): NodeRepoLayout => ({
+    repo: `/home/tim/.opendevhub/repos/${p.id}/demo`,
+    gitDir: `/home/tim/.opendevhub/repos/${p.id}/demo/.git`,
+    worktrees: `/home/tim/.opendevhub/repos/${p.id}/demo.worktrees`,
+    url: `ssh://tim@box/home/tim/.opendevhub/repos/${p.id}/demo`,
+    workspaceFolder: ws,
+  });
+  const routes: Array<Route & { close: ReturnType<typeof vi.fn> }> = [];
+  const info: ContainerInfo = {
+    id: "r1",
+    name: "demo_fix",
+    running: true,
+    ip: "172.18.0.4",
+    envId: remoteEnv,
+    envProjectId: project.id,
+    image: "vsc-fix-1234-uid",
+    binds: {},
+  };
+  const kit = {
+    containers: {
+      workspaceFolder: vi.fn(async (_t?: ExecTarget): Promise<string | undefined> => undefined),
+      listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
+      up: vi.fn(async (_t: ExecTarget, _o: { rebuild: boolean; onLine: (l: string) => void }) => ({
+        containerId: "r1",
+        remoteWorkspaceFolder: remoteFix.path,
+        remoteUser: "node",
+      })),
+      inspect: vi.fn(async (_id?: string): Promise<ContainerInfo | undefined> => info),
+      stop: vi.fn(async (_id: string) => {}),
+      readConfiguration: vi.fn(async (_t?: ExecTarget) => ({ forwardPorts: [] as unknown[], portsAttributes: {} as Record<string, unknown> })),
+      readConfig: vi.fn(async (_f: string) => ({
+        configuration: { image: "node:22" } as Record<string, unknown>,
+        workspaceFolder: "/workspaces/fix" as string | undefined,
+      })),
+      remove: vi.fn(async (_id: string) => {}),
+      removeImage: vi.fn(async (_ref: string) => true),
+    },
+    runtime: {
+      endpoint: (a: HostPort, password: string) => ({ baseUrl: `http://${a.host}:${a.port}`, password }),
+      ensureRunning: vi.fn(async (_t: ExecTarget, _a: { password?: string }) => ({ password: "pw-box", version: "2.0.20" })),
+      stopServer: vi.fn(async () => {}),
+      isHealthy: vi.fn(async () => true),
+      resolveBinary: vi.fn(async (_t?: ExecTarget): Promise<string | undefined> => "/usr/local/bin/opencode"),
+    },
+    relay: {
+      ensureRunning: vi.fn(async (_t: ExecTarget, _a: { address: HostPort; token: string }): Promise<RelayStatus> => ({ status: "active", via: "bun" })),
+      stop: vi.fn(async (_t?: ExecTarget) => {}),
+    },
+    images: {
+      ensureBase: vi.fn(async (p: Project, _w: EnvWorktree, _k: string[], _l: (l: string) => void) => ({
+        key: "b".repeat(64),
+        ref: `opendevhub/${p.id}:bbbbbbbbbbbb-base`,
+      })),
+    },
+    envFiles: {
+      path: (id: string) => `/home/tim/.opendevhub/envs/${id}/devcontainer.json`,
+      write: vi.fn(async (id: string, _c: Record<string, unknown>) => `/home/tim/.opendevhub/envs/${id}/devcontainer.json`),
+      remove: vi.fn(async (_id: string) => {}),
+    },
+    credentials: { prepare: vi.fn(async (_t: ExecTarget, _path: string, _o: { sshAgent: boolean; onLine: (l: string) => void }) => {}) },
+    network: {
+      route: vi.fn(async (_c: RouteContainer, _onLog: (l: string) => void): Promise<Route> => {
+        const r = {
+          kind: "ssh" as const,
+          opencode: { host: "127.0.0.1", port: 41001 },
+          relay: { host: "127.0.0.1", port: 41002 },
+          dial: vi.fn() as unknown as Dial,
+          close: vi.fn(async () => {}),
+        };
+        routes.push(r);
+        return r;
+      }),
+    },
+    git: {
+      currentBranch: vi.fn(async (_t: ExecTarget, _dir: string): Promise<string | undefined> => "fix"),
+      recordedBase: vi.fn(async (_t: ExecTarget, _dir: string, _b: string): Promise<string | undefined> => "main"),
+      aheadBehind: vi.fn(async (_t: ExecTarget, _dir: string, _base: string) => ({ ahead: 3, behind: 0 })),
+      isClean: vi.fn(async (_t: ExecTarget, _dir: string) => true),
+      isPushed: vi.fn(async (_t: ExecTarget, _dir: string, _b: string) => false),
+      commit: vi.fn(async (_t: ExecTarget, _dir: string, _m: string) => {}),
+      update: vi.fn(async (_t: ExecTarget, _dir: string, _base: string, strategy: "rebase" | "merge"): Promise<UpdateResult> => ({ strategy })),
+    },
+    repo: {
+      layout: vi.fn(layout),
+      ensure: vi.fn(async (_l: NodeRepoLayout) => {}),
+      branches: vi.fn(async (_l: NodeRepoLayout): Promise<string[]> => []),
+      pushBase: vi.fn(async (_p: Project, _l: NodeRepoLayout, _base: string) => {}),
+      addWorktree: vi.fn(async (l: NodeRepoLayout, branch: string, _base: string): Promise<EnvWorktree> => ({
+        path: `${l.workspaceFolder}.worktrees/${branch.replace(/\//g, "-")}`,
+        hostPath: `${l.worktrees}/${branch.replace(/\//g, "-")}`,
+        branch,
+      })),
+      removeWorktree: vi.fn(async (_l: NodeRepoLayout, _w: EnvWorktree) => {}),
+      bringHome: vi.fn(async (_p: Project, _l: NodeRepoLayout, _b: string) => {}),
+    },
+  };
+  const online = { box: true };
+  const nodes: NodeKitsPort = {
+    known: (n) => n === "box",
+    kit: (n) => (n === "box" && online.box ? (kit as unknown as NodeKit) : undefined),
+  };
+  return { kit, nodes, online, routes, layout, info };
+}
+
+function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPort, projects = [project], nodes?: NodeKitsPort) {
   const store = new StateStore({ port: 7777, persisted, persist: () => {} });
   const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean; reconciled: number }> = [];
   const containers = {
@@ -202,6 +316,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     forwarder,
     relay,
     network,
+    nodes,
     worktrees,
     git,
     publisher,
@@ -233,6 +348,23 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     },
   });
   return { store, containers, runtime, orch, monitors, forwarder, relay, worktrees, editors, client, clientFor, mkdir, git, publisher, clock, delay, images, envFiles, projectSettings, credentials, agentTunnel, tunnels, recordUsage };
+}
+
+/** A started project with a remote environment for `fix` on box recorded (not started). */
+async function withRemote() {
+  const box = boxKit();
+  const s = setup(undefined, undefined, undefined, box.nodes);
+  await s.orch.rescan();
+  await s.orch.start(project.id);
+  s.store.putEnvironment({ id: remoteEnv, projectId: project.id, worktree: remoteFix, node: "box" });
+  return { ...s, box };
+}
+
+/** …and started. */
+async function withRemoteRunning() {
+  const s = await withRemote();
+  await s.orch.startEnv(project.id, remoteEnv);
+  return s;
 }
 
 /** A started project whose worktree list has `feat`. */
@@ -2058,5 +2190,57 @@ describe("git and ssh credentials", () => {
     await orch.start(project.id);
     tunnels[0].opts.onRelayLost?.();
     await vi.waitFor(() => expect(relay.ensureRunning).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("environments on another node", () => {
+  it("start with that node's tools, mounting the node's repository", async () => {
+    const { orch, store, containers, images, box } = await withRemote();
+    await orch.startEnv(project.id, remoteEnv);
+    expect(box.kit.images.ensureBase).toHaveBeenCalledWith(project, remoteFix, [], expect.any(Function));
+    expect(images.ensureBase).not.toHaveBeenCalled();
+    expect(box.kit.containers.readConfig).toHaveBeenCalledWith(remoteFix.hostPath);
+    const config = box.kit.envFiles.write.mock.calls[0][1];
+    expect(config.mounts).toContain(
+      `type=bind,source=/home/tim/.opendevhub/repos/${project.id}/demo/.git,target=/workspaces/demo/.git`,
+    );
+    expect(box.kit.containers.up).toHaveBeenCalledWith(
+      {
+        id: remoteEnv,
+        path: remoteFix.hostPath,
+        idLabels: envLabels(remoteEnv, project.id),
+        overrideConfig: `/home/tim/.opendevhub/envs/${remoteEnv}/devcontainer.json`,
+      },
+      expect.anything(),
+    );
+    expect(containers.up).toHaveBeenCalledTimes(1);
+    expect(box.kit.network.route).toHaveBeenCalled();
+    expect(box.kit.runtime.ensureRunning).toHaveBeenCalled();
+    expect(store.runtime(remoteEnv)).toMatchObject({ containerState: "running", opencode: "healthy", containerId: "r1" });
+  });
+
+  it("start while the project's own container is stopped", async () => {
+    const box = boxKit();
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    s.store.putEnvironment({ id: remoteEnv, projectId: project.id, worktree: remoteFix, node: "box" });
+    await s.orch.startEnv(project.id, remoteEnv);
+    expect(s.store.runtime(remoteEnv).containerState).toBe("running");
+  });
+
+  it("fail with 'node box is unreachable' while it's offline, without touching their state", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    box.online.box = false;
+    expect(() => orch.stopEnv(project.id, remoteEnv)).toThrow(UnavailableError);
+    expect(() => orch.startEnv(project.id, remoteEnv)).toThrow("node box is unreachable");
+    expect(store.runtime(remoteEnv).containerState).toBe("running");
+  });
+
+  it("are skipped when the project stops while their node is offline", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    box.online.box = false;
+    await orch.stop(project.id);
+    expect(store.runtime(project.id).containerState).toBe("stopped");
+    expect(box.kit.containers.stop).not.toHaveBeenCalled();
   });
 });
