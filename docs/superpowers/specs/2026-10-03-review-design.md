@@ -48,9 +48,8 @@ the host and the container and survives restarts. This is a small change to `wor
 - **Base.** Resolved in this order: `branch.<b>.opendevhubBase`, then `/api/vcs/base`, then the
   default branch from `/api/vcs`. The UI can override it, and `?base=` overrides it for one
   request.
-- **Which diff.** Worktrees use `mode=branch&base=<base>`. The main checkout uses
-  `mode=working` when it's on the base branch. Either way you see everything the agent did,
-  committed or not, including untracked files.
+- **Which diff.** Uncommitted changes (`mode=working`) by default, or `mode=branch&base=<base>`
+  when chosen; see [the diff mode design](2026-10-06-review-diff-mode-design.md).
 - **Size cap.** Responses carry at most 2 MB of patches. Larger files are listed with their
   stats only; their patch loads on demand with `?file=`.
 - **Safety.** Every path goes through `checkDirectory`.
