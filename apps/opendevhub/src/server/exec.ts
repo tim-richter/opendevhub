@@ -57,8 +57,8 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
       carry[key] = parts.pop() ?? "";
       for (const line of parts) if (line.trim()) opts.onLine(line);
     };
-    child.stdout.on("data", (c: Buffer) => feed("out", c));
-    child.stderr.on("data", (c: Buffer) => feed("err", c));
+    child.stdout?.on("data", (c: Buffer) => feed("out", c));
+    child.stderr?.on("data", (c: Buffer) => feed("err", c));
 
     const timer = opts.timeoutMs
       ? setTimeout(() => {

@@ -454,6 +454,30 @@ export interface ResourceStats {
   memoryLimit: number;
 }
 
+/** A machine that runs environments: `local` (this one), or an ssh destination from config.json. */
+export type NodeId = string;
+
+export type NodeState = "online" | "connecting" | "unreachable" | "error";
+
+/** A node's capacity: memory in bytes, `containers` counts opendevhub's running containers. */
+export interface NodeStats {
+  cpus: number;
+  memTotal: number;
+  memAvailable: number;
+  containers: number;
+}
+
+export interface NodeView {
+  id: NodeId;
+  label: string;
+  /** The ssh destination; absent for `local`. */
+  ssh?: string;
+  state: NodeState;
+  /** Why the node is unreachable or needs setup. */
+  reason?: string;
+  stats?: NodeStats;
+}
+
 export interface DashboardSnapshot {
   roots: string[];
   preflight: Preflight;
@@ -463,6 +487,8 @@ export interface DashboardSnapshot {
   usage?: UsageTotals;
   /** By environment id (a main environment's id is its project id); running environments only. */
   resources?: Record<EnvId, ResourceStats>;
+  /** `local` first, then configured nodes in config order. */
+  nodes?: NodeView[];
 }
 
 export interface LogEvent {
