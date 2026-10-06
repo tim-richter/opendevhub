@@ -1,0 +1,52 @@
+---
+title: Checks
+description: The commands a change must pass before you publish it, run from Review.
+icon: ListChecks
+---
+
+Checks are the commands a change has to pass before it goes out: tests, lint, a Docker build. Define them once per project, and the Review tab runs them on the checkout you're looking at.
+
+## Define them
+
+In the project's `devcontainer.json`, so they're committed and shared with the team:
+
+```jsonc
+"customizations": {
+  "opendevhub": {
+    "checks": [
+      { "name": "lint", "command": "pnpm lint" },
+      { "name": "test", "command": "pnpm test", "timeout": 1200 },
+      { "name": "image", "command": "docker compose build", "where": "host" }
+    ]
+  }
+}
+```
+
+- `command` runs with `sh -c` in the checkout's folder.
+- `where` is `container` (default), the checkout's own container or the project's, or `host`, this machine (for `docker build` and `docker compose`).
+- `timeout` is in seconds (default 900, 10 to 7200). A check that runs out of time fails, and everything it started is stopped.
+
+Changes to `devcontainer.json` apply right away; nothing needs restarting.
+
+To use a different list without touching the repo, click **Edit** in the **Checks** section of the project page. Your list is saved in `~/.config/opendevhub/config.json` and replaces the one in `devcontainer.json`; **Use devcontainer.json** switches back.
+
+## Run them
+
+The **Checks** button in the Review toolbar shows where things stand: not run, out of date, running, passed or failed. Click it to open the panel, then **Run all**, or the play button next to one check to run just that one. Checks run one after another, and all of them run even when an earlier one fails. Click a check to read its output; failed ones open by themselves.
+
+A result belongs to the commit it ran on. Once you commit, or the uncommitted changes differ from the ones that were tested, the button shows the results as out of date.
+
+**Ask agent to fix** sends the failed checks' commands and the end of their output to the session you picked for review comments.
+
+**Publish…** never blocks on checks, but it warns you when they haven't all passed on the current commit.
+
+## Host checks and Docker
+
+Running Docker inside the devcontainer (Docker-in-Docker) needs a privileged container and starts every build with a cold cache. Host checks use your machine's Docker instead, in the checkout's folder on this machine. They therefore can't run for a worktree that only exists inside the container.
+
+- In a worktree, `COMPOSE_PROJECT_NAME` is set to `<project>-<branch>` (unless you set it yourself), so two worktrees' `docker compose` runs don't share containers, networks or volumes.
+- Every check gets `OPENDEVHUB_CHECK` (its name) and `OPENDEVHUB_BRANCH`.
+
+**Approval.** An agent can edit `devcontainer.json`, so a host command runs only after you have approved its exact text. The first run of a new or changed host command shows it and asks you to **Approve and run**. The approval is stored as a hash in `config.json` and covers only that text. Commands you save yourself on the project page count as approved.
+
+Approval covers the command, not what it builds. A `Dockerfile` or compose file still runs through your Docker daemon, so review the diff before you run host checks.

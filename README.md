@@ -79,6 +79,25 @@ To tell opendevhub about a host, or an ssh alias it can't probe, add it to `conf
 
 `kind` is one of `github`, `gitlab`, `forgejo`, `gitea`, `bitbucket` or `unknown`; `web` is the site's origin, needed when the remote host is an ssh alias (`work:team/app.git`).
 
+## Checks
+
+The commands a change must pass before it's published (tests, lint, a Docker build), defined per project and run from the Review tab:
+
+```jsonc
+"customizations": {
+  "opendevhub": {
+    "checks": [
+      { "name": "test", "command": "pnpm test" },
+      { "name": "image", "command": "docker compose build", "where": "host" }
+    ]
+  }
+}
+```
+
+- `where: "container"` (default) runs in the checkout's container; `"host"` runs on this machine in the checkout's folder, with your own Docker, and only after you approve the exact command once. In a worktree, `COMPOSE_PROJECT_NAME` is set to `<project>-<branch>`.
+- The **Checks** section of the project page edits a list of your own, saved in `config.json`, which replaces the one in `devcontainer.json`.
+- Results belong to the commit they ran on. **Publish…** warns when they haven't all passed there, and **Ask agent to fix** hands failures to a session.
+
 ## Tasks
 
 **New task** (on the Overview and project pages, in `⌘K`, or press `n`) starts agent work from a prompt, without opening the opencode tab. By default it creates a worktree on a branch named after the prompt's first line (`-2`, `-3`… when taken), starts a session there and sends the prompt. **Main checkout** runs it in the project folder instead.

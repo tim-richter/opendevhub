@@ -1,7 +1,7 @@
 # Checks: the commands a change must pass before it's published
 
 Date: 2026-10-06
-Status: Approved in conversation; building
+Status: Implemented
 Depends on: [review](2026-10-03-review-design.md), [publish](2026-10-03-publish-design.md).
 
 ## Problem
