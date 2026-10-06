@@ -3,7 +3,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import open from "open";
-import { type Config, FileForgeStore, FileProjectSettings, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState, stateDir } from "./config";
+import {
+  type Config,
+  FileForgeStore,
+  FileProjectSettings,
+  addNode,
+  configDir,
+  loadConfig,
+  loadState,
+  mergeRoots,
+  removeNode,
+  saveConfig,
+  saveState,
+  stateDir,
+} from "./config";
 import { Containers } from "./containers";
 import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { Checks } from "./checks";
@@ -17,6 +30,7 @@ import { Gateway } from "./gateway";
 import { GitOps } from "./git";
 import { Images } from "./images";
 import { Network, parseRouteMode } from "./network";
+import { Nodes } from "./nodes";
 import { Onboarding } from "./onboarding";
 import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
@@ -40,6 +54,11 @@ const USAGE = `Usage: opendevhub [--root <dir>]... [--port <n>] [--no-open]
   -p, --port <n>     Dashboard port (default 7777, saved)
       --no-open      Do not open the browser
   -h, --help         Show this help
+
+Remote nodes:
+  opendevhub nodes add <ssh-destination> [--label <name>]
+  opendevhub nodes list
+  opendevhub nodes remove <id>
 
 Environment:
   OPENDEVHUB_ROUTE           auto (default), direct or gateway: how to reach containers
@@ -100,7 +119,45 @@ export function findWebDir(): string | undefined {
   return undefined;
 }
 
+const NODES_USAGE = "usage: opendevhub nodes add <ssh-destination> [--label <name>] | nodes list | nodes remove <id>";
+
+/** `opendevhub nodes …`: edits config.json; a running opendevhub picks changes up on restart. */
+export function runNodesCommand(argv: string[], dir: string, out: { log(s: string): void; error(s: string): void }): number {
+  const [sub, ...rest] = argv;
+  try {
+    if (sub === "list") {
+      const nodes = loadConfig(dir).nodes ?? [];
+      if (nodes.length === 0) out.log("No nodes yet. Add one: opendevhub nodes add user@host");
+      for (const n of nodes) out.log([n.id, n.ssh, ...(n.label ? [n.label] : [])].join("\t"));
+      return 0;
+    }
+    if (sub === "add") {
+      const { values, positionals } = parseArgs({ args: rest, options: { label: { type: "string" } }, allowPositionals: true, strict: true });
+      if (positionals.length !== 1) throw new Error(NODES_USAGE);
+      const { config, node } = addNode(loadConfig(dir), { ssh: positionals[0], ...(values.label ? { label: values.label } : {}) });
+      saveConfig(dir, config);
+      out.log(`added node ${node.id} (${node.ssh}); a running opendevhub connects to it after a restart, or add it on the Nodes page instead`);
+      return 0;
+    }
+    if (sub === "remove" && rest.length === 1) {
+      const cfg = loadConfig(dir);
+      if (!cfg.nodes?.some((n) => n.id === rest[0])) throw new Error(`no node ${rest[0]}`);
+      saveConfig(dir, removeNode(cfg, rest[0]));
+      out.log(`removed node ${rest[0]}`);
+      return 0;
+    }
+    throw new Error(NODES_USAGE);
+  } catch (err) {
+    out.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<void> {
+  if (argv[0] === "nodes") {
+    process.exitCode = runNodesCommand(argv.slice(1), configDir(), console);
+    return;
+  }
   let opts: CliOptions;
   try {
     opts = parseCli(argv);
@@ -133,6 +190,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const store = new StateStore({ port: config.port, persisted: loadState(dir), persist: (s) => saveState(dir, s) });
   store.setRoots(config.roots);
+  const nodes = new Nodes({ configDir: dir, controlDir: path.join(dir, "ssh"), store });
+  nodes.start();
   const usage = UsageStore.open(path.join(dir, "usage.db"));
   const usageTracker = usage ? trackUsage(usage, store) : undefined;
   const containers = new Containers(spawnRunner);
@@ -191,6 +250,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     cleanup,
     checks,
     push,
+    nodes,
     onboarding: new Onboarding({ roots: () => config.roots }),
     ...(usage ? { usage } : {}),
     webDir: findWebDir(),
@@ -213,6 +273,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     stopNotifier();
     usageTracker?.stop();
     await orchestrator.shutdown();
+    await nodes.close();
     usage?.close();
     await server.close();
     process.exit(0);

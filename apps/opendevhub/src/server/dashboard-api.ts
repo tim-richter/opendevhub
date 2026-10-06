@@ -5,9 +5,11 @@ import { streamSSE } from "hono/streaming";
 import type { AddProjectResult, LogEvent } from "../shared/types";
 import type { Checks } from "./checks";
 import { type Cleanup, parseCleanupItems } from "./cleanup";
+import { InvalidNodeError } from "./config";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
+import type { Nodes } from "./nodes";
 import { localDay, type UsageStore } from "./usage";
 import { InvalidRequestError } from "./worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "./onboarding";
@@ -61,6 +63,8 @@ export interface DashboardDeps {
   checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;
   /** Absent when the usage ledger couldn't be opened. */
   usage?: Pick<UsageStore, "report">;
+  /** Absent in tests that don't need it. */
+  nodes?: Pick<Nodes, "add" | "remove">;
   webDir?: string;
 }
 
@@ -77,7 +81,7 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /** Maps the errors request handlers can expect to a status; anything else is a 500. */
 function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 {
-  if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError || err instanceof InvalidSubscriptionError) return 400;
+  if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError || err instanceof InvalidSubscriptionError || err instanceof InvalidNodeError) return 400;
   if (err instanceof NotFoundError) return 404;
   if (err instanceof BusyError || err instanceof AlreadyAnsweredError || err instanceof DevcontainerExistsError) return 409;
   if (err instanceof UnavailableError) return 412;
@@ -95,7 +99,7 @@ function str(value: unknown): string | undefined {
 }
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
-  const { store, orchestrator, onboarding, push, usage, cleanup, checks } = deps;
+  const { store, orchestrator, onboarding, push, usage, cleanup, checks, nodes } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -172,6 +176,13 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
     }
   });
   app.post("/api/cleanup", (c) => json(c, (_id, b) => cleanup.apply(parseCleanupItems(b.items))));
+
+  const requireNodes = () => {
+    if (!nodes) throw new UnavailableError("remote nodes are not available");
+    return nodes;
+  };
+  app.post("/api/nodes", (c) => json(c, (_id, b) => requireNodes().add({ ssh: b.ssh, label: b.label })));
+  app.delete("/api/nodes/:id", (c) => json(c, async (id) => void (await requireNodes().remove(id))));
 
   // Web Push: the worker's subscription, and a test notification.
   app.get("/api/push/key", (c) => c.json({ publicKey: push.publicKey() }));

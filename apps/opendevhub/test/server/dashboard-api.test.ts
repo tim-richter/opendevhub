@@ -7,6 +7,7 @@ import { InvalidSubscriptionError, type PushMessage } from "../../src/server/pus
 import { CommandError } from "../../src/server/containers";
 import { EditorUnavailableError } from "../../src/server/editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from "../../src/server/orchestrator";
+import { InvalidNodeError } from "../../src/server/config";
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
 import { StateStore } from "../../src/server/state";
@@ -616,5 +617,48 @@ describe("checks endpoints", () => {
       ["demo-abc123", [{ name: "t", command: "true" }]],
       ["demo-abc123", null],
     ]);
+  });
+});
+describe("node endpoints", () => {
+  function withNodes() {
+    const base = setup();
+    const nodes = {
+      add: vi.fn(async (input: { ssh: unknown; label?: unknown }) => {
+        if (input.ssh === "-bad") throw new InvalidNodeError("invalid ssh destination");
+        return { id: "box", label: "Box", ssh: String(input.ssh), state: "connecting" as const };
+      }),
+      remove: vi.fn(async (id: string) => {
+        if (id !== "box") throw new NotFoundError(`no node ${id}`);
+      }),
+    };
+    const app = createDashboardApp({ store: base.store, orchestrator: base.orchestrator, onboarding: base.onboarding, push: base.push, cleanup: base.cleanup, checks: base.checks, nodes });
+    return { app, nodes };
+  }
+  const post = (app: ReturnType<typeof createDashboardApp>, body: unknown) =>
+    app.request("/api/nodes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("adds a node", async () => {
+    const { app, nodes } = withNodes();
+    const res = await post(app, { ssh: "tim@box", label: "Box" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "box", ssh: "tim@box" });
+    expect(nodes.add).toHaveBeenCalledWith({ ssh: "tim@box", label: "Box" });
+  });
+
+  it("answers 400 for an invalid destination", async () => {
+    const { app } = withNodes();
+    expect((await post(app, { ssh: "-bad" })).status).toBe(400);
+  });
+
+  it("removes a node, and answers 404 for an unknown one", async () => {
+    const { app, nodes } = withNodes();
+    expect((await app.request("/api/nodes/box", { method: "DELETE" })).status).toBe(200);
+    expect(nodes.remove).toHaveBeenCalledWith("box");
+    expect((await app.request("/api/nodes/nope", { method: "DELETE" })).status).toBe(404);
+  });
+
+  it("answers 412 when nodes aren't available", async () => {
+    const { app } = setup();
+    expect((await post(app, { ssh: "tim@box" })).status).toBe(412);
   });
 });

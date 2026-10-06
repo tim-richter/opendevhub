@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadAndSaveStartupConfig, parseCli, proxyTargets } from "../../src/server/cli";
+import { loadAndSaveStartupConfig, parseCli, proxyTargets, runNodesCommand } from "../../src/server/cli";
 import { StateStore } from "../../src/server/state";
 import { loadConfig, saveConfig } from "../../src/server/config";
 
@@ -47,5 +47,48 @@ describe("proxyTargets", () => {
     const resolve = proxyTargets(store, { opencodeAddress: (id: string) => addresses[id] });
     expect(resolve("p-feat-0a1b")).toEqual({ host: "172.17.0.10", port: 4096, password: "pw" });
     expect(resolve("p")).toBeUndefined();
+  });
+});
+describe("runNodesCommand", () => {
+  function run(dir: string, ...argv: string[]) {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = runNodesCommand(argv, dir, { log: (s) => out.push(s), error: (s) => err.push(s) });
+    return { code, out, err };
+  }
+
+  it("adds, lists and removes nodes in config.json", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-nodes-"));
+    try {
+      saveConfig(dir, { roots: ["/a"], port: 7777 });
+      expect(run(dir, "list").out).toEqual(["No nodes yet. Add one: opendevhub nodes add user@host"]);
+      const added = run(dir, "add", "tim@box", "--label", "Box");
+      expect(added.code).toBe(0);
+      expect(added.out[0]).toMatch(/added node box \(tim@box\)/);
+      expect(run(dir, "list").out).toEqual(["box\ttim@box\tBox"]);
+      expect(run(dir, "remove", "box").code).toBe(0);
+      expect(loadConfig(dir).nodes).toBeUndefined();
+      expect(loadConfig(dir).roots).toEqual(["/a"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [["add"]],
+    [["add", "a", "b"]],
+    [["add", "-oProxyCommand=x"]],
+    [["remove", "nope"]],
+    [["bogus"]],
+    [[]],
+  ])("fails with exit 2 for %j", (argv) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-nodes-"));
+    try {
+      const r = run(dir, ...argv);
+      expect(r.code).toBe(2);
+      expect(r.err.length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
