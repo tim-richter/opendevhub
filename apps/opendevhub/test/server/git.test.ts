@@ -5,7 +5,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandError } from "../../src/server/containers";
 import { type RunResult, spawnRunner } from "../../src/server/exec";
-import { GitOps, IDENTITY_HINT, parseAheadBehind, parseBranchRefs } from "../../src/server/git";
+import { GitOps, IDENTITY_HINT, hostHeadObjects, parseAheadBehind, parseBranchRefs } from "../../src/server/git";
+import { fakeRunner } from "../helpers/fake-runner";
 import type { Project } from "../../src/shared/types";
 
 const project: Project = { id: "p", name: "p", path: "/p", devcontainerPath: "/p/x" };
@@ -298,5 +299,20 @@ describe("GitOps cleanup queries", () => {
     expect(await git.remotes(p, "/w")).toEqual(["origin", "fork"]);
     expect(await git.branchRefs(p, "/w")).toEqual([{ name: "feat", gone: false }]);
     expect(calls[1].cmd).toEqual(["git", "-C", "/w", "for-each-ref", "--format=%(refname:short)%09%(upstream)%09%(upstream:track)", "refs/heads"]);
+  });
+});
+
+describe("hostHeadObjects", () => {
+  it("runs git on the host in the folder, one object per path", async () => {
+    const fake = fakeRunner(() => ({ stdout: "abc123\n-\n" }));
+    expect(await hostHeadObjects(fake.run, "/home/tim/w/fix", [".devcontainer", "package-lock.json"])).toEqual(["abc123", undefined]);
+    expect(fake.calls[0].cmd).toBe("sh");
+    expect(fake.calls[0].args.slice(2)).toEqual(["sh", "/home/tim/w/fix", ".devcontainer", "package-lock.json"]);
+  });
+
+  it("throws when git fails", async () => {
+    await expect(hostHeadObjects(fakeRunner(() => ({ exitCode: 128, stderr: "fatal: not a git repository\n" })).run, "/x", ["a"])).rejects.toThrow(
+      /git rev-parse failed/,
+    );
   });
 });

@@ -247,6 +247,8 @@ export class Containers {
     const r = await this.run("docker", ["inspect", "--type", "container", "--format", "{{json .}}", containerId], {
       timeoutMs: DOCKER_TIMEOUT_MS,
     });
+    // ssh exits 255 when it can't reach the node; docker itself never does. Unknown, not gone.
+    if (r.exitCode === 255) throw new CommandError(`docker inspect could not run: ${r.stderr.trim() || "ssh exited 255"}`, tailLines(r.stderr));
     if (r.exitCode !== 0) return undefined;
     return parseInspect(r.stdout.trim());
   }

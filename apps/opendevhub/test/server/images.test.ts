@@ -13,7 +13,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function setup(objects: (string | undefined)[] = ["tree1", undefined]) {
+function setup(list: (string | undefined)[] = ["tree1", undefined]) {
   const builds: Array<{ folder: string; ref: string; done: ReturnType<typeof deferred> }> = [];
   const containers = {
     imageExists: vi.fn(async (_ref: string) => false),
@@ -23,9 +23,9 @@ function setup(objects: (string | undefined)[] = ["tree1", undefined]) {
       return done.promise;
     }),
   };
-  const git = { headObjects: vi.fn(async (_p: Project, _dir: string, _paths: string[]) => objects) };
+  const objects = vi.fn(async (_p: Project, _w: EnvWorktree, _paths: string[]) => list);
   const run = vi.fn(async (): Promise<RunResult> => ({ exitCode: 0, stdout: "0.89.0\n", stderr: "", timedOut: false }));
-  return { images: new Images({ run, containers, git }), containers, git, builds, run };
+  return { images: new Images({ run, containers, objects }), containers, objects, builds, run };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -55,12 +55,12 @@ describe("Images.ensureBase", () => {
   });
 
   it("reads the key inputs at the worktree's HEAD, with the key files", async () => {
-    const { images, git, builds } = setup();
+    const { images, objects, builds } = setup();
     const p = images.ensureBase(project, wt("a"), ["package-lock.json"], () => {});
     await tick();
     builds[0].done.resolve();
     const { key, ref } = await p;
-    expect(git.headObjects).toHaveBeenCalledWith(project, "/workspaces/demo.worktrees/a", [".devcontainer", ".devcontainer.json", "package-lock.json"]);
+    expect(objects).toHaveBeenCalledWith(project, wt("a"), [".devcontainer", ".devcontainer.json", "package-lock.json"]);
     expect(ref).toBe(baseImageRef(project.id, key));
     expect(builds[0].folder).toBe("/src/demo.worktrees/a");
   });
@@ -83,8 +83,8 @@ describe("Images.ensureBase", () => {
   });
 
   it("builds one image at a time per project, and other projects in parallel", async () => {
-    const { images, git, builds } = setup();
-    git.headObjects.mockImplementation(async (_p: Project, dir: string) => [dir]);
+    const { images, objects, builds } = setup();
+    objects.mockImplementation(async (_p: Project, w: EnvWorktree) => [w.path]);
     const a = images.ensureBase(project, wt("a"), [], () => {});
     const b = images.ensureBase(project, wt("b"), [], () => {});
     const c = images.ensureBase(other, wt("c"), [], () => {});

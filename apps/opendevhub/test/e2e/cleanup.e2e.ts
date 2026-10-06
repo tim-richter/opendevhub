@@ -72,7 +72,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       network: new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) }),
       worktrees: new Worktrees({ containers, run: spawnRunner }),
       git,
-      images: new Images({ run: spawnRunner, containers, git }),
+      images: new Images({ run: spawnRunner, containers, objects: (p, wt, paths) => git.headObjects(p, wt.path, paths) }),
       envFiles,
       publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }),
       editors: new EditorLauncher([]),

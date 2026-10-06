@@ -211,7 +211,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
     }),
     git,
-    images: new Images({ run: spawnRunner, containers, git }),
+    images: new Images({ run: spawnRunner, containers, objects: (p, wt, paths) => git.headObjects(p, wt.path, paths) }),
     envFiles: new EnvFiles(path.join(stateDir(), "envs")),
     projectSettings: (p) => loadConfig(dir).projects?.[p.path],
     worktrees: new Worktrees({

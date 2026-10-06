@@ -334,3 +334,12 @@ describe("Containers.listImages", () => {
     await expect(new Containers(run).listImages(["label=x"])).rejects.toThrow(/docker image ls failed: Cannot connect/);
   });
 });
+
+describe("Containers.inspect over ssh", () => {
+  it("throws when ssh fails, instead of reporting the container gone", async () => {
+    const down = new Containers(fakeRunner(() => ({ exitCode: 255, stderr: "ssh: connect to host box port 22: Connection refused\n" })).run);
+    await expect(down.inspect("c1")).rejects.toThrow(/docker inspect could not run.*Connection refused/);
+    const gone = new Containers(fakeRunner(() => ({ exitCode: 1, stderr: "Error: No such container: c1\n" })).run);
+    expect(await gone.inspect("c1")).toBeUndefined();
+  });
+});

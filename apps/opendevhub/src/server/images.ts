@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import type { EnvWorktree, Project } from "../shared/types";
 import type { Containers } from "./containers";
 import type { Runner } from "./exec";
-import type { GitOps } from "./git";
 
 /** What a config's image depends on, besides the key files a project lists. */
 export const KEY_PATHS = [".devcontainer", ".devcontainer.json"];
@@ -22,7 +21,8 @@ export function baseImageRef(projectId: string, key: string): string {
 export interface ImagesDeps {
   run: Runner;
   containers: Pick<Containers, "imageExists" | "build">;
-  git: Pick<GitOps, "headObjects">;
+  /** The object id at HEAD of each path in the worktree (undefined where missing). */
+  objects: (project: Project, worktree: EnvWorktree, paths: string[]) => Promise<(string | undefined)[]>;
 }
 
 /** Base images for task environments: one per project and image key, built one at a time per project. */
@@ -42,7 +42,7 @@ export class Images {
   ): Promise<{ key: string; ref: string }> {
     const [cliVersion, objects] = await Promise.all([
       this.cliVersion(),
-      this.deps.git.headObjects(project, worktree.path, [...KEY_PATHS, ...keyFiles]),
+      this.deps.objects(project, worktree, [...KEY_PATHS, ...keyFiles]),
     ]);
     const key = imageKey({ cliVersion, objects, generation: 0 });
     const ref = baseImageRef(project.id, key);
