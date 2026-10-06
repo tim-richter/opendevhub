@@ -191,4 +191,16 @@ describe("usage", () => {
     store.setUsage(structuredClone(totals));
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  it("publishes nodes in the snapshot and skips no-op updates", () => {
+    const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
+    const changes = vi.fn();
+    store.subscribe(changes);
+    expect(store.snapshot().nodes).toBeUndefined();
+    const nodes = [{ id: "local", label: "This machine", state: "online" as const }];
+    store.setNodes(nodes);
+    store.setNodes([...nodes]);
+    expect(store.snapshot().nodes).toEqual(nodes);
+    expect(changes).toHaveBeenCalledTimes(1);
+  });
 });

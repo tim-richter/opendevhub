@@ -4,6 +4,7 @@ import type {
   EnvId,
   EnvWorktree,
   IsolationInfo,
+  NodeView,
   Preflight,
   Project,
   ProjectId,
@@ -65,6 +66,7 @@ export class StateStore {
   private isolationInfo = new Map<ProjectId, IsolationInfo>();
   private usageTotals?: UsageTotals;
   private resourceStats: Record<EnvId, ResourceStats> = {};
+  private nodeViews: NodeView[] = [];
 
   constructor(private readonly opts: StoreOptions) {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
@@ -181,6 +183,12 @@ export class StateStore {
     this.emit();
   }
 
+  setNodes(views: NodeView[]): void {
+    if (JSON.stringify(this.nodeViews) === JSON.stringify(views)) return;
+    this.nodeViews = views;
+    this.emit();
+  }
+
   /** The containers of running environments, main and task, for the resource sampler. */
   runningContainers(): RunningContainer[] {
     return [...this.projectsById.keys(), ...this.envs.keys()].flatMap((envId) => {
@@ -217,6 +225,7 @@ export class StateStore {
       }),
       ...(this.usageTotals ? { usage: this.usageTotals } : {}),
       ...(Object.keys(this.resourceStats).length > 0 ? { resources: this.resourceStats } : {}),
+      ...(this.nodeViews.length > 0 ? { nodes: this.nodeViews } : {}),
     };
   }
 
