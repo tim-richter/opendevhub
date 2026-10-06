@@ -58,6 +58,9 @@ export const defaultSpawn: Spawn = (cmd, args) => nodeSpawn(cmd, args, { stdio: 
 
 /** A node reached over ssh. Every call goes through the ControlMaster that a NodeConnection keeps open. */
 export class SshHost implements Host {
+  /** Set by the NodeConnection once the node answered; empty until then. */
+  home = "";
+
   constructor(
     readonly id: NodeId,
     private readonly target: SshTarget,

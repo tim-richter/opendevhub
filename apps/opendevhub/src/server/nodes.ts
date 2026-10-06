@@ -5,12 +5,15 @@ import { type Host, LOCAL_NODE, localHost } from "./host";
 import { NodeConnection } from "./node-connection";
 import { nodeStats } from "./node-preflight";
 import { NotFoundError } from "./orchestrator";
+import type { SshTarget } from "./ssh";
 import type { StateStore } from "./state";
 
 /** What the registry needs from a connection; NodeConnection is one. */
 export interface NodeConnectionPort {
   readonly host: Host;
   readonly online: boolean;
+  /** The ssh destination and ControlMaster socket; absent on fakes that don't need them. */
+  readonly target?: SshTarget;
   view(): NodeView;
   start(): void;
   close(): Promise<void>;
@@ -25,6 +28,10 @@ export interface NodesOptions {
   connect?: (node: NodeConfig, onChange: () => void) => NodeConnectionPort;
   stats?: (run: Runner) => Promise<NodeStats | undefined>;
   statsIntervalMs?: number;
+  /** A node became online: called once per transition. */
+  onOnline?: (id: NodeId) => void;
+  /** A node stopped being online, or an online node was removed. */
+  onOffline?: (id: NodeId) => void;
 }
 
 /** This machine plus the configured ssh nodes: their connections, their stats, and the views the dashboard shows. */
@@ -32,6 +39,7 @@ export class Nodes {
   readonly local: Host;
   private readonly connections = new Map<NodeId, NodeConnectionPort>();
   private readonly stats = new Map<NodeId, NodeStats>();
+  private readonly wasOnline = new Set<NodeId>();
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = false;
 
@@ -54,6 +62,11 @@ export class Nodes {
       withStats({ id: LOCAL_NODE, label: "This machine", state: "online" }),
       ...[...this.connections.values()].map((c) => withStats(c.view())),
     ];
+  }
+
+  /** A configured node's connection, online or not. */
+  connection(id: NodeId): NodeConnectionPort | undefined {
+    return this.connections.get(id);
   }
 
   /** The local host always; a node's host only while it's online. */
@@ -82,6 +95,7 @@ export class Nodes {
     saveConfig(this.opts.configDir, removeNode(loadConfig(this.opts.configDir), id));
     this.connections.delete(id);
     this.stats.delete(id);
+    if (this.wasOnline.delete(id)) this.opts.onOffline?.(id);
     await conn.close();
     this.publish();
   }
@@ -103,7 +117,16 @@ export class Nodes {
   }
 
   private publish(): void {
-    if (!this.stopped) this.opts.store.setNodes(this.list());
+    if (this.stopped) return;
+    for (const [id, conn] of this.connections) {
+      if (conn.online && !this.wasOnline.has(id)) {
+        this.wasOnline.add(id);
+        this.opts.onOnline?.(id);
+      } else if (!conn.online && this.wasOnline.delete(id)) {
+        this.opts.onOffline?.(id);
+      }
+    }
+    this.opts.store.setNodes(this.list());
   }
 
   /** Samples local and online nodes, then again `statsIntervalMs` after the round ends. */

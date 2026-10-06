@@ -18,6 +18,10 @@ async function echoServer(): Promise<number> {
 }
 
 describe("localHost", () => {
+  it("knows this machine's home folder", () => {
+    expect(localHost().home).toBe(os.homedir());
+  });
+
   it("is the local node", () => {
     expect(localHost().id).toBe(LOCAL_NODE);
     expect(LOCAL_NODE).toBe("local");

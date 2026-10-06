@@ -37,13 +37,14 @@ afterEach(async () => {
   await Promise.all(open.splice(0).map((c) => c.close()));
 });
 
-function setup(opts: { check?: (n: number) => number; preflight?: () => Promise<string[]> } = {}) {
+function setup(opts: { check?: (n: number) => number; preflight?: () => Promise<string[]>; home?: string } = {}) {
   const controlDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-ctl-"));
   const masters: FakeChild[] = [];
   let checks = 0;
   const runner = fakeRunner((c: Call) => {
     if (c.args.includes("-O") && c.args.includes("check")) return { exitCode: (opts.check ?? (() => 0))(++checks) };
     if (c.args[0] === "-G") return { stdout: "user tim\nport 2222\n" };
+    if (c.args.at(-1)?.includes('"$HOME"')) return { stdout: opts.home ?? "/home/tim" };
     return {};
   });
   const preflight = vi.fn(opts.preflight ?? (async () => []));
@@ -80,6 +81,22 @@ describe("nextDelay", () => {
 });
 
 describe("NodeConnection", () => {
+  it("reads the node's home folder before going online", async () => {
+    const { conn } = setup();
+    conn.start();
+    await vi.waitFor(() => expect(conn.online).toBe(true));
+    expect(conn.host.home).toBe("/home/tim");
+    expect(conn.target).toEqual({ dest: "tim@box", control: expect.stringMatching(/box\.sock$/) });
+  });
+
+  it("stays unreachable when $HOME can't be read", async () => {
+    const { conn, history } = setup({ home: "" });
+    conn.start();
+    await vi.waitFor(() =>
+      expect(history).toContainEqual(expect.objectContaining({ state: "unreachable", reason: "could not read $HOME on tim@box" })),
+    );
+  });
+
   it("starts the master, runs preflight with the resolved port and goes online", async () => {
     const { conn, masters, preflight, onChange, controlDir } = setup();
     expect(conn.view()).toEqual({ id: "box", label: "Box", ssh: "tim@box", state: "connecting" });

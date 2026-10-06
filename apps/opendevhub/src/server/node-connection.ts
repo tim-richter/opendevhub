@@ -33,7 +33,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export class NodeConnection {
   readonly host: SshHost;
-  private readonly target: SshTarget;
+  readonly target: SshTarget;
   private readonly run: Runner;
   private state: NodeState = "connecting";
   private reason?: string;
@@ -78,6 +78,9 @@ export class NodeConnection {
     this.set("connecting");
     try {
       await this.openMaster();
+      const home = (await this.host.run("sh", ["-c", 'printf %s "$HOME"'], { timeoutMs: 10_000 })).stdout.trim();
+      if (!home.startsWith("/")) throw new Error(`could not read $HOME on ${this.target.dest}`);
+      this.host.home = home;
       const port = parseSshPort((await this.run("ssh", ["-G", this.target.dest], { timeoutMs: 10_000 })).stdout);
       const errors = await (this.opts.preflight ?? nodePreflight)(this.host, port, this.target.dest);
       if (this.closed) return;

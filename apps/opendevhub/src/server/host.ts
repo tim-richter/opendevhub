@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import type { NodeId } from "../shared/types";
@@ -16,6 +17,8 @@ export interface Host {
   readFile(file: string): Promise<string>;
   /** Creates missing parent folders. */
   writeFile(file: string, content: string): Promise<void>;
+  /** The absolute home folder on that machine; opendevhub's files on a node go under `<home>/.opendevhub`. */
+  home: string;
 }
 
 export function connectTcp(ip: string, port: number): Promise<net.Socket> {
@@ -33,6 +36,7 @@ export function localHost(run: Runner = spawnRunner): Host {
   return {
     id: LOCAL_NODE,
     run,
+    home: os.homedir(),
     dial: connectTcp,
     readFile: (file) => fs.readFile(file, "utf8"),
     async writeFile(file, content) {

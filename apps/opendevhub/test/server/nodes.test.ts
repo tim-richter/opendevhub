@@ -49,6 +49,47 @@ function setup(nodes: NodeConfig[] = [], online = true) {
 }
 
 describe("Nodes", () => {
+  it("reports nodes coming online and going offline, once per change", async () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
+    dirs.push(configDir);
+    saveConfig(configDir, { roots: [], port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
+    const conn = fakeConnection({ id: "box", ssh: "tim@box" }, false);
+    let notify = () => {};
+    const onOnline = vi.fn();
+    const onOffline = vi.fn();
+    const registry = new Nodes({
+      configDir,
+      controlDir: path.join(configDir, "ssh"),
+      store: { setNodes: vi.fn() },
+      local: localHost(fakeRunner().run),
+      connect: (_n, onChange) => {
+        notify = onChange;
+        return conn;
+      },
+      stats: async () => undefined,
+      statsIntervalMs: 1000,
+      onOnline,
+      onOffline,
+    });
+    registry.start();
+    expect(registry.connection("box")).toBe(conn);
+    expect(onOnline).not.toHaveBeenCalled();
+    conn.online = true;
+    notify();
+    notify();
+    expect(onOnline).toHaveBeenCalledTimes(1);
+    expect(onOnline).toHaveBeenCalledWith("box");
+    conn.online = false;
+    notify();
+    expect(onOffline).toHaveBeenCalledWith("box");
+    conn.online = true;
+    notify();
+    await registry.remove("box");
+    expect(onOffline).toHaveBeenCalledTimes(2);
+    expect(registry.connection("box")).toBeUndefined();
+    await registry.close();
+  });
+
   it("opens configured nodes on start and lists local first", async () => {
     const { registry, store, connections } = setup([{ id: "box", ssh: "tim@box" }]);
     registry.start();
