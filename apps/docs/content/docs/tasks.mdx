@@ -24,6 +24,8 @@ A task is stored in its sessions' opencode metadata (`metadata.opendevhub`), so 
 
 ## Review and publish
 
-Each checkout has a **Review** tab that shows the changes. When you're happy with them, [Publish](/docs/publish) pushes the branch and opens a pull request.
+Each checkout has a **Review** tab that shows the changes. Its toolbar stays at the top while you scroll: the branch, the base it's compared with (click it to pick another), how far ahead and behind it is, and whether it has uncommitted changes. By default a diff shows only the changed lines with a few lines around them; click an "unmodified lines" bar to expand it, or switch to the full file. You can also show the old and new versions side by side, and hide the changed-files tree. These choices are remembered.
+
+Comment on a line with the **+** in the diff's gutter; the comments button collects them, takes general comments, and sends them all to a session. The **Git** menu commits, updates from the base, merges into the base, and [publishes](/docs/publish) the branch as a pull request; an action that can't run says why.
 
 ![The Review tab of a task worktree: the changed files and the diff, with Commit, Merge and Publish actions](./images/review.webp)

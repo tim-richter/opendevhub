@@ -4,9 +4,9 @@ description: Push a branch and open a pull request, with no gh and no tokens.
 icon: Upload
 ---
 
-The Review tab's **Publish** panel pushes a branch and opens a pull request on the forge.
+**Publish…** in the Review tab's **Git** menu pushes a branch and opens a pull request on the forge.
 
-![The Publish panel after a commit: the pull request title and description, the remote, the target branch and how to open the PR](./images/publish.webp)
+![The Publish dialog: the pull request title and description, the remote, the target branch and how to open the PR](./images/publish.webp)
 
 - The push runs on your machine with your own ssh-agent and credential helpers, so pre-push hooks run there too. If the checkout isn't usable on the host, it runs in the container instead. `OPENDEVHUB_PUSH=host|container` forces one. Git never prompts for credentials: a missing one fails the push.
 - The forge is detected from the remote URL: the `forges` map in `config.json` first, then the built-in hosts (`github.com`, `gitlab.com`, `codeberg.org`, `bitbucket.org`), then a one-time unauthenticated probe of the host's Forgejo/Gitea API. The result is cached in `config.json`; delete the entry to probe again. Unreachable hosts aren't cached.
