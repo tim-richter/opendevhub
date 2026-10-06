@@ -140,6 +140,33 @@ function isComment(v: unknown): v is ReviewComment {
   return !!c && typeof c === "object" && typeof c.id === "string" && typeof c.text === "string";
 }
 
+/** How the review shows diffs; remembered across reviews and reloads. */
+export interface DiffView {
+  split: boolean;
+  fullFile: boolean;
+  /** The changed-files tree beside the diffs is hidden. */
+  hideFiles: boolean;
+}
+
+const DIFF_VIEW_KEY = "opendevhub:review-view";
+
+export function readDiffView(storage: Pick<Storage, "getItem"> | undefined = defaultStorage()): DiffView {
+  try {
+    const v = JSON.parse(storage?.getItem(DIFF_VIEW_KEY) ?? "{}") as Partial<DiffView>;
+    return { split: v.split === true, fullFile: v.fullFile === true, hideFiles: v.hideFiles === true };
+  } catch {
+    return { split: false, fullFile: false, hideFiles: false };
+  }
+}
+
+export function writeDiffView(view: DiffView, storage: Pick<Storage, "setItem"> | undefined = defaultStorage()): void {
+  try {
+    storage?.setItem(DIFF_VIEW_KEY, JSON.stringify(view));
+  } catch {
+    // storage blocked: the choice lasts until reload
+  }
+}
+
 /** Drafts survive a reload; unavailable or corrupt storage just means no drafts. */
 export function readComments(key: string, storage: Pick<Storage, "getItem"> | undefined = defaultStorage()): ReviewComment[] {
   try {
@@ -241,9 +268,50 @@ export function ensurePatchHeader(patch: string, name: string): string {
   return /^--- /m.test(head) ? patch : `--- a/${name}\n+++ b/${name}\n${patch}`;
 }
 
-/** The changed files' status, for the file tree's built-in git markers. */
-export function treeGitStatus(files: ReviewFile[]): GitStatusEntry[] {
-  return files.map((f) => ({ path: f.file, status: f.status }));
+/**
+ * Both versions of a file whose patch holds all of it: opencode diffs with the whole file as context, so a changed
+ * file is one hunk from line 1. `@pierre/diffs` can then hide the unchanged lines and expand them on demand.
+ * Missing for any other patch, and for added or deleted files, which have no unchanged lines.
+ */
+export function fileVersions(patch: string): { old: string; new: string } | undefined {
+  const hunks = [...patch.matchAll(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/gm)];
+  if (hunks.length !== 1 || hunks[0][1] !== "1" || hunks[0][2] !== "1") return undefined;
+  const old: string[] = [];
+  const next: string[] = [];
+  let oldEnd = true;
+  let newEnd = true;
+  let last = "";
+  for (const raw of patch.slice(hunks[0].index).split("\n").slice(1)) {
+    const kind = raw[0];
+    if (kind === "\\") {
+      if (last !== "+") oldEnd = false;
+      if (last !== "-") newEnd = false;
+      continue;
+    }
+    if (kind === " " || kind === "-") old.push(raw.slice(1));
+    if (kind === " " || kind === "+") next.push(raw.slice(1));
+    if (kind === " " || kind === "-" || kind === "+") last = kind;
+  }
+  const text = (lines: string[], end: boolean) => lines.join("\n") + (end ? "\n" : "");
+  return { old: text(old, oldEnd), new: text(next, newEnd) };
+}
+
+/** The folder all `paths` share, as "a/b/" (or "" when none); the review's file tree shows it once, above the tree. */
+export function commonDirectory(paths: string[]): string {
+  if (paths.length === 0) return "";
+  let shared = paths[0].split("/").slice(0, -1);
+  for (const path of paths.slice(1)) {
+    const dirs = path.split("/").slice(0, -1);
+    let i = 0;
+    while (i < shared.length && i < dirs.length && shared[i] === dirs[i]) i++;
+    shared = shared.slice(0, i);
+  }
+  return shared.length ? `${shared.join("/")}/` : "";
+}
+
+/** The changed files' status, for the file tree's built-in git markers; paths are relative to the tree's `root`. */
+export function treeGitStatus(files: ReviewFile[], root = ""): GitStatusEntry[] {
+  return files.map((f) => ({ path: f.file.slice(root.length), status: f.status }));
 }
 
 /** "+3 −1" next to a file in the tree. */

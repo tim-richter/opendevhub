@@ -1,13 +1,15 @@
-import { type DiffLineAnnotation, type FileDiffOptions, PatchDiff, type SelectedLineRange } from "@pierre/diffs/react";
+import { type DiffLineAnnotation, type FileDiffOptions, MultiFileDiff, PatchDiff, type SelectedLineRange } from "@pierre/diffs/react";
 import { type ReactNode, useMemo, useState } from "react";
+import { fileVersions } from "../review";
 
-/** Unified diffs with syntax highlighting that follow the system's light or dark scheme, like the rest of the UI. */
+/** Diffs with syntax highlighting that follow the system's light or dark scheme, like the rest of the UI. */
 const BASE_OPTIONS = {
   theme: { dark: "pierre-dark", light: "pierre-light" },
   themeType: "system",
-  diffStyle: "unified",
-  hunkSeparators: "line-info-basic",
+  hunkSeparators: "line-info",
   overflow: "wrap",
+  // Lines of context around each change while unchanged lines are hidden.
+  parseDiffOptions: { context: 3 },
 } as const;
 
 /**
@@ -18,6 +20,12 @@ const BASE_OPTIONS = {
  */
 export default function PatchView<A = undefined>(props: {
   patch: string;
+  /** The file's path. With it, a patch holding the whole file renders from both versions, hiding unchanged lines. */
+  name?: string;
+  /** Side by side instead of one column. */
+  split?: boolean;
+  /** Every line of the file instead of only the changes with a few lines around them. */
+  fullFile?: boolean;
   collapsed?: boolean;
   disableHeader?: boolean;
   onComment?: (range: SelectedLineRange) => void;
@@ -27,12 +35,14 @@ export default function PatchView<A = undefined>(props: {
   renderAnnotation?: (annotation: DiffLineAnnotation<A>) => ReactNode;
   renderHeaderPrefix?: () => ReactNode;
 }) {
-  const { collapsed, disableHeader, onComment } = props;
+  const { collapsed, disableHeader, onComment, split, fullFile, name } = props;
   // A controlled selection isn't painted while the gutter is dragged, so the drag's range is shown from here.
   const [dragged, setDragged] = useState<SelectedLineRange | null>(null);
   const options = useMemo<FileDiffOptions<A, undefined>>(
     () => ({
       ...BASE_OPTIONS,
+      diffStyle: split ? "split" : "unified",
+      expandUnchanged: !!fullFile,
       collapsed,
       disableFileHeader: disableHeader,
       ...(onComment
@@ -45,16 +55,23 @@ export default function PatchView<A = undefined>(props: {
           }
         : {}),
     }),
-    [collapsed, disableHeader, onComment],
+    [collapsed, disableHeader, onComment, split, fullFile],
   );
-  return (
-    <PatchDiff<A, undefined>
-      patch={props.patch}
-      options={options}
-      lineAnnotations={props.annotations}
-      selectedLines={dragged ?? props.selectedLines}
-      renderAnnotation={props.renderAnnotation}
-      renderHeaderPrefix={props.renderHeaderPrefix}
-    />
+  const files = useMemo(() => {
+    if (name === undefined) return undefined;
+    const versions = fileVersions(props.patch);
+    return versions && { oldFile: { name, contents: versions.old }, newFile: { name, contents: versions.new } };
+  }, [name, props.patch]);
+  const shared = {
+    options,
+    lineAnnotations: props.annotations,
+    selectedLines: dragged ?? props.selectedLines,
+    renderAnnotation: props.renderAnnotation,
+    renderHeaderPrefix: props.renderHeaderPrefix,
+  };
+  return files ? (
+    <MultiFileDiff<A, undefined> oldFile={files.oldFile} newFile={files.newFile} {...shared} />
+  ) : (
+    <PatchDiff<A, undefined> patch={props.patch} {...shared} />
   );
 }

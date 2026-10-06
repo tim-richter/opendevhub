@@ -1,54 +1,70 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import type { ProjectView, ReviewData, ReviewFile, UpdateResult } from "../../shared/types";
+import type { ProjectView, PublishResult, ReviewData, ReviewFile, UpdateResult } from "../../shared/types";
 import { useCheckout } from "./CheckoutPage";
-import {
-  commitChanges,
-  fetchReview,
-  mergeIntoBase,
-  removeWorktree,
-  sendPrompt,
-  startSession,
-  suggestCommitMessage,
-  updateFromBase,
-} from "../api";
+import { fetchReview, mergeIntoBase, removeWorktree, sendPrompt, startSession, updateFromBase } from "../api";
 import { type DiffLineAnnotation, type SelectedLineRange, useStableCallback } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "../components/LazyChangedFilesTree";
 import { PatchView } from "../components/LazyPatchView";
-import { ChevronDownIcon, ChevronRightIcon, GitBranchIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  ArrowDownToLineIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CircleDotIcon,
+  Columns2Icon,
+  ExternalLinkIcon,
+  FoldVerticalIcon,
+  GitBranchIcon,
+  GitCommitHorizontalIcon,
+  GitCompareArrowsIcon,
+  GitForkIcon,
+  GitMergeIcon,
+  GitPullRequestArrowIcon,
+  LoaderCircleIcon,
+  MessageSquareIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  RefreshCwIcon,
+  Rows2Icon,
+  UnfoldVerticalIcon,
+  XIcon,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Choice } from "../components/Choice";
-import { Chip, diffFont, Empty, muted } from "../components/Page";
-import { PublishPanel } from "../components/PublishPanel";
+import { diffFont, Empty, muted } from "../components/Page";
+import { PublishDialog, usePublishInfo } from "../components/PublishDialog";
+import { BaseDialog, CommentsDialog, CommitDialog, MergeDialog } from "../components/ReviewDialogs";
 import { DiffLinesSkeleton, ReviewSkeleton } from "../components/Skeletons";
 import { workspaceFolderOf } from "../derive";
 import {
-  acceptSuggestion,
   anchorFromRange,
   annotationsFor,
   composeReviewPrompt,
   conflictPrompt,
   diffKey,
+  type DiffView,
   draftKey,
   isLarge,
   linesLabel,
   type LineAnchor,
   newId,
   readComments,
+  readDiffView,
   selectionFor,
   type ReviewAnnotation,
   type ReviewComment,
   sentKey,
   writeComments,
+  writeDiffView,
 } from "../review";
 
 export function ProjectReview() {
@@ -124,8 +140,13 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
     writeComments(keyRef.current, next);
   }, []);
   const [sent, setSent] = useState<ReviewComment[]>(() => readComments(sentKey(projectId, target)));
-  const [general, setGeneral] = useState("");
   const [open, setOpen] = useState<{ file: string; anchor: LineAnchor }>();
+  const [diffView, setDiffView] = useState(readDiffView);
+  const changeDiffView = (change: Partial<DiffView>) => {
+    const next = { ...diffView, ...change };
+    setDiffView(next);
+    writeDiffView(next);
+  };
 
   const sessions = useMemo(
     () => view.sessions.filter((s) => s.directory === directory).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -148,7 +169,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
       : sendPrompt(projectId, chosen, text);
 
   const sendComments = () =>
-    run("send", async () => {
+    run("Sending", async () => {
       await deliver(composeReviewPrompt({ branch: data?.branch, base: baseName, comments }));
       const nextSent = [...sent, ...comments];
       setSent(nextSent);
@@ -167,70 +188,47 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const cancelLineComment = useCallback(() => setOpen(undefined), []);
   const deleteComment = useCallback((id: string) => saveComments(commentsRef.current.filter((c) => c.id !== id)), [saveComments]);
 
-  const addGeneral = (e: FormEvent) => {
-    e.preventDefault();
-    if (!general.trim()) return;
-    saveComments([...comments, { id: newId(), text: general.trim() }]);
-    setGeneral("");
-  };
-
-  // Git actions.
-  const [commitOpen, setCommitOpen] = useState(false);
-  const [message, setMessage] = useState("");
+  // Git actions: each opens a dialog, or runs at once when there is nothing to choose.
+  const [dialog, setDialog] = useState<"commit" | "merge" | "publish" | "base" | "comments">();
   const [conflicts, setConflicts] = useState<UpdateResult>();
-  const [ffOnly, setFfOnly] = useState(false);
   const [merged, setMerged] = useState<string>();
+  const [published, setPublished] = useState<PublishResult>();
+  const publish = usePublishInfo(projectId, directory, data);
 
-  // The suggestion is fetched in the background: it never blocks the actions, and it never replaces what you typed.
-  const [generating, setGenerating] = useState(false);
-  const suggestion = useRef(0);
-  const openCommit = () => {
-    setCommitOpen(true);
-    setMessage("");
-    const request = ++suggestion.current;
-    setGenerating(true);
-    suggestCommitMessage(projectId, directory)
-      .then((text) => setMessage((current) => acceptSuggestion({ current, suggestion: text, request, latest: suggestion.current })))
-      .catch(() => {})
-      .finally(() => {
-        if (request === suggestion.current) setGenerating(false);
-      });
-  };
-  const commit = (e: FormEvent) => {
-    e.preventDefault();
-    run("commit", async () => {
-      await commitChanges(projectId, directory, message);
-      setCommitOpen(false);
-      setNotice("Committed.");
-      load();
-    });
-  };
   const update = () =>
-    run("update", async () => {
+    run("Updating", async () => {
       const result = await updateFromBase(projectId, directory, baseName!);
       setConflicts(result.conflicts ? result : undefined);
       if (!result.conflicts) setNotice(`Updated from ${baseName} (${result.strategy}).`);
       load();
     });
-  const merge = () =>
-    run("merge", async () => {
+  const merge = (ffOnly: boolean) =>
+    run("Merging", async () => {
       const { branch } = await mergeIntoBase(projectId, directory, baseName!, ffOnly);
       setMerged(branch);
       setNotice(`Merged ${branch} into ${baseName}.`);
       load();
     });
   const removeMerged = () =>
-    run("remove", async () => {
+    run("Removing", async () => {
       await removeWorktree(projectId, directory, false, true);
       void navigate(`/p/${encodeURIComponent(projectId)}`);
     });
 
   const baseOptions = [...new Set([baseName, data?.workspace.branch, ...(view.runtime.worktrees ?? []).map((w) => w.branch)].filter(Boolean))] as string[];
 
-  const canCommit = !!data?.dirty;
-  const canUpdate = !!data && !!baseName && !!data.branch && data.behind > 0 && !data.dirty;
+  const commitBlocker = !data ? "Loading…" : data.dirty ? undefined : "No uncommitted changes";
+  const updateBlocker = !data
+    ? "Loading…"
+    : !baseName || !data.branch
+      ? "No base branch"
+      : data.dirty
+        ? "Commit the changes first"
+        : data.behind === 0
+          ? `Already up to date with ${baseName}`
+          : undefined;
   const mergeBlocker = !data
-    ? "loading"
+    ? "Loading…"
     : !isWorktree
       ? "The main checkout is the base"
       : data.ahead === 0
@@ -242,42 +240,142 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
             : data.workspace.branch !== baseName
               ? `The main checkout is on ${data.workspace.branch ?? "a detached HEAD"}, not ${baseName}`
               : undefined;
+  const base = baseName ?? "base";
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2.5">
-        {!data && !error && <Skeleton className="h-5 w-32" />}
-        {data?.branch && (
-          <Chip>
-            <GitBranchIcon /> {data.branch}
-          </Chip>
-        )}
-        <form
-          className="inline-flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setBaseOverride(baseInput.trim() || undefined);
-          }}
-        >
-          <Label className="font-normal text-muted-foreground" htmlFor="review-base">
-            compared with
-          </Label>
-          <Input id="review-base" className="h-8 w-44" list="review-bases" value={baseInput} onChange={(e) => setBaseInput(e.target.value)} placeholder="base" />
-          <datalist id="review-bases">
-            {baseOptions.map((b) => (
-              <option key={b} value={b} />
-            ))}
-          </datalist>
-        </form>
-        {!data && !error && <Skeleton className="h-4 w-44" />}
+      <div className="sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background/95 px-4 py-2 backdrop-blur max-md:top-[45px] md:-mx-8 md:px-8">
+        <Tip label={diffView.hideFiles ? "Show changed files" : "Hide changed files"}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={diffView.hideFiles ? "Show changed files" : "Hide changed files"}
+            aria-pressed={!diffView.hideFiles}
+            onClick={() => changeDiffView({ hideFiles: !diffView.hideFiles })}
+          >
+            {diffView.hideFiles ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
+          </Button>
+        </Tip>
+        {!data && !error && <Skeleton className="h-5 w-48" />}
         {data && (
-          <span className={muted} title={data.base ? `base from ${data.base.source}` : undefined}>
-            {data.ahead} ahead · {data.behind} behind{data.dirty ? " · uncommitted changes" : ""}
-          </span>
+          <div className="contents text-sm">
+            <Tip label="Current branch">
+              <span className="inline-flex min-w-0 items-center gap-1 font-medium">
+                <GitBranchIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{data.branch ?? "detached HEAD"}</span>
+              </span>
+            </Tip>
+            <Tip label={`Compared with ${base}${data.base ? ` (from ${data.base.source})` : ""}. Click to change.`}>
+              <Button variant="ghost" size="sm" className="h-7 px-1.5 font-normal text-muted-foreground" onClick={() => setDialog("base")}>
+                <GitCompareArrowsIcon /> {base}
+              </Button>
+            </Tip>
+            <Tip label={`${data.ahead} commit${data.ahead === 1 ? "" : "s"} ahead of ${base}, ${data.behind} behind`}>
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground tabular-nums">
+                <span className="inline-flex items-center">
+                  <ArrowUpIcon className="size-3.5" />
+                  {data.ahead}
+                </span>
+                <span className="inline-flex items-center">
+                  <ArrowDownIcon className="size-3.5" />
+                  {data.behind}
+                </span>
+              </span>
+            </Tip>
+            {data.dirty && (
+              <Tip label="Uncommitted changes">
+                <span className="inline-flex items-center gap-1 text-warn">
+                  <CircleDotIcon className="size-3.5" /> <span className="max-sm:sr-only">uncommitted</span>
+                </span>
+              </Tip>
+            )}
+            {busy && (
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <LoaderCircleIcon className="size-3.5 animate-spin" /> {busy}…
+              </span>
+            )}
+          </div>
         )}
-        <Button variant="ghost" size="sm" className="ml-auto" disabled={loading} onClick={load}>
-          <RefreshCwIcon /> {loading ? "Loading…" : "Refresh"}
-        </Button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label="Lines shown"
+            value={diffView.fullFile ? "full" : "changes"}
+            onValueChange={(v) => v && changeDiffView({ fullFile: v === "full" })}
+          >
+            <Tip label="Only changes, with a few lines around them">
+              <ToggleGroupItem className={checkedItem} value="changes" aria-label="Changes only">
+                <FoldVerticalIcon />
+              </ToggleGroupItem>
+            </Tip>
+            <Tip label="Full file">
+              <ToggleGroupItem className={checkedItem} value="full" aria-label="Full file">
+                <UnfoldVerticalIcon />
+              </ToggleGroupItem>
+            </Tip>
+          </ToggleGroup>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label="Layout"
+            value={diffView.split ? "split" : "unified"}
+            onValueChange={(v) => v && changeDiffView({ split: v === "split" })}
+          >
+            <Tip label="Unified: one column">
+              <ToggleGroupItem className={checkedItem} value="unified" aria-label="Unified">
+                <Rows2Icon />
+              </ToggleGroupItem>
+            </Tip>
+            <Tip label="Split: old and new side by side">
+              <ToggleGroupItem className={checkedItem} value="split" aria-label="Split">
+                <Columns2Icon />
+              </ToggleGroupItem>
+            </Tip>
+          </ToggleGroup>
+          <Tip label="Comments for the agent">
+            <Button variant="outline" size="sm" aria-label="Comments for the agent" onClick={() => setDialog("comments")}>
+              <MessageSquareIcon /> {comments.length}
+            </Button>
+          </Tip>
+          <DropdownMenu>
+            <Tip label="Commit, update, merge and publish">
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" disabled={!!busy}>
+                  <GitForkIcon /> Git <ChevronDownIcon />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tip>
+            <DropdownMenuContent align="end" className="w-64">
+              <GitItem icon={<GitCommitHorizontalIcon />} label="Commit…" blocker={commitBlocker} onSelect={() => setDialog("commit")} />
+              <GitItem icon={<ArrowDownToLineIcon />} label={`Update from ${base}`} blocker={updateBlocker} onSelect={update} />
+              <GitItem icon={<GitMergeIcon />} label={`Merge into ${base}…`} blocker={mergeBlocker} onSelect={() => setDialog("merge")} />
+              <DropdownMenuSeparator />
+              <GitItem
+                icon={<GitPullRequestArrowIcon />}
+                label={publish.info?.pr ? "Update pull request…" : "Publish…"}
+                blocker={publish.blocker}
+                onSelect={() => setDialog("publish")}
+              />
+              {publish.info?.pr && (
+                <DropdownMenuItem asChild>
+                  <a href={publish.info.pr} target="_blank" rel="noreferrer">
+                    <ExternalLinkIcon /> View pull request
+                  </a>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <GitItem icon={<GitCompareArrowsIcon />} label="Compare with…" onSelect={() => setDialog("base")} />
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Tip label="Refresh">
+            <Button variant="ghost" size="icon-sm" aria-label="Refresh" disabled={loading} onClick={load}>
+              <RefreshCwIcon className={cn(loading && "animate-spin")} />
+            </Button>
+          </Tip>
+        </div>
       </div>
 
       {error && (
@@ -286,55 +384,17 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         </Alert>
       )}
       {notice && <OkBanner>{notice}</OkBanner>}
-
-      <section className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" disabled={!canCommit || !!busy} onClick={openCommit} title={canCommit ? undefined : "No uncommitted changes"}>
-          Commit…
-        </Button>
-        <Button
-          variant="outline"
-          disabled={!canUpdate || !!busy}
-          onClick={update}
-          title={canUpdate ? undefined : "Nothing to bring in, or uncommitted changes"}
-        >
-          Update from {baseName ?? "base"}
-        </Button>
-        <Button variant="outline" disabled={!!mergeBlocker || !!busy} onClick={merge} title={mergeBlocker}>
-          Merge into {baseName ?? "base"}
-        </Button>
-        <Label className="font-normal text-muted-foreground">
-          <Checkbox checked={ffOnly} onCheckedChange={(c) => setFfOnly(c === true)} /> fast-forward only
-        </Label>
-      </section>
-
-      <PublishPanel projectId={projectId} directory={directory} data={data} baseName={baseName} onPublished={load} />
-
-      {commitOpen && (
-        <form className="flex flex-col gap-2" onSubmit={commit}>
-          <Textarea
-            aria-label="Commit message"
-            rows={3}
-            value={message}
-            placeholder={generating ? "Asking the agent for a message…" : "Commit message"}
-            onChange={(e) => setMessage(e.target.value)}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={!message.trim() || !!busy}>
-              Commit
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                suggestion.current++;
-                setGenerating(false);
-                setCommitOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
+      {published && (
+        <OkBanner>
+          <span>
+            {published.notice ? `${published.notice} ` : ""}Pushed from {published.pushedFrom === "host" ? "this machine" : "the container"}.
+          </span>
+          {published.openUrl && (
+            <a className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline" href={published.openUrl} target="_blank" rel="noreferrer">
+              {published.prUrl ? "Open pull request" : "Create the pull request on the forge"} <ExternalLinkIcon className="size-3.5" />
+            </a>
+          )}
+        </OkBanner>
       )}
 
       {conflicts?.conflicts && data?.branch && baseName && (
@@ -348,7 +408,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
               size="sm"
               disabled={!!busy}
               onClick={() =>
-                run("resolve", async () => {
+                run("Asking", async () => {
                   await deliver(conflictPrompt({ branch: data.branch!, base: baseName, strategy: conflicts.strategy, files: conflicts.conflicts! }));
                   setConflicts(undefined);
                   setNotice("Asked the agent to resolve the conflicts.");
@@ -370,86 +430,71 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         </OkBanner>
       )}
 
-      <section className="flex flex-col gap-2">
-        <form onSubmit={addGeneral} className="flex items-start gap-2">
-          <Textarea
-            rows={2}
-            className="min-h-0 flex-1"
-            placeholder="General comment for the agent…"
-            value={general}
-            onChange={(e) => setGeneral(e.target.value)}
-          />
-          <Button type="submit" variant="outline" disabled={!general.trim()}>
-            Add comment
-          </Button>
-        </form>
-        {comments.length > 0 && (
-          <ul className="flex flex-col gap-1 text-sm">
-            {comments.map((c) => (
-              <li key={c.id} className="flex items-start gap-1.5">
-                <span className="whitespace-pre-wrap">
-                  <span className="text-muted-foreground">{c.file ? `${c.file}:${linesLabel(c)}` : "General"}</span>{" "}
-                  {c.text}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="ml-auto text-muted-foreground"
-                  aria-label="Delete comment"
-                  onClick={() => saveComments(comments.filter((x) => x.id !== c.id))}
-                >
-                  <XIcon />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <Choice
-            label="Send to"
-            size="default"
-            value={chosen}
-            onChange={setSessionChoice}
-            options={[
-              ...sessions.map((s) => ({ value: s.id, label: `${s.title}${s.status === "running" ? " (working, queued)" : ""}` })),
-              { value: "new", label: "New session" },
-            ]}
-          />
-          <Button disabled={comments.length === 0 || !!busy} onClick={sendComments}>
-            Send to agent ({comments.length})
-          </Button>
-        </div>
-        {sent.length > 0 && (
-          <Collapsible className="group/sent">
-            <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-              <ChevronRightIcon className="size-4 transition-transform group-data-[state=open]/sent:rotate-90" /> Sent ({sent.length})
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <ul className="mt-1 flex flex-col gap-1 text-sm">
-                {sent.map((c) => (
-                  <li key={c.id}>
-                    <span className="text-muted-foreground">{c.file ? `${c.file}:${c.line}` : "General"}</span> {c.text}
-                  </li>
-                ))}
-              </ul>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-      </section>
+      {dialog === "commit" && (
+        <CommitDialog
+          projectId={projectId}
+          directory={directory}
+          onClose={() => setDialog(undefined)}
+          onCommitted={() => {
+            setNotice("Committed.");
+            load();
+          }}
+        />
+      )}
+      {dialog === "merge" && baseName && data && (
+        <MergeDialog branch={data.branch} base={baseName} ahead={data.ahead} onClose={() => setDialog(undefined)} onMerge={merge} />
+      )}
+      {dialog === "publish" && publish.info && (
+        <PublishDialog
+          projectId={projectId}
+          directory={directory}
+          info={publish.info}
+          loadInfo={publish.loadInfo}
+          baseName={baseName}
+          onClose={() => setDialog(undefined)}
+          onPublished={(r) => {
+            setPublished(r);
+            load();
+          }}
+        />
+      )}
+      {dialog === "base" && <BaseDialog current={baseOverride ?? baseName} options={baseOptions} onClose={() => setDialog(undefined)} onChange={setBaseOverride} />}
+      {dialog === "comments" && (
+        <CommentsDialog
+          comments={comments}
+          sent={sent}
+          sessions={[
+            ...sessions.map((s) => ({ value: s.id, label: `${s.title}${s.status === "running" ? " (working, queued)" : ""}` })),
+            { value: "new", label: "New session" },
+          ]}
+          session={chosen}
+          busy={!!busy}
+          onSession={setSessionChoice}
+          onAdd={(text) => saveComments([...comments, { id: newId(), text }])}
+          onDelete={deleteComment}
+          onSend={() => {
+            sendComments();
+            setDialog(undefined);
+          }}
+          onClose={() => setDialog(undefined)}
+        />
+      )}
 
       {!data && !error && <ReviewSkeleton />}
       {data && data.files.length === 0 && <p className={muted}>No changes compared with {baseName ?? "the last commit"}.</p>}
       {data && data.files.length > 0 && (
-        <div className="grid items-start gap-4 md:grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
-          <Card className="sticky top-4 overflow-hidden py-0 max-md:static">
-            <ChangedFilesTree
-              files={data.files}
-              onSelect={(file) => {
-                const index = data.files.findIndex((f) => f.file === file);
-                document.getElementById(`review-file-${index}`)?.scrollIntoView({ block: "start" });
-              }}
-            />
-          </Card>
+        <div className={cn("grid items-start gap-4", !diffView.hideFiles && "md:grid-cols-[minmax(14rem,22rem)_minmax(0,1fr)]")}>
+          {!diffView.hideFiles && (
+            <Card className="sticky top-16 overflow-hidden py-0 max-md:static">
+              <ChangedFilesTree
+                files={data.files}
+                onSelect={(file) => {
+                  const index = data.files.findIndex((f) => f.file === file);
+                  document.getElementById(`review-file-${index}`)?.scrollIntoView({ block: "start" });
+                }}
+              />
+            </Card>
+          )}
           <div className="flex min-w-0 flex-col gap-3">
             {data.files.map((f, i) => (
               <FileDiff
@@ -457,6 +502,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
                 id={`review-file-${i}`}
                 file={f}
                 load={() => fetchReview(projectId, directory, { base: baseOverride, file: f.file }).then((d) => d.files[0]?.patch)}
+                view={diffView}
                 comments={comments}
                 open={open?.file === f.file ? open.anchor : undefined}
                 onAnchor={(anchor) => setOpen({ file: f.file, anchor })}
@@ -473,6 +519,32 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   );
 }
 
+/** The tooltip trigger takes over `data-state`, so a toggle inside one shows its selection from `aria-checked`. */
+const checkedItem = "aria-checked:bg-accent aria-checked:text-accent-foreground";
+
+/** A tooltip on any element; the child must take a ref (a DOM element or a forwarding component). */
+function Tip({ label, children }: { label: ReactNode; children: ReactElement }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** A git menu entry; when it can't run, it is disabled and says why. */
+function GitItem(props: { icon: ReactNode; label: string; blocker?: string; onSelect: () => void }) {
+  return (
+    <DropdownMenuItem disabled={!!props.blocker} onSelect={props.onSelect} className="items-start [&_svg]:mt-0.5">
+      {props.icon}
+      <span className="flex min-w-0 flex-col">
+        {props.label}
+        {props.blocker && <span className="text-xs text-muted-foreground">{props.blocker}</span>}
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
 function OkBanner({ children }: { children: ReactNode }) {
   return (
     <Alert className="border-ok/40 bg-ok/10">
@@ -485,6 +557,7 @@ function FileDiff(props: {
   id: string;
   file: ReviewFile;
   load: () => Promise<string | undefined>;
+  view: DiffView;
   comments: ReviewComment[];
   /** The line whose comment box is open in this file. */
   open: LineAnchor | undefined;
@@ -545,6 +618,9 @@ function FileDiff(props: {
       <Card className={cn("overflow-hidden py-0", diffFont)} id={props.id}>
         <PatchView<ReviewAnnotation>
           patch={patch}
+          name={file.file}
+          split={props.view.split}
+          fullFile={props.view.fullFile}
           collapsed={collapsed}
           onComment={onComment}
           annotations={annotations}

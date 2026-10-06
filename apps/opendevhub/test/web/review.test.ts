@@ -5,7 +5,9 @@ import {
   anchorFor,
   anchorFromRange,
   annotationsFor,
+  commonDirectory,
   ensurePatchHeader,
+  fileVersions,
   publishBlocker,
   selectionFor,
   statsDecoration,
@@ -18,8 +20,10 @@ import {
   isLarge,
   parsePatch,
   readComments,
+  readDiffView,
   targetOf,
   writeComments,
+  writeDiffView,
 } from "../../src/web/review";
 
 const patch = [
@@ -263,6 +267,59 @@ describe("@pierre/diffs adapters", () => {
   });
 });
 
+describe("diff view", () => {
+  it("defaults to unified, changes only, and remembers a choice", () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    expect(readDiffView(storage)).toEqual({ split: false, fullFile: false, hideFiles: false });
+    writeDiffView({ split: true, fullFile: true, hideFiles: true }, storage);
+    expect(readDiffView(storage)).toEqual({ split: true, fullFile: true, hideFiles: true });
+  });
+
+  it("falls back to the defaults on corrupt storage", () => {
+    expect(readDiffView({ getItem: () => "{nope" })).toEqual({ split: false, fullFile: false, hideFiles: false });
+  });
+});
+
+describe("fileVersions", () => {
+  it("rebuilds both sides of a whole-file patch", () => {
+    const whole = ["--- a/x.ts", "+++ b/x.ts", "@@ -1,3 +1,3 @@", " one", "-two", "+TWO", " three", ""].join("\n");
+    expect(fileVersions(whole)).toEqual({ old: "one\ntwo\nthree\n", new: "one\nTWO\nthree\n" });
+  });
+
+  it("keeps a missing final newline on the side that lacks it", () => {
+    const whole = ["@@ -1,2 +1,2 @@", " one", "-two", "\\ No newline at end of file", "+two", ""].join("\n");
+    expect(fileVersions(whole)).toEqual({ old: "one\ntwo", new: "one\ntwo\n" });
+  });
+
+  it("gives nothing for a patch that doesn't hold the whole file", () => {
+    expect(fileVersions(patch)).toBeUndefined();
+    const twoHunks = ["@@ -1,1 +1,1 @@", "-a", "+b", "@@ -9,1 +9,1 @@", "-c", "+d", ""].join("\n");
+    expect(fileVersions(twoHunks)).toBeUndefined();
+  });
+
+  it("gives nothing for an added or deleted file, which has no unchanged lines to hide", () => {
+    expect(fileVersions(["@@ -0,0 +1,2 @@", "+a", "+b", ""].join("\n"))).toBeUndefined();
+    expect(fileVersions(["@@ -1,2 +0,0 @@", "-a", "-b", ""].join("\n"))).toBeUndefined();
+  });
+});
+
+describe("commonDirectory", () => {
+  it("is the folder every path shares, ending in a slash", () => {
+    expect(commonDirectory(["packages/ui/src/a.ts", "packages/ui/src/deep/b.ts", "packages/ui/test/c.ts"])).toBe("packages/ui/");
+  });
+
+  it("never swallows a file name", () => {
+    expect(commonDirectory(["packages/ui/src/a.ts"])).toBe("packages/ui/src/");
+    expect(commonDirectory(["src/ab.ts", "src/a.ts"])).toBe("src/");
+  });
+
+  it("is empty when the paths share no folder", () => {
+    expect(commonDirectory(["src/a.ts", "README.md"])).toBe("");
+    expect(commonDirectory([])).toBe("");
+  });
+});
+
 describe("@pierre/trees adapters", () => {
   const files = [
     { file: "src/a.ts", status: "modified" as const, additions: 3, deletions: 1 },
@@ -277,6 +334,13 @@ describe("@pierre/trees adapters", () => {
       { path: "src/new.ts", status: "added" },
       { path: "old.txt", status: "deleted" },
       { path: "logo.png", status: "added" },
+    ]);
+  });
+
+  it("gives git status relative to the tree's root folder", () => {
+    expect(treeGitStatus(files.slice(0, 2), "src/")).toEqual([
+      { path: "a.ts", status: "modified" },
+      { path: "new.ts", status: "added" },
     ]);
   });
 
