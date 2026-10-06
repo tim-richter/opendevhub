@@ -263,6 +263,11 @@ export class OpencodeClient {
     return this.send("PATCH", `/api/session/${encodeURIComponent(id)}`, patch, directory);
   }
 
+  /** Deletes a session; opencode deletes its child (subagent) sessions with it. */
+  deleteSession(id: string, directory?: string): Promise<void> {
+    return this.send("DELETE", `/api/session/${encodeURIComponent(id)}`, undefined, directory);
+  }
+
   info(): Promise<{ version: string }> {
     return this.get("/api/info");
   }

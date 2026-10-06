@@ -168,6 +168,14 @@ describe("OpencodeClient", () => {
     expect(await client.vcsBase("/w/b")).toBeUndefined();
   });
 
+  it("deletes a session, which opencode does with its subagent sessions", async () => {
+    fake.state.sessions = [rawSession("ses_1"), rawSession("ses_2", { parentID: "ses_1" }), rawSession("ses_3")];
+    await client.deleteSession("ses_1", "/w/x");
+    expect(fake.state.deleted).toEqual(["ses_1"]);
+    expect(fake.state.sessions.map((s) => s.id)).toEqual(["ses_3"]);
+    await expect(client.deleteSession("ses_9")).rejects.toMatchObject({ status: 404 });
+  });
+
   it("interrupts a session", async () => {
     await client.interrupt("ses_1", "/w/x");
     expect(fake.state.interrupts).toEqual(["ses_1"]);

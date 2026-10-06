@@ -147,6 +147,9 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     prompt: vi.fn(async (_sid: string, _text: string, _delivery?: string, _dir?: string) => {}),
     generate: vi.fn(async (_sid: string, _prompt: string, _dir?: string) => "feat: do things"),
     interrupt: vi.fn(async (_sid: string, _dir?: string) => {}),
+    sessions: vi.fn(async (): Promise<RawSession[]> => []),
+    active: vi.fn(async () => new Set<string>()),
+    deleteSession: vi.fn(async (_id: string, _dir?: string) => {}),
   };
   const publisher = {
     info: vi.fn(async (_p: Project, _c: { container: string; host?: string }, branch: string | undefined, _remote?: string) => ({
@@ -994,6 +997,53 @@ describe("Orchestrator", () => {
       expect(store.environment("env-feat")).toBeUndefined();
     });
 
+    const discarded = (id: string, directory = "/workspaces/demo") =>
+      rawSession(id, { location: { directory }, time: { created: 1, updated: Date.now() }, metadata: { opendevhub: { task: "tsk_1", variant: 1, of: 2, title: "Fix", discarded: true } } });
+
+    it("scans sessions of the main opencode and of each running task environment, against a fresh worktree list", async () => {
+      const { orch, client, envId } = await withEnv();
+      client.sessions
+        .mockResolvedValueOnce([discarded("ses_d"), rawSession("ses_gone", { location: { directory: "/workspaces/demo.worktrees/old" }, time: { created: 1, updated: Date.now() } })])
+        .mockResolvedValueOnce([discarded("ses_t", featWt.path)]);
+      const r = await orch.cleanupSessionScan(project.id);
+      expect(r.items.map((i) => [i.id, i.why, i.envId])).toEqual([
+        ["session:demo-abc123:ses_d", "discarded", undefined],
+        ["session:demo-abc123:ses_gone", "worktree-gone", undefined],
+        ["session:demo-abc123:ses_t", "discarded", envId],
+      ]);
+    });
+
+    it("leaves out busy sessions, and skips the worktree rule when the worktree list can't be read", async () => {
+      const { orch, client, store, worktrees } = await running();
+      store.setSessions(project.id, [{ id: "ses_w", projectId: project.id, title: "w", directory: "/x", updatedAt: 1, status: "needs-answer" }]);
+      const gone = (id: string) => rawSession(id, { location: { directory: "/workspaces/demo.worktrees/old" }, time: { created: 1, updated: Date.now() } });
+      client.sessions.mockResolvedValue([discarded("ses_run"), discarded("ses_w"), gone("ses_gone")]);
+      client.active.mockResolvedValue(new Set(["ses_run"]));
+      worktrees.list.mockRejectedValue(new Error("git broke"));
+      expect((await orch.cleanupSessionScan(project.id)).items).toEqual([]);
+    });
+
+    it("deletes a session that still qualifies, logs it, and skips one that changed", async () => {
+      const { orch, client } = await running();
+      client.sessions.mockResolvedValue([discarded("ses_d")]);
+      const [found] = (await orch.cleanupSessionScan(project.id)).items;
+      expect(await orch.cleanupSession(project.id, found)).toEqual({ outcome: "removed" });
+      expect(client.deleteSession).toHaveBeenCalledWith("ses_d", "/workspaces/demo");
+      expect(orch.logLines(project.id)).toContain("cleanup: removed session Session ses_d (discarded task variant)");
+      client.sessions.mockResolvedValue([]);
+      expect(await orch.cleanupSession(project.id, found)).toEqual({ outcome: "skipped", message: "changed since scan" });
+      expect(client.deleteSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a session item naming another project's environment", async () => {
+      const { orch, client, store } = await running();
+      store.putEnvironment({ id: "other-env", projectId: "other", worktree: featWt });
+      client.sessions.mockResolvedValue([discarded("ses_d")]);
+      const forged = { ...item, id: "session:demo-abc123:ses_d", kind: "session" as const, sessionId: "ses_d", envId: "other-env", title: "", directory: "", updatedAt: 0, why: "idle" as const };
+      expect(await orch.cleanupSession(project.id, forged)).toEqual({ outcome: "skipped", message: "changed since scan" });
+      expect(client.deleteSession).not.toHaveBeenCalled();
+    });
+
     it("refuses while another git action runs", async () => {
       const { orch, git } = await running();
       let release!: () => void;
@@ -1003,6 +1053,27 @@ describe("Orchestrator", () => {
       await vi.waitFor(() => expect(git.fetchPrune).toHaveBeenCalled());
       release();
       await first;
+    });
+  });
+
+  describe("removeSession", () => {
+    it("deletes a listed session through its environment's opencode, stopping it first when busy", async () => {
+      const s = setup();
+      await s.orch.rescan();
+      await s.orch.start(project.id);
+      s.store.setSessions(project.id, [
+        { id: "ses_1", projectId: project.id, title: "Idle one", directory: "/workspaces/demo", updatedAt: 1, status: "idle" },
+        { id: "ses_2", projectId: project.id, title: "Busy one", directory: "/workspaces/demo", updatedAt: 1, status: "running" },
+      ]);
+      const reconciled = s.monitors[0].reconciled;
+      await s.orch.removeSession(project.id, "ses_1");
+      expect(s.client.interrupt).not.toHaveBeenCalled();
+      expect(s.client.deleteSession).toHaveBeenCalledWith("ses_1", "/workspaces/demo");
+      expect(s.orch.logLines(project.id)).toContain("removed session Idle one");
+      expect(s.monitors[0].reconciled).toBeGreaterThan(reconciled);
+      await s.orch.removeSession(project.id, "ses_2");
+      expect(s.client.interrupt).toHaveBeenCalledWith("ses_2", "/workspaces/demo");
+      await expect(s.orch.removeSession(project.id, "nope")).rejects.toThrow(NotFoundError);
     });
   });
 

@@ -51,6 +51,7 @@ function setup(webDir?: string) {
       files: [],
     })),
     promptSession: vi.fn(async (_id: string, _sid: string, _text: string) => {}),
+    removeSession: vi.fn(async (_id: string, _sid: string) => {}),
     commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
     commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
     updateFromBase: vi.fn(async (_id: string, _dir: string, _base: string) => ({ strategy: "rebase" as const })),
@@ -316,6 +317,14 @@ describe("dashboard API", () => {
       expect(orchestrator.replyForm).toHaveBeenCalledWith(project.id, "frm_1", { db: "pg" });
       expect((await send(app, "DELETE", "forms/frm_1", undefined)).status).toBe(200);
       expect(orchestrator.cancelForm).toHaveBeenCalledWith(project.id, "frm_1");
+    });
+
+    it("removes a session, and answers 404 for one it doesn't list", async () => {
+      const { app, orchestrator } = setup();
+      expect((await send(app, "DELETE", "sessions/ses_1", undefined)).status).toBe(200);
+      expect(orchestrator.removeSession).toHaveBeenCalledWith(project.id, "ses_1");
+      orchestrator.removeSession.mockRejectedValueOnce(new NotFoundError("ses_9", "session"));
+      expect((await send(app, "DELETE", "sessions/ses_9", undefined)).status).toBe(404);
     });
 
     it("maps unknown ids to 404, already answered to 409 and invalid answers to 400 with the message", async () => {

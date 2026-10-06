@@ -47,6 +47,8 @@ export interface FakeState {
   patches: Array<{ sessionId: string; body: unknown }>;
   /** Session ids `POST /api/session/:id/interrupt` was called for. */
   interrupts: string[];
+  /** Session ids `DELETE /api/session/:id` removed. */
+  deleted: string[];
 }
 
 export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
@@ -64,6 +66,7 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
     prompts: [],
     patches: [],
     interrupts: [],
+    deleted: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -197,6 +200,22 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
             res.writeHead(204);
             res.end();
           });
+          return;
+        }
+        if (patch && req.method === "DELETE") {
+          const sessionId = decodeURIComponent(patch[1]);
+          if (!state.sessions.some((s) => s.id === sessionId)) return fail(404, "SessionNotFoundError");
+          state.deleted.push(sessionId);
+          // opencode deletes the session's child sessions with it.
+          const gone = new Set([sessionId]);
+          let size = 0;
+          while (size !== gone.size) {
+            size = gone.size;
+            for (const s of state.sessions) if (s.parentID && gone.has(s.parentID)) gone.add(s.id);
+          }
+          state.sessions = state.sessions.filter((s) => !gone.has(s.id));
+          res.writeHead(204);
+          res.end();
           return;
         }
         const interrupt = url.pathname.match(/^\/api\/session\/([^/]+)\/interrupt$/);

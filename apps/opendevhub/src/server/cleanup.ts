@@ -10,6 +10,7 @@ import type {
   ImageCleanupItem,
   Project,
   ProjectId,
+  SessionCleanupItem,
   Worktree,
 } from "../shared/types";
 import type { ContainerInfo, Containers, ImageInfo } from "./containers";
@@ -18,6 +19,9 @@ import { BusyError, type Orchestrator } from "./orchestrator";
 import type { StateStore } from "./state";
 import { InvalidRequestError } from "./worktrees";
 import { BASE_PROJECT_LABEL } from "./images";
+import type { RawSession } from "./opencode/client";
+import { rollUp, rootOf } from "./status";
+import { parseTaskMeta } from "./tasks";
 
 /** A task environment may be starting from an image this new, before its record names it. */
 export const FRESH_IMAGE_MS = 15 * 60_000;
@@ -191,13 +195,70 @@ export async function branchChanged(
   return undefined;
 }
 
+/** A session untouched this long is offered for removal, unchecked. */
+export const IDLE_SESSION_MS = 30 * 24 * 60 * 60_000;
+
+export interface StaleSessionsInput {
+  projectId: ProjectId;
+  /** The task environment whose opencode listed the sessions; absent for the main environment. */
+  envId?: EnvId;
+  /** Every session that opencode lists, subagents included. */
+  sessions: RawSession[];
+  /** Sessions running or waiting on a permission or an answer, at any depth. */
+  busy: Set<string>;
+  /** The main checkout, as the container sees it. */
+  workspace: string;
+  /** Current linked worktree paths; unknown means no session counts as of a removed worktree. */
+  worktrees?: string[];
+  now: number;
+}
+
+const within = (dir: string, root: string) => dir === root || dir.startsWith(root.replace(/\/$/, "") + "/");
+
+/** Top-level sessions that may go: discarded task variants, sessions of removed worktrees, and long-idle ones. */
+export function staleSessions(input: StaleSessionsInput): SessionCleanupItem[] {
+  const parents = new Map(input.sessions.map((s) => [s.id, s.parentID]));
+  const busy = new Set([...input.busy].map((id) => rootOf(id, parents)));
+  const trees = rollUp(input.sessions);
+  const items: SessionCleanupItem[] = [];
+  for (const s of input.sessions) {
+    if (s.parentID || s.time.archived !== undefined || busy.has(s.id)) continue;
+    const directory = s.location.directory;
+    const updatedAt = trees.get(s.id)?.updatedAt ?? s.time.updated;
+    const idleDays = Math.floor((input.now - updatedAt) / (24 * 60 * 60_000));
+    const why = parseTaskMeta(s.metadata)?.discarded
+      ? ("discarded" as const)
+      : input.worktrees && !within(directory, input.workspace) && !input.worktrees.some((w) => within(directory, w))
+        ? ("worktree-gone" as const)
+        : input.now - updatedAt >= IDLE_SESSION_MS
+          ? ("idle" as const)
+          : undefined;
+    if (!why) continue;
+    const reasons = { discarded: "discarded task variant", "worktree-gone": "its worktree was removed", idle: `idle for ${idleDays} days` };
+    items.push({
+      id: `session:${input.projectId}:${s.id}`,
+      kind: "session",
+      checked: why !== "idle",
+      reason: reasons[why],
+      projectId: input.projectId,
+      ...(input.envId ? { envId: input.envId } : {}),
+      sessionId: s.id,
+      title: s.title?.trim() || "Untitled session",
+      directory,
+      updatedAt,
+      why,
+    });
+  }
+  return items;
+}
+
 /** opendevhub's base images by name, and the UID images built on them by label. */
 export const CLEANUP_IMAGE_FILTERS = [`reference=${BASE_REPO}*`, `label=${BASE_PROJECT_LABEL}`];
 
 export interface CleanupDeps {
   store: Pick<StateStore, "projects" | "project" | "runtime" | "environments" | "environment">;
   containers: Pick<Containers, "listManaged" | "listImages" | "remove" | "removeImage">;
-  branches: Pick<Orchestrator, "cleanupScan" | "cleanupBranch" | "appendLog">;
+  branches: Pick<Orchestrator, "cleanupScan" | "cleanupBranch" | "cleanupSessionScan" | "cleanupSession" | "appendLog">;
   now?: () => number;
 }
 
@@ -225,7 +286,7 @@ export class Cleanup {
     };
   }
 
-  /** Removes the selected items: branches first, then containers, then images, each re-checked first. */
+  /** Removes the selected items: branches, then sessions, then containers, then images, each re-checked first. */
   async apply(items: CleanupItem[]): Promise<CleanupResult> {
     if (this.applying) throw new BusyError("cleanup");
     this.applying = true;
@@ -233,6 +294,7 @@ export class Cleanup {
       const results: CleanupResult["results"] = [];
       let freedBytes = 0;
       for (const item of items) if (item.kind === "branch") results.push({ id: item.id, ...(await this.removeBranch(item)) });
+      for (const item of items) if (item.kind === "session") results.push({ id: item.id, ...(await this.removeSession(item)) });
       for (const kind of ["container", "image"] as const) {
         const selected = items.filter((i) => i.kind === kind);
         if (selected.length === 0) continue;
@@ -261,13 +323,24 @@ export class Cleanup {
   private async scanProject(p: Project): Promise<{ summary: CleanupProject; items: CleanupItem[] }> {
     const summary: CleanupProject = { id: p.id, name: p.name };
     if (this.deps.store.runtime(p.id).containerState !== "running") return { summary: { ...summary, skipped: "not running" }, items: [] };
+    const warnings: string[] = [];
+    const items: CleanupItem[] = [];
     try {
       const r = await this.deps.branches.cleanupScan(p.id);
-      return { summary: { ...summary, ...(r.warning ? { warning: r.warning } : {}) }, items: r.items };
+      if (r.warning) warnings.push(r.warning);
+      items.push(...r.items);
     } catch (err) {
-      const warning = err instanceof BusyError ? "busy with another git action; scan again in a moment" : `could not scan branches: ${message(err)}`;
-      return { summary: { ...summary, warning }, items: [] };
+      warnings.push(err instanceof BusyError ? "busy with another git action; scan again in a moment" : `could not scan branches: ${message(err)}`);
     }
+    // After the branch scan, which refreshes the worktree list that tells a removed worktree's sessions apart.
+    try {
+      const r = await this.deps.branches.cleanupSessionScan(p.id);
+      if (r.warning) warnings.push(r.warning);
+      items.push(...r.items);
+    } catch (err) {
+      warnings.push(`could not scan sessions: ${message(err)}`);
+    }
+    return { summary: { ...summary, ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}) }, items };
   }
 
   private async docker(): Promise<DockerItem[]> {
@@ -292,6 +365,17 @@ export class Cleanup {
       if (err instanceof BusyError) return { outcome: "skipped", message: "project busy" };
       if (this.deps.store.project(item.projectId)) {
         this.deps.branches.appendLog(item.projectId, `cleanup: could not delete branch ${item.branch}: ${message(err)}`);
+      }
+      return { outcome: "failed", message: message(err) };
+    }
+  }
+
+  private async removeSession(item: SessionCleanupItem): Promise<CleanupOutcome> {
+    try {
+      return await this.deps.branches.cleanupSession(item.projectId, item);
+    } catch (err) {
+      if (this.deps.store.project(item.projectId)) {
+        this.deps.branches.appendLog(item.projectId, `cleanup: could not remove session ${item.sessionId}: ${message(err)}`);
       }
       return { outcome: "failed", message: message(err) };
     }
@@ -360,6 +444,24 @@ export function parseCleanupItems(value: unknown): CleanupItem[] {
     if (o.kind === "image") {
       const ref = field(o, "ref");
       return { id: `image:${ref}`, kind: "image", checked: true, reason: "", ref, bytes: 0, why: "superseded" };
+    }
+    if (o.kind === "session") {
+      const projectId = field(o, "projectId");
+      const sessionId = field(o, "sessionId");
+      const envId = typeof o.envId === "string" && o.envId !== "" ? o.envId : undefined;
+      return {
+        id: `session:${projectId}:${sessionId}`,
+        kind: "session",
+        checked: true,
+        reason: "",
+        projectId,
+        ...(envId ? { envId } : {}),
+        sessionId,
+        title: "",
+        directory: "",
+        updatedAt: 0,
+        why: "idle",
+      };
     }
     throw new InvalidRequestError(`unknown cleanup item kind ${String(o.kind)}`);
   });

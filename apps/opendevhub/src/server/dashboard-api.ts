@@ -32,6 +32,7 @@ export type DashboardOrchestrator = Pick<
   | "cancelForm"
   | "review"
   | "promptSession"
+  | "removeSession"
   | "commitMessage"
   | "commit"
   | "updateFromBase"
@@ -242,6 +243,7 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       sessionId: await orchestrator.startSession(id, str(b.directory) ?? "", str(b.title), str(b.prompt)),
     })),
   );
+  app.delete("/api/projects/:id/sessions/:sid", (c) => json(c, (id) => orchestrator.removeSession(id, c.req.param("sid") ?? "")));
   app.post("/api/projects/:id/sessions/:sid/prompt", (c) =>
     json(c, (id, b) => orchestrator.promptSession(id, c.req.param("sid") ?? "", str(b.text) ?? "")),
   );

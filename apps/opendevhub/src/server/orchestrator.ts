@@ -17,6 +17,7 @@ import type {
   PublishInfo,
   PublishResult,
   ReviewData,
+  SessionCleanupItem,
   SessionSummary,
   TaskMeta,
   TaskResult,
@@ -26,7 +27,7 @@ import type {
   Worktree,
   WorktreeRoot,
 } from "../shared/types";
-import { branchChanged, scanBranches } from "./cleanup";
+import { branchChanged, scanBranches, staleSessions } from "./cleanup";
 import { CommandError, type ContainerInfo, type Containers, type ExecTarget, type PortConfig, envLabels } from "./containers";
 import { stateDir } from "./config";
 import { buildOverrideConfig, envIdFor, type EnvSettings, isolationBlocker, resolveEnvSettings } from "./env-config";
@@ -437,6 +438,65 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Lists the sessions cleanup may delete, from the main opencode and each running task environment's. The worktree
+   * list is read fresh; when it can't be, no session counts as of a removed worktree.
+   */
+  async cleanupSessionScan(id: ProjectId): Promise<{ warning?: string; items: SessionCleanupItem[] }> {
+    const p = this.requireProject(id);
+    const ws = this.workspaceFolder(p);
+    const worktrees = await this.worktreePaths(p, ws);
+    const envs = [id, ...this.deps.store.environments(id).filter((e) => this.deps.store.runtime(e.id).containerState === "running").map((e) => e.id)];
+    const warnings: string[] = [];
+    const items: SessionCleanupItem[] = [];
+    for (const envId of envs) {
+      try {
+        items.push(...(await this.staleSessionsIn(p, envId, ws, worktrees)));
+      } catch (err) {
+        warnings.push(`could not list ${envId === id ? "" : `${envId}'s `}sessions: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return { ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}), items };
+  }
+
+  /** Deletes a scanned session, if a fresh scan of its environment still lists it. */
+  async cleanupSession(id: ProjectId, item: SessionCleanupItem): Promise<CleanupOutcome> {
+    const p = this.requireProject(id);
+    const envId = item.envId ?? id;
+    if (item.envId && this.deps.store.environment(item.envId)?.projectId !== id) return { outcome: "skipped", message: "changed since scan" };
+    const ws = this.workspaceFolder(p);
+    const worktrees = await this.worktreePaths(p, ws);
+    const current = (await this.staleSessionsIn(p, envId, ws, worktrees)).find((i) => i.id === item.id);
+    if (!current) return { outcome: "skipped", message: "changed since scan" };
+    await this.opencodeClient(envId).deleteSession(current.sessionId, current.directory);
+    this.log(id, `cleanup: removed session ${current.title} (${current.reason})`);
+    this.monitors.get(envId)?.reconcile?.();
+    return { outcome: "removed" };
+  }
+
+  /** Current worktree paths, or undefined when git can't list them. */
+  private worktreePaths(p: Project, ws: string): Promise<string[] | undefined> {
+    return this.deps.worktrees
+      .list(p, ws, this.deps.store.runtime(p.id).worktreeRoot)
+      .then((list) => list.map((w) => w.path))
+      .catch(() => undefined);
+  }
+
+  private async staleSessionsIn(p: Project, envId: EnvId, workspace: string, worktrees: string[] | undefined): Promise<SessionCleanupItem[]> {
+    const client = this.opencodeClient(envId);
+    const [sessions, active] = await Promise.all([client.sessions(), client.active()]);
+    const waiting = this.deps.store.sessionsOf(p.id).filter((s) => s.status !== "idle").map((s) => s.id);
+    return staleSessions({
+      projectId: p.id,
+      ...(envId !== p.id ? { envId } : {}),
+      sessions,
+      busy: new Set([...active, ...waiting]),
+      workspace,
+      ...(worktrees ? { worktrees } : {}),
+      now: (this.deps.now ?? Date.now)(),
+    });
+  }
+
   /** Writes a line to a project's log, for work done outside the orchestrator (cleanup's Docker items). */
   appendLog(id: ProjectId, line: string): void {
     this.log(id, line);
@@ -451,6 +511,19 @@ export class Orchestrator {
     if (prompt?.trim()) await client.prompt(session.id, prompt, undefined, directory);
     this.monitors.get(env.id)?.reconcile?.();
     return session.id;
+  }
+
+  /** Deletes one of the project's sessions with its subagents, stopping it first when it isn't idle. */
+  async removeSession(id: ProjectId, sessionId: string): Promise<void> {
+    this.requireProject(id);
+    const session = this.deps.store.sessionsOf(id).find((s) => s.id === sessionId);
+    if (!session) throw new NotFoundError(sessionId, "session");
+    const envId = session.envId ?? id;
+    const client = this.opencodeClient(envId);
+    if (session.status !== "idle") await client.interrupt(sessionId, session.directory);
+    await client.deleteSession(sessionId, session.directory);
+    this.log(id, `removed session ${session.title}`);
+    this.monitors.get(envId)?.reconcile?.();
   }
 
   /** Sends a prompt to one of the project's sessions, queued behind the current turn when it is running. */

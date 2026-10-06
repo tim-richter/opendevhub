@@ -19,7 +19,7 @@ export function compareSessions(a: SessionSummary, b: SessionSummary): number {
   return RANK[a.status] - RANK[b.status] || b.updatedAt - a.updatedAt;
 }
 
-function rootOf(id: string, parents: Map<string, string | undefined>): string {
+export function rootOf(id: string, parents: Map<string, string | undefined>): string {
   let current = id;
   const seen = new Set<string>();
   while (!seen.has(current)) {

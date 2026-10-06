@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { type BranchGit, branchChanged, Cleanup, FRESH_IMAGE_MS, parseCleanupItems, scanBranches, staleDocker } from "../../src/server/cleanup";
+import { type BranchGit, branchChanged, Cleanup, FRESH_IMAGE_MS, parseCleanupItems, scanBranches, staleDocker, staleSessions } from "../../src/server/cleanup";
 import type { ContainerInfo, ImageInfo } from "../../src/server/containers";
 import type { BranchRef } from "../../src/server/git";
+import type { RawSession } from "../../src/server/opencode/client";
 import { BusyError } from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
 import { InvalidRequestError } from "../../src/server/worktrees";
-import type { BranchCleanupItem, CleanupItem, Project, Worktree } from "../../src/shared/types";
+import { rawSession } from "../helpers/fake-opencode";
+import type { BranchCleanupItem, CleanupItem, Project, SessionCleanupItem, Worktree } from "../../src/shared/types";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const OLD = NOW - 2 * FRESH_IMAGE_MS;
@@ -235,6 +237,11 @@ function service(o: { containers?: ContainerInfo[]; images?: ImageInfo[]; runnin
       order.push(item.id);
       return { outcome: "removed" as const };
     }),
+    cleanupSessionScan: vi.fn(async (_id: string) => ({ items: [sessionItem] as SessionCleanupItem[] }) as { warning?: string; items: SessionCleanupItem[] }),
+    cleanupSession: vi.fn(async (_id: string, item: SessionCleanupItem) => {
+      order.push(item.id);
+      return { outcome: "removed" as const };
+    }),
     appendLog: vi.fn((_id: string, _line: string) => {}),
   };
   const cleanup = new Cleanup({ store, containers, branches, now: () => NOW });
@@ -242,6 +249,10 @@ function service(o: { containers?: ContainerInfo[]; images?: ImageInfo[]; runnin
 }
 const branchItem: BranchCleanupItem = {
   id: "branch:demo:feat", kind: "branch", checked: true, reason: "merged into main", projectId: "demo", branch: "feat", base: "main", why: "merged",
+};
+const sessionItem: SessionCleanupItem = {
+  id: "session:demo:ses_d", kind: "session", checked: true, reason: "discarded task variant", projectId: "demo", sessionId: "ses_d",
+  title: "t", directory: "/workspaces/demo", updatedAt: NOW, why: "discarded",
 };
 const orphan = ctr("c1", { envId: "demo-x", envProjectId: "demo", imageId: "sha256:uid" });
 const uidImage = img("sha256:uid", ["vsc-x-uid:latest"], { labels: { "opendevhub.base-project": "demo" } });
@@ -252,13 +263,33 @@ describe("Cleanup.scan", () => {
     const plan = await cleanup.scan();
     expect(containers.listImages).toHaveBeenCalledWith(["reference=opendevhub/*", "label=opendevhub.base-project"]);
     expect(plan).toMatchObject({ scannedAt: NOW, projects: [{ id: "demo", name: "demo" }] });
-    expect(plan.items.map((i) => i.id)).toEqual(["branch:demo:feat", "container:c1", "image:vsc-x-uid:latest"]);
+    expect(plan.items.map((i) => i.id)).toEqual(["branch:demo:feat", "session:demo:ses_d", "container:c1", "image:vsc-x-uid:latest"]);
+  });
+
+  it("scans sessions after branches, and still scans them when the branch scan fails", async () => {
+    const { cleanup, branches } = service();
+    const calls: string[] = [];
+    branches.cleanupScan.mockImplementation(async () => {
+      calls.push("branches");
+      throw new BusyError("demo");
+    });
+    branches.cleanupSessionScan.mockImplementation(async () => {
+      calls.push("sessions");
+      return { warning: "demo-feat: opencode is not running", items: [sessionItem] };
+    });
+    const plan = await cleanup.scan();
+    expect(calls).toEqual(["branches", "sessions"]);
+    expect(plan.items.map((i) => i.id)).toEqual(["session:demo:ses_d"]);
+    expect(plan.projects[0].warning).toBe("busy with another git action; scan again in a moment; demo-feat: opencode is not running");
+    branches.cleanupSessionScan.mockRejectedValue(new Error("boom"));
+    expect((await cleanup.scan()).projects[0].warning).toContain("could not scan sessions: boom");
   });
 
   it("skips branches of a stopped project but still scans Docker", async () => {
     const { cleanup, branches } = service({ running: false, containers: [orphan] });
     const plan = await cleanup.scan();
     expect(branches.cleanupScan).not.toHaveBeenCalled();
+    expect(branches.cleanupSessionScan).not.toHaveBeenCalled();
     expect(plan.projects).toEqual([{ id: "demo", name: "demo", skipped: "not running" }]);
     expect(plan.items.map((i) => i.id)).toEqual(["container:c1"]);
   });
@@ -278,20 +309,21 @@ describe("Cleanup.scan", () => {
     containers.listManaged.mockRejectedValue(new Error("Cannot connect to the Docker daemon"));
     const plan = await cleanup.scan();
     expect(plan.dockerError).toBe("Cannot connect to the Docker daemon");
-    expect(plan.items.map((i) => i.id)).toEqual(["branch:demo:feat"]);
+    expect(plan.items.map((i) => i.id)).toEqual(["branch:demo:feat", "session:demo:ses_d"]);
   });
 });
 
 describe("Cleanup.apply", () => {
-  it("removes branches, then containers, then the images they freed", async () => {
+  it("removes branches, then sessions, then containers, then the images they freed", async () => {
     const { cleanup, containers, order } = service({ containers: [orphan], images: [uidImage] });
     const plan = await cleanup.scan();
     const result = await cleanup.apply(plan.items);
-    expect(order).toEqual(["branch:demo:feat", "container:c1"]);
+    expect(order).toEqual(["branch:demo:feat", "session:demo:ses_d", "container:c1"]);
     expect(containers.removeImage).toHaveBeenCalledWith("vsc-x-uid:latest");
     expect(result).toEqual({
       results: [
         { id: "branch:demo:feat", outcome: "removed" },
+        { id: "session:demo:ses_d", outcome: "removed" },
         { id: "container:c1", outcome: "removed" },
         { id: "image:vsc-x-uid:latest", outcome: "removed" },
       ],
@@ -323,12 +355,20 @@ describe("Cleanup.apply", () => {
     });
     containers.remove.mockRejectedValueOnce(new Error("docker rm failed: boom"));
     const plan = await cleanup.scan();
-    const result = await cleanup.apply(plan.items.filter((i) => i.kind !== "image"));
+    const result = await cleanup.apply(plan.items.filter((i) => i.kind !== "image" && i.kind !== "session"));
     expect(result.results).toEqual([
       { id: "branch:demo:feat", outcome: "skipped", message: "project busy" },
       { id: "container:c1", outcome: "failed", message: "docker rm failed: boom" },
     ]);
     expect(branches.appendLog).toHaveBeenCalledWith("demo", "cleanup: could not remove container n-c1: docker rm failed: boom");
+  });
+
+  it("reports a session that failed to go, and logs it to its project", async () => {
+    const { cleanup, branches } = service();
+    branches.cleanupSession.mockRejectedValueOnce(new Error("opencode is not running — start the project first"));
+    const result = await cleanup.apply([sessionItem]);
+    expect(result.results).toEqual([{ id: "session:demo:ses_d", outcome: "failed", message: "opencode is not running — start the project first" }]);
+    expect(branches.appendLog).toHaveBeenCalledWith("demo", "cleanup: could not remove session ses_d: opencode is not running — start the project first");
   });
 
   it("logs Docker removals to the owning project", async () => {
@@ -351,10 +391,11 @@ describe("Cleanup.apply", () => {
 
 describe("parseCleanupItems", () => {
   it("keeps the identity fields and drops the rest", () => {
-    expect(parseCleanupItems([{ ...branchItem, extra: 1 }, { kind: "container", containerId: "c1" }, { kind: "image", ref: "opendevhub/demo:1-base" }])).toEqual([
+    expect(parseCleanupItems([{ ...branchItem, extra: 1 }, { kind: "container", containerId: "c1" }, { kind: "image", ref: "opendevhub/demo:1-base" }, { ...sessionItem, envId: "demo-feat", title: "forged" }])).toEqual([
       { id: "branch:demo:feat", kind: "branch", checked: true, reason: "merged into main", projectId: "demo", branch: "feat", base: "main", why: "merged" },
       { id: "container:c1", kind: "container", checked: true, reason: "", containerId: "c1", running: false, why: "orphan-env" },
       { id: "image:opendevhub/demo:1-base", kind: "image", checked: true, reason: "", ref: "opendevhub/demo:1-base", bytes: 0, why: "superseded" },
+      { id: "session:demo:ses_d", kind: "session", checked: true, reason: "", projectId: "demo", envId: "demo-feat", sessionId: "ses_d", title: "", directory: "", updatedAt: 0, why: "idle" },
     ]);
   });
 
@@ -363,5 +404,77 @@ describe("parseCleanupItems", () => {
     expect(() => parseCleanupItems([{ kind: "volume" }])).toThrow(InvalidRequestError);
     expect(() => parseCleanupItems([{ kind: "branch", projectId: "demo", branch: "-x", why: "merged" }])).toThrow(InvalidRequestError);
     expect(() => parseCleanupItems([{ kind: "branch", projectId: "demo", branch: "x", why: "whatever" }])).toThrow(InvalidRequestError);
+    expect(() => parseCleanupItems([{ kind: "session", projectId: "demo" }])).toThrow(InvalidRequestError);
+  });
+});
+
+describe("staleSessions", () => {
+  const DAY = 24 * 60 * 60_000;
+  const recent = { created: NOW - DAY, updated: NOW - DAY };
+  const at = (directory: string) => ({ directory });
+  const scan = (sessions: RawSession[], busy: string[] = []) =>
+    staleSessions({
+      projectId: "demo",
+      sessions,
+      busy: new Set(busy),
+      workspace: "/workspaces/demo",
+      worktrees: ["/workspaces/demo.worktrees/feat"],
+      now: NOW,
+    });
+
+  it("lists discarded variants and sessions of removed worktrees checked, long-idle ones unchecked", () => {
+    const items = scan([
+      rawSession("ses_d", { time: recent, location: at("/workspaces/demo.worktrees/feat"), metadata: { opendevhub: { task: "tsk_1", variant: 2, of: 2, title: "t", discarded: true } } }),
+      rawSession("ses_g", { time: recent, location: at("/workspaces/demo.worktrees/gone") }),
+      rawSession("ses_i", { time: { created: 0, updated: NOW - 40 * DAY }, location: at("/workspaces/demo/sub") }),
+      rawSession("ses_ok", { time: recent, location: at("/workspaces/demo") }),
+      rawSession("ses_wt", { time: recent, location: at("/workspaces/demo.worktrees/feat/pkg") }),
+    ]);
+    expect(items.map((i) => [i.id, i.why, i.checked, i.reason])).toEqual([
+      ["session:demo:ses_d", "discarded", true, "discarded task variant"],
+      ["session:demo:ses_g", "worktree-gone", true, "its worktree was removed"],
+      ["session:demo:ses_i", "idle", false, "idle for 40 days"],
+    ]);
+    expect(items[1]).toMatchObject({ kind: "session", projectId: "demo", sessionId: "ses_g", title: "Session ses_g", directory: "/workspaces/demo.worktrees/gone", updatedAt: NOW - DAY });
+  });
+
+  it("never lists subagents, archived sessions, or a session whose tree is busy; idle counts the newest update in the tree", () => {
+    const old = { created: 0, updated: NOW - 40 * DAY };
+    const items = scan(
+      [
+        rawSession("ses_a", { time: old }),
+        rawSession("ses_a1", { time: old, parentID: "ses_a" }),
+        rawSession("ses_b", { time: old }),
+        rawSession("ses_b1", { time: recent, parentID: "ses_b" }),
+        rawSession("ses_c", { time: { ...old, archived: NOW - 40 * DAY } }),
+        rawSession("ses_e", { time: old, location: at("/workspaces/demo.worktrees/gone") }),
+      ],
+      ["ses_a1", "ses_e"],
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("lists no session as of a removed worktree when the worktree list is unknown", () => {
+    const items = staleSessions({
+      projectId: "demo",
+      sessions: [rawSession("ses_g", { time: recent, location: at("/workspaces/demo.worktrees/feat") })],
+      busy: new Set(),
+      workspace: "/workspaces/demo",
+      now: NOW,
+    });
+    expect(items).toEqual([]);
+  });
+
+  it("names the task environment that holds the session", () => {
+    const items = staleSessions({
+      projectId: "demo",
+      envId: "demo-feat",
+      sessions: [rawSession("ses_g", { time: recent, location: at("/x") })],
+      busy: new Set(),
+      workspace: "/workspaces/demo",
+      worktrees: [],
+      now: NOW,
+    });
+    expect(items).toMatchObject([{ id: "session:demo:ses_g", envId: "demo-feat" }]);
   });
 });

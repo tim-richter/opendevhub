@@ -477,7 +477,25 @@ export interface ImageCleanupItem {
   projectId?: ProjectId;
 }
 
-export type CleanupItem = BranchCleanupItem | ContainerCleanupItem | ImageCleanupItem;
+/** A top-level opencode session cleanup may delete, with its subagent sessions. */
+export interface SessionCleanupItem {
+  /** `session:<projectId>:<sessionId>`. */
+  id: string;
+  kind: "session";
+  checked: boolean;
+  reason: string;
+  projectId: ProjectId;
+  /** The task environment whose opencode holds it; absent for the main environment. */
+  envId?: EnvId;
+  sessionId: string;
+  title: string;
+  directory: string;
+  /** The latest update in the session's tree. */
+  updatedAt: number;
+  why: "discarded" | "worktree-gone" | "idle";
+}
+
+export type CleanupItem = BranchCleanupItem | ContainerCleanupItem | ImageCleanupItem | SessionCleanupItem;
 
 export interface CleanupProject {
   id: ProjectId;
