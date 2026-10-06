@@ -429,3 +429,80 @@ export interface AddProjectResult {
   /** Why the project wasn't started. */
   error?: string;
 }
+
+/** A local branch cleanup may delete, with its worktree and that worktree's own container. */
+export interface BranchCleanupItem {
+  /** `branch:<projectId>:<branch>`. */
+  id: string;
+  kind: "branch";
+  /** Whether the page selects it by default. */
+  checked: boolean;
+  /** What the page shows, e.g. "merged into main". */
+  reason: string;
+  projectId: ProjectId;
+  branch: string;
+  base: string;
+  why: "merged" | "upstream-gone";
+  /** Its linked worktree, as the container sees it. */
+  worktree?: string;
+  /** The worktree has uncommitted or untracked changes; removing it discards them. */
+  dirty?: boolean;
+  /** The worktree's own environment, removed with it. */
+  env?: EnvId;
+}
+
+export interface ContainerCleanupItem {
+  /** `container:<containerId>`. */
+  id: string;
+  kind: "container";
+  checked: boolean;
+  reason: string;
+  containerId: string;
+  name?: string;
+  running: boolean;
+  why: "orphan-env" | "removed-project";
+  /** The project its labels name, current or not. */
+  projectId?: ProjectId;
+}
+
+export interface ImageCleanupItem {
+  /** `image:<ref>`. */
+  id: string;
+  kind: "image";
+  checked: boolean;
+  reason: string;
+  ref: string;
+  bytes: number;
+  why: "superseded" | "removed-project" | "uid";
+  projectId?: ProjectId;
+}
+
+export type CleanupItem = BranchCleanupItem | ContainerCleanupItem | ImageCleanupItem;
+
+export interface CleanupProject {
+  id: ProjectId;
+  name: string;
+  /** The scan went on without something, e.g. "using local refs: <reason>". */
+  warning?: string;
+  /** Branches can't be scanned without the main container. */
+  skipped?: "not running";
+}
+
+export interface CleanupPlan {
+  scannedAt: number;
+  projects: CleanupProject[];
+  /** Set when Docker could not be listed; there are then no container or image items. */
+  dockerError?: string;
+  items: CleanupItem[];
+}
+
+export interface CleanupOutcome {
+  outcome: "removed" | "skipped" | "failed";
+  message?: string;
+}
+
+export interface CleanupResult {
+  results: (CleanupOutcome & { id: string })[];
+  /** Sum of the removed images' sizes; layers shared with other images make the real number smaller. */
+  freedBytes: number;
+}
