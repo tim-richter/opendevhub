@@ -243,6 +243,12 @@ describe("task environment containers", () => {
     expect(calls[0].args).toEqual(["read-configuration", "--workspace-folder", "/src/demo.worktrees/feat"]);
   });
 
+  it("passes labels to the build", async () => {
+    const ok = fakeRunner(() => ({ stdout: '{"outcome":"success","imageName":["img"]}' }));
+    await new Containers(ok.run).build("/f", "img", () => {}, ["a=1", "b=2"]);
+    expect(ok.calls[0].args).toEqual(["build", "--workspace-folder", "/f", "--image-name", "img", "--label", "a=1", "--label", "b=2"]);
+  });
+
   it("builds an image and reports the CLI's error", async () => {
     const ok = fakeRunner(() => ({ stdout: '{"outcome":"success","imageName":["img"]}\n' }));
     await new Containers(ok.run).build("/f", "img", () => {});

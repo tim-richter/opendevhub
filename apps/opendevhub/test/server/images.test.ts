@@ -17,7 +17,7 @@ function setup(objects: (string | undefined)[] = ["tree1", undefined]) {
   const builds: Array<{ folder: string; ref: string; done: ReturnType<typeof deferred> }> = [];
   const containers = {
     imageExists: vi.fn(async (_ref: string) => false),
-    build: vi.fn((folder: string, ref: string, _onLine: (l: string) => void) => {
+    build: vi.fn((folder: string, ref: string, _onLine: (l: string) => void, _labels?: string[]) => {
       const done = deferred();
       builds.push({ folder, ref, done });
       return done.promise;
@@ -45,6 +45,15 @@ describe("imageKey", () => {
 });
 
 describe("Images.ensureBase", () => {
+  it("labels the base image with its project", async () => {
+    const { images, containers, builds } = setup();
+    const p = images.ensureBase(project, wt("a"), [], () => {});
+    await tick();
+    builds[0].done.resolve();
+    await p;
+    expect(containers.build.mock.calls[0][3]).toEqual([`opendevhub.base-project=${project.id}`]);
+  });
+
   it("reads the key inputs at the worktree's HEAD, with the key files", async () => {
     const { images, git, builds } = setup();
     const p = images.ensureBase(project, wt("a"), ["package-lock.json"], () => {});

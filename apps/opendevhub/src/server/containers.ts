@@ -250,11 +250,10 @@ export class Containers {
   }
 
   /** Builds the image a folder's config describes (Dockerfile and features), without a container or lifecycle commands. */
-  async build(folder: string, imageName: string, onLine: (line: string) => void): Promise<void> {
-    const r = await this.run("devcontainer", ["build", "--workspace-folder", folder, "--image-name", imageName], {
-      timeoutMs: UP_TIMEOUT_MS,
-      onLine,
-    });
+  async build(folder: string, imageName: string, onLine: (line: string) => void, labels: string[] = []): Promise<void> {
+    const args = ["build", "--workspace-folder", folder, "--image-name", imageName];
+    for (const label of labels) args.push("--label", label);
+    const r = await this.run("devcontainer", args, { timeoutMs: UP_TIMEOUT_MS, onLine });
     const outcome = lastOutcome(r.stdout);
     if (r.exitCode === 0 && outcome?.outcome === "success") return;
     const reason = outcome?.message ?? outcome?.description ?? (r.timedOut ? "timed out after 15 minutes" : `exit ${r.exitCode}`);

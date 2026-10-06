@@ -7,6 +7,9 @@ import type { GitOps } from "./git";
 /** What a config's image depends on, besides the key files a project lists. */
 export const KEY_PATHS = [".devcontainer", ".devcontainer.json"];
 
+/** On base images, and inherited by the UID images `devcontainer up` builds on them, so cleanup can tell them apart. */
+export const BASE_PROJECT_LABEL = "opendevhub.base-project";
+
 export function imageKey(input: { cliVersion: string; objects: (string | undefined)[]; generation: number }): string {
   const parts = [input.cliVersion, input.objects.map((o) => o ?? null), input.generation];
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
@@ -45,7 +48,7 @@ export class Images {
     const ref = baseImageRef(project.id, key);
     let pending = this.building.get(ref);
     if (!pending) {
-      pending = this.enqueue(project.id, () => this.buildIfMissing(ref, worktree.hostPath, onLine)).finally(() =>
+      pending = this.enqueue(project.id, () => this.buildIfMissing(ref, worktree.hostPath, project.id, onLine)).finally(() =>
         this.building.delete(ref),
       );
       this.building.set(ref, pending);
@@ -63,10 +66,10 @@ export class Images {
     return next;
   }
 
-  private async buildIfMissing(ref: string, folder: string, onLine: (line: string) => void): Promise<void> {
+  private async buildIfMissing(ref: string, folder: string, projectId: string, onLine: (line: string) => void): Promise<void> {
     if (await this.deps.containers.imageExists(ref)) return;
     onLine(`image: building ${ref}`);
-    await this.deps.containers.build(folder, ref, onLine);
+    await this.deps.containers.build(folder, ref, onLine, [`${BASE_PROJECT_LABEL}=${projectId}`]);
     onLine(`image: built ${ref}`);
   }
 
