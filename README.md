@@ -168,6 +168,26 @@ They arrive while the dashboard tab is closed, as long as the browser is running
 
 Notifications are enabled per browser and address: opening the dashboard on another host name or port (`127.0.0.1` instead of `localhost`, or `--port`) means enabling them again there. The keys and subscriptions are in `~/.local/state/opendevhub/push.json`.
 
+## Remote nodes (preview)
+
+Other machines can join as nodes, reached over ssh. Tasks can't be placed on them yet; for now
+the Nodes page shows whether each one is reachable and ready, and how much CPU and memory it
+has free.
+
+Add one on the Nodes page, or with `opendevhub nodes add tim@workstation --label Workstation`
+(then restart opendevhub). A node needs:
+
+- Docker, the devcontainer CLI and git 2.48 or newer, on the PATH of a **non-interactive** ssh
+  shell. Tools installed through nvm or a login profile often aren't: check with
+  `ssh tim@workstation 'devcontainer --version'`, and if it fails, link the binary into
+  `/usr/local/bin` or set PATH in `~/.ssh/environment` (with `PermitUserEnvironment yes`).
+- An ssh key that logs in without a prompt, and a known host key: run `ssh tim@workstation` once.
+- `AllowTcpForwarding yes` in its sshd config (the default).
+
+opendevhub keeps one ssh connection per node (a ControlMaster under
+`~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Nothing is
+installed on the node and nothing listens there besides sshd.
+
 ## Development
 
 This is a pnpm workspace:
