@@ -1,4 +1,4 @@
-import { BellIcon, CircleDollarSignIcon, EraserIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, ServerIcon, XIcon } from "lucide-react";
+import { BellIcon, BookOpenIcon, CircleDollarSignIcon, EraserIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, ServerIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -40,6 +40,7 @@ import { formatCost, opensNewTask, projectIdFromPath } from "../tasks";
 import { formatUsage } from "../usage";
 
 const FILTER_THRESHOLD = 8;
+const DOCS_URL = "https://tim-richter.github.io/opendevhub/";
 
 export function Shell() {
   const { snapshot, connected, newTask, newTaskFor, addProjectOpen } = useDash();
@@ -229,6 +230,13 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
           <SidebarMenuItem>
             <SidebarMenuButton size="sm" className="text-muted-foreground" disabled={scanning} onClick={rescan} title={snapshot.roots.join("\n")}>
               <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan roots"}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild size="sm" className="text-muted-foreground">
+              <a href={DOCS_URL} target="_blank" rel="noreferrer">
+                <BookOpenIcon /> Documentation
+              </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
