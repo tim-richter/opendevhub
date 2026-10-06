@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
+  BranchCleanupItem,
+  CleanupOutcome,
   EnvId,
   EnvWorktree,
   FormAnswer,
@@ -24,6 +26,7 @@ import type {
   Worktree,
   WorktreeRoot,
 } from "../shared/types";
+import { branchChanged, scanBranches } from "./cleanup";
 import { CommandError, type ContainerInfo, type Containers, type ExecTarget, type PortConfig, envLabels } from "./containers";
 import { stateDir } from "./config";
 import { buildOverrideConfig, envIdFor, type EnvSettings, isolationBlocker, resolveEnvSettings } from "./env-config";
@@ -104,7 +107,8 @@ export type ImagesPort = Pick<Images, "ensureBase">;
 export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
 export type GitPort = Pick<
   GitOps,
-  "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch" | "localBranches"
+  | "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch"
+  | "localBranches" | "remotes" | "fetchPrune" | "branchRefs" | "remoteHead" | "isAncestor"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;
@@ -381,19 +385,8 @@ export class Orchestrator {
       const known = this.deps.store.runtime(id).worktrees ?? [];
       const target = known.find((w) => w.path === worktreePath);
       if (!target) throw new InvalidRequestError(`unknown worktree ${worktreePath}`);
-      const rec = this.deps.store.environments(id).find((e) => e.worktree.path === worktreePath);
-      if (rec) {
-        const env = this.taskEnv(p, rec);
-        try {
-          await this.exclusiveEnv(env, () => this.destroyEnv(env));
-        } catch (err) {
-          if (err instanceof BusyError) throw err;
-          throw new UnavailableError(`kept the worktree: its container could not be removed (${err instanceof Error ? err.message : String(err)})`);
-        }
-      }
       const ws = this.workspaceFolder(p);
-      await this.deps.worktrees.remove(p, ws, worktreePath, force);
-      this.log(id, `worktree: removed ${worktreePath}`);
+      await this.dropWorktree(p, worktreePath, force);
       try {
         if (deleteBranch && target.branch) {
           await this.gitAction(id, `delete branch ${target.branch}`, () => this.deps.git.deleteBranch(p, ws, target.branch!));
@@ -406,6 +399,47 @@ export class Orchestrator {
         this.deps.store.updateRuntime(id, { worktrees: list });
       }
     });
+  }
+
+  /** Lists the project's merged and upstream-gone branches, after `git fetch --prune`. */
+  cleanupScan(id: ProjectId): Promise<{ warning?: string; items: BranchCleanupItem[] }> {
+    return this.withGit(id, async (p) => {
+      const ws = this.workspaceFolder(p);
+      const worktrees = await this.deps.worktrees.list(p, ws, this.deps.store.runtime(id).worktreeRoot);
+      this.deps.store.updateRuntime(id, { worktrees });
+      const envs = this.deps.store.environments(id);
+      return scanBranches(this.deps.git, {
+        project: p,
+        workspace: ws,
+        worktrees,
+        envOf: (dir) => envs.find((e) => e.worktree.path === dir)?.id,
+      });
+    });
+  }
+
+  /** Deletes a scanned branch with its worktree and that worktree's container, if it still qualifies. */
+  cleanupBranch(id: ProjectId, item: BranchCleanupItem): Promise<CleanupOutcome> {
+    return this.withGit(id, async (p) => {
+      const ws = this.workspaceFolder(p);
+      const root = this.deps.store.runtime(id).worktreeRoot;
+      const changed = await branchChanged(this.deps.git, p, ws, item, await this.deps.worktrees.list(p, ws, root));
+      if (changed) return { outcome: "skipped", message: changed };
+      try {
+        if (item.worktree) await this.dropWorktree(p, item.worktree, item.dirty === true);
+        // -d is git's own check that it's merged; a branch whose upstream is gone may be squash-merged, which -d refuses.
+        await this.deps.git.deleteBranch(p, ws, item.branch, item.why === "upstream-gone");
+      } finally {
+        const list = await this.deps.worktrees.list(p, ws, root).catch(() => undefined);
+        if (list) this.deps.store.updateRuntime(id, { worktrees: list });
+      }
+      this.log(id, `cleanup: deleted branch ${item.branch} (${item.reason})${item.worktree ? " and its worktree" : ""}`);
+      return { outcome: "removed" };
+    });
+  }
+
+  /** Writes a line to a project's log, for work done outside the orchestrator (cleanup's Docker items). */
+  appendLog(id: ProjectId, line: string): void {
+    this.log(id, line);
   }
 
   async startSession(id: ProjectId, directory: string, title?: string, prompt?: string): Promise<string> {
@@ -1123,6 +1157,22 @@ export class Orchestrator {
   }
 
   /** Deletes a task container, its generated config and the UID image the CLI built for it. Throws when the container stays. */
+  /** Removes a worktree and its own container first; keeps the worktree when the container won't go. */
+  private async dropWorktree(p: Project, worktreePath: string, force: boolean): Promise<void> {
+    const rec = this.deps.store.environments(p.id).find((e) => e.worktree.path === worktreePath);
+    if (rec) {
+      const env = this.taskEnv(p, rec);
+      try {
+        await this.exclusiveEnv(env, () => this.destroyEnv(env));
+      } catch (err) {
+        if (err instanceof BusyError) throw err;
+        throw new UnavailableError(`kept the worktree: its container could not be removed (${err instanceof Error ? err.message : String(err)})`);
+      }
+    }
+    await this.deps.worktrees.remove(p, this.workspaceFolder(p), worktreePath, force);
+    this.log(p.id, `worktree: removed ${worktreePath}`);
+  }
+
   private async destroyEnv(env: TaskEnv): Promise<void> {
     const { store, containers } = this.deps;
     this.stopMonitor(env.id);

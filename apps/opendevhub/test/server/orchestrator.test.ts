@@ -119,8 +119,13 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     commit: vi.fn(async (_p: Project, _dir: string, _m: string) => {}),
     update: vi.fn(async (_p: Project, _dir: string, _base: string, strategy: "rebase" | "merge"): Promise<UpdateResult> => ({ strategy })),
     mergeInto: vi.fn(async (_p: Project, _ws: string, _b: string, _ff: boolean) => {}),
-    deleteBranch: vi.fn(async (_p: Project, _ws: string, _b: string) => {}),
+    deleteBranch: vi.fn(async (_p: Project, _ws: string, _b: string, _force?: boolean) => {}),
     localBranches: vi.fn(async (_p: Project, _dir: string): Promise<string[]> => ["main"]),
+    remotes: vi.fn(async (_p: Project, _dir: string): Promise<string[]> => ["origin"]),
+    fetchPrune: vi.fn(async (_p: Project, _dir: string, _remote: string) => {}),
+    branchRefs: vi.fn(async (_p: Project, _dir: string): Promise<{ name: string; upstream?: string; gone: boolean }[]> => []),
+    remoteHead: vi.fn(async (_p: Project, _dir: string, _remote: string): Promise<string | undefined> => "main"),
+    isAncestor: vi.fn(async (_p: Project, _dir: string, _b: string, _base: string) => true),
   };
   const client = {
     createSession: vi.fn(async (directory: string, _o?: NewSession) => ({ id: "ses_new", location: { directory } })),
@@ -923,6 +928,84 @@ describe("Orchestrator", () => {
       expect(worktrees.list.mock.calls.length).toBe(calls + 1);
     });
   });
+  describe("cleanup", () => {
+    const featWt = { path: "/workspaces/demo.worktrees/feat", hostPath: "/src/demo.worktrees/feat", branch: "feat" };
+    const item = {
+      id: "branch:demo-abc123:feat", kind: "branch" as const, checked: true, reason: "merged into main",
+      projectId: project.id, branch: "feat", base: "main", why: "merged" as const, worktree: featWt.path,
+    };
+
+    async function running() {
+      const s = setup();
+      await s.orch.rescan();
+      await s.orch.start(project.id);
+      s.worktrees.list.mockResolvedValue([featWt]);
+      s.git.branchRefs.mockResolvedValue([{ name: "main", gone: false }, { name: "feat", gone: false }]);
+      s.git.recordedBase.mockResolvedValue(undefined);
+      return s;
+    }
+
+    it("scans branches in the container and refreshes the worktree list", async () => {
+      const { orch, git, store } = await running();
+      const r = await orch.cleanupScan(project.id);
+      expect(git.fetchPrune).toHaveBeenCalledWith(project, "/workspaces/demo", "origin");
+      expect(r.items.map((i) => [i.branch, i.worktree])).toEqual([["feat", featWt.path]]);
+      expect(store.runtime(project.id).worktrees).toEqual([featWt]);
+    });
+
+    it("removes the worktree, then deletes a merged branch with -d, and logs it", async () => {
+      const { orch, worktrees, git } = await running();
+      expect(await orch.cleanupBranch(project.id, item)).toEqual({ outcome: "removed" });
+      expect(worktrees.remove).toHaveBeenCalledWith(project, "/workspaces/demo", featWt.path, false);
+      expect(git.deleteBranch).toHaveBeenCalledWith(project, "/workspaces/demo", "feat", false);
+      expect(orch.logLines(project.id)).toContain("cleanup: deleted branch feat (merged into main) and its worktree");
+    });
+
+    it("deletes an upstream-gone branch with -D", async () => {
+      const { orch, git } = await running();
+      git.isAncestor.mockResolvedValue(false);
+      git.branchRefs.mockResolvedValue([{ name: "feat", upstream: "refs/remotes/origin/feat", gone: true }]);
+      const gone = { ...item, why: "upstream-gone" as const, reason: "its upstream is gone; it may not be merged" };
+      expect(await orch.cleanupBranch(project.id, gone)).toEqual({ outcome: "removed" });
+      expect(git.deleteBranch).toHaveBeenCalledWith(project, "/workspaces/demo", "feat", true);
+    });
+
+    it("forces the worktree removal only for an item scanned as dirty", async () => {
+      const { orch, worktrees, git } = await running();
+      git.isClean.mockResolvedValue(false);
+      await orch.cleanupBranch(project.id, { ...item, dirty: true, checked: false });
+      expect(worktrees.remove).toHaveBeenCalledWith(project, "/workspaces/demo", featWt.path, true);
+    });
+
+    it("skips an item that changed since the scan, touching nothing", async () => {
+      const { orch, worktrees, git } = await running();
+      git.isAncestor.mockResolvedValue(false);
+      expect(await orch.cleanupBranch(project.id, item)).toEqual({ outcome: "skipped", message: "changed since scan" });
+      expect(worktrees.remove).not.toHaveBeenCalled();
+      expect(git.deleteBranch).not.toHaveBeenCalled();
+    });
+
+    it("removes the worktree's own container first", async () => {
+      const { orch, store, containers } = await running();
+      store.putEnvironment({ id: "env-feat", projectId: project.id, worktree: featWt });
+      store.updateRuntime("env-feat", { containerId: "c9" });
+      await orch.cleanupBranch(project.id, { ...item, env: "env-feat" });
+      expect(containers.remove).toHaveBeenCalledWith("c9");
+      expect(store.environment("env-feat")).toBeUndefined();
+    });
+
+    it("refuses while another git action runs", async () => {
+      const { orch, git } = await running();
+      let release!: () => void;
+      git.fetchPrune.mockImplementation(() => new Promise<void>((r) => (release = r)));
+      const first = orch.cleanupScan(project.id);
+      expect(() => orch.cleanupBranch(project.id, item)).toThrow(BusyError);
+      await vi.waitFor(() => expect(git.fetchPrune).toHaveBeenCalled());
+      release();
+      await first;
+    });
+  });
+
   describe("responding", () => {
     async function running() {
       const s = setup();
