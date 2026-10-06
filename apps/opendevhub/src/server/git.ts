@@ -16,6 +16,28 @@ export function parseAheadBehind(out: string): { ahead: number; behind: number }
   return { ahead: Number.isFinite(ahead) ? ahead : 0, behind: Number.isFinite(behind) ? behind : 0 };
 }
 
+const FETCH_TIMEOUT_MS = 60_000;
+const REF_FORMAT = "%(refname:short)%09%(upstream)%09%(upstream:track)";
+
+export interface BranchRef {
+  name: string;
+  /** Full ref of its upstream, when it has one. */
+  upstream?: string;
+  /** The upstream was deleted on the remote (pruned by the last fetch). */
+  gone: boolean;
+}
+
+/** `git for-each-ref` lines of name, upstream and track, separated by tabs (ref names can't hold tabs). */
+export function parseBranchRefs(out: string): BranchRef[] {
+  return out
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((line) => {
+      const [name, upstream, track] = line.split("\t");
+      return { name, ...(upstream ? { upstream } : {}), gone: track?.trim() === "[gone]" };
+    });
+}
+
 function failure(args: string[], r: RunResult): CommandError {
   const tail = tailLines(r.stderr + "\n" + r.stdout, 5);
   return new CommandError(`git ${args[0]} failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`, tail);
@@ -60,6 +82,41 @@ export class GitOps {
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
+  }
+
+  async remotes(p: Project, dir: string): Promise<string[]> {
+    return (await this.git(p, dir, ["remote"])).split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+
+  /** Updates remote-tracking refs and drops ones deleted on the remote; never prompts for credentials. */
+  async fetchPrune(p: Project, dir: string, remote: string): Promise<void> {
+    const args = ["fetch", "--prune", "--quiet", remote];
+    const r = await this.deps.containers.exec(p, ["git", "-C", dir, ...args], {
+      env: { GIT_TERMINAL_PROMPT: "0" },
+      timeoutMs: FETCH_TIMEOUT_MS,
+    });
+    if (r.timedOut) throw new CommandError(`git fetch ${remote} timed out after 60 s`);
+    if (r.exitCode !== 0) throw failure(args, r);
+  }
+
+  async branchRefs(p: Project, dir: string): Promise<BranchRef[]> {
+    return parseBranchRefs(await this.git(p, dir, ["for-each-ref", `--format=${REF_FORMAT}`, "refs/heads"]));
+  }
+
+  /** The branch the remote's HEAD points at (`origin/main` → `main`), when the clone recorded it. */
+  async remoteHead(p: Project, dir: string, remote: string): Promise<string | undefined> {
+    const r = await this.exec(p, dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`]);
+    const ref = r.stdout.trim();
+    return r.exitCode === 0 && ref.startsWith(`${remote}/`) ? ref.slice(remote.length + 1) : undefined;
+  }
+
+  /** Whether every commit of the local branch is in `base`. Throws when git can't tell (e.g. `base` doesn't exist). */
+  async isAncestor(p: Project, dir: string, branch: string, base: string): Promise<boolean> {
+    const args = ["merge-base", "--is-ancestor", `refs/heads/${branch}`, base];
+    const r = await this.exec(p, dir, args);
+    if (r.exitCode === 0) return true;
+    if (r.exitCode === 1) return false;
+    throw failure(args, r);
   }
 
   async recordedBase(p: Project, dir: string, branch: string): Promise<string | undefined> {

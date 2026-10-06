@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandError } from "../../src/server/containers";
-import { spawnRunner } from "../../src/server/exec";
-import { GitOps, IDENTITY_HINT, parseAheadBehind } from "../../src/server/git";
+import { type RunResult, spawnRunner } from "../../src/server/exec";
+import { GitOps, IDENTITY_HINT, parseAheadBehind, parseBranchRefs } from "../../src/server/git";
 import type { Project } from "../../src/shared/types";
 
 const project: Project = { id: "p", name: "p", path: "/p", devcontainerPath: "/p/x" };
@@ -234,5 +234,65 @@ describe("headObjects", () => {
     expect(await ops.headObjects(project, "/w/x", [".devcontainer", ".devcontainer.json", "package-lock.json"])).toEqual(["aaa", undefined, "bbb"]);
     expect(exec.mock.calls[0][1].slice(0, 2)).toEqual(["sh", "-c"]);
     expect(exec.mock.calls[0][1].slice(3)).toEqual(["sh", "/w/x", ".devcontainer", ".devcontainer.json", "package-lock.json"]);
+  });
+});
+
+describe("parseBranchRefs", () => {
+  it("reads names, upstreams and gone tracking", () => {
+    const out = "main\trefs/remotes/origin/main\t\nfeat\trefs/remotes/origin/feat\t[gone]\nlocal\t\t\nahead\trefs/remotes/origin/ahead\t[ahead 2]\n";
+    expect(parseBranchRefs(out)).toEqual([
+      { name: "main", upstream: "refs/remotes/origin/main", gone: false },
+      { name: "feat", upstream: "refs/remotes/origin/feat", gone: true },
+      { name: "local", gone: false },
+      { name: "ahead", upstream: "refs/remotes/origin/ahead", gone: false },
+    ]);
+  });
+});
+
+describe("GitOps cleanup queries", () => {
+  const p: Project = { id: "demo", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
+  function ops(handler: (cmd: string[]) => Partial<RunResult>) {
+    const calls: { cmd: string[]; opts?: { env?: Record<string, string>; timeoutMs?: number } }[] = [];
+    const containers = {
+      exec: async (_t: unknown, cmd: string[], opts?: { env?: Record<string, string>; timeoutMs?: number }): Promise<RunResult> => {
+        calls.push({ cmd, opts });
+        return { exitCode: 0, stdout: "", stderr: "", timedOut: false, ...handler(cmd) };
+      },
+    };
+    return { git: new GitOps({ containers }), calls };
+  }
+
+  it("fetches with prune, no prompts and a 60 s timeout", async () => {
+    const { git, calls } = ops(() => ({}));
+    await git.fetchPrune(p, "/w", "origin");
+    expect(calls[0].cmd).toEqual(["git", "-C", "/w", "fetch", "--prune", "--quiet", "origin"]);
+    expect(calls[0].opts).toEqual({ env: { GIT_TERMINAL_PROMPT: "0" }, timeoutMs: 60_000 });
+  });
+
+  it("reports a failed or timed-out fetch", async () => {
+    await expect(ops(() => ({ exitCode: 128, stderr: "fatal: could not read from remote" })).git.fetchPrune(p, "/w", "origin")).rejects.toThrow(
+      /could not read from remote/,
+    );
+    await expect(ops(() => ({ exitCode: 143, timedOut: true })).git.fetchPrune(p, "/w", "origin")).rejects.toThrow(/timed out/);
+  });
+
+  it("strips the remote from its HEAD branch", async () => {
+    expect(await ops(() => ({ stdout: "origin/main\n" })).git.remoteHead(p, "/w", "origin")).toBe("main");
+    expect(await ops(() => ({ exitCode: 1 })).git.remoteHead(p, "/w", "origin")).toBeUndefined();
+  });
+
+  it("answers ancestry, and throws when git can't", async () => {
+    const { git, calls } = ops((cmd) => ({ exitCode: cmd.at(-1) === "main" ? 0 : cmd.at(-1) === "dev" ? 1 : 128, stderr: "fatal: Not a valid object name" }));
+    expect(await git.isAncestor(p, "/w", "feat", "main")).toBe(true);
+    expect(calls[0].cmd).toEqual(["git", "-C", "/w", "merge-base", "--is-ancestor", "refs/heads/feat", "main"]);
+    expect(await git.isAncestor(p, "/w", "feat", "dev")).toBe(false);
+    await expect(git.isAncestor(p, "/w", "feat", "gone")).rejects.toThrow(/Not a valid object name/);
+  });
+
+  it("lists remotes and branch refs", async () => {
+    const { git, calls } = ops((cmd) => ({ stdout: cmd[3] === "remote" ? "origin\nfork\n" : "feat\t\t\n" }));
+    expect(await git.remotes(p, "/w")).toEqual(["origin", "fork"]);
+    expect(await git.branchRefs(p, "/w")).toEqual([{ name: "feat", gone: false }]);
+    expect(calls[1].cmd).toEqual(["git", "-C", "/w", "for-each-ref", "--format=%(refname:short)%09%(upstream)%09%(upstream:track)", "refs/heads"]);
   });
 });
