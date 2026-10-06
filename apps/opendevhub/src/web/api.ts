@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { AddProjectResult, CandidateList, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
+import type { AddProjectResult, CandidateList, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -186,4 +186,20 @@ export async function addProject(path: string, stack: StackId): Promise<AddProje
   });
   if (!res.ok) throw await failure(res, "add project");
   return (await res.json()) as AddProjectResult;
+}
+
+export async function fetchCleanup(): Promise<CleanupPlan> {
+  const res = await fetch("/api/cleanup");
+  if (!res.ok) throw await failure(res, "cleanup scan");
+  return (await res.json()) as CleanupPlan;
+}
+
+export async function applyCleanup(items: CleanupItem[]): Promise<CleanupResult> {
+  const res = await fetch("/api/cleanup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw await failure(res, "cleanup");
+  return (await res.json()) as CleanupResult;
 }
