@@ -86,15 +86,16 @@ export interface Host {
   local environments does not change.
 - **`SshHost`** (one per node, owned by a `NodeConnection`):
   - `run` executes `ssh -S <ctl> -o BatchMode=yes <dest> -- <quoted cmd>` over a ControlMaster
-    socket at `~/.config/opendevhub/ssh/<id>.sock`, opened with `ssh -M -N -f
-    -o ControlPersist=yes -o ServerAliveInterval=15`. Arguments are shell-quoted on the hub
+    socket at `~/.config/opendevhub/ssh/<id>.sock`. The master is
+    `ssh -M -N -o ServerAliveInterval=15 -o ServerAliveCountMax=3`, kept as a child process of
+    the hub (not `-f`: a daemonized ssh keeps the captured stdio open, and the child's exit
+    is the signal that the node dropped). Arguments are shell-quoted on the hub
     side; stdout and stderr stream through as today, so `onLine` keeps working.
-  - `dial` opens a `direct-tcpip` channel on a persistent `ssh2` connection. It authenticates
-    with the hub's `SSH_AUTH_SOCK` and reads `~/.ssh/config` for the destination's `HostName`,
-    `User`, `Port` and `IdentityFile`. (ssh2 doesn't read ssh config itself; `ssh -G <dest>`
-    resolves it.) A destination using `ProxyJump` or `ProxyCommand` falls back to
-    `ssh -S <ctl> -W ip:port <dest>` per connection: it still goes through the ControlMaster but
-    costs one process per socket. The `ssh2` package is a new dependency.
+  - `dial` spawns `ssh -S <ctl> -W ip:port <dest>` per connection and returns a duplex over its
+    stdin and stdout. The channel goes through the ControlMaster, so OpenSSH does the host-key
+    checks, reads the ssh config (including `ProxyJump`) and authenticates once. The cost is one
+    small process per open socket. (The `ssh2` library was rejected: it doesn't check
+    `known_hosts`, so opendevhub would have to reimplement host-key verification.)
   - `readFile`/`writeFile` go through `run` (`cat`, and `sh -c 'cat > "$1"'` with stdin).
     `RunOptions` gains `input?: string`.
 - `Containers`, `Images`, `RelayRuntime`, `OpencodeRuntime` and `EnvFiles` take a `Host`
@@ -103,14 +104,15 @@ export interface Host {
 
 ### NodeConnection
 
-One per configured node. It owns the ControlMaster and the ssh2 connection, runs preflight,
+One per configured node. It owns the ControlMaster, runs preflight,
 and drives `NodeView.state`:
 
 - Connects lazily: when the dashboard starts (to adopt), and when a task is placed.
-- On a dropped ssh2 connection or a failed `ssh -O check`, sets `unreachable` and reconnects
+- The master's ready when `ssh -S <ctl> -O check <dest>` succeeds. When the master process
+  exits (keepalives fail after about 45 s, or the node reboots), it sets `unreachable` and reconnects
   with backoff (1 s doubling to 60 s). On success it reruns preflight, then the orchestrator
   adopts that node's containers again (see Runtime).
-- `close()` on shutdown runs `ssh -O exit` and ends the ssh2 connection. Remote containers keep
+- `close()` on shutdown runs `ssh -O exit` and kills the master. Remote containers keep
   running, as local ones do.
 
 ## Placement
@@ -237,7 +239,7 @@ local environments.
   and an in-memory file map. Covers ssh command quoting, preflight parsing, placement
   validation, the push, worktree and fetch commands, the git-target resolution, Bring home's
   divergence check, and `NodeConnection`'s state changes and backoff (with a fake clock).
-- **Integration:** `ssh localhost` registered as a node. This exercises ControlMaster, ssh2
+- **Integration:** `ssh localhost` registered as a node. This exercises ControlMaster, `-W`
   channels, `~/.opendevhub/repos` and the `ssh` route on one machine, and is the dev workflow
   for this feature. It runs when `ODH_TEST_SSH_LOCALHOST=1` is set, because CI may lack sshd.
 - **e2e:** opt-in with `ODH_E2E_NODE=<ssh-destination>`: add the node, start an isolated task
