@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import type { ProjectView } from "../../shared/types";
 import { refreshWorktrees } from "../api";
+import { ChecksSettings } from "../components/ChecksSettings";
 import { CopyButton } from "../components/CopyButton";
 import { GitBranchIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -149,6 +150,8 @@ export function ProjectOverview() {
           </ul>
         </Section>
       )}
+
+      <ChecksSettings projectId={project.id} />
 
       {orphans.length > 0 && (
         <Section title="Other sessions" hint="in folders that are no longer a worktree">

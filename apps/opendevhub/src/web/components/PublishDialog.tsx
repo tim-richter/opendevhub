@@ -50,6 +50,8 @@ export function PublishDialog(props: {
   info: PublishInfo;
   loadInfo: (remote?: string) => Promise<PublishInfo | undefined>;
   baseName?: string;
+  /** Set when the project's checks haven't all passed on this commit; publishing stays possible. */
+  checksWarning?: string;
   onClose: () => void;
   onPublished: (result: PublishResult) => void;
 }) {
@@ -107,6 +109,11 @@ export function PublishDialog(props: {
               {info.forge.kind !== "unknown" ? ` to ${info.forge.kind}` : ""}.
             </DialogDescription>
           </DialogHeader>
+          {props.checksWarning && (
+            <Alert className="border-warn/40 bg-warn/10">
+              <AlertDescription className="text-warn">{props.checksWarning} You can still publish.</AlertDescription>
+            </Alert>
+          )}
           <Input
             aria-label="Pull request title"
             placeholder={generating ? "Asking the agent for a title…" : "Title"}

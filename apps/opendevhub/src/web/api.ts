@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { AddProjectResult, CandidateList, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
+import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 
@@ -150,6 +150,29 @@ export function suggestPublish(projectId: string, directory: string): Promise<{ 
 
 export function publishChanges(projectId: string, directory: string, req: PublishRequest): Promise<PublishResult> {
   return postJson(projectId, "publish", { directory, ...req }, "publish");
+}
+
+export async function fetchChecks(projectId: string, directory?: string): Promise<ChecksView> {
+  const query = directory === undefined ? "" : `?${new URLSearchParams({ directory })}`;
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/checks${query}`);
+  if (!res.ok) throw await failure(res, "checks");
+  return (await res.json()) as ChecksView;
+}
+
+export async function fetchCheckRun(projectId: string, directory: string): Promise<CheckRun | undefined> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/checks/run?${new URLSearchParams({ directory })}`);
+  if (!res.ok) throw await failure(res, "checks");
+  return ((await res.json()) as { run?: CheckRun }).run;
+}
+
+/** Runs all checks, or the named ones; `approve` lists host commands the user just approved. */
+export function runChecks(projectId: string, directory: string, opts: { names?: string[]; approve?: string[] } = {}): Promise<CheckRun> {
+  return postJson(projectId, "checks/run", { directory, ...opts }, "run checks");
+}
+
+/** Saves the project's own list of checks, or goes back to devcontainer.json's with null. */
+export function saveChecks(projectId: string, checks: CheckDef[] | null): Promise<ChecksConfig> {
+  return postJson(projectId, "checks/settings", { checks }, "save checks");
 }
 
 export function subscribe(handlers: {

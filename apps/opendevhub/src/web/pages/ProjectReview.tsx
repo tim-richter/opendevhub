@@ -41,7 +41,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { diffFont, Empty, muted } from "../components/Page";
+import { ChecksIcon, ChecksPanel, useChecks } from "../components/ChecksPanel";
 import { PublishDialog, usePublishInfo } from "../components/PublishDialog";
+import { fixPrompt, publishWarning, STATE_LABEL } from "../checks";
 import { BaseDialog, CommentsDialog, CommitDialog, MergeDialog } from "../components/ReviewDialogs";
 import { DiffLinesSkeleton, ReviewSkeleton } from "../components/Skeletons";
 import { workspaceFolderOf } from "../derive";
@@ -195,6 +197,18 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const [published, setPublished] = useState<PublishResult>();
   const publish = usePublishInfo(projectId, directory, data);
 
+  // Checks: reloaded with the review (a commit makes the last run out of date), shown when they run or fail.
+  const checks = useChecks(projectId, directory);
+  const reloadChecks = checks.load;
+  useEffect(() => {
+    if (data) void reloadChecks();
+  }, [data, reloadChecks]);
+  const [checksOpen, setChecksOpen] = useState(false);
+  useEffect(() => {
+    if (checks.state === "running" || checks.state === "failed") setChecksOpen(true);
+  }, [checks.state]);
+  const hasChecks = checks.state !== "none" || (checks.view?.errors.length ?? 0) > 0;
+
   const update = () =>
     run("Updating", async () => {
       const result = await updateFromBase(projectId, directory, baseName!);
@@ -335,6 +349,13 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
               </ToggleGroupItem>
             </Tip>
           </ToggleGroup>
+          {hasChecks && (
+            <Tip label={`${STATE_LABEL[checks.state]}. Click to ${checksOpen ? "hide" : "show"} them.`}>
+              <Button variant="outline" size="sm" aria-pressed={checksOpen} onClick={() => setChecksOpen((o) => !o)}>
+                <ChecksIcon state={checks.state} /> <span className="max-sm:sr-only">Checks</span>
+              </Button>
+            </Tip>
+          )}
           <Tip label="Comments for the agent">
             <Button variant="outline" size="sm" aria-label="Comments for the agent" onClick={() => setDialog("comments")}>
               <MessageSquareIcon /> {comments.length}
@@ -378,6 +399,19 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
         </div>
       </div>
 
+      {checksOpen && hasChecks && (
+        <ChecksPanel
+          checks={checks}
+          busy={!!busy}
+          onClose={() => setChecksOpen(false)}
+          onFix={(results) =>
+            run("Asking", async () => {
+              await deliver(fixPrompt({ branch: data?.branch, results }));
+              setNotice("Asked the agent to fix the failed checks.");
+            })
+          }
+        />
+      )}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -451,6 +485,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
           info={publish.info}
           loadInfo={publish.loadInfo}
           baseName={baseName}
+          checksWarning={publishWarning(checks.view)}
           onClose={() => setDialog(undefined)}
           onPublished={(r) => {
             setPublished(r);

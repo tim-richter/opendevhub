@@ -4,6 +4,8 @@ import {
   createEnv,
   createTask,
   envAction,
+  fetchCheckRun,
+  fetchChecks,
   dismissForm,
   fetchModels,
   fetchPublishInfo,
@@ -14,6 +16,8 @@ import {
   removeEnv,
   removeSession,
   removeWorktree,
+  runChecks,
+  saveChecks,
   replyForm,
   replyPermission,
   sendPrompt,
@@ -150,5 +154,29 @@ describe("session API", () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
     stubFetch(503, { error: "opencode is not running — start the project first" });
     await expect(removeSession("demo-1", "ses_1")).rejects.toThrow("opencode is not running — start the project first");
+  });
+});
+
+describe("checks API", () => {
+  it("lists checks with or without a checkout", async () => {
+    const fetchMock = stubFetch(200, { checks: [], source: "none", devcontainer: [], errors: [] });
+    await fetchChecks("demo-1");
+    await fetchChecks("demo-1", "/w/a b");
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(["/api/projects/demo-1/checks", "/api/projects/demo-1/checks?directory=%2Fw%2Fa+b"]);
+  });
+
+  it("starts a run, polls it and saves settings", async () => {
+    const fetchMock = stubFetch(200, { run: { directory: "/w" } });
+    expect(await fetchCheckRun("demo-1", "/w")).toEqual({ directory: "/w" });
+    await runChecks("demo-1", "/w", { names: ["test"], approve: ["docker build ."] });
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/demo-1/checks/run");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ directory: "/w", names: ["test"], approve: ["docker build ."] });
+    await saveChecks("demo-1", null);
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ checks: null });
+  });
+
+  it("surfaces why a run was refused", async () => {
+    stubFetch(400, { error: "approve the host command of img before running it" });
+    await expect(runChecks("demo-1", "/w")).rejects.toThrow("approve the host command");
   });
 });
