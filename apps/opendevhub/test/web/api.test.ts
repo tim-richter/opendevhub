@@ -12,6 +12,7 @@ import {
   pickVariant,
   publishChanges,
   removeEnv,
+  removeSession,
   removeWorktree,
   replyForm,
   replyPermission,
@@ -138,5 +139,16 @@ describe("environment API", () => {
     expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
     await removeEnv("demo-1", "e1");
     expect(fetchMock.mock.calls[2][0]).toBe("/api/projects/demo-1/envs/e1/remove");
+  });
+});
+
+describe("session API", () => {
+  it("removes a session, and surfaces the server's error", async () => {
+    const fetchMock = stubFetch(200, { ok: true });
+    await removeSession("demo-1", "ses/1");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/demo-1/sessions/ses%2F1");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    stubFetch(503, { error: "opencode is not running — start the project first" });
+    await expect(removeSession("demo-1", "ses_1")).rejects.toThrow("opencode is not running — start the project first");
   });
 });

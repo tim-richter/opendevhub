@@ -113,6 +113,12 @@ export async function sendPrompt(projectId: string, sessionId: string, text: str
   await postJson(projectId, `sessions/${encodeURIComponent(sessionId)}/prompt`, { text }, "send to agent");
 }
 
+/** Deletes a session with its subagent sessions, stopping it first if it's busy. */
+export async function removeSession(projectId: string, sessionId: string): Promise<void> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  if (!res.ok) throw await failure(res, "remove session");
+}
+
 export async function rescan(): Promise<DashboardSnapshot> {
   const res = await fetch("/api/projects/rescan", { method: "POST" });
   if (!res.ok) throw await failure(res, "rescan");

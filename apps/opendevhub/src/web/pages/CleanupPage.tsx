@@ -8,6 +8,7 @@ import { applyCleanup, fetchCleanup, postAction } from "../api";
 import { branchGroups, initialSelection, isRisky, riskyNotes, selectionSummary, toggleAll } from "../cleanup";
 import { Chip, Empty, muted, Note, Page, PageHeader, Section } from "../components/Page";
 import { useDash } from "../DashboardContext";
+import { relativeTime } from "../derive";
 import { formatMemory } from "../resources";
 
 function ago(at: number, now: number): string {
@@ -87,7 +88,7 @@ export function CleanupPage() {
   const header = (
     <PageHeader
       title="Cleanup"
-      description="Merged branches with their worktrees, containers opendevhub no longer needs, and unused images. Nothing is removed until you confirm."
+      description="Merged branches with their worktrees, stale sessions, containers opendevhub no longer needs, and unused images. Nothing is removed until you confirm."
       actions={
         <>
           {plan && <span className={muted}>{ago(plan.scannedAt, Date.now())}</span>}
@@ -113,6 +114,9 @@ export function CleanupPage() {
 
   const containers = plan.items.filter((i) => i.kind === "container");
   const images = plan.items.filter((i) => i.kind === "image");
+  const sessions = plan.items.filter((i) => i.kind === "session");
+  const projectName = (id: string) => plan.projects.find((p) => p.id === id)?.name ?? id;
+  const now = Date.now();
   const groups = branchGroups(plan);
   const notes = riskyNotes(plan, selected);
   const selectAll = (kind: CleanupItem["kind"]) => {
@@ -166,6 +170,18 @@ export function CleanupPage() {
             ))}
           </Section>
 
+          <Section title="Sessions" hint="discarded task variants, sessions of removed worktrees, and ones idle for 30 days" action={selectAll("session")}>
+            {sessions.length === 0 && <p className={cn(muted, "px-4 py-2")}>Nothing to clean up.</p>}
+            {sessions.map((item) => (
+              <Row key={item.id} item={item} selected={selected.has(item.id)} onToggle={(on) => toggle(item.id, on)} result={results.get(item.id)}>
+                <span className="truncate text-sm">{item.title}</span>
+                <span className={muted}>{projectName(item.projectId)}</span>
+                <Chip variant={item.why === "idle" ? "outline" : "secondary"}>{item.reason}</Chip>
+                <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{relativeTime(item.updatedAt, now)}</span>
+              </Row>
+            ))}
+          </Section>
+
           {plan.dockerError ? (
             <Note warn>Docker could not be listed, so containers and images weren't scanned: {plan.dockerError}</Note>
           ) : (
@@ -199,7 +215,7 @@ export function CleanupPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Clean up {selectionSummary(plan, selected)}?</DialogTitle>
-            <DialogDescription>Branches are deleted locally only. This can't be undone.</DialogDescription>
+            <DialogDescription>Branches are deleted locally only. Sessions are deleted in opencode with their subagents. This can't be undone.</DialogDescription>
           </DialogHeader>
           {notes.length > 0 && (
             <ul className="list-disc space-y-1 pl-5 text-sm text-attention">

@@ -1,11 +1,13 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router";
 import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
-import { useNow } from "../DashboardContext";
+import { removeSession } from "../api";
+import { useDash, useNow } from "../DashboardContext";
 import { checkoutOf, checkoutPath } from "../checkouts";
 import { openUrlOf, relativeTime, type SessionEntry, worktreeLabel } from "../derive";
-import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
+import { ExternalLinkIcon, GitBranchIcon, Trash2Icon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Chip } from "./Page";
 import { PendingStack } from "./PendingCards";
@@ -25,13 +27,24 @@ export function SessionRow(props: {
   now: number;
 }) {
   const { session, openUrl, project, worktree, highlighted, now } = props;
+  const { report } = useDash();
+  const [removing, setRemoving] = useState(false);
   const waiting = session.status === "needs-permission" || session.status === "needs-answer";
+  const remove = () => {
+    const title = session.title || "Untitled session";
+    const stop = session.status === "idle" ? "" : " It is stopped first.";
+    if (!confirm(`Remove the session ${title}? It is deleted in opencode with its subagents.${stop} This can't be undone.`)) return;
+    setRemoving(true);
+    removeSession(session.projectId, session.id)
+      .catch(report)
+      .finally(() => setRemoving(false));
+  };
   return (
     <li
       className={cn(
         "grid items-center gap-x-3.5 border-t px-4 py-2 first:border-t-0 hover:bg-muted/50",
         "max-md:grid-cols-[auto_minmax(0,1fr)_auto] max-md:gap-y-1",
-        project ? "md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,10rem)_6rem_9rem]" : "md:grid-cols-[8.5rem_minmax(0,1fr)_6rem_9rem]",
+        project ? "md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,10rem)_6rem_11rem]" : "md:grid-cols-[8.5rem_minmax(0,1fr)_6rem_11rem]",
         highlighted && "bg-attention/10 shadow-[inset_3px_0_var(--attention)]",
       )}
       id={`session-${session.id}`}
@@ -86,6 +99,17 @@ export function SessionRow(props: {
         >
           {waiting && !session.pending ? "Respond" : "Open"} <ExternalLinkIcon className="size-3.5" />
         </a>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground hover:text-destructive"
+          aria-label={`Remove session ${session.title || "Untitled session"}`}
+          title="Remove session"
+          disabled={removing}
+          onClick={remove}
+        >
+          <Trash2Icon />
+        </Button>
       </span>
     </li>
   );

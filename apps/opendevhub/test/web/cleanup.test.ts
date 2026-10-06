@@ -12,12 +12,16 @@ const items: CleanupItem[] = [
   { id: "container:c2", kind: "container", checked: true, reason: "x", containerId: "c2", running: false, why: "orphan-env" },
   { id: "image:i1", kind: "image", checked: true, reason: "x", ref: "i1", bytes: 2 * GiB, why: "superseded" },
   { id: "image:i2", kind: "image", checked: true, reason: "x", ref: "i2", bytes: GiB, why: "uid" },
+  { id: "session:a:s1", kind: "session", checked: true, reason: "discarded task variant", projectId: "a", sessionId: "s1", title: "Fix · #1",
+    directory: "/w", updatedAt: 0, why: "discarded" },
+  { id: "session:a:s2", kind: "session", checked: false, reason: "idle for 45 days", projectId: "a", sessionId: "s2", title: "Old chat",
+    directory: "/w", updatedAt: 0, why: "idle" },
 ];
 const plan: CleanupPlan = { scannedAt: 0, projects: [{ id: "a", name: "alpha" }, { id: "b", name: "beta" }, { id: "c", name: "gamma", skipped: "not running" }], items };
 
 describe("cleanup selection", () => {
   it("starts from the scan's defaults", () => {
-    expect([...initialSelection(plan)]).toEqual(["branch:a:feat", "container:c2", "image:i1", "image:i2"]);
+    expect([...initialSelection(plan)]).toEqual(["branch:a:feat", "container:c2", "image:i1", "image:i2", "session:a:s1"]);
   });
 
   it("select-all and none leave risky rows alone", () => {
@@ -27,7 +31,7 @@ describe("cleanup selection", () => {
   });
 
   it("summarises counts and image sizes", () => {
-    expect(selectionSummary(plan, initialSelection(plan))).toBe("1 branch, 1 container, 2 images · 3.0 GiB");
+    expect(selectionSummary(plan, initialSelection(plan))).toBe("1 branch, 1 session, 1 container, 2 images · 3.0 GiB");
     expect(selectionSummary(plan, new Set(["branch:a:feat", "branch:a:wip"]))).toBe("2 branches");
     expect(selectionSummary(plan, new Set())).toBe("Nothing selected");
   });
@@ -37,6 +41,7 @@ describe("cleanup selection", () => {
       "discards uncommitted changes in wip",
       "deletes sq, whose upstream is gone but which may not be merged",
       "stops and removes the running container busy",
+      "deletes the session Old chat, idle for 45 days",
     ]);
   });
 
