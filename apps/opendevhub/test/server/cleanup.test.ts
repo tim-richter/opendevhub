@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { FRESH_IMAGE_MS, staleDocker } from "../../src/server/cleanup";
+import { describe, expect, it, vi } from "vitest";
+import { type BranchGit, branchChanged, FRESH_IMAGE_MS, scanBranches, staleDocker } from "../../src/server/cleanup";
 import type { ContainerInfo, ImageInfo } from "../../src/server/containers";
+import type { BranchRef } from "../../src/server/git";
+import type { BranchCleanupItem, Project, Worktree } from "../../src/shared/types";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const OLD = NOW - 2 * FRESH_IMAGE_MS;
@@ -79,5 +81,128 @@ describe("staleDocker images", () => {
 
   it("ignores opendevhub images that aren't bases of a current project", () => {
     expect(stale({ images: [img("sha256:x", ["opendevhub/demo:something"])] })).toEqual([]);
+  });
+});
+
+const project: Project = { id: "demo", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
+const WS = "/workspaces/demo";
+
+/** A repo: refs, which branches are in which base, recorded bases, dirty worktree paths. */
+function repo(o: {
+  refs: BranchRef[];
+  merged?: Record<string, string[]>;
+  recorded?: Record<string, string>;
+  dirty?: string[];
+  current?: string;
+  remotes?: string[];
+  remoteHead?: string;
+  fetchFails?: string;
+}) {
+  const git = {
+    remotes: vi.fn(async () => o.remotes ?? ["origin"]),
+    fetchPrune: vi.fn(async () => {
+      if (o.fetchFails) throw new Error(o.fetchFails);
+    }),
+    branchRefs: vi.fn(async () => o.refs),
+    remoteHead: vi.fn(async () => o.remoteHead),
+    currentBranch: vi.fn(async () => o.current ?? "main"),
+    recordedBase: vi.fn(async (_p: Project, _d: string, b: string) => o.recorded?.[b]),
+    isAncestor: vi.fn(async (_p: Project, _d: string, b: string, base: string) => {
+      const inBase = o.merged?.[base];
+      if (!inBase) throw new Error(`fatal: Not a valid object name ${base}`);
+      return inBase.includes(b);
+    }),
+    isClean: vi.fn(async (_p: Project, dir: string) => !(o.dirty ?? []).includes(dir)),
+  } satisfies BranchGit;
+  return git;
+}
+const ref = (name: string, extra: Partial<BranchRef> = {}): BranchRef => ({ name, gone: false, ...extra });
+const wt = (branch: string): Worktree => ({ path: `/workspaces/demo.worktrees/${branch}`, branch });
+
+describe("scanBranches", () => {
+  it("lists merged branches checked and upstream-gone ones unchecked, skipping the base and the current branch", async () => {
+    const git = repo({
+      refs: [ref("main"), ref("feat"), ref("squashed", { upstream: "refs/remotes/origin/squashed", gone: true }), ref("wip"), ref("live", { upstream: "refs/remotes/origin/live" })],
+      merged: { main: ["main", "feat"] },
+      remoteHead: "main",
+    });
+    const r = await scanBranches(git, { project, workspace: WS, worktrees: [wt("feat")], envOf: (p) => (p.endsWith("/feat") ? "env-feat" : undefined) });
+    expect(git.fetchPrune).toHaveBeenCalledWith(project, WS, "origin");
+    expect(r.warning).toBeUndefined();
+    expect(r.items).toEqual([
+      { id: "branch:demo:feat", kind: "branch", checked: true, reason: "merged into main", projectId: "demo", branch: "feat", base: "main", why: "merged",
+        worktree: "/workspaces/demo.worktrees/feat", env: "env-feat" },
+      { id: "branch:demo:squashed", kind: "branch", checked: false, reason: "its upstream is gone; it may not be merged", projectId: "demo",
+        branch: "squashed", base: "main", why: "upstream-gone" },
+    ]);
+  });
+
+  it("uses each branch's recorded base, then the remote HEAD, then the current branch", async () => {
+    const git = repo({ refs: [ref("dev"), ref("a"), ref("b")], recorded: { a: "dev" }, merged: { dev: ["a"], trunk: ["b"] }, current: "trunk", remotes: [] });
+    const r = await scanBranches(git, { project, workspace: WS, worktrees: [], envOf: () => undefined });
+    expect(git.fetchPrune).not.toHaveBeenCalled();
+    expect(r.items.map((i) => [i.branch, i.base])).toEqual([["a", "dev"], ["b", "trunk"]]);
+  });
+
+  it("keeps scanning on local refs when the fetch fails", async () => {
+    const git = repo({ refs: [ref("feat")], merged: { main: ["feat"] }, remoteHead: "main", fetchFails: "could not read from remote" });
+    const r = await scanBranches(git, { project, workspace: WS, worktrees: [], envOf: () => undefined });
+    expect(r.warning).toBe("using local refs: could not read from remote");
+    expect(r.items.map((i) => i.branch)).toEqual(["feat"]);
+  });
+
+  it("skips a branch whose base is missing, and goes on with the rest", async () => {
+    const git = repo({ refs: [ref("orphan"), ref("feat")], recorded: { orphan: "deleted-base" }, merged: { main: ["feat"] }, remoteHead: "main" });
+    const r = await scanBranches(git, { project, workspace: WS, worktrees: [], envOf: () => undefined });
+    expect(r.items.map((i) => i.branch)).toEqual(["feat"]);
+  });
+
+  it("marks a dirty worktree and leaves it unchecked", async () => {
+    const git = repo({ refs: [ref("feat")], merged: { main: ["feat"] }, remoteHead: "main", dirty: ["/workspaces/demo.worktrees/feat"] });
+    const r = await scanBranches(git, { project, workspace: WS, worktrees: [wt("feat")], envOf: () => undefined });
+    expect(r.items[0]).toMatchObject({ dirty: true, checked: false });
+  });
+});
+
+describe("branchChanged", () => {
+  const item = (extra: Partial<BranchCleanupItem> = {}): BranchCleanupItem => ({
+    id: "branch:demo:feat", kind: "branch", checked: true, reason: "merged into main", projectId: "demo", branch: "feat", base: "main", why: "merged", ...extra,
+  });
+
+  it("passes a branch that still qualifies", async () => {
+    const git = repo({ refs: [ref("feat")], merged: { main: ["feat"] }, remoteHead: "main" });
+    expect(await branchChanged(git, project, WS, item(), [])).toBeUndefined();
+    expect(git.fetchPrune).not.toHaveBeenCalled();
+  });
+
+  it("recomputes the base instead of trusting the request", async () => {
+    const git = repo({ refs: [ref("feat")], merged: { main: [], feat: ["feat"] }, remoteHead: "main" });
+    expect(await branchChanged(git, project, WS, item({ base: "feat" }), [])).toBe("changed since scan");
+  });
+
+  it("refuses an upstream-gone claim when the upstream is still there", async () => {
+    const git = repo({ refs: [ref("feat", { upstream: "refs/remotes/origin/feat" })], merged: { main: [] }, remoteHead: "main" });
+    expect(await branchChanged(git, project, WS, item({ why: "upstream-gone" }), [])).toBe("changed since scan");
+  });
+
+  it("accepts an upstream-gone branch that has since been merged", async () => {
+    const git = repo({ refs: [ref("feat", { upstream: "refs/remotes/origin/feat", gone: true })], merged: { main: ["feat"] }, remoteHead: "main" });
+    expect(await branchChanged(git, project, WS, item({ why: "upstream-gone" }), [])).toBeUndefined();
+  });
+
+  it("skips a branch that is gone or now checked out in the main checkout", async () => {
+    expect(await branchChanged(repo({ refs: [] }), project, WS, item(), [])).toBe("the branch no longer exists");
+    const git = repo({ refs: [ref("feat")], merged: { feat: ["feat"] }, current: "feat" });
+    expect(await branchChanged(git, project, WS, item(), [])).toBe("the branch is checked out in the main checkout");
+  });
+
+  it("skips when the worktree changed or got uncommitted changes since the scan", async () => {
+    const base = { refs: [ref("feat")], merged: { main: ["feat"] }, remoteHead: "main" };
+    expect(await branchChanged(repo(base), project, WS, item(), [wt("feat")])).toBe("changed since scan");
+    const dirty = repo({ ...base, dirty: ["/workspaces/demo.worktrees/feat"] });
+    expect(await branchChanged(dirty, project, WS, item({ worktree: wt("feat").path }), [wt("feat")])).toBe(
+      "changed since scan: the worktree has uncommitted changes",
+    );
+    expect(await branchChanged(dirty, project, WS, item({ worktree: wt("feat").path, dirty: true }), [wt("feat")])).toBeUndefined();
   });
 });
