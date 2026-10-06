@@ -10,7 +10,7 @@ import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
 import { StateStore } from "../../src/server/state";
-import type { Candidate, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
+import type { Candidate, CleanupItem, CleanupPlan, CleanupResult, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
 
 const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
 const added: Candidate = { path: "/src/new-app", name: "new-app", root: "/src", stack: "node" };
@@ -86,15 +86,19 @@ function setup(webDir?: string) {
   } satisfies PushPort;
   // Rescanning after a write discovers the new project.
   orchestrator.rescan.mockImplementation(async () => store.setProjects([project, newProject]));
-  return { store, orchestrator, onboarding, push, app: createDashboardApp({ store, orchestrator, onboarding, push, webDir }) };
+  const cleanup = {
+    scan: vi.fn(async () => ({ scannedAt: 1, projects: [], items: [] }) as CleanupPlan),
+    apply: vi.fn(async (_items: CleanupItem[]): Promise<CleanupResult> => ({ results: [], freedBytes: 0 })),
+  };
+  return { store, orchestrator, onboarding, push, cleanup, app: createDashboardApp({ store, orchestrator, onboarding, push, cleanup, webDir }) };
 }
 
 describe("dashboard API", () => {
   it("serves a usage report for a day, today by default", async () => {
     const report = { total: { cost: 1, tokens: 1 }, today: { cost: 0, tokens: 0 }, day: "2026-10-01", dayTotal: { cost: 1, tokens: 1 }, projects: [], days: [] };
     const usage = { report: vi.fn((_day: string, _today: string) => report) };
-    const { store, orchestrator, onboarding, push } = setup();
-    const app = createDashboardApp({ store, orchestrator, onboarding, push, usage });
+    const { store, orchestrator, onboarding, push, cleanup } = setup();
+    const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, usage });
     const res = await app.request("/api/usage?day=2026-10-01");
     expect(await res.json()).toEqual(report);
     const today = usage.report.mock.calls[0][1];
@@ -511,5 +515,35 @@ describe("add project", () => {
     });
     expect(res.status).toBe(403);
     expect(onboarding.add).not.toHaveBeenCalled();
+  });
+});
+
+describe("cleanup endpoints", () => {
+  it("scans on GET", async () => {
+    const { app, cleanup } = setup();
+    const res = await app.request("/api/cleanup");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ scannedAt: 1, projects: [], items: [] });
+    expect(cleanup.scan).toHaveBeenCalled();
+  });
+
+  it("applies the parsed selection on POST", async () => {
+    const { app, cleanup } = setup();
+    const res = await app.request("/api/cleanup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ items: [{ kind: "container", containerId: "c1" }] }),
+    });
+    expect(res.status).toBe(200);
+    expect(cleanup.apply.mock.calls[0][0]).toMatchObject([{ id: "container:c1", kind: "container" }]);
+  });
+
+  it("answers 400 for a malformed body and 409 while an apply runs", async () => {
+    const { app, cleanup } = setup();
+    const post = (body: unknown) =>
+      app.request("/api/cleanup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post({ items: "x" })).status).toBe(400);
+    cleanup.apply.mockRejectedValueOnce(new BusyError("cleanup"));
+    expect((await post({ items: [] })).status).toBe(409);
   });
 });

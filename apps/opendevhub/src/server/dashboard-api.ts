@@ -3,6 +3,7 @@ import path from "node:path";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AddProjectResult, LogEvent } from "../shared/types";
+import { type Cleanup, parseCleanupItems } from "./cleanup";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
 import { AlreadyAnsweredError, BusyError, NotFoundError, type Orchestrator, UnavailableError } from "./orchestrator";
@@ -54,6 +55,7 @@ export interface DashboardDeps {
   orchestrator: DashboardOrchestrator;
   onboarding: OnboardingPort;
   push: PushPort;
+  cleanup: Pick<Cleanup, "scan" | "apply">;
   /** Absent when the usage ledger couldn't be opened. */
   usage?: Pick<UsageStore, "report">;
   webDir?: string;
@@ -90,7 +92,7 @@ function str(value: unknown): string | undefined {
 }
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
-  const { store, orchestrator, onboarding, push, usage } = deps;
+  const { store, orchestrator, onboarding, push, usage, cleanup } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -157,6 +159,16 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
     if (!isDay(day)) return c.json({ error: `not a date: ${day}` }, 400);
     return c.json(usage.report(day, today));
   });
+
+  // Cleanup scans on demand: it fetches every project's remote, so it never runs in the snapshot.
+  app.get("/api/cleanup", async (c) => {
+    try {
+      return c.json(await cleanup.scan());
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  });
+  app.post("/api/cleanup", (c) => json(c, (_id, b) => cleanup.apply(parseCleanupItems(b.items))));
 
   // Web Push: the worker's subscription, and a test notification.
   app.get("/api/push/key", (c) => c.json({ publicKey: push.publicKey() }));

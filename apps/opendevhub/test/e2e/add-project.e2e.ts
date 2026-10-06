@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { Credentials } from "../../src/server/credentials";
+import { Cleanup } from "../../src/server/cleanup";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import { scanRoots } from "../../src/server/discovery";
 import { EditorLauncher } from "../../src/server/editors";
@@ -55,6 +56,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: add a repo without a devconta
     const app = createDashboardApp({
       store,
       orchestrator: orch,
+      cleanup: new Cleanup({ store, containers, branches: orch }),
       onboarding: new Onboarding({ roots }),
       push: new Push({ file: path.join(root, "push.json") }),
     });

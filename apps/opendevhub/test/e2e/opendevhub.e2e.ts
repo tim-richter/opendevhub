@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { Credentials } from "../../src/server/credentials";
+import { Cleanup } from "../../src/server/cleanup";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import { EditorLauncher } from "../../src/server/editors";
 import { spawnRunner } from "../../src/server/exec";
@@ -157,7 +158,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const push = new Push({ file: path.join(agentDir, "push.json"), send: sender });
     push.subscribe({ endpoint: "https://push.example.com/e2e", keys: { p256dh: "k", auth: "a" } });
     const stopNotifier = startNotifier(store, push);
-    const dashboard = createDashboardApp({ store, orchestrator: orch, onboarding: new Onboarding({ roots: () => [] }), push });
+    const dashboard = createDashboardApp({ store, orchestrator: orch, cleanup: new Cleanup({ store, containers, branches: orch }), onboarding: new Onboarding({ roots: () => [] }), push });
 
     // opencode's default rules allow most actions outright; make this session ask.
     expect((await opencode("PATCH", "", { permissions: [{ action: "*", resource: "*", effect: "ask" }] })).ok).toBe(true);

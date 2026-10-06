@@ -6,6 +6,7 @@ import open from "open";
 import { type Config, FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState, stateDir } from "./config";
 import { Containers } from "./containers";
 import { EditorLauncher, detectEditors, pathWhich } from "./editors";
+import { Cleanup } from "./cleanup";
 import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
 import { EnvFiles } from "./env-files";
@@ -166,6 +167,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     roots: () => config.roots,
     scan: (roots) => scanRoots(roots),
   });
+  const cleanup = new Cleanup({ store, containers, branches: orchestrator });
 
   store.setPreflight(await preflight(spawnRunner));
   await orchestrator.rescan();
@@ -176,6 +178,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const app = createDashboardApp({
     store,
     orchestrator,
+    cleanup,
     push,
     onboarding: new Onboarding({ roots: () => config.roots }),
     ...(usage ? { usage } : {}),
