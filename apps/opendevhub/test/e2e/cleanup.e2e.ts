@@ -120,6 +120,22 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       expect((await inContainer("show-ref", "--verify", "--quiet", "refs/heads/done")).exitCode).not.toBe(0);
       expect((await inContainer("show-ref", "--verify", "--quiet", "refs/heads/wip")).exitCode).toBe(0);
       expect(await containers.imageExists(oldBase)).toBe(false);
+
+      // A session in a worktree that's since been removed is offered checked, and goes on apply.
+      const client = () => clientFor(runtime.endpoint(orch.opencodeAddress(project.id)!, store.runtime(project.id).password!));
+      const orphaned = await orch.startSession(project.id, wip.path, "wip notes");
+      await orch.removeWorktree(project.id, wip.path, true);
+      const sessionPlan = await cleanup.scan();
+      expect(sessionPlan.items.find((i) => i.id === `session:${project.id}:${orphaned}`)).toMatchObject({ checked: true, why: "worktree-gone" });
+      const sessionResult = await cleanup.apply(sessionPlan.items.filter((i) => i.id === `session:${project.id}:${orphaned}`));
+      expect(sessionResult.results).toEqual([{ id: `session:${project.id}:${orphaned}`, outcome: "removed" }]);
+      expect((await client().sessions()).map((s) => s.id)).not.toContain(orphaned);
+
+      // The per-row button: removes a session the dashboard lists.
+      const listed = await orch.startSession(project.id, ws, "scratch");
+      await vi.waitFor(() => expect(store.sessionsOf(project.id).map((s) => s.id)).toContain(listed), { timeout: 30_000, interval: 500 });
+      await orch.removeSession(project.id, listed);
+      expect((await client().sessions()).map((s) => s.id)).not.toContain(listed);
     } finally {
       for (const e of store.environments(project.id)) await orch.removeEnv(project.id, e.id).catch(() => {});
       await orch.stop(project.id).catch(() => {});
