@@ -35,6 +35,8 @@ export interface Worktree {
   path: string;
   /** Same checkout on this machine, when it lives in the mounted worktrees folder. */
   hostPath?: string;
+  /** Set on worktrees that live on another node; they have no hostPath on this machine. */
+  node?: NodeId;
   branch?: string;
   head?: string;
 }
@@ -77,6 +79,8 @@ export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
 export interface EnvironmentView {
   id: EnvId;
   worktree: EnvWorktree;
+  /** The node it runs on; absent for this machine. */
+  node?: NodeId;
   /** The base image it was last started from. */
   image?: { key: string; ref: string };
   runtime: PublicRuntime;
@@ -344,6 +348,8 @@ export interface TaskRequest {
   base?: string;
   /** Worktree tasks only; the project's default when absent. */
   environment?: Isolation;
+  /** The node isolated variants run on; absent for this machine. */
+  node?: NodeId;
   variants: TaskVariantSpec[];
 }
 

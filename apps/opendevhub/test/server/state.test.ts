@@ -203,4 +203,26 @@ describe("usage", () => {
     expect(store.snapshot().nodes).toEqual(nodes);
     expect(changes).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps an environment's node across restarts and lists its worktree as remote", () => {
+    const project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/src/demo/.devcontainer/devcontainer.json" };
+    const saved: PersistedState[] = [];
+    const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: (s) => saved.push(structuredClone(s)) });
+    store.setProjects([project]);
+    store.updateRuntime(project.id, { worktrees: [{ path: "/workspaces/demo.worktrees/a", hostPath: "/src/demo.worktrees/a", branch: "a" }] });
+    const worktree = { path: "/workspaces/demo.worktrees/fix", hostPath: "/home/tim/.opendevhub/repos/demo-abc123/demo.worktrees/fix", branch: "fix" };
+    store.putEnvironment({ id: "demo-abc123-fix-1a2b", projectId: project.id, worktree, node: "box" });
+    store.updateRuntime("demo-abc123-fix-1a2b", { containerId: "r1" });
+    expect(saved.at(-1)?.environments?.["demo-abc123-fix-1a2b"]).toMatchObject({ node: "box", worktree });
+
+    const view = store.snapshot().projects[0];
+    expect(view.environments[0].node).toBe("box");
+    expect(view.runtime.worktrees).toEqual([
+      { path: "/workspaces/demo.worktrees/a", hostPath: "/src/demo.worktrees/a", branch: "a" },
+      { path: "/workspaces/demo.worktrees/fix", branch: "fix", node: "box" },
+    ]);
+
+    const again = new StateStore({ port: 7777, persisted: saved.at(-1)!, persist: () => {} });
+    expect(again.environment("demo-abc123-fix-1a2b")?.node).toBe("box");
+  });
 });

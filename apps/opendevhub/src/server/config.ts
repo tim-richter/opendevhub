@@ -29,6 +29,8 @@ export interface PersistedEnv extends PersistedRuntime {
   projectId: ProjectId;
   worktree: EnvWorktree;
   image?: { key: string; ref: string };
+  /** Absent for this machine. */
+  node?: NodeId;
 }
 
 export interface PersistedState {

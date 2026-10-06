@@ -4,6 +4,7 @@ import type {
   EnvId,
   EnvWorktree,
   IsolationInfo,
+  NodeId,
   NodeView,
   Preflight,
   Project,
@@ -13,6 +14,7 @@ import type {
   ResourceStats,
   SessionSummary,
   UsageTotals,
+  Worktree,
 } from "../shared/types";
 import { projectUrl } from "../shared/urls";
 import type { PersistedEnv, PersistedRuntime, PersistedState } from "./config";
@@ -33,6 +35,8 @@ export interface EnvRecord {
   projectId: ProjectId;
   worktree: EnvWorktree;
   image?: { key: string; ref: string };
+  /** Absent for this machine. */
+  node?: NodeId;
 }
 
 function durable(r: ProjectRuntime): PersistedRuntime {
@@ -74,8 +78,8 @@ export class StateStore {
     }
     for (const [id, saved] of Object.entries(opts.persisted.environments ?? {})) {
       if (!saved?.worktree?.path || !saved.projectId) continue;
-      const { projectId, worktree, image, ...runtime } = saved;
-      this.envs.set(id, { id, projectId, worktree, ...(image ? { image } : {}) });
+      const { projectId, worktree, image, node, ...runtime } = saved;
+      this.envs.set(id, { id, projectId, worktree, ...(image ? { image } : {}), ...(node ? { node } : {}) });
       this.runtimes.set(id, { ...defaultRuntime(projectId), ...runtime });
     }
   }
@@ -208,14 +212,18 @@ export class StateStore {
       editors: this.editorList,
       projects: this.projects().map((project) => {
         const isolation = this.isolationInfo.get(project.id);
+        const envs = this.environments(project.id);
+        const remote: Worktree[] = envs.flatMap((e) => (e.node ? [{ path: e.worktree.path, branch: e.worktree.branch, node: e.node }] : []));
+        const runtime = publicRuntime(this.runtime(project.id));
         return {
           project,
-          runtime: publicRuntime(this.runtime(project.id)),
+          runtime: remote.length > 0 ? { ...runtime, worktrees: [...(runtime.worktrees ?? []), ...remote] } : runtime,
           sessions: this.sessionsOf(project.id),
           openUrl: projectUrl(project.id, this.opts.port),
-          environments: this.environments(project.id).map((e) => ({
+          environments: envs.map((e) => ({
             id: e.id,
             worktree: e.worktree,
+            ...(e.node ? { node: e.node } : {}),
             ...(e.image ? { image: e.image } : {}),
             runtime: publicRuntime(this.runtime(e.id)),
             openUrl: projectUrl(e.id, this.opts.port),
@@ -242,7 +250,13 @@ export class StateStore {
       if (r.containerId || r.password || r.workspaceFolder || r.relayToken) projects[id] = durable(r);
     }
     for (const [id, e] of this.envs) {
-      environments[id] = { projectId: e.projectId, worktree: e.worktree, ...(e.image ? { image: e.image } : {}), ...durable(this.runtime(id)) };
+      environments[id] = {
+        projectId: e.projectId,
+        worktree: e.worktree,
+        ...(e.image ? { image: e.image } : {}),
+        ...(e.node ? { node: e.node } : {}),
+        ...durable(this.runtime(id)),
+      };
     }
     this.opts.persist(Object.keys(environments).length > 0 ? { projects, environments } : { projects });
   }

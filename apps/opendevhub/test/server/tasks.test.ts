@@ -4,6 +4,13 @@ import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "
 import { InvalidRequestError } from "../../src/server/worktrees";
 
 describe("parseTaskRequest", () => {
+  it("reads the node, leaving it out for this machine", () => {
+    expect(parseTaskRequest({ prompt: "x", environment: "isolated", node: "box" }).node).toBe("box");
+    expect(parseTaskRequest({ prompt: "x", node: "local" }).node).toBeUndefined();
+    expect(parseTaskRequest({ prompt: "x" }).node).toBeUndefined();
+    expect(() => parseTaskRequest({ prompt: "x", node: "Bad Node" })).toThrow(/invalid node/);
+  });
+
   it("accepts the environment of worktree tasks", () => {
     expect(parseTaskRequest({ prompt: "x", environment: "isolated" }).environment).toBe("isolated");
     expect(parseTaskRequest({ prompt: "x" })).not.toHaveProperty("environment");
