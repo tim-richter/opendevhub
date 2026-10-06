@@ -30,6 +30,7 @@ import { Gateway } from "./gateway";
 import { GitOps } from "./git";
 import { Images } from "./images";
 import { Network, parseRouteMode } from "./network";
+import { NodeKits, buildNodeKit } from "./node-kits";
 import { Nodes } from "./nodes";
 import { Onboarding } from "./onboarding";
 import { OpencodeClient } from "./opencode/client";
@@ -190,12 +191,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const store = new StateStore({ port: config.port, persisted: loadState(dir), persist: (s) => saveState(dir, s) });
   store.setRoots(config.roots);
-  const nodes = new Nodes({ configDir: dir, controlDir: path.join(dir, "ssh"), store });
-  nodes.start();
+  const nodes = new Nodes({
+    configDir: dir,
+    controlDir: path.join(dir, "ssh"),
+    store,
+    onOnline: (id) => void orchestrator.nodeOnline(id).catch(() => {}),
+    onOffline: (id) => void orchestrator.nodeOffline(id).catch(() => {}),
+  });
   const usage = UsageStore.open(path.join(dir, "usage.db"));
   const usageTracker = usage ? trackUsage(usage, store) : undefined;
   const containers = new Containers(spawnRunner);
   const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
+  const kits = new NodeKits({ nodes, build: (conn) => buildNodeKit(conn, { clientFor, local: spawnRunner }) });
   const runtime = new OpencodeRuntime({ containers, clientFor });
   const editors = new EditorLauncher(await detectEditors(pathWhich()));
   store.setEditors(editors.list());
@@ -211,6 +218,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
     }),
     git,
+    nodes: kits,
     images: new Images({ run: spawnRunner, containers, objects: (p, wt, paths) => git.headObjects(p, wt.path, paths) }),
     envFiles: new EnvFiles(path.join(stateDir(), "envs")),
     projectSettings: (p) => loadConfig(dir).projects?.[p.path],
@@ -241,6 +249,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   store.setPreflight(await preflight(spawnRunner));
   await orchestrator.rescan();
   if (store.preflight().errors.length === 0) await orchestrator.adopt();
+  // After the local containers, so a node coming online adopts into a settled store.
+  nodes.start();
 
   const push = new Push({ file: path.join(stateDir(), "push.json") });
   const stopNotifier = startNotifier(store, push);
