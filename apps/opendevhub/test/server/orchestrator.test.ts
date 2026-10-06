@@ -2194,6 +2194,46 @@ describe("git and ssh credentials", () => {
 });
 
 describe("environments on another node", () => {
+  it("are removed with their worktree and branch on the node", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    await orch.removeEnv(project.id, remoteEnv);
+    expect(box.kit.containers.remove).toHaveBeenCalledWith("r1");
+    expect(box.kit.envFiles.remove).toHaveBeenCalledWith(remoteEnv);
+    expect(box.kit.repo.removeWorktree).toHaveBeenCalledWith(box.layout(project, "/workspaces/demo"), remoteFix);
+    expect(store.environment(remoteEnv)).toBeUndefined();
+  });
+
+  it("keep their record when the node's worktree won't go", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    box.kit.repo.removeWorktree.mockRejectedValueOnce(new CommandError("removing worktree fix on box failed: busy"));
+    await expect(orch.removeEnv(project.id, remoteEnv)).rejects.toThrow(/busy/);
+    expect(store.environment(remoteEnv)).toBeDefined();
+  });
+
+  it("are removed as worktrees, even while the project's container is stopped", async () => {
+    const { orch, store, box, worktrees } = await withRemoteRunning();
+    await orch.stop(project.id);
+    store.updateRuntime(project.id, { containerState: "stopped" });
+    box.kit.repo.removeWorktree.mockClear();
+    await orch.removeWorktree(project.id, remoteFix.path, false);
+    expect(box.kit.repo.removeWorktree).toHaveBeenCalled();
+    expect(worktrees.remove).not.toHaveBeenCalled();
+    expect(store.environment(remoteEnv)).toBeUndefined();
+  });
+
+  it("are removed when another variant is picked", async () => {
+    const { orch, store, box } = await withRemoteRunning();
+    const local = { ...waiting({ permissions: [], forms: [] }), id: "ses_keep", status: "idle" as const, directory: "/workspaces/demo",
+      task: { task: "tsk_1", variant: 1, of: 2, title: "t" } };
+    const remote = { ...local, id: "ses_r", envId: remoteEnv, directory: remoteFix.path, task: { task: "tsk_1", variant: 2, of: 2, title: "t", branch: "fix" } };
+    store.setSessions(project.id, [local]);
+    store.setSessions(remoteEnv, [remote]);
+    const result = await orch.pickVariant(project.id, "tsk_1", "ses_keep", true);
+    expect(result.removed).toEqual([remoteFix.path]);
+    expect(box.kit.repo.removeWorktree).toHaveBeenCalled();
+    expect(store.environment(remoteEnv)).toBeUndefined();
+  });
+
   async function remoteTask(body: Record<string, unknown> = {}) {
     const box = boxKit();
     const s = setup(undefined, undefined, undefined, box.nodes);

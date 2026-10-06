@@ -456,6 +456,11 @@ export class Orchestrator {
   }
 
   removeWorktree(id: ProjectId, worktreePath: string, force: boolean, deleteBranch = false): Promise<void> {
+    const remote = this.remoteEnvAt(this.requireProject(id), worktreePath);
+    if (remote) {
+      this.kit(remote);
+      return this.exclusiveEnv(remote, () => this.destroyEnv(remote));
+    }
     return this.withGit(id, async (p) => {
       const known = this.deps.store.runtime(id).worktrees ?? [];
       const target = known.find((w) => w.path === worktreePath);
@@ -837,15 +842,27 @@ export class Orchestrator {
       const inUse = new Set(all.filter((s) => !gone.includes(s)).map((s) => s.directory));
       const known = this.deps.store.runtime(id).worktrees ?? [];
       const dirs = [...new Set(gone.map((s) => s.directory))].filter((d) => d !== ws && !inUse.has(d));
+      const fail = (err: unknown) => {
+        if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+        return err instanceof Error ? err.message : String(err);
+      };
       for (const dir of dirs) {
+        const remote = this.remoteEnvAt(p, dir);
+        if (remote) {
+          try {
+            this.kit(remote);
+            await this.exclusiveEnv(remote, () => this.destroyEnv(remote));
+            result.removed.push(dir);
+            this.log(id, `task: removed ${dir} and branch ${remote.worktree.branch} on node ${remote.node}`);
+          } catch (err) {
+            result.errors.push(`${remote.worktree.branch}: kept — ${fail(err)}`);
+          }
+          continue;
+        }
         const wt = known.find((w) => w.path === dir);
         if (!wt) continue;
         // Only delete a branch this task created: the worktree may have switched to another one since.
         const ours = wt.branch !== undefined && gone.some((s) => s.directory === dir && s.task?.branch === wt.branch);
-        const fail = (err: unknown) => {
-          if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
-          return err instanceof Error ? err.message : String(err);
-        };
         const rec = this.deps.store.environments(id).find((e) => e.worktree.path === dir);
         if (rec) {
           const env = this.taskEnv(p, rec);
@@ -1391,6 +1408,12 @@ export class Orchestrator {
     return next;
   }
 
+  /** The remote environment whose worktree is `directory`, if one is. */
+  private remoteEnvAt(project: Project, directory: string): TaskEnv | undefined {
+    const rec = this.deps.store.environments(project.id).find((e) => e.node && e.worktree.path === directory);
+    return rec ? this.taskEnv(project, rec) : undefined;
+  }
+
   /** Deletes a task container, its generated config and the UID image the CLI built for it. Throws when the container stays. */
   /** Removes a worktree and its own container first; keeps the worktree when the container won't go. */
   private async dropWorktree(p: Project, worktreePath: string, force: boolean): Promise<void> {
@@ -1422,6 +1445,10 @@ export class Orchestrator {
       if (image && /^vsc-.+-uid$/.test(image.split(":")[0])) await containers.removeImage(image);
     }
     await kit.envFiles.remove(env.id).catch(() => {});
+    if (env.node !== LOCAL_NODE) {
+      // The worktree and branch exist only for this environment; a branch brought home stays on this machine.
+      await kit.repo!.removeWorktree(kit.repo!.layout(env.project, this.workspaceFolder(env.project)), env.worktree);
+    }
     store.removeEnvironment(env.id);
     this.envLog(env, "environment: removed");
   }
