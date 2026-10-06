@@ -53,9 +53,13 @@ export function useCheckoutActions(view: ProjectView) {
   const containerAction = (env: EnvironmentView, action: "start" | "stop") =>
     busy(`env:${env.id}`, () => envAction(view.project.id, env.id, action));
   const removeContainer = (env: EnvironmentView, label: string) => {
-    if (!confirm(`Remove the container of ${label}? Its sessions are deleted; the worktree and its files stay.`)) return;
+    const text = env.node
+      ? `Remove ${label} from ${env.node}? Its container, worktree and branch there are deleted; bring the branch home first to keep its commits.`
+      : `Remove the container of ${label}? Its sessions are deleted; the worktree and its files stay.`;
+    if (!confirm(text)) return;
     busy(`env:${env.id}`, () => removeEnv(view.project.id, env.id));
   };
+
 
   return { pending, busy, newSession, remove, ownContainer, containerAction, removeContainer };
 }

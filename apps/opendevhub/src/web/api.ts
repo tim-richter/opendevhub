@@ -118,6 +118,10 @@ export function mergeIntoBase(projectId: string, directory: string, base: string
   return postJson(projectId, "review/merge", { directory, base, ffOnly }, "merge into base");
 }
 
+export function bringHome(projectId: string, directory: string): Promise<{ branch: string }> {
+  return postJson(projectId, "review/bring-home", { directory }, "bring home");
+}
+
 export async function sendPrompt(projectId: string, sessionId: string, text: string): Promise<void> {
   await postJson(projectId, `sessions/${encodeURIComponent(sessionId)}/prompt`, { text }, "send to agent");
 }

@@ -4,6 +4,7 @@ import { branchSlug, deriveTitle, MAX_VARIANTS, taskBranches } from "../../share
 import type { Isolation, ModelsInfo, TaskVariantSpec, TaskWhere } from "../../shared/types";
 import { createTask, fetchModels } from "../api";
 import { useDash } from "../DashboardContext";
+import { nodeChoices } from "../nodes";
 import { modelFromKey, modelKey, taskDestination, taskFailures } from "../tasks";
 import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -51,6 +52,7 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
   const [base, setBase] = useState("");
   const [where, setWhere] = useState<TaskWhere>("worktree");
   const [environment, setEnvironment] = useState<Isolation>();
+  const [node, setNode] = useState("local");
   const [rows, setRows] = useState<Row[]>([EMPTY_ROW]);
   const [models, setModels] = useState<ModelsInfo>();
   const [busy, setBusy] = useState(false);
@@ -58,12 +60,14 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const view = projects.find((v) => v.project.id === projectId);
+  const nodes = snapshot?.nodes ?? [];
+  const remote = node !== "local";
   const flags = view ? projectFlags(view, (snapshot?.preflight.errors.length ?? 0) > 0) : undefined;
   const canOpen = flags?.canOpen ?? false;
   const worktreesReady = view?.runtime.worktreeRoot?.mounted === true;
-  const effectiveWhere: TaskWhere = worktreesReady ? where : "workspace";
+  const effectiveWhere: TaskWhere = remote ? "worktree" : worktreesReady ? where : "workspace";
   const isolation = view?.isolation;
-  const chosenEnv: Isolation = isolation?.unsupported ? "shared" : (environment ?? isolation?.default ?? "shared");
+  const chosenEnv: Isolation = remote ? "isolated" : isolation?.unsupported ? "shared" : (environment ?? isolation?.default ?? "shared");
   const shownRows = effectiveWhere === "worktree" ? rows : rows.slice(0, 1);
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
@@ -111,6 +115,7 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
       ...(title.trim() ? { title: title.trim() } : {}),
       where: effectiveWhere,
       ...(worktree ? { environment: chosenEnv } : {}),
+      ...(remote ? { node } : {}),
       ...(worktree && branch.trim() ? { branch: branch.trim() } : {}),
       ...(worktree && base.trim() ? { base: base.trim() } : {}),
       variants,
@@ -159,6 +164,7 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
                 setProjectId(id);
                 setRows([EMPTY_ROW]);
                 setEnvironment(undefined);
+                setNode("local");
               }}
             />
           </div>
@@ -201,6 +207,20 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
             />
           </div>
 
+          {nodes.length > 1 && (
+            <div className="flex flex-wrap items-center gap-4 text-sm">
+              <Label htmlFor="task-node" className="font-normal text-muted-foreground">
+                Node
+              </Label>
+              <Choice id="task-node" value={node} options={nodeChoices(nodes)} onChange={setNode} />
+              {remote && (
+                <span className="text-muted-foreground">
+                  {isolation?.unsupported ?? "Runs in a new worktree with its own container, from the base pushed to that node."}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <span className="text-muted-foreground">Where</span>
             <RadioGroup
@@ -210,10 +230,10 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
               aria-label="Where"
             >
               <Label className="font-normal">
-                <RadioGroupItem value="worktree" disabled={!worktreesReady} /> New worktree
+                <RadioGroupItem value="worktree" disabled={remote || !worktreesReady} /> New worktree
               </Label>
               <Label className="font-normal">
-                <RadioGroupItem value="workspace" /> Main checkout
+                <RadioGroupItem value="workspace" disabled={remote} /> Main checkout
               </Label>
             </RadioGroup>
             {view && canOpen && !worktreesReady && <span className="text-muted-foreground">Rebuild the container to enable worktrees.</span>}
@@ -229,10 +249,10 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
                 aria-label="Environment"
               >
                 <Label className="font-normal">
-                  <RadioGroupItem value="shared" /> Shared container
+                  <RadioGroupItem value="shared" disabled={remote} /> Shared container
                 </Label>
                 <Label className="font-normal" title={isolation?.unsupported}>
-                  <RadioGroupItem value="isolated" disabled={!!isolation?.unsupported} /> Own container
+                  <RadioGroupItem value="isolated" disabled={remote || !!isolation?.unsupported} /> Own container
                 </Label>
               </RadioGroup>
               {isolation?.unsupported && <span className="text-muted-foreground">{isolation.unsupported}</span>}

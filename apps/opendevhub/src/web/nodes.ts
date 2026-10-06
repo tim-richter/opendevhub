@@ -1,4 +1,5 @@
 import type { NodeState, NodeStats, NodeView } from "../shared/types";
+import type { ChoiceOption } from "./components/Choice";
 import { formatMemory } from "./resources";
 
 const LABELS: Record<NodeState, string> = {
@@ -33,4 +34,20 @@ export function formatNodeStats(stats: NodeStats | undefined): string | undefine
 
 export function nodesNeedingAttention(nodes: NodeView[] | undefined): number {
   return (nodes ?? []).filter((n) => n.state === "unreachable" || n.state === "error").length;
+}
+
+/** The task form's Node options, in the snapshot's order (this machine first). */
+export function nodeChoices(nodes: NodeView[] | undefined): ChoiceOption[] {
+  return (nodes ?? []).map((n) => {
+    const extra =
+      n.state !== "online" ? ` · ${nodeStateLabel(n.state).toLowerCase()}` : n.stats ? ` · ${formatMemory(n.stats.memAvailable)} free` : "";
+    return { value: n.id, label: `${n.label}${extra}` };
+  });
+}
+
+/** The node a remote environment runs on, and whether it's reachable right now; undefined for this machine. */
+export function envNode(nodeId: string | undefined, nodes: NodeView[] | undefined): { label: string; offline: boolean } | undefined {
+  if (!nodeId || nodeId === "local") return undefined;
+  const node = nodes?.find((n) => n.id === nodeId);
+  return { label: node?.label ?? nodeId, offline: node?.state !== "online" };
 }

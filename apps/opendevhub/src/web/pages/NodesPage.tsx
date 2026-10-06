@@ -66,7 +66,7 @@ export function NodesPage() {
 
   return (
     <Page>
-      <PageHeader title="Nodes" description="Machines that run task environments, reached over ssh. Tasks can't be placed on them yet." />
+      <PageHeader title="Nodes" description="Machines that run task environments, reached over ssh. Choose one in the New task form." />
 
       <Section title="Machines">
         {nodes.map((node) => (

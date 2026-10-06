@@ -2,7 +2,7 @@ import { type ReactElement, type ReactNode, useCallback, useEffect, useMemo, use
 import { useNavigate } from "react-router";
 import type { ProjectView, PublishResult, ReviewData, ReviewFile, ReviewMode, UpdateResult } from "../../shared/types";
 import { useCheckout } from "./CheckoutPage";
-import { fetchReview, mergeIntoBase, removeWorktree, sendPrompt, startSession, updateFromBase } from "../api";
+import { bringHome, fetchReview, mergeIntoBase, removeWorktree, sendPrompt, startSession, updateFromBase } from "../api";
 import { type DiffLineAnnotation, type SelectedLineRange, useStableCallback } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "../components/LazyChangedFilesTree";
 import { PatchView } from "../components/LazyPatchView";
@@ -11,6 +11,7 @@ import {
   ArrowDownToLineIcon,
   ArrowUpIcon,
   ChevronDownIcon,
+  DownloadIcon,
   ChevronRightIcon,
   CircleDotIcon,
   Columns2Icon,
@@ -88,6 +89,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   const navigate = useNavigate();
   const projectId = view.project.id;
   const isWorktree = directory !== workspaceFolderOf(view);
+  const remoteNode = view.runtime.worktrees?.find((w) => w.path === directory)?.node;
 
   const [baseOverride, setBaseOverride] = useState<string>();
   // The diff shown: uncommitted changes, or everything since the base; remembered per checkout.
@@ -218,6 +220,12 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
   }, [checks.state]);
   const hasChecks = checks.state !== "none" || (checks.view?.errors.length ?? 0) > 0;
 
+  const fetchHome = () =>
+    run("Bringing home", async () => {
+      const { branch } = await bringHome(projectId, directory);
+      setNotice(`Fetched ${branch} from ${remoteNode} into this machine's repository.`);
+      load();
+    });
   const update = () =>
     run("Updating", async () => {
       const result = await updateFromBase(projectId, directory, baseName!);
@@ -408,6 +416,9 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
               <GitItem icon={<GitCommitHorizontalIcon />} label="Commit…" blocker={commitBlocker} onSelect={() => setDialog("commit")} />
               <GitItem icon={<ArrowDownToLineIcon />} label={`Update from ${base}`} blocker={updateBlocker} onSelect={update} />
               <GitItem icon={<GitMergeIcon />} label={`Merge into ${base}…`} blocker={mergeBlocker} onSelect={() => setDialog("merge")} />
+              {remoteNode && (
+                <GitItem icon={<DownloadIcon />} label={`Bring home from ${remoteNode}`} blocker={data ? undefined : "Loading…"} onSelect={fetchHome} />
+              )}
               <DropdownMenuSeparator />
               <GitItem
                 icon={<GitPullRequestArrowIcon />}

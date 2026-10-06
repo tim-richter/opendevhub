@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatNodeStats, nodeStateLabel, nodesNeedingAttention } from "../../src/web/nodes";
+import { envNode, formatNodeStats, nodeChoices, nodeStateLabel, nodesNeedingAttention } from "../../src/web/nodes";
 
 const GiB = 1024 ** 3;
 
@@ -31,5 +31,30 @@ describe("node view helpers", () => {
         { id: "c", label: "c", state: "connecting" },
       ]),
     ).toBe(2);
+  });
+});
+
+describe("task form nodes", () => {
+  const nodes = [
+    { id: "local", label: "This machine", state: "online" as const, stats: { cpus: 8, memTotal: 32 * GiB, memAvailable: 12.5 * GiB, containers: 3 } },
+    { id: "box", label: "Workstation", ssh: "tim@box", state: "online" as const },
+    { id: "pi", label: "pi", ssh: "pi", state: "unreachable" as const },
+  ];
+
+  it("offers every node, with free memory or why it can't be used", () => {
+    expect(nodeChoices(nodes)).toEqual([
+      { value: "local", label: "This machine · 12.5 GiB free" },
+      { value: "box", label: "Workstation" },
+      { value: "pi", label: "pi · unreachable" },
+    ]);
+    expect(nodeChoices(undefined)).toEqual([]);
+  });
+
+  it("names a remote environment's node and whether it's offline", () => {
+    expect(envNode(undefined, nodes)).toBeUndefined();
+    expect(envNode("local", nodes)).toBeUndefined();
+    expect(envNode("box", nodes)).toEqual({ label: "Workstation", offline: false });
+    expect(envNode("pi", nodes)).toEqual({ label: "pi", offline: true });
+    expect(envNode("gone", nodes)).toEqual({ label: "gone", offline: true });
   });
 });

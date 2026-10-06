@@ -121,7 +121,7 @@ export function CheckoutPage() {
             ) : (
               <StartStopButton view={view} />
             )}
-            <OpenInMenu view={view} directory={checkout.directory} hostPath={checkout.hostPath} />
+            {!checkout.worktree?.node && <OpenInMenu view={view} directory={checkout.directory} hostPath={checkout.hostPath} />}
             <ContainerMenu view={view} checkout={checkout} />
             {checkout.worktree && (
               <Button
