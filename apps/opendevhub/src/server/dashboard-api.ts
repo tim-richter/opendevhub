@@ -45,7 +45,8 @@ export type DashboardOrchestrator = Pick<
   | "publishSuggestion"
   | "publish"
   | "models"
-  | "createTask"
+  | "startTask"
+  | "dismissStarting"
   | "pickVariant"
   | "createEnv"
   | "startEnv"
@@ -273,7 +274,11 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
     }
   });
-  app.post("/api/projects/:id/tasks", (c) => json(c, (id, b) => orchestrator.createTask(id, b)));
+  // Answers once the request is checked; the snapshot's `starting` shows the setup.
+  app.post("/api/projects/:id/tasks", (c) => json(c, (id, b) => orchestrator.startTask(id, b)));
+  app.delete("/api/projects/:id/tasks/:task/starting", (c) =>
+    json(c, async (id) => orchestrator.dismissStarting(id, c.req.param("task") ?? "")),
+  );
   app.post("/api/projects/:id/tasks/:task/pick", (c) =>
     json(c, (id, b) => orchestrator.pickVariant(id, c.req.param("task") ?? "", str(b.sessionId) ?? "", b.removeWorktrees === true)),
   );

@@ -411,6 +411,35 @@ export interface ProjectView {
   environments: EnvironmentView[];
   /** Known once the main container has started. */
   isolation?: IsolationInfo;
+  /** Tasks whose variants are still being set up, newest last. */
+  starting?: StartingTask[];
+}
+
+/** Where a starting task variant is: its worktree, its environment (image, container), then its session. */
+export type StartStep = "queued" | "pushing" | "worktree" | "image" | "container" | "session" | "failed";
+
+export interface StartingVariant {
+  /** 1-based, as in TaskMeta. */
+  variant: number;
+  branch?: string;
+  /** Set when it runs on another node. */
+  node?: NodeId;
+  step: StartStep;
+  /** Why it failed. */
+  error?: string;
+  /** Set once its session exists; the variant leaves the list when the session shows up. */
+  sessionId?: string;
+  /** The last lines its setup wrote. */
+  log: string[];
+}
+
+/** A task the dashboard started whose variants aren't all running yet. Kept in memory only. */
+export interface StartingTask {
+  task: string;
+  title: string;
+  of: number;
+  createdAt: number;
+  variants: StartingVariant[];
 }
 
 export type EditorTarget = "host" | "container";

@@ -21,6 +21,7 @@ import type {
   ReviewMode,
   SessionCleanupItem,
   SessionSummary,
+  StartingVariant,
   TaskMeta,
   TaskRequest,
   TaskResult,
@@ -64,6 +65,8 @@ import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktree
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
 const MODELS_TTL_MS = 60_000;
 const MODELS_RETRY_MS = 1500;
+const GIT_WAIT_MS = 200;
+const GIT_WAIT_LIMIT_MS = 120_000;
 const NO_WORKTREE_MOUNT =
   "this container was created before opendevhub mounted a worktrees folder — rebuild the container to enable worktrees";
 
@@ -235,6 +238,8 @@ export class Orchestrator {
   private readonly settings = new Map<ProjectId, EnvSettings>();
   /** Each environment's sshAgent setting, from the configuration it was started with. */
   private readonly sshAgents = new Map<EnvId, boolean>();
+  /** The starting task variant an environment is being set up for, so its steps and log lines reach it. */
+  private readonly setups = new Map<EnvId, { task: string; variant: number }>();
   private defaultEnvFiles?: EnvFilesPort;
   /**
    * Task containers come up one at a time per node: concurrent `devcontainer up` calls race on the CLI's shared
@@ -646,36 +651,96 @@ export class Orchestrator {
   }
 
   /**
-   * Starts a task: for each variant, a worktree (unless it runs in the main checkout), a session tagged with
-   * the task in its metadata, and the prompt. Worktrees are created in order under one git lock; a failing
-   * variant is recorded on its result and the others still run, and worktrees already created are kept.
-   * Isolated variants then start their own containers in parallel and get their sessions there.
+   * Starts a task and waits until every variant runs or failed. For each variant: a worktree (unless it runs in
+   * the main checkout), a session tagged with the task in its metadata, and the prompt. Worktrees are created in
+   * order under one git lock; a failing variant is recorded on its result and the others still run, and worktrees
+   * already created are kept. Isolated variants then start their own containers in parallel and get their sessions there.
    */
   async createTask(id: ProjectId, body: Record<string, unknown>): Promise<TaskResult> {
+    return (await this.beginTask(id, body)).done;
+  }
+
+  /**
+   * Like createTask, but answers once the request is checked: the variants are set up in the background, and
+   * the snapshot's `starting` shows each one's step and log until its session appears.
+   */
+  async startTask(id: ProjectId, body: Record<string, unknown>): Promise<TaskResult> {
+    const { task, done } = await this.beginTask(id, body);
+    void done.catch(() => {});
+    return { task, variants: [] };
+  }
+
+  /** Forgets a starting task's variants that failed (or already have their session). */
+  dismissStarting(id: ProjectId, task: string): void {
+    this.requireProject(id);
+    if (!this.deps.store.dismissStarting(id, task)) throw new NotFoundError(task, "starting task");
+  }
+
+  /** The checks a task request must pass before anything is created; then the job that sets it up. */
+  private async beginTask(id: ProjectId, body: Record<string, unknown>): Promise<{ task: string; done: Promise<TaskResult> }> {
     const req = parseTaskRequest(body);
     const client = this.opencodeClient(id);
     const project = this.requireProject(id);
     const node = req.node ?? LOCAL_NODE;
     const remoteKit = node === LOCAL_NODE ? undefined : this.remoteKitFor(project, req, node);
+    const { store } = this.deps;
+    if (req.where === "worktree" && !remoteKit && !store.runtime(id).worktreeRoot?.mounted) throw new UnavailableError(NO_WORKTREE_MOUNT);
+    let base = req.base;
+    if (remoteKit && !base) {
+      base = await this.deps.git.currentBranch(project, this.workspaceFolder(project));
+      if (!base) throw new InvalidRequestError("the main checkout is on a detached HEAD; choose a base branch for a task on another node");
+    }
+    const now = (this.deps.now ?? Date.now)();
+    const task = newTaskId(now);
+    const title = req.title ?? deriveTitle(req.prompt);
+    store.putStarting(id, {
+      task,
+      title,
+      of: req.variants.length,
+      createdAt: now,
+      variants: req.variants.map((_, i) => ({ variant: i + 1, ...(remoteKit ? { node } : {}), step: "queued" as const, log: [] })),
+    });
+    const done = this.runTask(project, client, req, { task, title, node, remoteKit, base }).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      for (const v of store.startingTask(id, task)?.variants ?? []) {
+        if (v.step !== "session" && v.step !== "failed") store.updateStarting(id, task, v.variant, { step: "failed", error: message });
+      }
+      this.log(id, `task ${title}: could not start: ${message}`);
+      throw err;
+    });
+    return { task, done };
+  }
+
+  private async runTask(
+    project: Project,
+    client: OpencodeClient,
+    req: TaskRequest,
+    job: { task: string; title: string; node: NodeId; remoteKit?: NodeKit; base?: string },
+  ): Promise<TaskResult> {
+    const { task, title, node, remoteKit } = job;
+    const id = project.id;
+    const { store } = this.deps;
     const { isolated, notice } = remoteKit
       ? { isolated: true, notice: undefined }
       : req.where === "worktree"
         ? this.isolationFor(project, req.environment)
         : { isolated: false, notice: undefined };
-    const title = req.title ?? deriveTitle(req.prompt);
     const of = req.variants.length;
     const labels = variantLabels(req.variants);
     const own: (EnvWorktree | undefined)[] = [];
-    const { task, results } = await this.withGit(id, async (p) => {
-      const rt = this.deps.store.runtime(id);
+    const step = (i: number, patch: Partial<Omit<StartingVariant, "variant" | "log">>) => store.updateStarting(id, task, i + 1, patch);
+    const results = await this.withGitWhenFree(id, async (p) => {
+      const rt = store.runtime(id);
       const ws = this.workspaceFolder(p);
       const root = rt.worktreeRoot;
-      const task = newTaskId((this.deps.now ?? Date.now)());
       let branches: string[] = [];
       let remote: { layout: NodeRepoLayout; base: string; notice?: string } | undefined;
       if (req.where === "worktree") {
         if (!remoteKit && !root?.mounted) throw new UnavailableError(NO_WORKTREE_MOUNT);
-        if (remoteKit) remote = await this.prepareRemote(p, ws, remoteKit, node, req.base);
+        if (remoteKit) {
+          req.variants.forEach((_, i) => step(i, { step: "pushing" }));
+          remote = await this.prepareRemote(p, ws, remoteKit, node, job.base);
+        }
         const taken = new Set([
           ...(await this.deps.git.localBranches(p, ws)),
           ...(rt.worktrees ?? []).flatMap((w) => (w.branch ? [w.branch] : [])),
@@ -690,25 +755,31 @@ export class Orchestrator {
         if (notice) result.notice = notice;
         if (remote?.notice) result.notice = remote.notice;
         results.push(result);
+        const onLine = (l: string) => this.variantLog(id, task, i, l);
         try {
           if (branch && remote) {
+            step(i, { step: "worktree", branch });
             const wt = await remoteKit!.repo.addWorktree(remote.layout, branch, remote.base);
             result.directory = wt.path;
             own[i] = wt;
             continue;
           }
           if (branch) {
-            const wt = await this.deps.worktrees.add(p, { workspaceFolder: ws, root: root!, branch, base: req.base, onLine: (l) => this.log(id, l) });
+            step(i, { step: "worktree", branch });
+            const wt = await this.deps.worktrees.add(p, { workspaceFolder: ws, root: root!, branch, base: req.base, onLine });
             result.directory = wt.path;
             if (isolated && wt.hostPath) {
               own[i] = { path: wt.path, hostPath: wt.hostPath, branch };
               continue;
             }
           }
+          step(i, { step: "session" });
           const meta: TaskMeta = { task, variant: i + 1, of, title, ...(branch ? { branch } : {}) };
           await this.startVariant(client, result, result.directory!, meta, variantTitle(title, labels[i], of), v, req.prompt);
+          step(i, { sessionId: result.sessionId });
         } catch (err) {
           this.variantFailed(id, title, i, branch, result, err);
+          step(i, { step: "failed", error: result.error });
         }
       }
       if (branches.length > 0 && !remote) {
@@ -717,23 +788,26 @@ export class Orchestrator {
           const known = rt.worktrees ?? [];
           return [...known, ...created.filter((c) => !known.some((w) => w.path === c.path))];
         });
-        this.deps.store.updateRuntime(id, { worktrees: list });
+        store.updateRuntime(id, { worktrees: list });
       }
-      return { task, results };
+      return results;
     });
     await Promise.all(
       own.map(async (worktree, i) => {
         if (!worktree) return;
         const result = results[i];
         try {
-          const env = await this.ensureTaskEnv(project, worktree, node).catch((err: unknown) => {
+          const env = await this.ensureTaskEnv(project, worktree, node, { task, variant: i + 1 }).catch((err: unknown) => {
             throw new Error(`its container did not start: ${err instanceof Error ? err.message : String(err)}`);
           });
           result.envId = env.id;
+          step(i, { step: "session" });
           const meta: TaskMeta = { task, variant: i + 1, of, title, branch: worktree.branch };
           await this.startVariant(this.opencodeClient(env.id), result, worktree.path, meta, variantTitle(title, labels[i], of), req.variants[i], req.prompt);
+          step(i, { sessionId: result.sessionId });
         } catch (err) {
           this.variantFailed(id, title, i, worktree.branch, result, err);
+          step(i, { step: "failed", error: result.error });
         }
       }),
     );
@@ -742,6 +816,23 @@ export class Orchestrator {
     this.monitors.get(id)?.reconcile?.();
     for (const r of results) if (r.envId) this.monitors.get(r.envId)?.reconcile?.();
     return { task, variants: results };
+  }
+
+  /** withGit, but waits (up to two minutes) while another git action or lifecycle action holds the project. */
+  private async withGitWhenFree<T>(id: ProjectId, fn: (project: Project) => Promise<T>): Promise<T> {
+    const delay = this.deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    for (let waited = 0; this.busy.has(id) || this.gitBusy.has(id); waited += GIT_WAIT_MS) {
+      if (waited >= GIT_WAIT_LIMIT_MS) throw new BusyError(id);
+      await delay(GIT_WAIT_MS);
+    }
+    return this.withGit(id, fn);
+  }
+
+  /** A line of a starting variant's setup: in the project's log and in the variant's own. */
+  private variantLog(id: ProjectId, task: string, i: number, raw: string): void {
+    this.log(id, raw);
+    const line = cleanLogLine(raw);
+    if (line) this.deps.store.appendStartingLog(id, task, i + 1, line);
   }
 
   /** The kit a task placed on `node` runs with; throws when the request or the node rules that out. */
@@ -1381,12 +1472,28 @@ export class Orchestrator {
 
 
   /** The worktree's own environment, started unless it already runs. */
-  private async ensureTaskEnv(project: Project, worktree: EnvWorktree, node: NodeId = LOCAL_NODE): Promise<TaskEnv> {
+  private async ensureTaskEnv(
+    project: Project,
+    worktree: EnvWorktree,
+    node: NodeId = LOCAL_NODE,
+    setup?: { task: string; variant: number },
+  ): Promise<TaskEnv> {
     const env = this.recordTaskEnv(project, worktree, node);
     const rt = this.deps.store.runtime(env.id);
     if (rt.containerState === "running" && rt.opencode === "healthy") return env;
-    await this.exclusiveEnv(env, () => this.bringUpTask(env));
+    if (setup) this.setups.set(env.id, setup);
+    try {
+      await this.exclusiveEnv(env, () => this.bringUpTask(env));
+    } finally {
+      this.setups.delete(env.id);
+    }
     return env;
+  }
+
+  /** Moves the starting variant an environment is set up for to its next step. */
+  private setupStep(env: Env, step: "image" | "container"): void {
+    const setup = this.setups.get(env.id);
+    if (setup) this.deps.store.updateStarting(env.project.id, setup.task, setup.variant, { step });
   }
 
   /**
@@ -1404,6 +1511,7 @@ export class Orchestrator {
       }
       const images = kit.images;
       if (!images) throw new UnavailableError("task environments are not available in this build");
+      this.setupStep(env, "image");
       const image = await images.ensureBase(env.project, env.worktree, this.settingsOf(env.project).keyFiles, (l) => this.envLog(env, l));
       const read = await containers.readConfig(env.worktree.hostPath);
       const blocker = isolationBlocker(read.configuration, read.workspaceFolder);
@@ -1419,6 +1527,7 @@ export class Orchestrator {
       await kit.envFiles.write(env.id, config);
       const rec = store.environment(env.id);
       if (rec) store.putEnvironment({ ...rec, image });
+      this.setupStep(env, "container");
       const up = await this.upTask(env);
       store.updateRuntime(env.id, { containerId: up.containerId });
       const info = await containers.inspect(up.containerId);
@@ -1688,6 +1797,8 @@ export class Orchestrator {
   private envLog(env: Env, raw: string): void {
     const line = cleanLogLine(raw);
     if (!line) return;
+    const setup = this.setups.get(env.id);
+    if (setup) this.deps.store.appendStartingLog(env.project.id, setup.task, setup.variant, line);
     this.log(env.project.id, env.worktree ? `[${env.worktree.branch}] ${line}` : line);
   }
 

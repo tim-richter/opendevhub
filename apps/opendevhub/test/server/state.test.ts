@@ -225,4 +225,65 @@ describe("usage", () => {
     const again = new StateStore({ port: 7777, persisted: saved.at(-1)!, persist: () => {} });
     expect(again.environment("demo-abc123-fix-1a2b")?.node).toBe("box");
   });
+
+  describe("starting tasks", () => {
+    const project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/src/demo/.devcontainer/devcontainer.json" };
+    const setupStore = () => {
+      const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
+      store.setProjects([project]);
+      store.putStarting(project.id, {
+        task: "tsk_1",
+        title: "Fix login",
+        of: 2,
+        createdAt: 5,
+        variants: [
+          { variant: 1, step: "queued", log: [] },
+          { variant: 2, node: "box", step: "queued", log: [] },
+        ],
+      });
+      return store;
+    };
+    const session = (id: string): SessionSummary => ({
+      id,
+      projectId: project.id,
+      title: "Fix login",
+      directory: "/workspaces/demo.worktrees/fix-login",
+      status: "running",
+      updatedAt: 1,
+      pending: { permissions: [], forms: [] },
+    });
+
+    it("shows a starting task's variants until their sessions appear", () => {
+      const store = setupStore();
+      store.updateStarting(project.id, "tsk_1", 1, { step: "worktree", branch: "fix-login" });
+      expect(store.snapshot().projects[0].starting?.[0].variants[0]).toMatchObject({ step: "worktree", branch: "fix-login" });
+      store.updateStarting(project.id, "tsk_1", 1, { step: "session", sessionId: "ses_1" });
+      expect(store.snapshot().projects[0].starting?.[0].variants).toHaveLength(2);
+      store.setSessions(project.id, [session("ses_1")]);
+      expect(store.snapshot().projects[0].starting?.[0].variants.map((v) => v.variant)).toEqual([2]);
+      store.updateStarting(project.id, "tsk_1", 2, { step: "session", sessionId: "ses_2" });
+      store.setSessions(project.id, [session("ses_1"), session("ses_2")]);
+      expect(store.snapshot().projects[0].starting).toBeUndefined();
+    });
+
+    it("keeps the last 30 log lines of each variant", () => {
+      const store = setupStore();
+      for (let i = 0; i < 35; i++) store.appendStartingLog(project.id, "tsk_1", 2, `line ${i}`);
+      const log = store.snapshot().projects[0].starting![0].variants[1].log;
+      expect(log).toHaveLength(30);
+      expect(log[0]).toBe("line 5");
+      expect(log.at(-1)).toBe("line 34");
+    });
+
+    it("dismisses the variants that are done, and the task once none is left", () => {
+      const store = setupStore();
+      store.updateStarting(project.id, "tsk_1", 1, { step: "failed", error: "boom" });
+      expect(store.dismissStarting(project.id, "tsk_1")).toBe(true);
+      expect(store.snapshot().projects[0].starting?.[0].variants.map((v) => v.variant)).toEqual([2]);
+      store.updateStarting(project.id, "tsk_1", 2, { step: "failed", error: "unreachable" });
+      store.dismissStarting(project.id, "tsk_1");
+      expect(store.snapshot().projects[0].starting).toBeUndefined();
+      expect(store.dismissStarting(project.id, "tsk_1")).toBe(false);
+    });
+  });
 });

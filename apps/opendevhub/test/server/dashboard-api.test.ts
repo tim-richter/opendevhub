@@ -69,10 +69,8 @@ function setup(webDir?: string) {
     publishSuggestion: vi.fn(async (_id: string, _dir: string) => ({ title: "t", description: "d" })),
     publish: vi.fn(async (_id: string, _dir: string, _req: unknown) => ({ strategy: "branch" as const, pushedFrom: "host" as const, output: [] })),
     models: vi.fn(async (_id: string): Promise<ModelsInfo> => ({ models: [], agents: [] })),
-    createTask: vi.fn(async (_id: string, _b: Record<string, unknown>): Promise<TaskResult> => ({
-      task: "tsk_1",
-      variants: [{ branch: "x", directory: "/w/x", sessionId: "ses_1" }],
-    })),
+    startTask: vi.fn(async (_id: string, _b: Record<string, unknown>): Promise<TaskResult> => ({ task: "tsk_1", variants: [] })),
+    dismissStarting: vi.fn((_id: string, _task: string) => {}),
     pickVariant: vi.fn(async (_id: string, _t: string, _s: string, _r: boolean): Promise<PickResult> => ({ discarded: ["ses_2"], removed: [], errors: [] })),
   } satisfies DashboardOrchestrator;
   const onboarding = {
@@ -449,8 +447,11 @@ describe("dashboard API", () => {
       const body = { prompt: "Fix it", variants: [{}] };
       const res = await post(app, "tasks", body);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ task: "tsk_1", variants: [{ branch: "x", directory: "/w/x", sessionId: "ses_1" }] });
-      expect(orchestrator.createTask).toHaveBeenCalledWith(project.id, body);
+      expect(await res.json()).toEqual({ task: "tsk_1", variants: [] });
+      expect(orchestrator.startTask).toHaveBeenCalledWith(project.id, body);
+      const dismissed = await app.request(`/api/projects/${project.id}/tasks/tsk_1/starting`, { method: "DELETE" });
+      expect(dismissed.status).toBe(200);
+      expect(orchestrator.dismissStarting).toHaveBeenCalledWith(project.id, "tsk_1");
       expect(await (await app.request(`/api/projects/${project.id}/models`)).json()).toEqual({ models: [], agents: [] });
       expect(await (await post(app, "tasks/tsk_1/pick", { sessionId: "ses_1", removeWorktrees: true })).json()).toEqual({
         discarded: ["ses_2"],
@@ -464,11 +465,11 @@ describe("dashboard API", () => {
 
     it("maps task errors to statuses", async () => {
       const { app, orchestrator } = setup();
-      orchestrator.createTask.mockRejectedValueOnce(new InvalidRequestError("the prompt is empty"));
+      orchestrator.startTask.mockRejectedValueOnce(new InvalidRequestError("the prompt is empty"));
       const bad = await post(app, "tasks", { prompt: "" });
       expect(bad.status).toBe(400);
       expect(await bad.json()).toEqual({ error: "the prompt is empty" });
-      orchestrator.createTask.mockRejectedValueOnce(new BusyError(project.id));
+      orchestrator.startTask.mockRejectedValueOnce(new BusyError(project.id));
       expect((await post(app, "tasks", { prompt: "x" })).status).toBe(409);
       orchestrator.pickVariant.mockRejectedValueOnce(new NotFoundError("ses_9", "variant"));
       expect((await post(app, "tasks/tsk_1/pick", { sessionId: "ses_9" })).status).toBe(404);
@@ -484,7 +485,7 @@ describe("dashboard API", () => {
         body: JSON.stringify({ prompt: "x" }),
       });
       expect(res.status).toBe(403);
-      expect(orchestrator.createTask).not.toHaveBeenCalled();
+      expect(orchestrator.startTask).not.toHaveBeenCalled();
     });
   });
 });

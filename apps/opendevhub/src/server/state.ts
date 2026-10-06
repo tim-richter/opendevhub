@@ -13,6 +13,8 @@ import type {
   PublicRuntime,
   ResourceStats,
   SessionSummary,
+  StartingTask,
+  StartingVariant,
   UsageTotals,
   Worktree,
 } from "../shared/types";
@@ -71,6 +73,7 @@ export class StateStore {
   private usageTotals?: UsageTotals;
   private resourceStats: Record<EnvId, ResourceStats> = {};
   private nodeViews: NodeView[] = [];
+  private startingTasks = new Map<ProjectId, StartingTask[]>();
 
   constructor(private readonly opts: StoreOptions) {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
@@ -115,7 +118,60 @@ export class StateStore {
     const current = this.sessions.get(id) ?? [];
     if (JSON.stringify(current) === JSON.stringify(list)) return;
     this.sessions.set(id, list);
+    const owner = this.envs.get(id)?.projectId ?? id;
+    this.pruneStarting(owner);
     this.emit();
+  }
+
+  /** Records a task whose variants are being set up. */
+  putStarting(projectId: ProjectId, task: StartingTask): void {
+    this.startingTasks.set(projectId, [...(this.startingTasks.get(projectId) ?? []).filter((t) => t.task !== task.task), task]);
+    this.emit();
+  }
+
+  startingTask(projectId: ProjectId, task: string): StartingTask | undefined {
+    return this.startingTasks.get(projectId)?.find((t) => t.task === task);
+  }
+
+  updateStarting(projectId: ProjectId, task: string, variant: number, patch: Partial<Omit<StartingVariant, "variant" | "log">>): void {
+    const v = this.startingVariant(projectId, task, variant);
+    if (!v) return;
+    Object.assign(v, patch);
+    this.pruneStarting(projectId);
+    this.emit();
+  }
+
+  /** Keeps the last 30 lines. */
+  appendStartingLog(projectId: ProjectId, task: string, variant: number, line: string): void {
+    const v = this.startingVariant(projectId, task, variant);
+    if (!v) return;
+    v.log = [...v.log, line].slice(-30);
+    this.emit();
+  }
+
+  /** Drops the variants that failed or got their session; false when the task isn't listed. */
+  dismissStarting(projectId: ProjectId, task: string): boolean {
+    const t = this.startingTask(projectId, task);
+    if (!t) return false;
+    t.variants = t.variants.filter((v) => v.step !== "failed" && v.step !== "session");
+    this.pruneStarting(projectId);
+    this.emit();
+    return true;
+  }
+
+  private startingVariant(projectId: ProjectId, task: string, variant: number): StartingVariant | undefined {
+    return this.startingTask(projectId, task)?.variants.find((v) => v.variant === variant);
+  }
+
+  /** Variants whose session is listed are running; tasks without variants are done. */
+  private pruneStarting(projectId: ProjectId): void {
+    const tasks = this.startingTasks.get(projectId);
+    if (!tasks) return;
+    const listed = new Set(this.sessionsOf(projectId).map((s) => s.id));
+    for (const t of tasks) t.variants = t.variants.filter((v) => !v.sessionId || !listed.has(v.sessionId));
+    const left = tasks.filter((t) => t.variants.length > 0);
+    if (left.length > 0) this.startingTasks.set(projectId, left);
+    else this.startingTasks.delete(projectId);
   }
 
   /** The project's sessions across its main and task environments. */
@@ -229,6 +285,7 @@ export class StateStore {
             openUrl: projectUrl(e.id, this.opts.port),
           })),
           ...(isolation ? { isolation } : {}),
+          ...(this.startingTasks.has(project.id) ? { starting: structuredClone(this.startingTasks.get(project.id)!) } : {}),
         };
       }),
       ...(this.usageTotals ? { usage: this.usageTotals } : {}),

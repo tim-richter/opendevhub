@@ -1599,10 +1599,12 @@ describe("Orchestrator", () => {
       );
       const first = orch.createTask(project.id, { prompt: "y" });
       await vi.waitFor(() => expect(release).toBeDefined());
-      await expect(orch.createTask(project.id, { prompt: "z" })).rejects.toThrow(BusyError);
+      // A second task waits for the lock instead of failing; other git work still says busy.
+      const second = orch.createTask(project.id, { prompt: "z" });
       expect(() => orch.createWorktree(project.id, { branch: "z" })).toThrow(BusyError);
       release();
       await first;
+      expect((await second).variants[0]).toMatchObject({ branch: "z", sessionId: expect.any(String) });
 
       store.updateRuntime(project.id, { worktreeRoot: { host: "/h", container: "/c", mounted: false } });
       await expect(orch.createTask(project.id, { prompt: "x" })).rejects.toThrow(UnavailableError);
@@ -2456,5 +2458,99 @@ describe("environments on another node", () => {
     await orch.stop(project.id);
     expect(store.runtime(project.id).containerState).toBe("stopped");
     expect(box.kit.containers.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("starting tasks in the background", () => {
+  async function started() {
+    const s = setup();
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    let n = 0;
+    s.client.createSession.mockImplementation(async (directory: string) => ({ id: `ses_${++n}`, location: { directory } }));
+    return s;
+  }
+  const startingOf = (s: { store: StateStore }, task: string) => s.store.snapshot().projects[0].starting?.find((t) => t.task === task);
+
+  it("answers once the request is checked, and reports each variant's steps as it goes", async () => {
+    const s = await started();
+    let release!: () => void;
+    s.worktrees.add.mockImplementationOnce(
+      (_p, a) => new Promise((r) => (release = () => r({ path: `${a.root.container}/fix-login`, hostPath: `${a.root.host}/fix-login`, branch: a.branch }))),
+    );
+    const result = await s.orch.startTask(project.id, { prompt: "Fix login", environment: "shared" });
+    expect(result.variants).toEqual([]);
+    await vi.waitFor(() => expect(startingOf(s, result.task)?.variants[0]).toMatchObject({ step: "worktree", branch: "fix-login" }));
+    expect(startingOf(s, result.task)).toMatchObject({ title: "Fix login", of: 1 });
+    release();
+    await vi.waitFor(() => expect(startingOf(s, result.task)?.variants[0]).toMatchObject({ step: "session", sessionId: "ses_1" }));
+  });
+
+  it("still refuses bad requests right away", async () => {
+    const s = await started();
+    await expect(s.orch.startTask(project.id, { prompt: " " })).rejects.toThrow(InvalidRequestError);
+    s.store.updateRuntime(project.id, { opencode: "unhealthy" });
+    await expect(s.orch.startTask(project.id, { prompt: "x" })).rejects.toThrow(UnavailableError);
+    expect(s.store.snapshot().projects[0].starting).toBeUndefined();
+  });
+
+  it("records a variant's failure and its log, and starts the others", async () => {
+    const s = await started();
+    s.worktrees.add.mockImplementationOnce(async (_p, a) => {
+      a.onLine("worktree: preparing");
+      throw new CommandError("git worktree add failed: boom", ["fatal: boom"]);
+    });
+    const { task } = await s.orch.startTask(project.id, { prompt: "Fix", environment: "shared", variants: [{}, {}] });
+    await vi.waitFor(() => expect(startingOf(s, task)?.variants[1].step).toBe("session"));
+    expect(startingOf(s, task)?.variants[0]).toMatchObject({ step: "failed", error: "git worktree add failed: boom" });
+    expect(startingOf(s, task)?.variants[0].log).toContain("worktree: preparing");
+  });
+
+  it("shows an isolated variant's image and container steps and their log lines", async () => {
+    const s = await started();
+    let built!: () => void;
+    s.images.ensureBase.mockImplementationOnce(
+      (p: Project, _w: EnvWorktree, _k: string[], onLine: (l: string) => void) =>
+        new Promise((r) => {
+          onLine("image: building opendevhub/demo:k-base");
+          built = () => r({ key: "k".repeat(64), ref: `opendevhub/${p.id}:kkkkkkkkkkkk-base` });
+        }),
+    );
+    s.worktrees.add.mockImplementationOnce(async (_p, a) => ({ path: `${a.root.container}/fix`, hostPath: `${a.root.host}/fix`, branch: a.branch }));
+    const { task } = await s.orch.startTask(project.id, { prompt: "Fix", environment: "isolated" });
+    await vi.waitFor(() => expect(startingOf(s, task)?.variants[0].step).toBe("image"));
+    expect(startingOf(s, task)?.variants[0].log.some((l) => l.includes("image: building"))).toBe(true);
+    built();
+    await vi.waitFor(() => expect(startingOf(s, task)?.variants[0].step).toBe("session"));
+  });
+
+  it("marks every variant failed when the whole task can't start", async () => {
+    const box = boxKit();
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    box.kit.repo.pushBase.mockRejectedValueOnce(new CommandError("pushing main to box failed: denied"));
+    const { task } = await s.orch.startTask(project.id, { prompt: "x", environment: "isolated", node: "box", variants: [{}, {}] });
+    await vi.waitFor(() => expect(startingOf(s, task)?.variants.every((v) => v.step === "failed")).toBe(true));
+    expect(startingOf(s, task)?.variants[0]).toMatchObject({ node: "box", error: "pushing main to box failed: denied" });
+  });
+
+  it("checks a remote task's base before answering", async () => {
+    const box = boxKit();
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    s.git.currentBranch.mockResolvedValue(undefined);
+    await expect(s.orch.startTask(project.id, { prompt: "x", environment: "isolated", node: "box" })).rejects.toThrow(/detached HEAD/);
+  });
+
+  it("dismisses a failed variant", async () => {
+    const s = await started();
+    s.worktrees.add.mockRejectedValueOnce(new Error("boom"));
+    const { task } = await s.orch.startTask(project.id, { prompt: "x", environment: "shared" });
+    await vi.waitFor(() => expect(startingOf(s, task)?.variants[0].step).toBe("failed"));
+    s.orch.dismissStarting(project.id, task);
+    expect(startingOf(s, task)).toBeUndefined();
+    expect(() => s.orch.dismissStarting(project.id, task)).toThrow(NotFoundError);
   });
 });
