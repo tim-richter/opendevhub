@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate, useOutletContext, useParams, useSearchParams
 import type { ForwardedPort, ProjectView } from "../../shared/types";
 import { refreshWorktrees } from "../api";
 import { CopyButton } from "../components/CopyButton";
-import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, KeyRoundIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, GitCompareIcon, KeyRoundIcon, MessagesSquareIcon, PlayIcon, PlusIcon, ServerIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -101,7 +101,7 @@ export function CheckoutPage() {
                 <KeyRoundIcon className="size-3" /> {agent.label}
               </Badge>
             )}
-            {resources && <ResourceStat {...resources} className="ml-1 font-sans whitespace-nowrap" />}
+            {resources && <ResourceStat {...resources} className="ml-1 font-sans" />}
           </p>
         }
         actions={
@@ -121,7 +121,7 @@ export function CheckoutPage() {
             ) : (
               <StartStopButton view={view} />
             )}
-            {!checkout.worktree?.node && <OpenInMenu view={view} directory={checkout.directory} hostPath={checkout.hostPath} />}
+            {!checkout.worktree?.node && <OpenInMenu view={view} directory={checkout.directory} hostPath={checkout.hostPath} icon />}
             <ContainerMenu view={view} checkout={checkout} />
             {checkout.worktree && (
               <Button
@@ -142,12 +142,14 @@ export function CheckoutPage() {
 
       <TabBar label="Worktree">
         <TabLink to={base} end>
-          Sessions <Count n={n.attention} tone="attention" />
+          <MessagesSquareIcon className="size-4" /> Sessions <Count n={n.attention} tone="attention" />
           {n.attention === 0 && <Count n={n.running + n.idle} tone="muted" />}
         </TabLink>
-        <TabLink to={`${base}/review`}>Review</TabLink>
+        <TabLink to={`${base}/review`}>
+          <GitCompareIcon className="size-4" /> Review
+        </TabLink>
         <TabLink to={`${base}/runtime`}>
-          Runtime <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
+          <ServerIcon className="size-4" /> Runtime <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
         </TabLink>
       </TabBar>
 

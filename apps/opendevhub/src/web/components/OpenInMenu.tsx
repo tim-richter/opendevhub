@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, CodeXmlIcon } from "lucide-react";
 import type { ProjectView } from "../../shared/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +12,15 @@ import {
 import { openInEditor } from "../api";
 import { useDash } from "../DashboardContext";
 import { containerShellCommand, shellQuote } from "../derive";
+import { Tip } from "./Tip";
 
 /**
  * "Open in…" for one checkout (the workspace or a worktree): editors opendevhub found on this machine,
  * plus commands to copy for anything it can't launch (a terminal Neovim, a shell in the container).
  */
-export function OpenInMenu(props: { view: ProjectView; directory: string; hostPath?: string; compact?: boolean }) {
-  const { view, directory, hostPath, compact } = props;
+/** `icon` draws the trigger as an icon button with a tooltip. */
+export function OpenInMenu(props: { view: ProjectView; directory: string; hostPath?: string; compact?: boolean; icon?: boolean }) {
+  const { view, directory, hostPath, compact, icon } = props;
   const { snapshot, report } = useDash();
   const running = view.runtime.containerState === "running";
   const editors = snapshot?.editors ?? [];
@@ -45,11 +47,21 @@ export function OpenInMenu(props: { view: ProjectView; directory: string; hostPa
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size={compact ? "sm" : "default"} onClick={(e) => e.stopPropagation()}>
-          Open in… <ChevronDownIcon />
-        </Button>
-      </DropdownMenuTrigger>
+      {icon ? (
+        <Tip label="Open in…">
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" aria-label="Open in…">
+              <CodeXmlIcon />
+            </Button>
+          </DropdownMenuTrigger>
+        </Tip>
+      ) : (
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size={compact ? "sm" : "default"} onClick={(e) => e.stopPropagation()}>
+            Open in… <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+      )}
       <DropdownMenuContent align="end" className="min-w-56" onClick={(e) => e.stopPropagation()}>
         {editors.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">Editors on this machine</DropdownMenuLabel>}
         {editors.map((e) => item(e.label, why(e.target), launch(e.id), e.id))}

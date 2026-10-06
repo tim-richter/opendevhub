@@ -6,7 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Choice } from "./Choice";
-import { Chip, muted, Section } from "./Page";
+import { Chip, muted } from "./Page";
 
 const DEFAULT_TIMEOUT = 900;
 
@@ -23,7 +23,7 @@ type Row = { key: number; name: string; command: string; where: CheckWhere; time
 let nextKey = 1;
 const toRow = (c: CheckDef): Row => ({ key: nextKey++, name: c.name, command: c.command, where: c.where, timeout: String(c.timeout) });
 
-/** The project's checks on its page: what Review runs, and where to change it. */
+/** The project's checks, in its settings: what Review runs, and where to change it. */
 export function ChecksSettings({ projectId }: { projectId: string }) {
   const [config, setConfig] = useState<ChecksConfig>();
   const [error, setError] = useState<string>();
@@ -50,19 +50,21 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
   const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs?.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   return (
-    <Section
-      title="Checks"
-      hint={config ? `run from Review before publishing · ${SOURCE_LABEL[config.source]}` : "run from Review before publishing"}
-      action={
-        config &&
-        !rows && (
-          <Button variant="ghost" size="sm" onClick={() => setRows(config.checks.map(toRow))}>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <h3 className="font-semibold">Checks</h3>
+          <p className={muted}>
+            {config ? `Run from Review before publishing · ${SOURCE_LABEL[config.source]}` : "Run from Review before publishing"}
+          </p>
+        </div>
+        {config && !rows && (
+          <Button variant="outline" size="sm" onClick={() => setRows(config.checks.map(toRow))}>
             <PencilIcon /> Edit
           </Button>
-        )
-      }
-    >
-      <div className="flex flex-col gap-3 px-4 py-3">
+        )}
+      </div>
+      <div className="flex flex-col gap-3">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -187,6 +189,6 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
           </form>
         )}
       </div>
-    </Section>
+    </section>
   );
 }

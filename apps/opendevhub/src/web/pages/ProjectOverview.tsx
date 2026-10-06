@@ -2,9 +2,8 @@ import { useEffect } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import type { ProjectView } from "../../shared/types";
 import { refreshWorktrees } from "../api";
-import { ChecksSettings } from "../components/ChecksSettings";
 import { CopyButton } from "../components/CopyButton";
-import { GitBranchIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { GitBranchIcon, InfoIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +16,9 @@ import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL } from "../components/Status";
 import { EnvBadge } from "../components/EnvBadge";
-import { checkoutReady, ContainerMenu, NewWorktreeForm, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
+import { ProjectSettingsButton } from "../components/ProjectSettingsDialog";
+import { Tip } from "../components/Tip";
+import { checkoutReady, ContainerMenu, NewWorktreeButton, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
 import { type Checkout, checkoutCounts, checkoutOf, checkoutPath, checkouts, checkoutTone, orphanSessions, projectTasks } from "../checkouts";
 import { useDash } from "../DashboardContext";
 import { formatCost, formatTokens } from "../tasks";
@@ -92,6 +93,7 @@ export function ProjectOverview() {
             <StartStopButton view={view} />
             <OpenButton view={view} />
             <OpenInMenu view={view} directory={workspaceFolderOf(view)} hostPath={project.path} />
+            <ProjectSettingsButton view={view} />
             <MoreMenu view={view} />
           </>
         }
@@ -111,26 +113,33 @@ export function ProjectOverview() {
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
-          <GroupTitle className="mb-0 flex-1">Worktrees</GroupTitle>
+          <GroupTitle className="mb-0">Worktrees</GroupTitle>
+          {root?.mounted && (
+            <Tip
+              label={
+                <>
+                  Worktrees live in <code className="font-mono">{root.host}</code>, mounted at <code className="font-mono">{root.container}</code>.
+                </>
+              }
+            >
+              <InfoIcon className="size-4 text-muted-foreground" tabIndex={0} aria-label="Where worktrees live" />
+            </Tip>
+          )}
+          <span className="flex-1" />
           {running && (
             <Button variant="ghost" size="sm" onClick={() => void refreshWorktrees(project.id).catch(() => {})}>
               <RefreshCwIcon /> Refresh
             </Button>
           )}
+          <NewWorktreeButton view={view} />
         </div>
         {!running && <Note>Start the project to create worktrees. Worktrees on this machine can still be opened.</Note>}
         <UnmountedNotice view={view} />
-        {running && root?.mounted && <NewWorktreeForm view={view} />}
-        <ul className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3">
+        <ul className="grid gap-3 md:grid-cols-2">
           {checkouts(view).map((c) => (
             <CheckoutCard key={c.directory} view={view} checkout={c} />
           ))}
         </ul>
-        {root?.mounted && (
-          <p className={muted}>
-            Worktrees live in <code className="font-mono">{root.host}</code>, mounted at <code className="font-mono">{root.container}</code>.
-          </p>
-        )}
       </section>
 
       {tasks.length > 0 && (
@@ -151,8 +160,6 @@ export function ProjectOverview() {
           </ul>
         </Section>
       )}
-
-      <ChecksSettings projectId={project.id} />
 
       {orphans.length > 0 && (
         <Section title="Other sessions" hint="in folders that are no longer a worktree">
@@ -203,12 +210,12 @@ function CheckoutCard({ view, checkout: c }: { view: ProjectView; checkout: Chec
             <span className="truncate">only in container ({c.directory})</span>
           )}
         </p>
-        <div className="flex min-h-5 flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex min-h-5 flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
           {n.attention > 0 && <span className="font-semibold text-attention">{n.attention} need you</span>}
           {n.running > 0 && <span>{n.running} working</span>}
           {n.idle > 0 && <span>{n.idle} idle</span>}
           {n.attention + n.running + n.idle === 0 && <span>No sessions</span>}
-          {resources && <ResourceStat {...resources} />}
+          {resources && <ResourceStat {...resources} className="ml-auto" />}
         </div>
         {env && (
           <div>

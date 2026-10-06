@@ -6,7 +6,7 @@ icon: GitBranch
 
 When opendevhub starts a container it bind-mounts `<project>.worktrees` (created next to the project) at `<workspaceFolder>.worktrees` in the container. For a project at `~/code/demo`, worktrees live in `~/code/demo.worktrees/<branch>`, so you can open and edit them on your machine.
 
-The project's **Worktrees** tab creates a branch and worktree there with `git worktree add` inside the container, and can start an opencode session in it straight away.
+**New worktree** in the project's **Worktrees** section creates a branch and worktree there with `git worktree add` inside the container, and can start an opencode session in it straight away. The ⓘ next to the heading shows where the folder is on your machine and in the container.
 
 ![A project's worktrees: the main checkout and two task branches, each with its own sessions and Open in… menu](./images/worktrees.webp)
 
@@ -18,7 +18,7 @@ The project's **Worktrees** tab creates a branch and worktree there with `git wo
 
 ## Open in your editor
 
-The "Open in…" menu on the project and each worktree attaches VS Code to the container, or opens the checkout in VS Code, Cursor, Zed, JetBrains IDEs, Neovide or Neovim in your terminal. Only editors found on your machine are listed.
+The "Open in…" menu on the project and each worktree (the `</>` button on a worktree's page) attaches VS Code to the container, or opens the checkout in VS Code, Cursor, Zed, JetBrains IDEs, Neovide or Neovim in your terminal. Only editors found on your machine are listed.
 
 Editors are launched by the opendevhub process, so it needs your desktop session's environment (`DISPLAY`/`WAYLAND_DISPLAY`). Neovim opens in `$TERMINAL`, or the first of kitty, ghostty, wezterm, alacritty, foot, gnome-terminal, konsole or xfce4-terminal it finds. Attaching VS Code needs the Dev Containers extension.
 

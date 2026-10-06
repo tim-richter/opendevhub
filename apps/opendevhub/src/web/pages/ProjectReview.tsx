@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { ProjectView, PublishResult, ReviewData, ReviewFile, ReviewMode, UpdateResult } from "../../shared/types";
 import { useCheckout } from "./CheckoutPage";
@@ -39,9 +39,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { diffFont, Empty, muted } from "../components/Page";
+import { Tip } from "../components/Tip";
 import { ChecksIcon, ChecksPanel, useChecks } from "../components/ChecksPanel";
 import { PublishDialog, usePublishInfo } from "../components/PublishDialog";
 import { fixPrompt, publishWarning, STATE_LABEL } from "../checks";
@@ -623,16 +623,6 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
 
 /** The tooltip trigger takes over `data-state`, so a toggle inside one shows its selection from `aria-checked`. */
 const checkedItem = "aria-checked:bg-accent aria-checked:text-accent-foreground";
-
-/** A tooltip on any element; the child must take a ref (a DOM element or a forwarding component). */
-function Tip({ label, children }: { label: ReactNode; children: ReactElement }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 /** A git menu entry; when it can't run, it is disabled and says why. */
 function GitItem(props: { icon: ReactNode; label: string; blocker?: string; onSelect: () => void }) {

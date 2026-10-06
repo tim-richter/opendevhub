@@ -93,7 +93,7 @@ export function Overview() {
         ) : tiles.length === 0 ? (
           <p className={muted}>No projects match.</p>
         ) : (
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3">
+          <ul className="grid gap-3 md:grid-cols-2">
             {tiles.map((v) => (
               <ProjectTile key={v.project.id} view={v} />
             ))}
@@ -167,7 +167,7 @@ function ProjectTile({ view }: { view: ProjectView }) {
         <p className="truncate font-mono text-xs text-muted-foreground" title={view.project.path}>
           {view.project.path}
         </p>
-        <div className="flex min-h-5 flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex min-h-5 flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
           {c.attention > 0 && <span className="font-semibold text-attention">{c.attention} need you</span>}
           {running ? (
             <>
@@ -180,7 +180,7 @@ function ProjectTile({ view }: { view: ProjectView }) {
           ) : (
             view.runtime.containerState === "stopped" && <span>Container not running</span>
           )}
-          {resources && <ResourceStat {...resources} />}
+          {resources && <ResourceStat {...resources} className="ml-auto" />}
         </div>
         {view.runtime.error && (
           <p className="truncate text-xs text-destructive" title={view.runtime.error}>

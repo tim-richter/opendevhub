@@ -95,7 +95,7 @@ The commands a change must pass before it's published (tests, lint, a Docker bui
 ```
 
 - `where: "container"` (default) runs in the checkout's container; `"host"` runs on this machine in the checkout's folder, with your own Docker, and only after you approve the exact command once. In a worktree, `COMPOSE_PROJECT_NAME` is set to `<project>-<branch>`.
-- The **Checks** section of the project page edits a list of your own, saved in `config.json`, which replaces the one in `devcontainer.json`.
+- **Checks** in the project's settings (the gear on the project page) edits a list of your own, saved in `config.json`, which replaces the one in `devcontainer.json`.
 - Results belong to the commit they ran on. **Publish…** warns when they haven't all passed there, and **Ask agent to fix** hands failures to a session.
 
 ## Tasks

@@ -28,7 +28,7 @@ In the project's `devcontainer.json`, so they're committed and shared with the t
 
 Changes to `devcontainer.json` apply right away; nothing needs restarting.
 
-To use a different list without touching the repo, click **Edit** in the **Checks** section of the project page. Your list is saved in `~/.config/opendevhub/config.json` and replaces the one in `devcontainer.json`; **Use devcontainer.json** switches back.
+To use a different list without touching the repo, open the project's settings (the gear on the project page) and click **Edit** under **Checks**. Your list is saved in `~/.config/opendevhub/config.json` and replaces the one in `devcontainer.json`; **Use devcontainer.json** switches back.
 
 ## Run them
 
@@ -47,6 +47,6 @@ Running Docker inside the devcontainer (Docker-in-Docker) needs a privileged con
 - In a worktree, `COMPOSE_PROJECT_NAME` is set to `<project>-<branch>` (unless you set it yourself), so two worktrees' `docker compose` runs don't share containers, networks or volumes.
 - Every check gets `OPENDEVHUB_CHECK` (its name) and `OPENDEVHUB_BRANCH`.
 
-**Approval.** An agent can edit `devcontainer.json`, so a host command runs only after you have approved its exact text. The first run of a new or changed host command shows it and asks you to **Approve and run**. The approval is stored as a hash in `config.json` and covers only that text. Commands you save yourself on the project page count as approved.
+**Approval.** An agent can edit `devcontainer.json`, so a host command runs only after you have approved its exact text. The first run of a new or changed host command shows it and asks you to **Approve and run**. The approval is stored as a hash in `config.json` and covers only that text. Commands you save yourself in the project's settings count as approved.
 
 Approval covers the command, not what it builds. A `Dockerfile` or compose file still runs through your Docker daemon, so review the diff before you run host checks.
