@@ -1,4 +1,6 @@
 import net from "node:net";
+import type { Duplex } from "node:stream";
+import type { Host } from "./host";
 import { OPENCODE_PORT } from "./opencode/runtime";
 import { RELAY_PORT } from "./relay/runtime";
 
@@ -7,8 +9,8 @@ export interface HostPort {
   port: number;
 }
 
-/** Opens a TCP connection to a port of the container. */
-export type Dial = (port: number) => Promise<net.Socket>;
+/** Opens a stream to a port of the container. */
+export type Dial = (port: number) => Promise<Duplex>;
 
 /**
  * How the host reaches one container. `direct` connects to the container's IP (Linux with a native
@@ -16,10 +18,10 @@ export type Dial = (port: number) => Promise<net.Socket>;
  * Colima, rootless Docker, ...), with loopback tunnels for opencode and the relay.
  */
 export interface Route {
-  kind: "direct" | "gateway";
+  kind: "direct" | "gateway" | "ssh";
   opencode: HostPort;
   relay: HostPort;
-  /** Set on the gateway route only; the direct route connects to the container IP itself. */
+  /** Set on the gateway and ssh routes; the direct route connects to the container IP itself. */
   dial?: Dial;
   close(): Promise<void>;
 }
@@ -84,8 +86,8 @@ export interface Tunnel {
 }
 
 /** Listens on a free 127.0.0.1 port and pipes each connection to a socket from `dial`. */
-export async function openTunnel(dial: () => Promise<net.Socket>): Promise<Tunnel> {
-  const sockets = new Set<net.Socket>();
+export async function openTunnel(dial: () => Promise<Duplex>): Promise<Tunnel> {
+  const sockets = new Set<Duplex>();
   const server = net.createServer({ allowHalfOpen: true }, (client) => {
     client.pause();
     sockets.add(client);
@@ -131,6 +133,29 @@ export async function openTunnel(dial: () => Promise<net.Socket>): Promise<Tunne
   };
 }
 
+/** Loopback tunnels for opencode and the relay, each connection through `dial`. */
+export async function tunnelRoute(kind: "gateway" | "ssh", dial: Dial): Promise<Route> {
+  const opencode = await openTunnel(() => dial(OPENCODE_PORT));
+  const relay = await openTunnel(() => dial(RELAY_PORT)).catch(async (err: unknown) => {
+    await opencode.close();
+    throw err;
+  });
+  return {
+    kind,
+    opencode: opencode.address,
+    relay: relay.address,
+    dial,
+    close: async () => {
+      await Promise.all([opencode.close(), relay.close()]);
+    },
+  };
+}
+
+/** A container on another node: every connection is an ssh channel opened from that node. */
+export function sshRoute(host: Pick<Host, "dial">, ip: string): Promise<Route> {
+  return tunnelRoute("ssh", (port) => host.dial(ip, port));
+}
+
 export interface NetworkDeps {
   gateway: GatewayPort;
   mode?: RouteMode;
@@ -149,20 +174,6 @@ export class Network {
     }
     const { gateway } = this.deps;
     await gateway.attach(container, onLog);
-    const dial: Dial = (port) => gateway.connect(container.ip, port);
-    const opencode = await openTunnel(() => dial(OPENCODE_PORT));
-    const relay = await openTunnel(() => dial(RELAY_PORT)).catch(async (err: unknown) => {
-      await opencode.close();
-      throw err;
-    });
-    return {
-      kind: "gateway",
-      opencode: opencode.address,
-      relay: relay.address,
-      dial,
-      close: async () => {
-        await Promise.all([opencode.close(), relay.close()]);
-      },
-    };
+    return tunnelRoute("gateway", (port) => gateway.connect(container.ip, port));
   }
 }

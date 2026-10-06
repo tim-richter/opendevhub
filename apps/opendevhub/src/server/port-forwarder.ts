@@ -1,3 +1,4 @@
+import type { Duplex } from "node:stream";
 import net from "node:net";
 import type { ForwardedPort } from "../shared/types";
 import type { Dial } from "./network";
@@ -20,7 +21,7 @@ export interface ForwardTarget {
 
 interface Forward {
   servers: net.Server[];
-  sockets: Set<net.Socket>;
+  sockets: Set<Duplex>;
 }
 
 export interface PortForwarderOptions {
@@ -97,7 +98,7 @@ export class PortForwarder {
     events: ForwardEvents,
   ): Promise<ForwardedPort> {
     const labelled = spec.label === undefined ? {} : { label: spec.label };
-    const sockets = new Set<net.Socket>();
+    const sockets = new Set<Duplex>();
     const logIntervalMs = this.opts.logIntervalMs ?? 30_000;
     let lastLog = -Infinity;
 
@@ -113,7 +114,7 @@ export class PortForwarder {
       // Paused until an upstream is ready, so bytes sent before the relay answers are not lost.
       client.pause();
       sockets.add(client);
-      let upstream: net.Socket | undefined;
+      let upstream: Duplex | undefined;
       const destroy = () => {
         client.destroy();
         upstream?.destroy();
@@ -123,7 +124,7 @@ export class PortForwarder {
       client.on("error", destroy);
       client.on("close", destroy);
 
-      const pipe = (socket: net.Socket, rest?: Buffer) => {
+      const pipe = (socket: Duplex, rest?: Buffer) => {
         if (client.destroyed) {
           socket.destroy();
           return;

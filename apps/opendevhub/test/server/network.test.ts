@@ -8,7 +8,10 @@ import {
   openTunnel,
   parseRouteMode,
   probeReachable,
+  sshRoute,
 } from "../../src/server/network";
+import { OPENCODE_PORT } from "../../src/server/opencode/runtime";
+import { RELAY_PORT } from "../../src/server/relay/runtime";
 import { RelayError } from "../../src/server/relay/client";
 import { freePort } from "../helpers/relay";
 
@@ -205,5 +208,38 @@ describe("Network.route", () => {
     await expect(new Network({ gateway, mode: "gateway" }).route(container, () => {})).rejects.toThrow(
       "docker run failed",
     );
+  });
+});
+describe("sshRoute", () => {
+  it("tunnels opencode and the relay through the host's dial to the container IP", async () => {
+    const opencodeUp = await echo("oc:");
+    const relayUp = await echo("relay:");
+    const dials: Array<[string, number]> = [];
+    // Stands in for a node: container ports map to local echo servers.
+    const host = {
+      dial: async (ip: string, port: number) => {
+        dials.push([ip, port]);
+        return connectLocal(port === OPENCODE_PORT ? opencodeUp : relayUp);
+      },
+    };
+    const route = await sshRoute(host, "172.18.0.4");
+    closers.push(route.close);
+    expect(route.kind).toBe("ssh");
+    expect(route.opencode.host).toBe("127.0.0.1");
+    expect(await roundTrip(route.opencode.port, "a")).toBe("oc:a");
+    expect(await roundTrip(route.relay.port, "b")).toBe("relay:b");
+    expect(dials).toEqual([
+      ["172.18.0.4", OPENCODE_PORT],
+      ["172.18.0.4", RELAY_PORT],
+    ]);
+    expect(route.dial).toBeDefined();
+    await route.dial!(8080).then((s) => s.destroy());
+    expect(dials.at(-1)).toEqual(["172.18.0.4", 8080]);
+  });
+
+  it("stops listening on close", async () => {
+    const route = await sshRoute({ dial: () => connectLocal(1) }, "172.18.0.4");
+    await route.close();
+    await expect(roundTrip(route.opencode.port, "x")).rejects.toThrow();
   });
 });
