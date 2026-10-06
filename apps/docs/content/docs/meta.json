@@ -7,6 +7,7 @@
     "add-project",
     "tasks",
     "worktrees",
+    "cleanup",
     "publish",
     "git-and-ssh",
     "notifications",

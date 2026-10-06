@@ -3,7 +3,7 @@
 Features discussed but not specced yet. Each one is a sketch; it gets a spec in `specs/`
 once it's picked up. Specced so far: respond inline, tasks, review, publish, per-task
 environments, git identity and ssh-agent forwarding (the git half of credential setup), add project,
-usage tracking, resource stats.
+usage tracking, resource stats, cleanup.
 
 opencode 2.0.22 endpoints that make an item cheaper are noted where they exist. They come from
 the live server's `/openapi.json`.
@@ -36,8 +36,6 @@ the live server's `/openapi.json`.
   environment tiles.
 - **Idle auto-stop for main environments.** The per-task environments spec covers task
   containers; extend it to whole projects, as an opt-in.
-- **Cleanup.** Prune merged branches and their worktrees, and garbage-collect stale containers
-  and opendevhub images in one place.
 - **Forward compose service ports** (`"db:5432"` in `forwardPorts`): a known limitation in the
   README.
 - **Tasks from issues.** Turn a Forgejo, GitHub or GitLab issue into a task and link the PR
