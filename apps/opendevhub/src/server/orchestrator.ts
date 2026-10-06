@@ -22,6 +22,7 @@ import type {
   SessionCleanupItem,
   SessionSummary,
   TaskMeta,
+  TaskRequest,
   TaskResult,
   TaskVariantResult,
   TaskVariantSpec,
@@ -43,7 +44,7 @@ import { newTaskId } from "./ids";
 import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "./tasks";
 import type { GitOps } from "./git";
 import { LOCAL_NODE } from "./host";
-import type { NodeRepoPort } from "./node-repo";
+import type { NodeRepoLayout, NodeRepoPort } from "./node-repo";
 import { diffMode, NO_LIMITS, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
@@ -58,7 +59,7 @@ import type { Credentials } from "./credentials";
 import { AGENT_SOCKET, AgentTunnel, type AgentTunnelOptions } from "./relay/agent";
 import type { RelayTarget } from "./relay/client";
 import type { EnvRecord, StateStore } from "./state";
-import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeRoot } from "./worktrees";
+import { InvalidRequestError, type Worktrees, mountArg, validateBranch, worktreeDirName, worktreeRoot } from "./worktrees";
 
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
 const MODELS_TTL_MS = 60_000;
@@ -432,6 +433,9 @@ export class Orchestrator {
       if (!root?.mounted) {
         throw new UnavailableError(NO_WORKTREE_MOUNT);
       }
+      const target = path.posix.join(root.container, worktreeDirName(branch));
+      const held = this.deps.store.environments(id).find((e) => e.node && e.worktree.path === target);
+      if (held) throw new InvalidRequestError(`${target} is used by a task on node ${held.node}; remove that task first`);
       const ws = this.workspaceFolder(p);
       const worktree = await this.deps.worktrees.add(p, {
         workspaceFolder: ws,
@@ -645,7 +649,13 @@ export class Orchestrator {
     const req = parseTaskRequest(body);
     const client = this.opencodeClient(id);
     const project = this.requireProject(id);
-    const { isolated, notice } = req.where === "worktree" ? this.isolationFor(project, req.environment) : { isolated: false, notice: undefined };
+    const node = req.node ?? LOCAL_NODE;
+    const remoteKit = node === LOCAL_NODE ? undefined : this.remoteKitFor(project, req, node);
+    const { isolated, notice } = remoteKit
+      ? { isolated: true, notice: undefined }
+      : req.where === "worktree"
+        ? this.isolationFor(project, req.environment)
+        : { isolated: false, notice: undefined };
     const title = req.title ?? deriveTitle(req.prompt);
     const of = req.variants.length;
     const labels = variantLabels(req.variants);
@@ -656,11 +666,14 @@ export class Orchestrator {
       const root = rt.worktreeRoot;
       const task = newTaskId((this.deps.now ?? Date.now)());
       let branches: string[] = [];
+      let remote: { layout: NodeRepoLayout; base: string; notice?: string } | undefined;
       if (req.where === "worktree") {
-        if (!root?.mounted) throw new UnavailableError(NO_WORKTREE_MOUNT);
+        if (!remoteKit && !root?.mounted) throw new UnavailableError(NO_WORKTREE_MOUNT);
+        if (remoteKit) remote = await this.prepareRemote(p, ws, remoteKit, node, req.base);
         const taken = new Set([
           ...(await this.deps.git.localBranches(p, ws)),
           ...(rt.worktrees ?? []).flatMap((w) => (w.branch ? [w.branch] : [])),
+          ...(remote ? await remoteKit!.repo.branches(remote.layout) : []),
         ]);
         branches = taskBranches({ branch: req.branch, title, variants: req.variants, taken }).map(validateBranch);
       }
@@ -669,8 +682,15 @@ export class Orchestrator {
         const branch = branches[i];
         const result: TaskVariantResult = branch ? { branch } : { directory: ws };
         if (notice) result.notice = notice;
+        if (remote?.notice) result.notice = remote.notice;
         results.push(result);
         try {
+          if (branch && remote) {
+            const wt = await remoteKit!.repo.addWorktree(remote.layout, branch, remote.base);
+            result.directory = wt.path;
+            own[i] = wt;
+            continue;
+          }
           if (branch) {
             const wt = await this.deps.worktrees.add(p, { workspaceFolder: ws, root: root!, branch, base: req.base, onLine: (l) => this.log(id, l) });
             result.directory = wt.path;
@@ -685,7 +705,7 @@ export class Orchestrator {
           this.variantFailed(id, title, i, branch, result, err);
         }
       }
-      if (branches.length > 0) {
+      if (branches.length > 0 && !remote) {
         const created = results.flatMap((r) => (r.branch && r.directory ? [{ path: r.directory, branch: r.branch }] : []));
         const list = await this.deps.worktrees.list(p, ws, root).catch(() => {
           const known = rt.worktrees ?? [];
@@ -700,7 +720,7 @@ export class Orchestrator {
         if (!worktree) return;
         const result = results[i];
         try {
-          const env = await this.ensureTaskEnv(project, worktree).catch((err: unknown) => {
+          const env = await this.ensureTaskEnv(project, worktree, node).catch((err: unknown) => {
             throw new Error(`its container did not start: ${err instanceof Error ? err.message : String(err)}`);
           });
           result.envId = env.id;
@@ -716,6 +736,37 @@ export class Orchestrator {
     this.monitors.get(id)?.reconcile?.();
     for (const r of results) if (r.envId) this.monitors.get(r.envId)?.reconcile?.();
     return { task, variants: results };
+  }
+
+  /** The kit a task placed on `node` runs with; throws when the request or the node rules that out. */
+  private remoteKitFor(project: Project, req: TaskRequest, node: NodeId): NodeKit {
+    if (req.where !== "worktree" || req.environment === "shared") {
+      throw new InvalidRequestError("a task on another node needs a new worktree with its own container");
+    }
+    if (!this.deps.nodes?.known(node)) throw new InvalidRequestError(`unknown node ${node}`);
+    const unsupported = this.deps.store.isolation(project.id)?.unsupported;
+    if (unsupported) throw new InvalidRequestError(`${project.name} can't run on another node: ${unsupported}`);
+    const kit = this.deps.nodes.kit(node);
+    if (!kit) throw new UnavailableError(`node ${node} is unreachable`);
+    return kit;
+  }
+
+  /** The node's repository for the project, with the base pushed to it. */
+  private async prepareRemote(
+    p: Project,
+    ws: string,
+    kit: NodeKit,
+    node: NodeId,
+    requested: string | undefined,
+  ): Promise<{ layout: NodeRepoLayout; base: string; notice?: string }> {
+    const base = requested ?? (await this.deps.git.currentBranch(p, ws));
+    if (!base) throw new InvalidRequestError("the main checkout is on a detached HEAD; choose a base branch for a task on another node");
+    const layout = kit.repo.layout(p, ws);
+    await kit.repo.ensure(layout);
+    await kit.repo.pushBase(p, layout, base);
+    this.log(p.id, `task: pushed ${base} to node ${node}`);
+    const clean = await this.deps.git.isClean(p, ws);
+    return { layout, base, ...(clean ? {} : { notice: `uncommitted changes in the main checkout are not on node ${node}` }) };
   }
 
   /** Creates a variant's session (recorded on the result at once) and sends the prompt. */
@@ -1078,6 +1129,7 @@ export class Orchestrator {
     const project = this.requireProject(id);
     if (directory === this.workspaceFolder(project)) return;
     if (this.deps.store.runtime(id).worktrees?.some((w) => w.path === directory)) return;
+    if (this.deps.store.environments(id).some((e) => e.worktree.path === directory)) return;
     throw new InvalidRequestError(`${directory} is neither the workspace nor a known worktree`);
   }
 
@@ -1136,7 +1188,10 @@ export class Orchestrator {
     const seen = this.seenDirectories.get(id) ?? new Set<string>();
     this.seenDirectories.set(id, seen);
     const ws = this.workspaceFolder(project);
-    const known = new Set((this.deps.store.runtime(id).worktrees ?? []).map((w) => w.path));
+    const known = new Set([
+      ...(this.deps.store.runtime(id).worktrees ?? []).map((w) => w.path),
+      ...this.deps.store.environments(id).map((e) => e.worktree.path),
+    ]);
     const fresh = directories.filter((d) => d !== ws && !known.has(d) && !seen.has(d));
     if (fresh.length === 0) return;
     for (const d of fresh) seen.add(d);
@@ -1246,18 +1301,26 @@ export class Orchestrator {
   }
 
   /** Records a worktree's own environment (or returns the one it has). */
-  private recordTaskEnv(project: Project, worktree: EnvWorktree): TaskEnv {
+  private recordTaskEnv(project: Project, worktree: EnvWorktree, node: NodeId = LOCAL_NODE): TaskEnv {
     const { store } = this.deps;
-    const existing = store.environments(project.id).find((e) => e.worktree.path === worktree.path);
+    const existing = store.environments(project.id).find((e) => e.worktree.path === worktree.path && (e.node ?? LOCAL_NODE) === node);
     if (existing) return this.taskEnv(project, existing);
-    const rec: EnvRecord = { id: envIdFor(project.id, worktree.path, worktree.branch), projectId: project.id, worktree };
+    // A remote worktree can sit at the same container path as a local one; its id must not.
+    const key = node === LOCAL_NODE ? worktree.path : `${node}:${worktree.path}`;
+    const rec: EnvRecord = {
+      id: envIdFor(project.id, key, worktree.branch),
+      projectId: project.id,
+      worktree,
+      ...(node === LOCAL_NODE ? {} : { node }),
+    };
     store.putEnvironment(rec);
     return this.taskEnv(project, rec);
   }
 
+
   /** The worktree's own environment, started unless it already runs. */
-  private async ensureTaskEnv(project: Project, worktree: EnvWorktree): Promise<TaskEnv> {
-    const env = this.recordTaskEnv(project, worktree);
+  private async ensureTaskEnv(project: Project, worktree: EnvWorktree, node: NodeId = LOCAL_NODE): Promise<TaskEnv> {
+    const env = this.recordTaskEnv(project, worktree, node);
     const rt = this.deps.store.runtime(env.id);
     if (rt.containerState === "running" && rt.opencode === "healthy") return env;
     await this.exclusiveEnv(env, () => this.bringUpTask(env));

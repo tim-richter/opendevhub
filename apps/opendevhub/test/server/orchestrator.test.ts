@@ -2194,6 +2194,79 @@ describe("git and ssh credentials", () => {
 });
 
 describe("environments on another node", () => {
+  async function remoteTask(body: Record<string, unknown> = {}) {
+    const box = boxKit();
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    const result = await s.orch.createTask(project.id, { prompt: "Fix login", environment: "isolated", node: "box", ...body });
+    return { ...s, box, result };
+  }
+
+  it("place a task: push the base, worktree on the node, environment there", async () => {
+    const { result, box, worktrees, store, client } = await remoteTask();
+    const layout = box.layout(project, "/workspaces/demo");
+    expect(box.kit.repo.ensure).toHaveBeenCalledWith(layout);
+    expect(box.kit.repo.pushBase).toHaveBeenCalledWith(project, layout, "main");
+    expect(box.kit.repo.addWorktree).toHaveBeenCalledWith(layout, "fix-login", "main");
+    expect(worktrees.add).not.toHaveBeenCalled();
+    const v = result.variants[0];
+    expect(v).toMatchObject({ branch: "fix-login", directory: "/workspaces/demo.worktrees/fix-login", sessionId: "ses_new" });
+    expect(store.environment(v.envId!)).toMatchObject({ node: "box", worktree: { branch: "fix-login" } });
+    expect(v.envId).toBe(envIdFor(project.id, "box:/workspaces/demo.worktrees/fix-login", "fix-login"));
+    expect(client.createSession).toHaveBeenCalledWith("/workspaces/demo.worktrees/fix-login", expect.anything());
+    expect(box.kit.containers.up).toHaveBeenCalled();
+  });
+
+  it("avoid branch names the node already has, and use the requested base", async () => {
+    const box = boxKit();
+    box.kit.repo.branches.mockResolvedValue(["fix-login"]);
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    const result = await s.orch.createTask(project.id, { prompt: "Fix login", environment: "isolated", node: "box", base: "origin/main" });
+    expect(result.variants[0].branch).not.toBe("fix-login");
+    expect(box.kit.repo.pushBase).toHaveBeenCalledWith(project, expect.anything(), "origin/main");
+  });
+
+  it("say when the main checkout's uncommitted changes stay behind", async () => {
+    const box = boxKit();
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    s.git.isClean.mockResolvedValue(false);
+    const result = await s.orch.createTask(project.id, { prompt: "x", environment: "isolated", node: "box" });
+    expect(result.variants[0].notice).toBe("uncommitted changes in the main checkout are not on node box");
+  });
+
+  it("refuse what can't run on a node", async () => {
+    const box = boxKit();
+    const s = setup(undefined, undefined, undefined, box.nodes);
+    await s.orch.rescan();
+    await s.orch.start(project.id);
+    const task = (body: Record<string, unknown>) => s.orch.createTask(project.id, { prompt: "x", ...body });
+    await expect(task({ where: "workspace", node: "box" })).rejects.toThrow(InvalidRequestError);
+    await expect(task({ environment: "shared", node: "box" })).rejects.toThrow(/needs a new worktree with its own container/);
+    await expect(task({ environment: "isolated", node: "nope" })).rejects.toThrow("unknown node nope");
+    s.git.currentBranch.mockResolvedValue(undefined);
+    await expect(task({ environment: "isolated", node: "box" })).rejects.toThrow(/detached HEAD/);
+    box.online.box = false;
+    await expect(task({ environment: "isolated", node: "box" })).rejects.toThrow("node box is unreachable");
+    s.store.setIsolation(project.id, { default: "shared", unsupported: "host networking is not supported" });
+    box.online.box = true;
+    await expect(task({ environment: "isolated", node: "box" })).rejects.toThrow(/can't run on another node: host networking/);
+  });
+
+  it("accept their checkouts as known directories", async () => {
+    const { orch, result } = await remoteTask();
+    await expect(orch.review(project.id, result.variants[0].directory!)).resolves.toBeDefined();
+  });
+
+  it("keep a local worktree from taking a remote environment's path", async () => {
+    const { orch } = await remoteTask();
+    await expect(orch.createWorktree(project.id, { branch: "fix-login" })).rejects.toThrow(/used by a task on node box/);
+  });
+
   it("are parked when their node drops: watching stops, state and sessions stay", async () => {
     const { orch, store, monitors, forwarder, box } = await withRemoteRunning();
     const session = { ...waiting({ permissions: [], forms: [] }), id: "ses_r", envId: remoteEnv, directory: remoteFix.path, status: "idle" as const };
