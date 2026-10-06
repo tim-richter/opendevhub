@@ -88,9 +88,14 @@ export interface ProjectTask {
   attention: boolean;
   running: boolean;
   updatedAt: number;
+  /** Some variants are still being set up. */
+  starting?: true;
 }
 
-/** Tasks with several variants (they span worktrees, so they live at project level), most recent first. */
+/**
+ * Tasks with several variants (they span worktrees, so they live at project level), and tasks still being set
+ * up, most recent first.
+ */
 export function projectTasks(view: ProjectView): ProjectTask[] {
   const out = new Map<string, ProjectTask>();
   for (const s of view.sessions) {
@@ -100,6 +105,14 @@ export function projectTasks(view: ProjectView): ProjectTask[] {
     t.attention ||= needsAttention(s.status);
     t.running ||= s.status === "running";
     t.updatedAt = Math.max(t.updatedAt, s.updatedAt);
+    out.set(t.task, t);
+  }
+  for (const s of view.starting ?? []) {
+    const t = out.get(s.task) ?? { task: s.task, title: s.title, variants: 0, attention: false, running: false, updatedAt: s.createdAt };
+    t.variants = Math.max(t.variants, s.of);
+    t.attention ||= s.variants.some((v) => v.step === "failed");
+    t.running ||= s.variants.some((v) => v.step !== "failed");
+    t.starting = true;
     out.set(t.task, t);
   }
   return [...out.values()].sort((a, b) => b.updatedAt - a.updatedAt);

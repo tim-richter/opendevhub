@@ -101,6 +101,20 @@ describe("checkouts", () => {
     ]);
   });
 
+  it("lists starting tasks, single-variant ones too, until their variants run", () => {
+    const v: ProjectView = {
+      ...view([session("a", wt("x"), { task: { task: "t1", variant: 1, of: 2, title: "T t1" }, updatedAt: 5 })]),
+      starting: [
+        { task: "t1", title: "T t1", of: 2, createdAt: 3, variants: [{ variant: 2, step: "image", log: [] }] },
+        { task: "t9", title: "Fix", of: 1, createdAt: 7, variants: [{ variant: 1, step: "failed", error: "boom", log: [] }] },
+      ],
+    };
+    expect(projectTasks(v)).toEqual([
+      { task: "t9", title: "Fix", variants: 1, attention: true, running: false, updatedAt: 7, starting: true },
+      { task: "t1", title: "T t1", variants: 2, attention: false, running: true, updatedAt: 5, starting: true },
+    ]);
+  });
+
   it("maps the old project tab URLs to worktree URLs", () => {
     expect(legacyPath("p 1", "review")).toBe("/p/p%201/main/review");
     expect(legacyPath("p 1", "review", "login")).toBe("/p/p%201/w/login/review");

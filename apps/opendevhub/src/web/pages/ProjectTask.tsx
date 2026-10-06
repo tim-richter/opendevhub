@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
-import type { ReviewData, SessionSummary } from "../../shared/types";
-import { fetchReview, pickVariant } from "../api";
-import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import type { ReviewData, SessionSummary, StartingVariant } from "../../shared/types";
+import { dismissStarting, fetchReview, pickVariant } from "../api";
+import { ChevronRightIcon, ExternalLinkIcon, LoaderCircleIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { Empty, muted } from "../components/Page";
 import { SessionBadge } from "../components/Status";
 import { useDash } from "../DashboardContext";
@@ -15,7 +16,36 @@ import { envOfDirectory, sessionHref } from "../derive";
 import { EnvBadge } from "../components/EnvBadge";
 import { useProjectView } from "./ProjectLayout";
 import { formatUsage, taskUsage } from "../usage";
-import { diffStats, formatCost, formatTokens, pickPrompts, removals, taskSessions, variantName } from "../tasks";
+import { diffStats, formatCost, formatTokens, pickPrompts, removals, startStepLabel, taskSessions, variantName } from "../tasks";
+
+/** A variant that is still being set up: where it is, and the last lines its setup wrote. */
+function StartingCard(props: { variant: StartingVariant; onDismiss: () => void }) {
+  const { variant: v } = props;
+  const failed = v.step === "failed";
+  return (
+    <Card className={cn("min-w-0 gap-3 px-4 py-3", failed && "border-destructive/50")}>
+      <header className="flex min-w-0 items-center gap-2">
+        {failed ? null : <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />}
+        <strong className="truncate">{v.branch ?? `#${v.variant}`}</strong>
+        {v.node && <span className={cn(muted, "truncate")}>on {v.node}</span>}
+        <span className={cn("ml-auto shrink-0 text-sm", failed ? "text-destructive" : "text-muted-foreground")}>{startStepLabel(v.step)}</span>
+      </header>
+      {v.error && <p className="text-sm break-words text-destructive">{v.error}</p>}
+      {v.log.length > 0 && (
+        <pre className="max-h-48 overflow-auto rounded-md bg-muted/50 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+          {v.log.join("\n")}
+        </pre>
+      )}
+      {failed && (
+        <div>
+          <Button variant="outline" size="sm" onClick={props.onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export function ProjectTask() {
   const view = useProjectView();
@@ -23,6 +53,7 @@ export function ProjectTask() {
   const { report, snapshot } = useDash();
   const total = taskUsage(snapshot, task);
   const sessions = taskSessions(view, task);
+  const starting = view.starting?.find((t) => t.task === task);
   // null: the changes couldn't be read.
   const [reviews, setReviews] = useState<Record<string, ReviewData | null>>({});
   const [picking, setPicking] = useState(false);
@@ -82,7 +113,7 @@ export function ProjectTask() {
     }
   };
 
-  if (sessions.length === 0) {
+  if (sessions.length === 0 && !starting) {
     return (
       <Empty title="No variants to show">
         <p className={muted}>This task's sessions were discarded, or are older than the sessions opencode lists.</p>
@@ -102,9 +133,10 @@ export function ProjectTask() {
         <ChevronRightIcon className="size-3.5" /> Task
       </nav>
       <div className="flex items-baseline gap-2.5">
-        <h2 className="text-lg font-semibold">{sessions[0].task?.title || "Task"}</h2>
+        <h2 className="text-lg font-semibold">{starting?.title || sessions[0]?.task?.title || "Task"}</h2>
         <span className={muted}>
-          {sessions.length} variant{sessions.length === 1 ? "" : "s"}
+          {starting?.of ?? sessions.length} variant{(starting?.of ?? sessions.length) === 1 ? "" : "s"}
+          {starting && starting.variants.some((v) => v.step !== "failed") && " · starting"}
           {total && <span className="tabular-nums"> · Total {formatUsage(total)}</span>}
         </span>
       </div>
@@ -114,6 +146,9 @@ export function ProjectTask() {
         </Alert>
       )}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
+        {starting?.variants.map((v) => (
+          <StartingCard key={`starting-${v.variant}`} variant={v} onDismiss={() => void dismissStarting(view.project.id, task).catch(report)} />
+        ))}
         {sessions.map((s) => {
           const review = reviews[s.directory];
           const stats = review ? diffStats(review) : undefined;

@@ -1,5 +1,5 @@
 import { modelShortName } from "../shared/tasks";
-import type { ProjectView, ReviewData, SessionSummary, TaskResult } from "../shared/types";
+import type { ProjectView, ReviewData, SessionSummary, StartStep, TaskResult } from "../shared/types";
 import { workspaceFolderOf } from "./derive";
 
 /** The task's sessions in variant order. Discarded variants never reach the dashboard. */
@@ -131,4 +131,24 @@ export function modelFromKey(key: string): { id: string; providerID: string } | 
   if (!key) return undefined;
   const [providerID, id] = JSON.parse(key) as [string, string];
   return { id, providerID };
+}
+
+const STEP_LABELS: Record<StartStep, string> = {
+  queued: "Waiting",
+  pushing: "Pushing the base",
+  worktree: "Creating the worktree",
+  image: "Preparing the image",
+  container: "Starting the container",
+  session: "Starting the session",
+  failed: "Failed",
+};
+
+/** What a starting variant is doing, for its card. */
+export function startStepLabel(step: StartStep): string {
+  return STEP_LABELS[step];
+}
+
+/** A task's page: its variants, and while they're set up, their progress. */
+export function taskPath(projectId: string, task: string): string {
+  return `/p/${encodeURIComponent(projectId)}/t/${encodeURIComponent(task)}`;
 }

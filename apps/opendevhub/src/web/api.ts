@@ -260,3 +260,9 @@ export async function removeNode(id: string): Promise<void> {
   const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) throw await failure(res, "remove node");
 }
+
+/** Forgets a starting task's variants that failed. */
+export async function dismissStarting(projectId: string, task: string): Promise<void> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(task)}/starting`, { method: "DELETE" });
+  if (!res.ok) throw await failure(res, "dismiss");
+}

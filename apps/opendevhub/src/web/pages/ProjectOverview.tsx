@@ -142,6 +142,7 @@ export function ProjectOverview() {
                   <StatusDot tone={t.attention ? "attention" : t.running ? "running" : "ok"} />
                   <span className="flex-1 truncate">{t.title || "Task"}</span>
                   <span className={muted}>
+                    {t.starting && "starting · "}
                     {t.variants} variant{t.variants === 1 ? "" : "s"}
                   </span>
                 </Link>

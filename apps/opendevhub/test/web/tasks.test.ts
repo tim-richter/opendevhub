@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ProjectView, ReviewData, SessionSummary, TaskMeta } from "../../src/shared/types";
 import {
   diffStats,
+  startStepLabel,
+  taskPath,
   formatCost,
   formatTokens,
   modelFromKey,
@@ -184,5 +186,21 @@ describe("keyboard and routing", () => {
     expect(modelFromKey(modelKey(ref))).toEqual(ref);
     expect(modelKey(undefined)).toBe("");
     expect(modelFromKey("")).toBeUndefined();
+  });
+});
+
+describe("starting tasks", () => {
+  it("names each setup step", () => {
+    expect(startStepLabel("queued")).toBe("Waiting");
+    expect(startStepLabel("pushing")).toBe("Pushing the base");
+    expect(startStepLabel("worktree")).toBe("Creating the worktree");
+    expect(startStepLabel("image")).toBe("Preparing the image");
+    expect(startStepLabel("container")).toBe("Starting the container");
+    expect(startStepLabel("session")).toBe("Starting the session");
+    expect(startStepLabel("failed")).toBe("Failed");
+  });
+
+  it("goes to the task's page", () => {
+    expect(taskPath("p 1", "tsk_1")).toBe("/p/p%201/t/tsk_1");
   });
 });

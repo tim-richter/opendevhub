@@ -5,7 +5,7 @@ import type { Isolation, ModelsInfo, TaskVariantSpec, TaskWhere } from "../../sh
 import { createTask, fetchModels } from "../api";
 import { useDash } from "../DashboardContext";
 import { nodeChoices } from "../nodes";
-import { modelFromKey, modelKey, taskDestination, taskFailures } from "../tasks";
+import { modelFromKey, modelKey, taskPath } from "../tasks";
 import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -33,7 +33,7 @@ export function NewTaskDialog() {
 }
 
 function TaskForm({ initialProject, onClose }: { initialProject?: string; onClose: () => void }) {
-  const { snapshot, act, report } = useDash();
+  const { snapshot, act } = useDash();
   const navigate = useNavigate();
   const projects = useMemo(
     () => [...(snapshot?.projects ?? [])].sort((a, b) => a.project.name.localeCompare(b.project.name)),
@@ -122,15 +122,9 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
     })
       .then(
         (result) => {
-          const to = taskDestination(view.project.id, result);
-          const failed = taskFailures(result);
-          if (!to) {
-            setError(failed ?? "No variant started");
-            return;
-          }
+          // The variants are set up in the background; the task's page shows how far each one got.
           onClose();
-          void navigate(to);
-          if (failed) report(new Error(`Some variants did not start: ${failed}`));
+          void navigate(taskPath(view.project.id, result.task));
         },
         (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
       )
