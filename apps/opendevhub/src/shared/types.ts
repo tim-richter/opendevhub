@@ -188,6 +188,63 @@ export interface ReviewData {
   truncated?: boolean;
 }
 
+/** Where a check runs: in the checkout's environment, or on this machine in its host folder. */
+export type CheckWhere = "container" | "host";
+
+/** A command a change must pass, from `customizations.opendevhub.checks` or the project's settings. */
+export interface CheckDef {
+  name: string;
+  command: string;
+  where: CheckWhere;
+  /** Seconds. */
+  timeout: number;
+}
+
+export type CheckSource = "devcontainer" | "settings" | "none";
+
+export interface ChecksConfig {
+  /** The checks that apply; each host check says whether its exact command was approved. */
+  checks: (CheckDef & { approved: boolean })[];
+  source: CheckSource;
+  /** As read from devcontainer.json, and the project's own list when it has one. */
+  devcontainer: CheckDef[];
+  settings?: CheckDef[];
+  /** Entries that were dropped, and why. */
+  errors: string[];
+}
+
+export type CheckStatus = "queued" | "running" | "passed" | "failed" | "error";
+
+export interface CheckResult {
+  name: string;
+  command: string;
+  where: CheckWhere;
+  status: CheckStatus;
+  exitCode?: number;
+  timedOut?: boolean;
+  durationMs?: number;
+  /** Why it couldn't run ("error"). */
+  reason?: string;
+  /** The last lines of its output. */
+  output: string[];
+}
+
+export interface CheckRun {
+  directory: string;
+  /** The commit the run tested, and whether it had uncommitted changes then. */
+  head?: string;
+  dirty: boolean;
+  startedAt: number;
+  finishedAt?: number;
+  results: CheckResult[];
+}
+
+export interface ChecksView extends ChecksConfig {
+  run?: CheckRun;
+  /** The run still describes the checkout: same HEAD, same dirty state. */
+  current?: boolean;
+}
+
 export type ForgeKind = "github" | "gitlab" | "forgejo" | "gitea" | "bitbucket" | "unknown";
 export type PublishStrategy = "branch" | "agit";
 

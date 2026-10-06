@@ -119,6 +119,29 @@ export class FileForgeStore implements ForgeStore {
   }
 }
 
+export interface ProjectSettingsStore {
+  get(projectPath: string): Record<string, unknown>;
+  /** Replaces the given keys of the project's entry; an undefined value removes the key. */
+  update(projectPath: string, patch: Record<string, unknown>): void;
+}
+
+/** A project's entry in `config.json` `projects`; updating re-reads the file so settings changed meanwhile aren't lost. */
+export class FileProjectSettings implements ProjectSettingsStore {
+  constructor(private readonly dir: string) {}
+
+  get(projectPath: string): Record<string, unknown> {
+    const entry = loadConfig(this.dir).projects?.[projectPath];
+    return entry && typeof entry === "object" && !Array.isArray(entry) ? (entry as Record<string, unknown>) : {};
+  }
+
+  update(projectPath: string, patch: Record<string, unknown>): void {
+    const cfg = loadConfig(this.dir);
+    const entry = { ...this.get(projectPath), ...patch };
+    for (const [k, v] of Object.entries(patch)) if (v === undefined) delete entry[k];
+    saveConfig(this.dir, { ...cfg, projects: { ...cfg.projects, [projectPath]: entry } });
+  }
+}
+
 export function loadState(dir: string): PersistedState {
   const raw = readJson<Partial<PersistedState>>(path.join(dir, "state.json"), {});
   const environments = raw.environments && typeof raw.environments === "object" ? raw.environments : undefined;

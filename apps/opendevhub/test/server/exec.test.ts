@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
 import { spawnRunner } from "../../src/server/exec";
 
 const node = process.execPath;
@@ -41,5 +43,11 @@ describe("spawnRunner", () => {
   it("passes extra env vars", async () => {
     const r = await spawnRunner(node, ["-e", "console.log(process.env.ODH_FOO)"], { env: { ODH_FOO: "bar" } });
     expect(r.stdout.trim()).toBe("bar");
+  });
+
+  it("runs in the given working directory", async () => {
+    const dir = os.tmpdir();
+    const r = await spawnRunner(node, ["-e", "console.log(process.cwd())"], { cwd: dir });
+    expect(fs.realpathSync(r.stdout.trim())).toBe(fs.realpathSync(dir));
   });
 });

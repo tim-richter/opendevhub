@@ -7,7 +7,9 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { Credentials } from "../../src/server/credentials";
+import { Checks } from "../../src/server/checks";
 import { Cleanup } from "../../src/server/cleanup";
+import { FileProjectSettings } from "../../src/server/config";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import { EditorLauncher } from "../../src/server/editors";
 import { spawnRunner } from "../../src/server/exec";
@@ -29,7 +31,7 @@ import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
 import { UsageStore, trackUsage } from "../../src/server/usage";
 import { Worktrees } from "../../src/server/worktrees";
-import type { Project } from "../../src/shared/types";
+import type { CheckRun, Project } from "../../src/shared/types";
 
 const fixture = path.resolve("test/e2e/fixture");
 
@@ -158,7 +160,23 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     const push = new Push({ file: path.join(agentDir, "push.json"), send: sender });
     push.subscribe({ endpoint: "https://push.example.com/e2e", keys: { p256dh: "k", auth: "a" } });
     const stopNotifier = startNotifier(store, push);
-    const dashboard = createDashboardApp({ store, orchestrator: orch, cleanup: new Cleanup({ store, containers, branches: orch }), onboarding: new Onboarding({ roots: () => [] }), push });
+    const checks = new Checks({
+      target: (id, dir) => orch.checkTarget(id, dir),
+      project: (id) => store.project(id),
+      containers,
+      run: spawnRunner,
+      git: new GitOps({ containers }),
+      settings: new FileProjectSettings(agentDir),
+      log: (id, line) => orch.note(id, line),
+    });
+    const dashboard = createDashboardApp({
+      store,
+      orchestrator: orch,
+      cleanup: new Cleanup({ store, containers, branches: orch }),
+      checks,
+      onboarding: new Onboarding({ roots: () => [] }),
+      push,
+    });
 
     // opencode's default rules allow most actions outright; make this session ask.
     expect((await opencode("PATCH", "", { permissions: [{ action: "*", resource: "*", effect: "ask" }] })).ok).toBe(true);
@@ -200,6 +218,41 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     await vi.waitFor(() => expect(pendingOf()?.forms).toHaveLength(1), { timeout: 15_000 });
     await orch.cancelForm(project.id, pendingOf()!.forms[0].id);
     await vi.waitFor(() => expect(pendingOf()).toBeUndefined(), { timeout: 15_000 });
+
+    // Checks: one in the container, one on this machine, saved as the project's own list.
+    const api = (route: string, body?: unknown) =>
+      dashboard.request(`/api/projects/${project.id}/${route}`, {
+        method: body === undefined ? "GET" : "POST",
+        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+    const saved = await api("checks/settings", {
+      checks: [
+        { name: "inside", command: 'test -f .devcontainer/devcontainer.json && echo "in-$OPENDEVHUB_CHECK"' },
+        { name: "outside", command: "pwd", where: "host" },
+        { name: "slow", command: "sleep 60", timeout: 10 },
+      ],
+    });
+    expect(saved.status).toBe(200);
+    const dir = encodeURIComponent(rt.workspaceFolder!);
+    expect((await api("checks/run", { directory: rt.workspaceFolder })).status).toBe(200);
+    const run = await vi.waitFor(
+      async () => {
+        const { run } = (await (await api(`checks/run?directory=${dir}`)).json()) as { run: CheckRun };
+        if (!run.finishedAt) throw new Error("checks still running");
+        return run;
+      },
+      { timeout: 60_000, interval: 500 },
+    );
+    expect(run.results.map((r) => [r.name, r.status])).toEqual([
+      ["inside", "passed"],
+      ["outside", "passed"],
+      ["slow", "failed"],
+    ]);
+    expect(run.results[0].output).toEqual(["in-inside"]);
+    expect(run.results[1].output).toEqual([fixture]);
+    expect(run.results[2]).toMatchObject({ timedOut: true });
+    // `timeout` ended the whole command in the container, not only the client.
+    expect((await containers.exec(project, ["sh", "-c", "pgrep -f 'sleep 60' || true"])).stdout.trim()).toBe("");
 
     const server = await startServer({
       port: 0,

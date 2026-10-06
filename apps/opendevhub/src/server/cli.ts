@@ -3,9 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import open from "open";
-import { type Config, FileForgeStore, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState, stateDir } from "./config";
+import { type Config, FileForgeStore, FileProjectSettings, configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState, stateDir } from "./config";
 import { Containers } from "./containers";
 import { EditorLauncher, detectEditors, pathWhich } from "./editors";
+import { Checks } from "./checks";
 import { Cleanup } from "./cleanup";
 import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
@@ -168,6 +169,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     scan: (roots) => scanRoots(roots),
   });
   const cleanup = new Cleanup({ store, containers, branches: orchestrator });
+  const checks = new Checks({
+    target: (id, directory) => orchestrator.checkTarget(id, directory),
+    project: (id) => store.project(id),
+    containers,
+    run: spawnRunner,
+    git,
+    settings: new FileProjectSettings(dir),
+    log: (id, line) => orchestrator.note(id, line),
+  });
 
   store.setPreflight(await preflight(spawnRunner));
   await orchestrator.rescan();
@@ -179,6 +189,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     store,
     orchestrator,
     cleanup,
+    checks,
     push,
     onboarding: new Onboarding({ roots: () => config.roots }),
     ...(usage ? { usage } : {}),

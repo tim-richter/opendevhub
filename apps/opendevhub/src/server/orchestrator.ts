@@ -30,6 +30,7 @@ import type {
 import { branchChanged, scanBranches, staleSessions } from "./cleanup";
 import { CommandError, type ContainerInfo, type Containers, type ExecTarget, type PortConfig, envLabels } from "./containers";
 import { stateDir } from "./config";
+import type { CheckTarget } from "./checks";
 import { buildOverrideConfig, envIdFor, type EnvSettings, isolationBlocker, resolveEnvSettings } from "./env-config";
 import { EnvFiles } from "./env-files";
 import type { Images } from "./images";
@@ -862,6 +863,28 @@ export class Orchestrator {
       );
       return { branch };
     });
+  }
+
+  /** A checkout as checks run it: its environment (and whether it runs) and its host folder. */
+  checkTarget(id: ProjectId, directory: string): CheckTarget {
+    const project = this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const env = this.envForDirectory(project, directory);
+    const running = this.deps.store.runtime(env.id).containerState === "running";
+    return {
+      project,
+      exec: env.target,
+      ...(running
+        ? {}
+        : { unavailable: env.worktree ? "this worktree's container is not running — start it from the Worktrees tab" : "the project's container is not running" }),
+      checkout: this.checkout(project, directory),
+      isMain: directory === this.workspaceFolder(project),
+    };
+  }
+
+  /** Writes a line to the project's log. */
+  note(id: ProjectId, line: string): void {
+    this.log(id, line);
   }
 
   /** Where and how publishing would push this checkout. */

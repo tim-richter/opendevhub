@@ -5,7 +5,9 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Containers } from "../../src/server/containers";
 import { Credentials } from "../../src/server/credentials";
+import { Checks } from "../../src/server/checks";
 import { Cleanup } from "../../src/server/cleanup";
+import { FileProjectSettings } from "../../src/server/config";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import { scanRoots } from "../../src/server/discovery";
 import { EditorLauncher } from "../../src/server/editors";
@@ -57,6 +59,15 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: add a repo without a devconta
       store,
       orchestrator: orch,
       cleanup: new Cleanup({ store, containers, branches: orch }),
+      checks: new Checks({
+        target: (id, dir) => orch.checkTarget(id, dir),
+        project: (id) => store.project(id),
+        containers,
+        run: spawnRunner,
+        git: new GitOps({ containers }),
+        settings: new FileProjectSettings(root),
+        log: (id, line) => orch.note(id, line),
+      }),
       onboarding: new Onboarding({ roots }),
       push: new Push({ file: path.join(root, "push.json") }),
     });

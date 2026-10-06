@@ -71,6 +71,10 @@ describe("GitOps", () => {
     expect(await ops.currentBranch(project, repo)).toBeUndefined();
   });
 
+  it("reads the commit checked out", async () => {
+    expect(await ops.head(project, repo)).toBe(git(repo, "rev-parse", "HEAD").trim());
+  });
+
   it("knows whether the checkout is clean and whether the branch was pushed", async () => {
     expect(await ops.isClean(project, repo)).toBe(true);
     write(repo, "new.txt", "x\n");

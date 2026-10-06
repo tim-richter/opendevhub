@@ -11,6 +11,8 @@ export interface RunOptions {
   timeoutMs?: number;
   env?: Record<string, string>;
   onLine?: (line: string) => void;
+  /** Working directory; defaults to the server's. */
+  cwd?: string;
   /** Run in a new session without a controlling terminal, so ssh can't open /dev/tty to prompt. */
   detached?: boolean;
 }
@@ -25,6 +27,7 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     let settled = false;
     const carry = { out: "", err: "" };
     const child = spawn(cmd, args, { env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"],
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
       detached: opts.detached === true,
     });
     const kill = (signal: NodeJS.Signals) => {

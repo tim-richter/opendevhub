@@ -3,6 +3,7 @@ import path from "node:path";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AddProjectResult, LogEvent } from "../shared/types";
+import type { Checks } from "./checks";
 import { type Cleanup, parseCleanupItems } from "./cleanup";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
@@ -57,6 +58,7 @@ export interface DashboardDeps {
   onboarding: OnboardingPort;
   push: PushPort;
   cleanup: Pick<Cleanup, "scan" | "apply">;
+  checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;
   /** Absent when the usage ledger couldn't be opened. */
   usage?: Pick<UsageStore, "report">;
   webDir?: string;
@@ -93,7 +95,7 @@ function str(value: unknown): string | undefined {
 }
 
 export function createDashboardApp(deps: DashboardDeps): Hono {
-  const { store, orchestrator, onboarding, push, usage, cleanup } = deps;
+  const { store, orchestrator, onboarding, push, usage, cleanup, checks } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -323,6 +325,31 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
       }),
     ),
   );
+
+  // Checks: the commands a change must pass, run on one checkout.
+  const strings = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : undefined);
+  app.get("/api/projects/:id/checks", async (c) => {
+    try {
+      return c.json(await checks.view(c.req.param("id"), c.req.query("directory")));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  });
+  app.post("/api/projects/:id/checks/settings", (c) => json(c, (id, b) => checks.saveSettings(id, b.checks)));
+  app.post("/api/projects/:id/checks/run", (c) =>
+    json(c, (id, b) => {
+      const names = strings(b.names);
+      const approve = strings(b.approve);
+      return checks.start(id, str(b.directory) ?? "", { ...(names ? { names } : {}), ...(approve ? { approve } : {}) });
+    }),
+  );
+  app.get("/api/projects/:id/checks/run", (c) => {
+    try {
+      return c.json(checks.latest(c.req.param("id"), c.req.query("directory") ?? ""));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
+    }
+  });
 
   app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));
 

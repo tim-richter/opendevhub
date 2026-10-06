@@ -337,10 +337,13 @@ export class Containers {
   exec(
     target: ExecTarget,
     command: string[],
-    opts: { env?: Record<string, string>; timeoutMs?: number } = {},
+    opts: { env?: Record<string, string>; timeoutMs?: number; onLine?: (line: string) => void } = {},
   ): Promise<RunResult> {
     const args = ["exec", ...this.idArgs(target)];
     for (const [k, v] of Object.entries(opts.env ?? {})) args.push("--remote-env", `${k}=${v}`);
-    return this.run("devcontainer", [...args, ...command], { timeoutMs: opts.timeoutMs ?? EXEC_TIMEOUT_MS });
+    return this.run("devcontainer", [...args, ...command], {
+      timeoutMs: opts.timeoutMs ?? EXEC_TIMEOUT_MS,
+      ...(opts.onLine ? { onLine: opts.onLine } : {}),
+    });
   }
 }

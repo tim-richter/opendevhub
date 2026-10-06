@@ -76,6 +76,12 @@ export class GitOps {
     return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
   }
 
+  /** The commit checked out; undefined in a repository without commits. */
+  async head(p: Project, dir: string): Promise<string | undefined> {
+    const r = await this.exec(p, dir, ["rev-parse", "--verify", "-q", "HEAD"]);
+    return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
+  }
+
   /** Local branch names, e.g. to keep generated task branches free. */
   async localBranches(p: Project, dir: string): Promise<string[]> {
     return (await this.git(p, dir, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]))

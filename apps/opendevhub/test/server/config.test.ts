@@ -6,6 +6,7 @@ import {
   DEFAULT_PORT,
   configDir,
   FileForgeStore,
+  FileProjectSettings,
   loadConfig,
   loadState,
   mergeRoots,
@@ -138,5 +139,23 @@ describe("persisted environments", () => {
     };
     saveState(dir, state);
     expect(loadState(dir)).toEqual(state);
+  });
+});
+
+describe("FileProjectSettings", () => {
+  it("updates one project's entry and keeps the rest of config.json", () => {
+    saveConfig(dir, { roots: ["/r"], port: 1, projects: { "/a": { sshAgent: false }, "/b": { isolation: "isolated" } } });
+    const settings = new FileProjectSettings(dir);
+    settings.update("/a", { checks: [{ name: "t", command: "true" }] });
+    expect(settings.get("/a")).toEqual({ sshAgent: false, checks: [{ name: "t", command: "true" }] });
+    expect(loadConfig(dir)).toMatchObject({ roots: ["/r"], projects: { "/b": { isolation: "isolated" } } });
+  });
+
+  it("removes keys set to undefined and reads a missing entry as empty", () => {
+    const settings = new FileProjectSettings(dir);
+    expect(settings.get("/x")).toEqual({});
+    settings.update("/x", { checks: [], sshAgent: true });
+    settings.update("/x", { checks: undefined });
+    expect(settings.get("/x")).toEqual({ sshAgent: true });
   });
 });

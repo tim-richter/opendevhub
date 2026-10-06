@@ -10,7 +10,7 @@ import { AlreadyAnsweredError, BusyError, NotFoundError, UnavailableError } from
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
 import { StateStore } from "../../src/server/state";
-import type { Candidate, CleanupItem, CleanupPlan, CleanupResult, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
+import type { Candidate, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
 
 const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
 const added: Candidate = { path: "/src/new-app", name: "new-app", root: "/src", stack: "node" };
@@ -91,15 +91,31 @@ function setup(webDir?: string) {
     scan: vi.fn(async () => ({ scannedAt: 1, projects: [], items: [] }) as CleanupPlan),
     apply: vi.fn(async (_items: CleanupItem[]): Promise<CleanupResult> => ({ results: [], freedBytes: 0 })),
   };
-  return { store, orchestrator, onboarding, push, cleanup, app: createDashboardApp({ store, orchestrator, onboarding, push, cleanup, webDir }) };
+  const config: ChecksConfig = { checks: [], source: "none", devcontainer: [], errors: [] };
+  const run: CheckRun = { directory: "/w", dirty: false, startedAt: 1, results: [] };
+  const checks = {
+    view: vi.fn(async (_id: string, _dir?: string): Promise<ChecksView> => config),
+    latest: vi.fn((_id: string, _dir: string) => ({ run })),
+    start: vi.fn(async (_id: string, _dir: string, _opts?: { names?: string[]; approve?: string[] }) => run),
+    saveSettings: vi.fn(async (_id: string, _checks: unknown) => config),
+  };
+  return {
+    store,
+    orchestrator,
+    onboarding,
+    push,
+    cleanup,
+    checks,
+    app: createDashboardApp({ store, orchestrator, onboarding, push, cleanup, checks, webDir }),
+  };
 }
 
 describe("dashboard API", () => {
   it("serves a usage report for a day, today by default", async () => {
     const report = { total: { cost: 1, tokens: 1 }, today: { cost: 0, tokens: 0 }, day: "2026-10-01", dayTotal: { cost: 1, tokens: 1 }, projects: [], days: [] };
     const usage = { report: vi.fn((_day: string, _today: string) => report) };
-    const { store, orchestrator, onboarding, push, cleanup } = setup();
-    const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, usage });
+    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, checks, usage });
     const res = await app.request("/api/usage?day=2026-10-01");
     expect(await res.json()).toEqual(report);
     const today = usage.report.mock.calls[0][1];
@@ -554,5 +570,48 @@ describe("cleanup endpoints", () => {
     expect((await post({ items: "x" })).status).toBe(400);
     cleanup.apply.mockRejectedValueOnce(new BusyError("cleanup"));
     expect((await post({ items: [] })).status).toBe(409);
+  });
+});
+
+describe("checks endpoints", () => {
+  const post = (app: ReturnType<typeof setup>["app"], route: string, body: unknown) =>
+    app.request(`/api/projects/demo-abc123/${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("lists the checks, with a directory's run when given", async () => {
+    const { app, checks } = setup();
+    expect((await app.request("/api/projects/demo-abc123/checks")).status).toBe(200);
+    await app.request("/api/projects/demo-abc123/checks?directory=%2Fw");
+    expect(checks.view.mock.calls).toEqual([
+      ["demo-abc123", undefined],
+      ["demo-abc123", "/w"],
+    ]);
+    const latest = await app.request("/api/projects/demo-abc123/checks/run?directory=%2Fw");
+    expect(await latest.json()).toMatchObject({ run: { directory: "/w" } });
+  });
+
+  it("starts a run with only well-formed names and approvals", async () => {
+    const { app, checks } = setup();
+    expect((await post(app, "checks/run", { directory: "/w", names: ["test", 3], approve: ["docker build ."] })).status).toBe(200);
+    expect(checks.start).toHaveBeenCalledWith("demo-abc123", "/w", { names: ["test"], approve: ["docker build ."] });
+    await post(app, "checks/run", { directory: "/w" });
+    expect(checks.start).toHaveBeenLastCalledWith("demo-abc123", "/w", {});
+  });
+
+  it("maps a run already going to 409 and a bad request to 400", async () => {
+    const { app, checks } = setup();
+    checks.start.mockRejectedValueOnce(new BusyError("/w"));
+    expect((await post(app, "checks/run", { directory: "/w" })).status).toBe(409);
+    checks.saveSettings.mockRejectedValueOnce(new InvalidRequestError("checks must be a list"));
+    expect((await post(app, "checks/settings", { checks: "x" })).status).toBe(400);
+  });
+
+  it("saves or clears the project's own list", async () => {
+    const { app, checks } = setup();
+    await post(app, "checks/settings", { checks: [{ name: "t", command: "true" }] });
+    await post(app, "checks/settings", { checks: null });
+    expect(checks.saveSettings.mock.calls).toEqual([
+      ["demo-abc123", [{ name: "t", command: "true" }]],
+      ["demo-abc123", null],
+    ]);
   });
 });
