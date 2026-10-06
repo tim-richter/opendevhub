@@ -13,7 +13,7 @@ export default function Home() {
         session, answer permissions, run tasks in parallel worktrees and publish the result as a pull request.
       </p>
       <pre className="rounded-lg border bg-fd-card/70 backdrop-blur-sm px-4 py-2 text-sm">
-        <code>npx opendevhub --root ~/code</code>
+        <code>npx opendevhub</code>
       </pre>
       <div className="flex gap-3">
         <Link

@@ -6,7 +6,6 @@ import type { ForgeEntry } from "./forge";
 import { LOCAL_NODE } from "./host";
 
 export interface Config {
-  roots: string[];
   port: number;
   /** Forge per git host: configured by hand or remembered after a probe. */
   forges?: Record<string, ForgeEntry>;
@@ -162,7 +161,6 @@ export function loadConfig(dir: string): Config {
   const forges = readForges(raw.forges);
   const nodes = readNodes(raw.nodes);
   return {
-    roots: Array.isArray(raw.roots) ? raw.roots.filter((r) => typeof r === "string") : [],
     port: typeof raw.port === "number" ? raw.port : DEFAULT_PORT,
     ...(Object.keys(forges).length > 0 ? { forges } : {}),
     ...(nodes.length > 0 ? { nodes } : {}),
@@ -232,9 +230,9 @@ function expandHome(p: string): string {
   return p;
 }
 
-export function mergeRoots(existing: string[], added: string[], cwd = process.cwd()): string[] {
+export function resolveRoots(roots: string[], cwd = process.cwd()): string[] {
   const out: string[] = [];
-  for (const r of [...existing, ...added]) {
+  for (const r of roots) {
     const abs = path.resolve(cwd, expandHome(r));
     if (!out.includes(abs)) out.push(abs);
   }

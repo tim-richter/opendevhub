@@ -22,10 +22,12 @@ A local dashboard that orchestrates [opencode](https://opencode.ai) v2 agents, e
 ## Usage
 
 ```bash
-npx opendevhub --root ~/code --root ~/work   # roots and port are remembered
-npx opendevhub                               # reuse the saved roots
+npx opendevhub --root ~/code --root ~/work   # scan these directories for this run
+npx opendevhub                               # scan the current directory
 npx opendevhub --port 8080 --no-open
 ```
+
+`--root` is optional. When omitted, opendevhub scans the current directory. Use `--root` to scan other directories for this run; roots are never saved. The dashboard port is remembered.
 
 Containers keep running when opendevhub exits. The next time it starts, it reconnects to them.
 

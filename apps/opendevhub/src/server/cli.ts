@@ -12,7 +12,7 @@ import {
   nodeInUse,
   loadConfig,
   loadState,
-  mergeRoots,
+  resolveRoots,
   removeNode,
   saveConfig,
   saveState,
@@ -52,7 +52,7 @@ import { Worktrees } from "./worktrees";
 
 const USAGE = `Usage: opendevhub [--root <dir>]... [--port <n>] [--no-open]
 
-  -r, --root <dir>   Directory to scan for devcontainer projects (repeatable, saved)
+  -r, --root <dir>   Directory to scan for devcontainer projects (default: current directory; repeatable)
   -p, --port <n>     Dashboard port (default 7777, saved)
       --no-open      Do not open the browser
   -h, --help         Show this help
@@ -89,7 +89,7 @@ export function parseCli(argv: string[]): CliOptions {
   if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
     throw new Error(`invalid --port: ${values.port}`);
   }
-  return { roots: values.root ?? [], port, open: !values["no-open"], help: values.help === true };
+  return { roots: values.root ?? [process.cwd()], port, open: !values["no-open"], help: values.help === true };
 }
 
 /** The proxy's upstream for `<envId>.localhost`: a running environment's opencode, main or task. */
@@ -105,10 +105,10 @@ export function proxyTargets(
   };
 }
 
-/** Merges the command line into the saved config and saves it, keeping every other saved key (forges). */
-export function loadAndSaveStartupConfig(dir: string, opts: Pick<CliOptions, "roots" | "port">): Config {
+/** Saves the dashboard port while preserving the other settings. Scan roots are per-run. */
+export function loadAndSaveStartupConfig(dir: string, opts: Pick<CliOptions, "port">): Config {
   const saved = loadConfig(dir);
-  const config: Config = { ...saved, roots: mergeRoots(saved.roots, opts.roots), port: opts.port ?? saved.port };
+  const config: Config = { ...saved, port: opts.port ?? saved.port };
   saveConfig(dir, config);
   return config;
 }
@@ -186,14 +186,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const dir = configDir();
   const config = loadAndSaveStartupConfig(dir, opts);
-  if (config.roots.length === 0) {
-    console.error("No project roots configured yet. Run: opendevhub --root ~/code");
-    process.exitCode = 2;
-    return;
-  }
-
+  const roots = resolveRoots(opts.roots);
   const store = new StateStore({ port: config.port, persisted: loadState(dir), persist: (s) => saveState(dir, s) });
-  store.setRoots(config.roots);
+  store.setRoots(roots);
   const nodes = new Nodes({
     configDir: dir,
     controlDir: path.join(dir, "ssh"),
@@ -236,7 +231,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     ...(usageTracker ? { recordUsage: usageTracker.record } : {}),
     editors,
     clientFor,
-    roots: () => config.roots,
+    roots: () => roots,
     scan: (roots) => scanRoots(roots),
   });
   const cleanup = new Cleanup({ store, containers, branches: orchestrator });
@@ -265,7 +260,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     checks,
     push,
     nodes,
-    onboarding: new Onboarding({ roots: () => config.roots }),
+    onboarding: new Onboarding({ roots: () => roots }),
     ...(usage ? { usage } : {}),
     webDir: findWebDir(),
   });

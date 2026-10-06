@@ -14,7 +14,7 @@ import {
   FileProjectSettings,
   loadConfig,
   loadState,
-  mergeRoots,
+  resolveRoots,
   saveConfig,
   saveState,
   stateDir,
@@ -37,16 +37,16 @@ describe("configDir", () => {
 
 describe("config", () => {
   it("returns defaults when missing", () => {
-    expect(loadConfig(dir)).toEqual({ roots: [], port: DEFAULT_PORT });
+    expect(loadConfig(dir)).toEqual({ port: DEFAULT_PORT });
   });
   it("round-trips", () => {
-    saveConfig(dir, { roots: ["/a"], port: 9000 });
-    expect(loadConfig(dir)).toEqual({ roots: ["/a"], port: 9000 });
+    saveConfig(dir, { port: 9000 });
+    expect(loadConfig(dir)).toEqual({ port: 9000 });
   });
   it("backs up a corrupt file and starts fresh", () => {
     fs.writeFileSync(path.join(dir, "config.json"), "{not json");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(loadConfig(dir)).toEqual({ roots: [], port: DEFAULT_PORT });
+    expect(loadConfig(dir)).toEqual({ port: DEFAULT_PORT });
     expect(fs.existsSync(path.join(dir, "config.json.bak"))).toBe(true);
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
@@ -66,9 +66,9 @@ describe("state", () => {
   });
 });
 
-describe("mergeRoots", () => {
+describe("resolveRoots", () => {
   it("resolves, expands ~ and dedupes preserving order", () => {
-    expect(mergeRoots(["/a", "/b"], ["/b", "rel", "~/code"], "/cwd")).toEqual([
+    expect(resolveRoots(["/a", "/b", "/b", "rel", "~/code"], "/cwd")).toEqual([
       "/a",
       "/b",
       "/cwd/rel",
@@ -81,13 +81,12 @@ describe("FileForgeStore", () => {
   it("keeps forges in config.json next to the other settings", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forges-"));
     try {
-      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: ["/src"], port: 7777, forges: { "git.example.com": { kind: "forgejo" } } }));
+      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ port: 7777, forges: { "git.example.com": { kind: "forgejo" } } }));
       const store = new FileForgeStore(dir);
       expect(store.all()).toEqual({ "git.example.com": { kind: "forgejo" } });
       store.remember("gitea.example.com", { kind: "gitea" });
       const saved = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
       expect(saved).toEqual({
-        roots: ["/src"],
         port: 7777,
         forges: { "git.example.com": { kind: "forgejo" }, "gitea.example.com": { kind: "gitea" } },
       });
@@ -112,7 +111,7 @@ describe("config forges", () => {
   it("survives the CLI's load and save on start", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forges-"));
     try {
-      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: [], port: 1, forges: { h: { kind: "gitea" } } }));
+      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ port: 1, forges: { h: { kind: "gitea" } } }));
       saveConfig(dir, loadConfig(dir));
       expect(JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8")).forges).toEqual({ h: { kind: "gitea" } });
     } finally {
@@ -123,7 +122,7 @@ describe("config forges", () => {
 
 describe("config projects", () => {
   it("keeps per-project settings through the CLI's load and save", () => {
-    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: [], port: 1, projects: { "/src/demo": { isolation: "isolated" } } }));
+    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ port: 1, projects: { "/src/demo": { isolation: "isolated" } } }));
     saveConfig(dir, loadConfig(dir));
     expect(JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8")).projects).toEqual({ "/src/demo": { isolation: "isolated" } });
   });
@@ -149,11 +148,11 @@ describe("persisted environments", () => {
 
 describe("FileProjectSettings", () => {
   it("updates one project's entry and keeps the rest of config.json", () => {
-    saveConfig(dir, { roots: ["/r"], port: 1, projects: { "/a": { sshAgent: false }, "/b": { isolation: "isolated" } } });
+    saveConfig(dir, { port: 1, projects: { "/a": { sshAgent: false }, "/b": { isolation: "isolated" } } });
     const settings = new FileProjectSettings(dir);
     settings.update("/a", { checks: [{ name: "t", command: "true" }] });
     expect(settings.get("/a")).toEqual({ sshAgent: false, checks: [{ name: "t", command: "true" }] });
-    expect(loadConfig(dir)).toMatchObject({ roots: ["/r"], projects: { "/b": { isolation: "isolated" } } });
+    expect(loadConfig(dir)).toMatchObject({ projects: { "/b": { isolation: "isolated" } } });
   });
 
   it("removes keys set to undefined and reads a missing entry as empty", () => {
@@ -173,7 +172,6 @@ describe("nodes in config", () => {
       fs.writeFileSync(
         path.join(dir, "config.json"),
         JSON.stringify({
-          roots: [],
           port: 7777,
           nodes: [
             { id: "box", ssh: "tim@box", label: "Workstation" },
@@ -194,7 +192,7 @@ describe("nodes in config", () => {
   it("round-trips nodes through saveConfig", () => {
     const dir = tmp();
     try {
-      saveConfig(dir, { roots: ["/a"], port: 7777, nodes: [{ id: "box", ssh: "box" }] });
+      saveConfig(dir, { port: 7777, nodes: [{ id: "box", ssh: "box" }] });
       expect(loadConfig(dir).nodes).toEqual([{ id: "box", ssh: "box" }]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -231,7 +229,7 @@ describe("nodes in config", () => {
   });
 
   it("adds a node with an id from its label, and refuses the same destination twice", () => {
-    const base = { roots: [], port: 7777 };
+    const base = { port: 7777 };
     const { config, node } = addNode(base, { ssh: "tim@box", label: " Workstation " });
     expect(node).toEqual({ id: "workstation", ssh: "tim@box", label: "Workstation" });
     expect(config.nodes).toEqual([node]);
@@ -240,7 +238,7 @@ describe("nodes in config", () => {
   });
 
   it("removes a node by id", () => {
-    const cfg = { roots: [], port: 7777, nodes: [{ id: "a", ssh: "a" }, { id: "b", ssh: "b" }] };
+    const cfg = { port: 7777, nodes: [{ id: "a", ssh: "a" }, { id: "b", ssh: "b" }] };
     expect(removeNode(cfg, "a").nodes).toEqual([{ id: "b", ssh: "b" }]);
   });
 });

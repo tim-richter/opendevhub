@@ -28,7 +28,7 @@ function fakeConnection(node: NodeConfig, online: boolean) {
 function setup(nodes: NodeConfig[] = [], online = true) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
   dirs.push(configDir);
-  saveConfig(configDir, { roots: ["/src"], port: 7777, ...(nodes.length ? { nodes } : {}) });
+  saveConfig(configDir, { port: 7777, ...(nodes.length ? { nodes } : {}) });
   const store = { setNodes: vi.fn() };
   const connections = new Map<string, ReturnType<typeof fakeConnection>>();
   const stats = vi.fn(async () => ({ cpus: 4, memTotal: 1024, memAvailable: 512, containers: 1 }));
@@ -52,7 +52,7 @@ describe("Nodes", () => {
   it("refuses to remove a node that still runs environments", async () => {
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
     dirs.push(configDir);
-    saveConfig(configDir, { roots: [], port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
+    saveConfig(configDir, { port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
     const registry = new Nodes({
       configDir,
       controlDir: path.join(configDir, "ssh"),
@@ -73,7 +73,7 @@ describe("Nodes", () => {
   it("reports nodes coming online and going offline, once per change", async () => {
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
     dirs.push(configDir);
-    saveConfig(configDir, { roots: [], port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
+    saveConfig(configDir, { port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
     const conn = fakeConnection({ id: "box", ssh: "tim@box" }, false);
     let notify = () => {};
     const onOnline = vi.fn();
