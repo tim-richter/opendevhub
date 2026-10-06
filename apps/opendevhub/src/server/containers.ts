@@ -105,12 +105,15 @@ export interface ContainerInfo {
   envProjectId?: string;
   /** The image it was created from. */
   image?: string;
+  /** The id of the image it runs (`sha256:…`). */
+  imageId?: string;
 }
 
 export function parseInspect(json: string): ContainerInfo {
   const c = JSON.parse(json) as {
     Id: string;
     Name?: string;
+    Image?: string;
     State?: { Running?: boolean };
     Mounts?: { Type?: string; Source?: string; Destination?: string }[] | null;
     Config?: { Image?: string; Labels?: Record<string, string> | null };
@@ -131,11 +134,40 @@ export function parseInspect(json: string): ContainerInfo {
     envId: c.Config?.Labels?.[ENV_LABEL],
     envProjectId: c.Config?.Labels?.[ENV_PROJECT_LABEL],
     image: c.Config?.Image,
+    imageId: c.Image,
     binds,
   };
-  for (const k of ["envId", "envProjectId", "image"] as const) if (info[k] === undefined) delete info[k];
+  for (const k of ["envId", "envProjectId", "image", "imageId"] as const) if (info[k] === undefined) delete info[k];
   if (network) info.network = network;
   return info;
+}
+
+export interface ImageInfo {
+  id: string;
+  /** Its tags (`repo:tag`); empty for a dangling image. */
+  refs: string[];
+  bytes: number;
+  /** Creation time, ms since the epoch. */
+  created: number;
+  labels: Record<string, string>;
+}
+
+/** `docker image inspect` prints a JSON array. */
+export function parseImageInspect(json: string): ImageInfo[] {
+  const list = JSON.parse(json) as {
+    Id: string;
+    RepoTags?: string[] | null;
+    Size?: number;
+    Created?: string;
+    Config?: { Labels?: Record<string, string> | null } | null;
+  }[];
+  return list.map((i) => ({
+    id: i.Id,
+    refs: i.RepoTags ?? [],
+    bytes: i.Size ?? 0,
+    created: i.Created ? Date.parse(i.Created) : 0,
+    labels: i.Config?.Labels ?? {},
+  }));
 }
 
 /** The last `{"outcome": …}` line the devcontainer CLI printed. */
@@ -263,6 +295,24 @@ export class Containers {
   async imageExists(ref: string): Promise<boolean> {
     const r = await this.run("docker", ["image", "inspect", "--format", "{{.Id}}", ref], { timeoutMs: DOCKER_TIMEOUT_MS });
     return r.exitCode === 0;
+  }
+
+  /** Images matching any of the filters (`docker image ls --filter`), inspected. */
+  async listImages(filters: string[]): Promise<ImageInfo[]> {
+    const ids: string[] = [];
+    for (const filter of filters) {
+      const r = await this.run("docker", ["image", "ls", "-q", "--no-trunc", "--filter", filter], { timeoutMs: DOCKER_TIMEOUT_MS });
+      if (r.exitCode !== 0) throw new CommandError(`docker image ls failed: ${r.stderr.trim()}`, tailLines(r.stderr));
+      for (const id of r.stdout.split(/\s+/).filter(Boolean)) if (!ids.includes(id)) ids.push(id);
+    }
+    if (ids.length === 0) return [];
+    const r = await this.run("docker", ["image", "inspect", ...ids], { timeoutMs: 30_000 });
+    // An image removed since `ls` makes inspect exit 1 but still print the others.
+    try {
+      return parseImageInspect(r.stdout);
+    } catch {
+      throw new CommandError(`docker image inspect failed: ${r.stderr.trim()}`, tailLines(r.stderr));
+    }
   }
 
   /** Removes a container, stopping it first. One that is already gone counts as removed. */

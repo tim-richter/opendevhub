@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandError, Containers, ENV_LABEL, ENV_PROJECT_LABEL, envLabels, LABEL, parseInspect, parseUpOutput } from "../../src/server/containers";
+import { CommandError, Containers, ENV_LABEL, ENV_PROJECT_LABEL, envLabels, LABEL, parseImageInspect, parseInspect, parseUpOutput } from "../../src/server/containers";
 import type { Project } from "../../src/shared/types";
 import { fakeRunner } from "../helpers/fake-runner";
 
@@ -279,5 +279,58 @@ describe("task environment containers", () => {
     const cfg = await new Containers(run).readConfiguration(project);
     expect(cfg.forwardPorts).toEqual([3000]);
     expect(cfg.configuration).toEqual({ customizations: { opendevhub: { isolation: "isolated" } } });
+  });
+});
+describe("parseInspect imageId", () => {
+  it("reads the image id a container runs", () => {
+    const info = parseInspect(JSON.stringify({ Id: "c1", Image: "sha256:abc", Config: { Image: "vsc-x-uid", Labels: {} } }));
+    expect(info.imageId).toBe("sha256:abc");
+    expect(info.image).toBe("vsc-x-uid");
+  });
+});
+
+describe("parseImageInspect", () => {
+  it("reads id, tags, size, creation time and labels", () => {
+    const json = JSON.stringify([
+      { Id: "sha256:a", RepoTags: ["opendevhub/demo:111111111111-base"], Size: 1234, Created: "2026-10-05T10:00:00Z", Config: { Labels: { "opendevhub.base-project": "demo" } } },
+      { Id: "sha256:b", RepoTags: null, Size: 5, Created: "2026-10-05T11:00:00.123456789Z", Config: { Labels: null } },
+    ]);
+    expect(parseImageInspect(json)).toEqual([
+      { id: "sha256:a", refs: ["opendevhub/demo:111111111111-base"], bytes: 1234, created: Date.parse("2026-10-05T10:00:00Z"), labels: { "opendevhub.base-project": "demo" } },
+      { id: "sha256:b", refs: [], bytes: 5, created: Date.parse("2026-10-05T11:00:00.123Z"), labels: {} },
+    ]);
+  });
+});
+
+describe("Containers.listImages", () => {
+  it("inspects the union of each filter's images once", async () => {
+    const { run, calls } = fakeRunner(({ args }) => {
+      if (args[1] === "ls") return { stdout: args.includes("reference=opendevhub/*") ? "sha256:a\nsha256:b\n" : "sha256:b\n" };
+      return { stdout: JSON.stringify([{ Id: "sha256:a", RepoTags: [], Size: 1, Created: "2026-10-05T10:00:00Z", Config: {} }]) };
+    });
+    const list = await new Containers(run).listImages(["reference=opendevhub/*", "label=x"]);
+    expect(list.map((i) => i.id)).toEqual(["sha256:a"]);
+    expect(calls[0].args).toEqual(["image", "ls", "-q", "--no-trunc", "--filter", "reference=opendevhub/*"]);
+    expect(calls[2].args).toEqual(["image", "inspect", "sha256:a", "sha256:b"]);
+  });
+
+  it("skips inspect when nothing matches", async () => {
+    const { run, calls } = fakeRunner(() => ({ stdout: "" }));
+    expect(await new Containers(run).listImages(["label=x"])).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps what inspect printed when an image vanished in between", async () => {
+    const { run } = fakeRunner(({ args }) =>
+      args[1] === "ls"
+        ? { stdout: "sha256:a\nsha256:gone\n" }
+        : { exitCode: 1, stderr: "Error: No such image: sha256:gone", stdout: JSON.stringify([{ Id: "sha256:a", RepoTags: [], Size: 1, Created: "2026-10-05T10:00:00Z" }]) },
+    );
+    expect((await new Containers(run).listImages(["label=x"])).map((i) => i.id)).toEqual(["sha256:a"]);
+  });
+
+  it("throws when docker can't list images", async () => {
+    const { run } = fakeRunner(() => ({ exitCode: 1, stderr: "Cannot connect to the Docker daemon" }));
+    await expect(new Containers(run).listImages(["label=x"])).rejects.toThrow(/docker image ls failed: Cannot connect/);
   });
 });
