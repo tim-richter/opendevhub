@@ -134,6 +134,16 @@ describe("SshHost.dial", () => {
     stream.destroy();
   });
 
+  it("closes quietly when destroyed, like a socket, and stops ssh", async () => {
+    const { fake } = scripted("process.stdin.pipe(process.stdout)");
+    const stream = await new SshHost("box", target, fakeRunner().run, fake).dial("172.17.0.5", 4096);
+    const errors: Error[] = [];
+    stream.on("error", (e) => errors.push(e));
+    stream.destroy();
+    await once(stream, "close");
+    expect(errors).toEqual([]);
+  });
+
   it("fails the stream with ssh's message when the channel can't open", async () => {
     const { fake } = scripted(
       "process.stderr.write('channel 0: open failed: connect failed: Connection refused\\nstdio forwarding failed\\n'); process.exit(255)",

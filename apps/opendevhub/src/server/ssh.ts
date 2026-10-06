@@ -92,12 +92,7 @@ export class SshHost implements Host {
       child.stderr?.on("data", (c: Buffer) => {
         stderr = (stderr + c.toString("utf8")).slice(-2000);
       });
-      // Node accepts a { readable, writable } pair here; @types/node doesn't list that overload.
-      const pair = { readable: child.stdout!, writable: child.stdin! };
-      const stream = Duplex.from(pair as unknown as Parameters<typeof Duplex.from>[0]);
-      stream.on("close", () => {
-        if (child.exitCode === null) child.kill();
-      });
+      const stream = childStream(child);
       child.once("error", reject);
       child.once("spawn", () => resolve(stream));
       // "close" comes after stderr is drained, so the message is complete.
@@ -108,4 +103,39 @@ export class SshHost implements Host {
       });
     });
   }
+}
+
+/**
+ * A socket-like stream over a child's stdout and stdin. Unlike `Duplex.from`, a plain `destroy()`
+ * closes it without an AbortError, as on a `net.Socket`, and stops the child.
+ */
+function childStream(child: ChildProcess): Duplex {
+  const stdin = child.stdin!;
+  const stdout = child.stdout!;
+  // ssh's exit is reported through "close"; a write after it would raise EPIPE here.
+  stdin.on("error", () => {});
+  stdout.on("error", () => {});
+  const stream = new Duplex({
+    allowHalfOpen: true,
+    read() {
+      stdout.resume();
+    },
+    write(chunk, encoding, callback) {
+      stdin.write(chunk, encoding, () => callback());
+    },
+    final(callback) {
+      stdin.end(() => callback());
+    },
+    destroy(err, callback) {
+      stdout.destroy();
+      stdin.destroy();
+      if (child.exitCode === null) child.kill();
+      callback(err);
+    },
+  });
+  stdout.on("data", (chunk: Buffer) => {
+    if (!stream.push(chunk)) stdout.pause();
+  });
+  stdout.on("end", () => stream.push(null));
+  return stream;
 }
