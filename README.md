@@ -170,12 +170,23 @@ Notifications are enabled per browser and address: opening the dashboard on anot
 
 ## Remote nodes (preview)
 
-Other machines can join as nodes, reached over ssh. Tasks can't be placed on them yet; for now
-the Nodes page shows whether each one is reachable and ready, and how much CPU and memory it
-has free.
+Other machines can run task environments, reached over ssh. Add one on the Nodes page, or with
+`opendevhub nodes add tim@workstation --label Workstation` (then restart opendevhub). The Nodes
+page shows whether each node is reachable and ready, and how much CPU and memory it has free.
 
-Add one on the Nodes page, or with `opendevhub nodes add tim@workstation --label Workstation`
-(then restart opendevhub). A node needs:
+To run a task there, pick the node in the New task form. It gets a new worktree with its own
+container on that node: opendevhub pushes the base branch (the one you choose, or the main
+checkout's current branch) into a repository it keeps under `~/.opendevhub/repos` on the node,
+creates the worktree there, and starts the container with the node's Docker. Uncommitted changes
+in your main checkout stay behind.
+
+Sessions, permissions, forwarded ports, review, commit and Update from base work as for local
+tasks. **Bring home** (in the review's Git menu) fetches the branch into this machine's repository;
+Merge into base and Publish do that first. Removing the task deletes its worktree and branch on the
+node, so bring the branch home first to keep its commits. Checks and Open in editor aren't
+available for tasks on other nodes yet.
+
+A node needs:
 
 - Docker, the devcontainer CLI and git 2.48 or newer, on the PATH of a **non-interactive** ssh
   shell. Tools installed through nvm or a login profile often aren't: check with
@@ -183,9 +194,11 @@ Add one on the Nodes page, or with `opendevhub nodes add tim@workstation --label
   `/usr/local/bin` or set PATH in `~/.ssh/environment` (with `PermitUserEnvironment yes`).
 - An ssh key that logs in without a prompt, and a known host key: run `ssh tim@workstation` once.
 - `AllowTcpForwarding yes` in its sshd config (the default).
+- A Linux Docker engine: containers are reached at their IP from the node itself.
 
 opendevhub keeps one ssh connection per node (a ControlMaster under
-`~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Nothing is
+`~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Meanwhile its tasks show
+as offline. Containers keep running there and are picked up again when the node is back. Nothing is
 installed on the node and nothing listens there besides sshd.
 
 ## Development
