@@ -1,4 +1,4 @@
-import { BellIcon, CircleDollarSignIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { BellIcon, CircleDollarSignIcon, EraserIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -171,6 +171,9 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
               badge={snapshot.usage && <span className="text-xs text-muted-foreground tabular-nums">{formatCost(snapshot.usage.today.cost)}</span>}
             >
               <CircleDollarSignIcon /> Usage
+            </NavItem>
+            <NavItem to="/cleanup">
+              <EraserIcon /> Cleanup
             </NavItem>
           </SidebarMenu>
         </SidebarGroup>

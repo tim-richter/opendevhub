@@ -9,6 +9,7 @@ import { ProjectOverview } from "./pages/ProjectOverview";
 import { ProjectReview } from "./pages/ProjectReview";
 import { ProjectTask } from "./pages/ProjectTask";
 import { SessionsPage } from "./pages/SessionsPage";
+import { CleanupPage } from "./pages/CleanupPage";
 import { UsagePage } from "./pages/UsagePage";
 
 const checkoutTabs = (
@@ -28,6 +29,7 @@ export function App() {
         <Route index element={<Overview />} />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="usage" element={<UsagePage />} />
+        <Route path="cleanup" element={<CleanupPage />} />
         <Route path="p/:projectId" element={<ProjectLayout />}>
           <Route index element={<ProjectOverview />} />
           <Route path="t/:task" element={<ProjectTask />} />
