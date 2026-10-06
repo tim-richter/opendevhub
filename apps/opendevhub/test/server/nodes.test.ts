@@ -49,6 +49,27 @@ function setup(nodes: NodeConfig[] = [], online = true) {
 }
 
 describe("Nodes", () => {
+  it("refuses to remove a node that still runs environments", async () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
+    dirs.push(configDir);
+    saveConfig(configDir, { roots: [], port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
+    const registry = new Nodes({
+      configDir,
+      controlDir: path.join(configDir, "ssh"),
+      store: { setNodes: vi.fn() },
+      local: localHost(fakeRunner().run),
+      connect: (node) => fakeConnection(node, true),
+      stats: async () => undefined,
+      statsIntervalMs: 1000,
+      environmentsOn: (id) => (id === "box" ? 2 : 0),
+    });
+    registry.start();
+    await expect(registry.remove("box")).rejects.toThrow("node box still runs 2 task environments; remove them first");
+    await expect(registry.remove("box")).rejects.toBeInstanceOf(InvalidNodeError);
+    expect(loadConfig(configDir).nodes).toEqual([{ id: "box", ssh: "tim@box" }]);
+    await registry.close();
+  });
+
   it("reports nodes coming online and going offline, once per change", async () => {
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
     dirs.push(configDir);

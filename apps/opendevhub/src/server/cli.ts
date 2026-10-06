@@ -9,6 +9,7 @@ import {
   FileProjectSettings,
   addNode,
   configDir,
+  nodeInUse,
   loadConfig,
   loadState,
   mergeRoots,
@@ -143,6 +144,8 @@ export function runNodesCommand(argv: string[], dir: string, out: { log(s: strin
     if (sub === "remove" && rest.length === 1) {
       const cfg = loadConfig(dir);
       if (!cfg.nodes?.some((n) => n.id === rest[0])) throw new Error(`no node ${rest[0]}`);
+      const environments = Object.values(loadState(dir).environments ?? {}).filter((e) => e.node === rest[0]).length;
+      if (environments > 0) throw new Error(nodeInUse(rest[0], environments));
       saveConfig(dir, removeNode(cfg, rest[0]));
       out.log(`removed node ${rest[0]}`);
       return 0;
@@ -195,6 +198,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     configDir: dir,
     controlDir: path.join(dir, "ssh"),
     store,
+    environmentsOn: (id) => store.projects().flatMap((p) => store.environments(p.id)).filter((e) => e.node === id).length,
     onOnline: (id) => void orchestrator.nodeOnline(id).catch(() => {}),
     onOffline: (id) => void orchestrator.nodeOffline(id).catch(() => {}),
   });

@@ -553,11 +553,12 @@ export class Orchestrator {
     return { outcome: "removed" };
   }
 
-  /** Current worktree paths, or undefined when git can't list them. */
+  /** Current worktree paths, here and on other nodes, or undefined when git can't list them. */
   private worktreePaths(p: Project, ws: string): Promise<string[] | undefined> {
+    const remote = this.deps.store.environments(p.id).flatMap((e) => (e.node ? [e.worktree.path] : []));
     return this.deps.worktrees
       .list(p, ws, this.deps.store.runtime(p.id).worktreeRoot)
-      .then((list) => list.map((w) => w.path))
+      .then((list) => [...list.map((w) => w.path), ...remote])
       .catch(() => undefined);
   }
 

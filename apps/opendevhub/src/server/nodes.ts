@@ -1,5 +1,5 @@
 import type { NodeId, NodeStats, NodeView } from "../shared/types";
-import { InvalidNodeError, type NodeConfig, addNode, loadConfig, removeNode, saveConfig } from "./config";
+import { InvalidNodeError, type NodeConfig, addNode, loadConfig, nodeInUse, removeNode, saveConfig } from "./config";
 import type { Runner } from "./exec";
 import { type Host, LOCAL_NODE, localHost } from "./host";
 import { NodeConnection } from "./node-connection";
@@ -28,6 +28,8 @@ export interface NodesOptions {
   connect?: (node: NodeConfig, onChange: () => void) => NodeConnectionPort;
   stats?: (run: Runner) => Promise<NodeStats | undefined>;
   statsIntervalMs?: number;
+  /** How many task environments run on a node; one that has any can't be removed. */
+  environmentsOn?: (id: NodeId) => number;
   /** A node became online: called once per transition. */
   onOnline?: (id: NodeId) => void;
   /** A node stopped being online, or an online node was removed. */
@@ -92,6 +94,8 @@ export class Nodes {
   async remove(id: NodeId): Promise<void> {
     const conn = this.connections.get(id);
     if (!conn) throw new NotFoundError(`no node ${id}`);
+    const environments = this.opts.environmentsOn?.(id) ?? 0;
+    if (environments > 0) throw new InvalidNodeError(nodeInUse(id, environments));
     saveConfig(this.opts.configDir, removeNode(loadConfig(this.opts.configDir), id));
     this.connections.delete(id);
     this.stats.delete(id);

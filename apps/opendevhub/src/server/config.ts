@@ -146,6 +146,13 @@ export function addNode(cfg: Config, input: { ssh: string; label?: string }): { 
   return { config: { ...cfg, nodes: [...nodes, node] }, node };
 }
 
+/** Why a node can't be removed yet: its environments would be stranded. */
+export function nodeInUse(id: NodeId, environments: number): string {
+  return environments === 1
+    ? `node ${id} still runs 1 task environment; remove it first`
+    : `node ${id} still runs ${environments} task environments; remove them first`;
+}
+
 export function removeNode(cfg: Config, id: NodeId): Config {
   return { ...cfg, nodes: (cfg.nodes ?? []).filter((n) => n.id !== id) };
 }

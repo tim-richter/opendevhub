@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { loadAndSaveStartupConfig, parseCli, proxyTargets, runNodesCommand } from "../../src/server/cli";
 import { StateStore } from "../../src/server/state";
-import { loadConfig, saveConfig } from "../../src/server/config";
+import { loadConfig, saveConfig, saveState } from "../../src/server/config";
 
 describe("parseCli", () => {
   it("parses repeated roots, port and --no-open", () => {
@@ -50,6 +50,21 @@ describe("proxyTargets", () => {
   });
 });
 describe("runNodesCommand", () => {
+  it("won't remove a node that still runs task environments", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-nodes-"));
+    try {
+      saveConfig(dir, { roots: [], port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
+      const worktree = { path: "/workspaces/demo.worktrees/fix", hostPath: "/home/tim/x/fix", branch: "fix" };
+      saveState(dir, { projects: {}, environments: { "demo-fix-1a2b": { projectId: "demo", worktree, node: "box" } } });
+      const err: string[] = [];
+      expect(runNodesCommand(["remove", "box"], dir, { log: () => {}, error: (s) => err.push(s) })).toBe(2);
+      expect(err).toEqual(["node box still runs 1 task environment; remove it first"]);
+      expect(loadConfig(dir).nodes).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   function run(dir: string, ...argv: string[]) {
     const out: string[] = [];
     const err: string[] = [];

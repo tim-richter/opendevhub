@@ -2194,6 +2194,13 @@ describe("git and ssh credentials", () => {
 });
 
 describe("environments on another node", () => {
+  it("keep their sessions out of cleanup's removed-worktree list", async () => {
+    const { orch, client, clock } = await withRemoteRunning();
+    client.sessions.mockResolvedValue([{ id: "ses_r", time: { created: 1, updated: clock.now }, location: { directory: remoteFix.path } }]);
+    const scan = await orch.cleanupSessionScan(project.id);
+    expect(scan.items.filter((i) => i.sessionId === "ses_r")).toEqual([]);
+  });
+
   it("review and commit with git in their own container", async () => {
     const { orch, box } = await withRemoteRunning();
     const data = await orch.review(project.id, remoteFix.path);
