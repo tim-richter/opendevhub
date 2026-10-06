@@ -41,7 +41,7 @@ import { splitTitleBody } from "./forge";
 import { newTaskId } from "./ids";
 import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "./tasks";
 import type { GitOps } from "./git";
-import { diffMode, PATCH_BUDGET_BYTES, resolveBase, toReviewFiles } from "./review";
+import { diffMode, NO_LIMITS, resolveBase, toReviewFiles } from "./review";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import { type HostPort, type Network, type Route, type RouteContainer, directRoute } from "./network";
@@ -791,7 +791,7 @@ export class Orchestrator {
       git.isClean(project, ws),
     ]);
     const wanted = opts.file === undefined ? raw : raw.filter((f) => f.file === opts.file);
-    const { files, truncated } = toReviewFiles(wanted, opts.file === undefined ? PATCH_BUDGET_BYTES : Number.POSITIVE_INFINITY);
+    const { files, truncated } = toReviewFiles(wanted, opts.file === undefined ? {} : NO_LIMITS);
     return {
       directory,
       ...(branch ? { branch } : {}),

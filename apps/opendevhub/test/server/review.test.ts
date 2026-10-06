@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RawFileDiff } from "../../src/server/opencode/client";
-import { diffMode, isBinaryPatch, resolveBase, toReviewFiles } from "../../src/server/review";
+import { diffMode, isBinaryPatch, NO_LIMITS, resolveBase, toReviewFiles } from "../../src/server/review";
 
 const diff = (file: string, patch: string, over: Partial<RawFileDiff> = {}): RawFileDiff => ({
   file,
@@ -39,7 +39,7 @@ describe("diffMode", () => {
 
 describe("toReviewFiles", () => {
   it("keeps patches within the budget and lists the rest with stats only", () => {
-    const out = toReviewFiles([diff("a", "x".repeat(60)), diff("b", "y".repeat(60)), diff("c", "z".repeat(30))], 100);
+    const out = toReviewFiles([diff("a", "x".repeat(60)), diff("b", "y".repeat(60)), diff("c", "z".repeat(30))], { budget: 100 });
     expect(out.truncated).toBe(true);
     expect(out.files.map((f) => [f.file, f.patch?.length])).toEqual([
       ["a", 60],
@@ -55,5 +55,27 @@ describe("toReviewFiles", () => {
     expect(isBinaryPatch("@@ -1 +1 @@\n-a\n+b\n")).toBe(false);
     const out = toReviewFiles([diff("logo.png", "Binary files a/logo.png and b/logo.png differ", { status: "added" })]);
     expect(out).toEqual({ files: [{ file: "logo.png", status: "added", additions: 1, deletions: 0, binary: true }], truncated: false });
+  });
+
+  it("leaves out the patch of a large diff, by changed lines or by size, without spending budget on it", () => {
+    const out = toReviewFiles(
+      [
+        diff("lines", "x", { additions: 300, deletions: 101 }),
+        diff("bytes", "y".repeat(50)),
+        diff("small", "z".repeat(40), { additions: 300, deletions: 100 }),
+      ],
+      { budget: 100, fileBytes: 49 },
+    );
+    expect(out.truncated).toBe(false);
+    expect(out.files).toEqual([
+      { file: "lines", status: "modified", additions: 300, deletions: 101, large: true },
+      { file: "bytes", status: "modified", additions: 1, deletions: 0, large: true },
+      { file: "small", status: "modified", additions: 300, deletions: 100, patch: "z".repeat(40) },
+    ]);
+  });
+
+  it("keeps any patch when there are no limits, as for a single file asked for by name", () => {
+    const out = toReviewFiles([diff("lock", "y".repeat(500), { additions: 900 })], NO_LIMITS);
+    expect(out.files[0].patch).toHaveLength(500);
   });
 });

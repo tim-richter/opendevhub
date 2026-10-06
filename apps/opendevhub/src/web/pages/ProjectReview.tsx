@@ -56,7 +56,6 @@ import {
   diffKey,
   type DiffView,
   draftKey,
-  isLarge,
   linesLabel,
   type LineAnchor,
   newId,
@@ -660,7 +659,7 @@ function FileDiff(props: {
   onDelete: (id: string) => void;
 }) {
   const { file } = props;
-  const [collapsed, setCollapsed] = useState(isLarge(file));
+  const [collapsed, setCollapsed] = useState(false);
   const [patch, setPatch] = useState(file.patch);
   const [loading, setLoading] = useState(false);
   // @pierre/diffs wants stable callbacks and annotations; these read the latest props.
@@ -705,6 +704,21 @@ function FileDiff(props: {
     </button>
   ));
 
+  // A collapsed diff shows only its header: @pierre/diffs parses and highlights the whole patch even when
+  // collapsed, which for a lockfile or a generated spec blocks the page for seconds.
+  if (patch !== undefined && !file.binary && collapsed) {
+    return (
+      <Card className={cn("gap-0 overflow-hidden py-0", diffFont)} id={props.id}>
+        <header className="flex items-center gap-2 bg-muted/50 px-3 py-1.5">
+          {toggle()}
+          <span className="min-w-0 truncate font-mono text-sm">{file.file}</span>
+          <span className="ml-auto font-mono text-xs whitespace-nowrap">
+            <span className="text-ok">+{file.additions}</span> <span className="text-destructive">−{file.deletions}</span>
+          </span>
+        </header>
+      </Card>
+    );
+  }
   if (patch !== undefined && !file.binary) {
     return (
       <Card className={cn("overflow-hidden py-0", diffFont)} id={props.id}>
@@ -713,7 +727,6 @@ function FileDiff(props: {
           name={file.file}
           split={props.view.split}
           fullFile={props.view.fullFile}
-          collapsed={collapsed}
           onComment={onComment}
           annotations={annotations}
           selectedLines={selectedLines}
@@ -736,7 +749,8 @@ function FileDiff(props: {
       ) : loading ? (
         <DiffLinesSkeleton />
       ) : (
-        <p className="px-3 py-2.5">
+        <p className="flex items-center gap-3 px-3 py-2.5">
+          {file.large && <span className="text-sm text-muted-foreground">Large diff, not loaded with the others.</span>}
           <Button
             variant="outline"
             size="sm"

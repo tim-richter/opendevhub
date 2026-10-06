@@ -18,7 +18,6 @@ import {
   diffKey,
   directoryOf,
   draftKey,
-  isLarge,
   parsePatch,
   readComments,
   readDiffView,
@@ -196,11 +195,6 @@ describe("targets", () => {
     expect(directoryOf(view, "")).toBe("/workspaces/demo");
     expect(directoryOf(view, "feature-x")).toBe("/workspaces/demo.worktrees/feature-x");
     expect(directoryOf(view, "nope")).toBeUndefined();
-  });
-
-  it("collapses files over 400 changed lines", () => {
-    expect(isLarge({ file: "a", status: "modified", additions: 300, deletions: 101 })).toBe(true);
-    expect(isLarge({ file: "a", status: "modified", additions: 300, deletions: 100 })).toBe(false);
   });
 
   it("keys a file's diff by its content, so a refresh with new content re-renders it", () => {

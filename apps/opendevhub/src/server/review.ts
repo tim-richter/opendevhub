@@ -29,14 +29,31 @@ export function isBinaryPatch(patch: string): boolean {
   return /^Binary files .* differ$/m.test(patch) || patch.includes("GIT binary patch");
 }
 
-/** Keeps patches within `budget` bytes in order; files that don't fit (and binaries) are listed with stats only. */
-export function toReviewFiles(raw: RawFileDiff[], budget = PATCH_BUDGET_BYTES): { files: ReviewFile[]; truncated: boolean } {
+export interface PatchLimits {
+  /** Bytes of patches in one response. */
+  budget: number;
+  /** A file changing more lines than this is large. */
+  fileLines: number;
+  /** A patch bigger than this is large; opencode's patches hold the whole file, so a small change to a lockfile is big. */
+  fileBytes: number;
+}
+
+export const OVERVIEW_LIMITS: PatchLimits = { budget: PATCH_BUDGET_BYTES, fileLines: 400, fileBytes: 256 * 1024 };
+export const NO_LIMITS: PatchLimits = { budget: Infinity, fileLines: Infinity, fileBytes: Infinity };
+
+/**
+ * Keeps patches within the budget in order; files that don't fit, large ones (marked) and binaries are listed
+ * with stats only, for the review to load one by one.
+ */
+export function toReviewFiles(raw: RawFileDiff[], limits: Partial<PatchLimits> = {}): { files: ReviewFile[]; truncated: boolean } {
+  const { budget, fileLines, fileBytes } = { ...OVERVIEW_LIMITS, ...limits };
   let used = 0;
   let truncated = false;
   const files = raw.map(({ file, status, additions, deletions, patch }): ReviewFile => {
     const stats = { file, status, additions, deletions };
     if (isBinaryPatch(patch)) return { ...stats, binary: true };
     const bytes = Buffer.byteLength(patch);
+    if (additions + deletions > fileLines || bytes > fileBytes) return { ...stats, large: true };
     if (used + bytes > budget) {
       truncated = true;
       return stats;

@@ -60,7 +60,7 @@ the host and the container and survives restarts. This is a small change to `wor
 worktree and session rows.
 
 - On the left, a file list with status and +/−. On the right, a unified diff with line numbers.
-- Files over 400 changed lines start collapsed, and binary files just say "binary".
+- Large diffs (over 400 changed lines, or a patch over 256 KB, since opencode's patches hold the whole file) are left out of the review response and loaded one by one with "Load diff"; binary files just say "binary".
 - The header shows the target, the base (with a picker) and ahead/behind counts.
 - No syntax highlighting in the first version.
 

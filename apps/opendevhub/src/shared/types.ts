@@ -169,9 +169,11 @@ export interface ReviewFile {
   status: "added" | "deleted" | "modified";
   additions: number;
   deletions: number;
-  /** Missing when the response ran out of patch budget (load it with `?file=`) or the file is binary. */
+  /** Missing when the response ran out of patch budget, the diff is large (load it with `?file=`) or the file is binary. */
   patch?: string;
   binary?: boolean;
+  /** Too big to load with the others: many changed lines or a big patch. */
+  large?: boolean;
 }
 
 export interface ReviewData {

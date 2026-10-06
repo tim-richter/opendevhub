@@ -229,10 +229,6 @@ export function writeComments(
   }
 }
 
-export function isLarge(f: ReviewFile): boolean {
-  return f.additions + f.deletions > 400;
-}
-
 /** The route target for a checkout: "" for the main checkout, the worktree's folder name otherwise. */
 export function targetOf(view: ProjectView, directory: string): string | undefined {
   if (directory === workspaceFolderOf(view)) return "";
