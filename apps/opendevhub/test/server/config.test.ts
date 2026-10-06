@@ -4,6 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PORT,
+  InvalidNodeError,
+  addNode,
+  nodeIdFor,
+  removeNode,
+  validateSshDestination,
   configDir,
   FileForgeStore,
   FileProjectSettings,
@@ -157,5 +162,85 @@ describe("FileProjectSettings", () => {
     settings.update("/x", { checks: [], sshAgent: true });
     settings.update("/x", { checks: undefined });
     expect(settings.get("/x")).toEqual({ sshAgent: true });
+  });
+});
+describe("nodes in config", () => {
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "odh-nodes-"));
+
+  it("loads valid nodes and drops invalid ones", () => {
+    const dir = tmp();
+    try {
+      fs.writeFileSync(
+        path.join(dir, "config.json"),
+        JSON.stringify({
+          roots: [],
+          port: 7777,
+          nodes: [
+            { id: "box", ssh: "tim@box", label: "Workstation" },
+            { id: "local", ssh: "tim@other" },
+            { id: "Bad_ID", ssh: "tim@x" },
+            { id: "evil", ssh: "-oProxyCommand=touch /tmp/pwned" },
+            { id: "box", ssh: "tim@dupe" },
+            "junk",
+          ],
+        }),
+      );
+      expect(loadConfig(dir).nodes).toEqual([{ id: "box", ssh: "tim@box", label: "Workstation" }]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips nodes through saveConfig", () => {
+    const dir = tmp();
+    try {
+      saveConfig(dir, { roots: ["/a"], port: 7777, nodes: [{ id: "box", ssh: "box" }] });
+      expect(loadConfig(dir).nodes).toEqual([{ id: "box", ssh: "box" }]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["-oProxyCommand=touch /tmp/x"],
+    ["-p"],
+    ["tim@box extra"],
+    ["tim@box\n-oFoo=bar"],
+    [""],
+    ["   "],
+  ])("rejects the ssh destination %j", (dest) => {
+    expect(() => validateSshDestination(dest)).toThrow(InvalidNodeError);
+  });
+
+  it("accepts and trims usual destinations", () => {
+    expect(validateSshDestination(" tim@box.lan ")).toBe("tim@box.lan");
+    expect(validateSshDestination("build-1")).toBe("build-1");
+    expect(validateSshDestination("tim@[fe80::1]")).toBe("tim@[fe80::1]");
+  });
+
+  it.each([
+    ["tim@box.lan", [], "box-lan"],
+    ["My Box", [], "my-box"],
+    ["box", ["box"], "box-2"],
+    ["box", ["box", "box-2"], "box-3"],
+    ["local", [], "local-2"],
+    ["@@@", [], "node"],
+    ["tim@host:2222", [], "host"],
+  ])("nodeIdFor(%j, %j) = %s", (name, taken, id) => {
+    expect(nodeIdFor(name, taken)).toBe(id);
+  });
+
+  it("adds a node with an id from its label, and refuses the same destination twice", () => {
+    const base = { roots: [], port: 7777 };
+    const { config, node } = addNode(base, { ssh: "tim@box", label: " Workstation " });
+    expect(node).toEqual({ id: "workstation", ssh: "tim@box", label: "Workstation" });
+    expect(config.nodes).toEqual([node]);
+    expect(() => addNode(config, { ssh: "tim@box" })).toThrow(/already a node/);
+    expect(addNode(config, { ssh: "tim@other" }).node).toEqual({ id: "other", ssh: "tim@other" });
+  });
+
+  it("removes a node by id", () => {
+    const cfg = { roots: [], port: 7777, nodes: [{ id: "a", ssh: "a" }, { id: "b", ssh: "b" }] };
+    expect(removeNode(cfg, "a").nodes).toEqual([{ id: "b", ssh: "b" }]);
   });
 });

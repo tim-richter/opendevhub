@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { EnvId, EnvWorktree, ForgeKind, ProjectId } from "../shared/types";
+import type { EnvId, EnvWorktree, ForgeKind, NodeId, ProjectId } from "../shared/types";
 import type { ForgeEntry } from "./forge";
+import { LOCAL_NODE } from "./host";
 
 export interface Config {
   roots: string[];
@@ -11,6 +12,8 @@ export interface Config {
   forges?: Record<string, ForgeEntry>;
   /** Per-project settings keyed by the project's path (`{ isolation, keyFiles, sshAgent }`), validated where used. */
   projects?: Record<string, unknown>;
+  /** Machines tasks can run on, besides this one. */
+  nodes?: NodeConfig[];
 }
 
 export interface PersistedRuntime {
@@ -85,13 +88,75 @@ function readForges(raw: unknown): Record<string, ForgeEntry> {
   return out;
 }
 
+/** A machine reached over ssh. */
+export interface NodeConfig {
+  id: NodeId;
+  /** As the user's ssh config knows it: `host`, `user@host` or an alias. */
+  ssh: string;
+  label?: string;
+}
+
+export class InvalidNodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidNodeError";
+  }
+}
+
+const NODE_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+/** No whitespace, and no leading `-`: ssh would read that as an option (`-oProxyCommand=…`). */
+const SSH_DEST = /^[^-\s]\S*$/;
+
+export function validateSshDestination(dest: string): string {
+  const d = dest.trim();
+  if (!SSH_DEST.test(d)) throw new InvalidNodeError(`invalid ssh destination: ${JSON.stringify(dest)}`);
+  return d;
+}
+
+/** A node id from a label or destination: `tim@box.lan` → `box-lan`; taken ids and `local` get a suffix. */
+export function nodeIdFor(name: string, taken: string[]): NodeId {
+  const host = name.replace(/^.*@/, "").replace(/:\d+$/, "");
+  const base =
+    host.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50).replace(/-+$/, "") || "node";
+  let id = base;
+  for (let n = 2; id === LOCAL_NODE || taken.includes(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
+function readNodes(raw: unknown): NodeConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: NodeConfig[] = [];
+  for (const value of raw) {
+    const n = value as { id?: unknown; ssh?: unknown; label?: unknown };
+    if (!n || typeof n !== "object" || typeof n.id !== "string" || typeof n.ssh !== "string") continue;
+    if (!NODE_ID.test(n.id) || n.id === LOCAL_NODE || out.some((o) => o.id === n.id) || !SSH_DEST.test(n.ssh)) continue;
+    out.push({ id: n.id, ssh: n.ssh, ...(typeof n.label === "string" && n.label ? { label: n.label } : {}) });
+  }
+  return out;
+}
+
+export function addNode(cfg: Config, input: { ssh: string; label?: string }): { config: Config; node: NodeConfig } {
+  const ssh = validateSshDestination(input.ssh);
+  const label = input.label?.trim() || undefined;
+  const nodes = cfg.nodes ?? [];
+  if (nodes.some((n) => n.ssh === ssh)) throw new InvalidNodeError(`${ssh} is already a node`);
+  const node: NodeConfig = { id: nodeIdFor(label ?? ssh, nodes.map((n) => n.id)), ssh, ...(label ? { label } : {}) };
+  return { config: { ...cfg, nodes: [...nodes, node] }, node };
+}
+
+export function removeNode(cfg: Config, id: NodeId): Config {
+  return { ...cfg, nodes: (cfg.nodes ?? []).filter((n) => n.id !== id) };
+}
+
 export function loadConfig(dir: string): Config {
   const raw = readJson<Partial<Config>>(path.join(dir, "config.json"), {});
   const forges = readForges(raw.forges);
+  const nodes = readNodes(raw.nodes);
   return {
     roots: Array.isArray(raw.roots) ? raw.roots.filter((r) => typeof r === "string") : [],
     port: typeof raw.port === "number" ? raw.port : DEFAULT_PORT,
     ...(Object.keys(forges).length > 0 ? { forges } : {}),
+    ...(nodes.length > 0 ? { nodes } : {}),
     ...(raw.projects && typeof raw.projects === "object" && !Array.isArray(raw.projects) ? { projects: raw.projects } : {}),
   };
 }
