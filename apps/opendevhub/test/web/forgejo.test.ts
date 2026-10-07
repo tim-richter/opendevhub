@@ -7,7 +7,8 @@ import {
   forgejoFilePatches,
   forgejoReviewComments,
   forgejoReviewFiles,
-  forgejoStackRows,
+  forgejoReviewers,
+  forgejoStackGraph,
   matchesForgejoCheckout,
   matchesForgejoPull,
   readForgejoPreference,
@@ -239,9 +240,9 @@ describe("a pull request's stack", () => {
     head: "h",
   });
 
-  it("lists what it builds on, itself, then what builds on it", () => {
-    expect(forgejoStackRows(details)).toEqual([]);
-    const rows = forgejoStackRows({
+  it("draws what builds on it above, itself, then what it builds on", () => {
+    expect(forgejoStackGraph(details).rows).toEqual([]);
+    const { rows, lanes } = forgejoStackGraph({
       ...details,
       stack: {
         ancestors: [entry(1), entry(2)],
@@ -251,13 +252,73 @@ describe("a pull request's stack", () => {
         ],
       },
     });
-    expect(rows.map((r) => [r.number, r.depth, r.current])).toEqual([
-      [1, 0, false],
-      [2, 1, false],
-      [7, 2, true],
-      [8, 3, false],
-      [9, 4, false],
-      [10, 3, false],
+    expect(lanes).toBe(2);
+    expect(
+      rows.map((r) => [
+        r.number,
+        r.lane,
+        r.current,
+        r.continues,
+        r.merges,
+        r.through,
+      ])
+    ).toEqual([
+      [10, 1, false, false, [], []],
+      [9, 0, false, false, [], [1]],
+      [8, 0, false, true, [], [1]],
+      [7, 0, true, true, [1], []],
+      [2, 0, false, true, [], []],
+      [1, 0, false, true, [], []],
+    ]);
+  });
+
+  it("keeps a linear stack in one column", () => {
+    const { rows, lanes } = forgejoStackGraph({
+      ...details,
+      stack: {
+        ancestors: [entry(1)],
+        descendants: [{ ...entry(8), children: [] }],
+      },
+    });
+    expect(lanes).toBe(1);
+    expect(rows.map((r) => r.number)).toEqual([8, 7, 1]);
+  });
+});
+
+describe("forgejoReviewers", () => {
+  const review = (
+    author: string,
+    state: string,
+    submittedAt: string,
+    dismissed = false
+  ) => ({
+    author,
+    body: "",
+    commentsCount: 0,
+    commit: "c",
+    dismissed,
+    id: submittedAt.length + author.length,
+    stale: false,
+    state,
+    submittedAt,
+  });
+
+  it("keeps each reviewer's latest review, replaced by an open review request", () => {
+    expect(
+      forgejoReviewers(
+        [
+          review("bob", "APPROVED", "2026-01-03"),
+          review("alice", "REQUEST_CHANGES", "2026-01-01"),
+          review("alice", "APPROVED", "2026-01-02"),
+          review("dan", "APPROVED", "2026-01-04", true),
+          review("erin", "PENDING", "2026-01-05"),
+        ],
+        ["bob", "carol"]
+      )
+    ).toEqual([
+      { name: "alice", state: "APPROVED" },
+      { name: "bob", state: "REQUEST_REVIEW" },
+      { name: "carol", state: "REQUEST_REVIEW" },
     ]);
   });
 });

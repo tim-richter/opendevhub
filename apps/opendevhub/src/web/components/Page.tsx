@@ -82,6 +82,23 @@ export const Section = (props: {
   </Card>
 );
 
+/** A smaller titled block inside a shared card, such as one part of a sidebar. */
+export const PanelSection = (props: {
+  title: ReactNode;
+  hint?: ReactNode;
+  children: ReactNode;
+}) => (
+  <section className="flex flex-col pb-2">
+    <div className="flex items-baseline gap-3 px-4 pt-3 pb-1.5">
+      <h2 className="text-sm font-semibold">{props.title}</h2>
+      {props.hint && (
+        <span className="text-muted-foreground text-xs">{props.hint}</span>
+      )}
+    </div>
+    {props.children}
+  </section>
+);
+
 /** A single-choice filter drawn as a segmented control. */
 export const Segmented = <T extends string>(props: {
   value: T;

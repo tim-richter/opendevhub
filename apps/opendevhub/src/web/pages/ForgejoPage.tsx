@@ -301,18 +301,29 @@ const PullDiff = ({
                 <Chip key={l}>{l}</Chip>
               ))}
             </div>
-            <ForgejoStack details={details.data} search={search.toString()} />
-            <Section title="Description">
-              {details.data.body ? (
-                <MarkdownBody className="p-4">{details.data.body}</MarkdownBody>
-              ) : (
-                <p className="p-4 text-sm">No description.</p>
-              )}
-            </Section>
             <ForgejoContext
               key={details.data.headSha}
               details={details.data}
               onSelection={setFeedback}
+              stack={
+                <ForgejoStack
+                  details={details.data}
+                  search={search.toString()}
+                />
+              }
+              description={
+                <Section title="Description">
+                  {details.data.body ? (
+                    <MarkdownBody className="p-4">
+                      {details.data.body}
+                    </MarkdownBody>
+                  ) : (
+                    <p className="text-muted-foreground p-4 text-sm">
+                      No description.
+                    </p>
+                  )}
+                </Section>
+              }
             />
             {dialog === "handoff" && (
               <ForgejoHandoff

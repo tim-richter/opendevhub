@@ -77,43 +77,114 @@ export const stackForgejoPulls = (
 export interface ForgejoStackRow {
   number: number;
   title: string;
-  depth: number;
+  head: string;
   current: boolean;
+  /** Column of this pull request's dot in the stack graph. */
+  lane: number;
+  /** Whether a pull request stacked on this one continues its line upward. */
+  continues: boolean;
+  /** Lanes of pull requests stacked on this one that start in another column and curve into its dot. */
+  merges: number[];
+  /** Lanes of lines that pass this row on their way to a pull request further down. */
+  through: number[];
 }
 
-/** A pull request's stack as indented rows: what it builds on, itself, then what builds on it. */
-export const forgejoStackRows = (
+export interface ForgejoStackGraph {
+  /** Top to bottom: the most recent pull requests first, the one closest to the base branch last. */
+  rows: ForgejoStackRow[];
+  lanes: number;
+}
+
+interface StackEntry {
+  number: number;
+  title: string;
+  head: string;
+  current: boolean;
+  /** Index of the pull request this one targets, -1 for the base branch. */
+  parent: number;
+}
+
+/** Whether lane `lane` is free over rows (from, to], counted bottom-up. */
+const laneFree = (
+  segments: { lane: number; from: number; to: number }[],
+  lane: number,
+  from: number,
+  to: number
+) => !segments.some((s) => s.lane === lane && s.from < to && from < s.to);
+
+/**
+ * A pull request's stack laid out as a graph drawn bottom-up from its base branch:
+ * what it builds on, itself, then what builds on it. A pull request shares its parent's
+ * column when it can, so a linear stack stays a single straight line.
+ */
+export const forgejoStackGraph = (
   details: ForgejoPullDetails
-): ForgejoStackRow[] => {
+): ForgejoStackGraph => {
   const { stack, pull } = details;
   if (!stack) {
-    return [];
+    return { lanes: 0, rows: [] };
   }
-  const rows: ForgejoStackRow[] = stack.ancestors.map((p, depth) => ({
+  const entries: StackEntry[] = stack.ancestors.map((p, i) => ({
     current: false,
-    depth,
+    head: p.head,
     number: p.number,
+    parent: i - 1,
     title: p.title,
   }));
-  rows.push({
+  entries.push({
     current: true,
-    depth: rows.length,
+    head: details.head,
     number: pull.number,
+    parent: entries.length - 1,
     title: pull.title,
   });
-  const visit = (nodes: ForgejoStackNode[], depth: number) => {
+  const visit = (nodes: ForgejoStackNode[], parent: number) => {
     for (const node of nodes) {
-      rows.push({
+      entries.push({
         current: false,
-        depth,
+        head: node.head,
         number: node.number,
+        parent,
         title: node.title,
       });
-      visit(node.children, depth + 1);
+      visit(node.children, entries.length - 1);
     }
   };
-  visit(stack.descendants, rows.length);
-  return rows;
+  visit(stack.descendants, entries.length - 1);
+
+  // Each entry's line runs from its parent's row up to its own; lines in one column never overlap.
+  const lanes: number[] = [];
+  const segments: { lane: number; from: number; to: number }[] = [];
+  for (const [i, entry] of entries.entries()) {
+    const preferred = entry.parent < 0 ? 0 : (lanes[entry.parent] ?? 0);
+    let lane = preferred;
+    if (!laneFree(segments, lane, entry.parent, i)) {
+      lane = 0;
+      while (!laneFree(segments, lane, entry.parent, i)) {
+        lane += 1;
+      }
+    }
+    lanes.push(lane);
+    segments.push({ from: entry.parent, lane, to: i });
+  }
+
+  const rows = entries.map((entry, i): ForgejoStackRow => {
+    const lane = lanes[i] ?? 0;
+    const children = segments.filter((s) => s.from === i);
+    return {
+      continues: children.some((s) => s.lane === lane),
+      current: entry.current,
+      head: entry.head,
+      lane,
+      merges: children.filter((s) => s.lane !== lane).map((s) => s.lane),
+      number: entry.number,
+      through: segments
+        .filter((s) => s.from < i && i < s.to)
+        .map((s) => s.lane),
+      title: entry.title,
+    };
+  });
+  return { lanes: Math.max(0, ...lanes) + 1, rows: rows.toReversed() };
 };
 
 export const matchesForgejoPull = (
@@ -279,3 +350,21 @@ export const forgejoReviewComments = (
         ]
       : []
   );
+
+/** Each reviewer's latest say on the pull request; a pending review request outranks an older review. */
+export const forgejoReviewers = (
+  reviews: ForgejoReview[],
+  requested: string[]
+): { name: string; state: string }[] => {
+  const latest = new Map<string, string>();
+  const ordered = reviews
+    .filter((r) => !r.dismissed && r.state !== "PENDING" && r.author)
+    .toSorted((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+  for (const review of ordered) {
+    latest.set(review.author, review.state);
+  }
+  for (const name of requested) {
+    latest.set(name, "REQUEST_REVIEW");
+  }
+  return [...latest].map(([name, state]) => ({ name, state }));
+};
