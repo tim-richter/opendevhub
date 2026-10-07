@@ -1,3 +1,4 @@
+import type { JiraSettings, JiraSettingsInput, JiraTicket, JiraTickets } from "../shared/jira";
 import type { StackId } from "../shared/stacks";
 import type { ForgejoReviewInput, ForgejoChecks, ForgejoComment, ForgejoConnection, ForgejoPage, ForgejoPullDetails, ForgejoPullFilter, ForgejoPullQuery, ForgejoPulls, ForgejoReview, ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
 import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, NodeView, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
@@ -59,6 +60,32 @@ export function fetchForgejoChecks(owner: string, repo: string, sha: string, pag
 export async function testForgejoConnection(input: { url: string; token?: string }): Promise<ForgejoConnection> {
   const res = await fetch("/api/forgejo/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
   if (!res.ok) throw await failure(res, "test Forgejo connection");
+  return res.json();
+}
+
+export async function fetchJiraSettings(): Promise<JiraSettings> {
+  const res = await fetch("/api/jira/settings", { cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Jira settings");
+  return res.json();
+}
+
+export async function saveJiraSettings(input: JiraSettingsInput): Promise<JiraSettings> {
+  const res = await fetch("/api/jira/settings", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await failure(res, "save Jira settings");
+  return res.json();
+}
+
+export async function fetchJiraTickets(search = "", startAt = 0, signal?: AbortSignal): Promise<JiraTickets> {
+  const res = await fetch(`/api/jira/tickets?${new URLSearchParams({ search, startAt: String(startAt) })}`, { signal, cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Jira tickets");
+  return res.json();
+}
+
+export async function fetchJiraTicket(key: string, signal?: AbortSignal): Promise<JiraTicket> {
+  const res = await fetch(`/api/jira/tickets/${encodeURIComponent(key)}`, { signal, cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Jira ticket");
   return res.json();
 }
 

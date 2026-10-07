@@ -1,4 +1,4 @@
-import { BellIcon, BookOpenIcon, CircleDollarSignIcon, EraserIcon, GitPullRequestIcon, LayoutGridIcon, ListIcon, PlusIcon, RefreshCwIcon, SearchIcon, ServerIcon, SettingsIcon, XIcon } from "lucide-react";
+import { BellIcon, BookOpenIcon, CircleDollarSignIcon, EraserIcon, GitPullRequestIcon, LayoutGridIcon, ListIcon, TicketIcon, PlusIcon, RefreshCwIcon, SearchIcon, ServerIcon, SettingsIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -131,7 +131,7 @@ function CheckoutItems({ view }: { view: ProjectView }) {
 }
 
 function AppSidebar({ onSearch }: { onSearch: () => void }) {
-  const { snapshot, connected, rescan, scanning, permission, requestPermission, openAddProject, forgejo } = useDash();
+  const { snapshot, connected, rescan, scanning, permission, requestPermission, openAddProject, forgejo, jira } = useDash();
   const { setOpenMobile } = useSidebar();
   const [filter, setFilter] = useState("");
   const location = useLocation();
@@ -180,6 +180,7 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
             <NavItem to="/nodes" badge={nodesNeedingAttention(snapshot.nodes) > 0 && <Count n={nodesNeedingAttention(snapshot.nodes)} tone="attention" />}>
               <ServerIcon /> Nodes
             </NavItem>
+            {jira?.enabled && <NavItem to="/jira"><TicketIcon /> Jira</NavItem>}
             {forgejo?.enabled && (
               <NavItem to="/forgejo">
                 <GitPullRequestIcon /> Forgejo

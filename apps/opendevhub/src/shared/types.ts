@@ -1,3 +1,4 @@
+import type { JiraTaskSource } from "./jira";
 import type { StackId } from "./stacks";
 
 export type ProjectId = string;
@@ -322,6 +323,7 @@ export interface ModelsInfo {
 
 /** What opendevhub writes to `metadata.opendevhub` on each session of a task. */
 export interface TaskMeta {
+  jira?: JiraTaskSource;
   task: string;
   /** 1-based. */
   variant: number;
@@ -341,6 +343,7 @@ export interface TaskVariantSpec {
 }
 
 export interface TaskRequest {
+  jira?: JiraTaskSource;
   prompt: string;
   title?: string;
   where: TaskWhere;
@@ -435,6 +438,7 @@ export interface StartingVariant {
 
 /** A task the dashboard started whose variants aren't all running yet. Kept in memory only. */
 export interface StartingTask {
+  jira?: JiraTaskSource;
   task: string;
   title: string;
   of: number;

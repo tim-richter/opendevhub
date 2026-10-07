@@ -12,6 +12,7 @@ import { InvalidRequestError } from "../../src/server/worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
 import { StateStore } from "../../src/server/state";
 import { MemorySecretStore } from "../helpers/secrets";
+import { FileJiraSettings, Jira } from "../../src/server/jira";
 import { FileForgejoSettings, Forgejo } from "../../src/server/forgejo";
 import type { Candidate, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
 
@@ -113,6 +114,49 @@ function setup(webDir?: string) {
 }
 
 describe("dashboard API", () => {
+  it("protects Jira settings and routes tickets, search, pagination and linked tasks", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-jira-api-"));
+    try {
+      const deps = setup();
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("secret-token rejected", { status: 401 }));
+      const secrets = new MemorySecretStore();
+      const jira = new Jira(new FileJiraSettings(dir, secrets), fetcher);
+      const app = createDashboardApp({ ...deps, jira });
+      expect((await app.request("/api/jira/tickets")).status).toBe(412);
+      expect(fetcher).not.toHaveBeenCalled();
+      const post = (body: unknown, origin?: string) => app.request("/api/jira/settings", {
+        method: "POST", headers: { "content-type": "application/json", ...(origin ? { origin } : {}) }, body: JSON.stringify(body),
+      });
+      const saved = await post({ enabled: true, url: "https://jira.example.com", token: "secret-token" });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toEqual({ enabled: true, url: "https://jira.example.com", hasToken: true });
+      const view = await app.request("/api/jira/settings");
+      expect(view.headers.get("cache-control")).toBe("no-store");
+      expect(await view.text()).not.toContain("secret-token");
+      const failed = await app.request("/api/jira/tickets");
+      expect(failed.status).toBe(502);
+      expect(await failed.text()).not.toContain("secret-token");
+      expect((await post({ enabled: false, url: "https://jira.example.com" }, "https://attacker.example.com")).status).toBe(403);
+      expect((await post({ enabled: true, url: "https://other.example.com" })).status).toBe(400);
+      const tickets = vi.spyOn(jira, "tickets").mockResolvedValue({ tickets: [], total: 0 });
+      const ticket = vi.spyOn(jira, "ticket").mockResolvedValue({ key: "APP-12" } as never);
+      expect(await (await app.request("/api/jira/tickets?search=login&startAt=50")).json()).toEqual({ tickets: [], total: 0 });
+      expect(tickets).toHaveBeenCalledWith("login", 50);
+      expect((await app.request("/api/jira/tickets?startAt=1e2")).status).toBe(400);
+      expect(await (await app.request("/api/jira/tickets/APP-12")).json()).toEqual({ key: "APP-12" });
+      expect(ticket).toHaveBeenCalledWith("APP-12");
+      const source = { key: "APP-12", instanceUrl: "https://jira.example.com", title: "Login", description: "Fix login" };
+      const body = { prompt: "Fix login", jira: source, where: "worktree", variants: [{}] };
+      await app.request(`/api/projects/${project.id}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      expect(deps.orchestrator.startTask).toHaveBeenCalledWith(project.id, body);
+      expect(await (await app.request("/api/projects")).text()).not.toContain("secret-token");
+      await post({ enabled: false, url: "https://jira.example.com", clearToken: true });
+      expect(secrets.values.size).toBe(0);
+      expect((await new FileJiraSettings(dir, secrets).view()).hasToken).toBe(false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    expect((await setup().app.request("/api/jira/settings")).status).toBe(412);
+  });
+
   it("persists private Forgejo settings through the API without exposing the token", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forgejo-api-"));
     try {

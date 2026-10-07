@@ -17,6 +17,8 @@ import { DevcontainerExistsError, type OnboardingPort } from "./onboarding";
 import { InvalidSubscriptionError, type Push } from "./push";
 import type { StateStore } from "./state";
 import { ForgejoError, type Forgejo } from "./forgejo";
+import { IntegrationError } from "./integration-settings";
+import type { Jira } from "./jira";
 import { CredentialStoreError } from "./secrets";
 
 export type DashboardOrchestrator = Pick<
@@ -71,6 +73,7 @@ export interface DashboardDeps {
   /** Absent in tests that don't need it. */
   nodes?: Pick<Nodes, "add" | "remove">;
   forgejo?: Pick<Forgejo, "view" | "save" | "pulls" | "diff" | "inbox" | "details" | "patch" | "comments" | "reviews" | "reviewComments" | "checks" | "test"> & Partial<Pick<Forgejo, "review">>;
+  jira?: Pick<Jira, "view" | "save" | "tickets" | "ticket">;
   webDir?: string;
 }
 
@@ -87,7 +90,7 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /** Maps the errors request handlers can expect to a status; anything else is a 500. */
 function errorStatus(err: unknown): 400 | 404 | 409 | 412 | 422 | 500 | 502 {
-  if (err instanceof ForgejoError) return err.status;
+  if (err instanceof IntegrationError) return err.status;
   if (err instanceof CredentialStoreError) return 502;
   if (err instanceof InvalidRequestError || err instanceof EditorUnavailableError || err instanceof InvalidSubscriptionError || err instanceof InvalidNodeError) return 400;
   if (err instanceof NotFoundError) return 404;
@@ -193,6 +196,23 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   app.get("/api/forgejo/checks/:owner/:repo/:sha", (c) => json(c, () =>
     requireForgejo().checks(c.req.param("owner")!, c.req.param("repo")!, c.req.param("sha")!, Number(c.req.query("page") ?? 1), c.req.raw.signal),
   ));
+
+  app.use("/api/jira/*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+  const requireJira = () => {
+    if (!deps.jira) throw new UnavailableError("Jira is not available");
+    return deps.jira;
+  };
+  app.get("/api/jira/settings", (c) => json(c, async () => requireJira().view()));
+  app.post("/api/jira/settings", (c) => json(c, async (_id, b) => requireJira().save(b)));
+  app.get("/api/jira/tickets", (c) => json(c, async () => {
+    const page = c.req.query("startAt") ?? "0";
+    if (!/^\d+$/.test(page)) throw new InvalidRequestError("Invalid Jira page.");
+    return requireJira().tickets(c.req.query("search") ?? "", Number(page));
+  }));
+  app.get("/api/jira/tickets/:key", (c) => json(c, async () => requireJira().ticket(c.req.param("key")!)));
 
   app.post("/api/projects/rescan", async (c) => {
     await orchestrator.rescan();

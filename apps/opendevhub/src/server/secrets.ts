@@ -15,11 +15,12 @@ export class CredentialStoreError extends Error {
 
 /** Lazy loading keeps the optional integration usable on machines without a credential store. */
 export class OsSecretStore implements SecretStore {
+  constructor(private readonly service = "opendevhub.forgejo") {}
   private async entry(account: string): Promise<AsyncEntry> {
     const { AsyncEntry } = await import("@napi-rs/keyring");
     // The package's default Linux fallback is a volatile kernel keyring. Require the persistent
     // desktop store explicitly: credentials must survive reboots, and must never fall back to files.
-    return new AsyncEntry("opendevhub.forgejo", account, { linux: { store: "secret-service" } });
+    return new AsyncEntry(this.service, account, { linux: { store: "secret-service" } });
   }
 
   async get(account: string): Promise<string | undefined> {

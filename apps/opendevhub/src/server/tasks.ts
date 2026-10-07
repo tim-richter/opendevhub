@@ -1,3 +1,5 @@
+import { JIRA_KEY, type JiraTaskSource } from "../shared/jira";
+import { jiraUrl } from "./jira";
 import { MAX_VARIANTS } from "../shared/tasks";
 import type { ModelRef, ModelsInfo, TaskMeta, TaskRequest, TaskVariantSpec } from "../shared/types";
 import type { RawAgent, RawModel } from "./opencode/client";
@@ -35,8 +37,21 @@ function parseVariant(value: unknown, n: number): TaskVariantSpec {
   return { ...(model ? { model } : {}), ...(agent ? { agent } : {}) };
 }
 
+/** Copy only the ticket snapshot fields; never accept credentials or remote HTML. */
+export function parseJiraTaskSource(value: unknown): JiraTaskSource {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new InvalidRequestError("invalid Jira ticket reference");
+  const v = value as Record<string, unknown>;
+  if (typeof v.key !== "string" || v.key.length > 200 || !JIRA_KEY.test(v.key) ||
+      typeof v.instanceUrl !== "string" || typeof v.title !== "string" || v.title.length > 1000 ||
+      typeof v.description !== "string" || v.description.length > PROMPT_MAX) {
+    throw new InvalidRequestError("invalid Jira ticket reference");
+  }
+  return { key: v.key, instanceUrl: jiraUrl(v.instanceUrl), title: v.title, description: v.description };
+}
+
 /** Validates `POST …/tasks`; unknown fields are ignored. */
 export function parseTaskRequest(body: Record<string, unknown>): TaskRequest {
+  const jira = body.jira === undefined ? undefined : parseJiraTaskSource(body.jira);
   const prompt = str(body.prompt)?.trim() ?? "";
   if (!prompt) throw new InvalidRequestError("the prompt is empty");
   if (prompt.length > PROMPT_MAX) throw new InvalidRequestError(`the prompt is longer than ${PROMPT_MAX} characters`);
@@ -65,7 +80,7 @@ export function parseTaskRequest(body: Record<string, unknown>): TaskRequest {
     if (variants.length > 1) throw new InvalidRequestError("several variants need a worktree each; choose New worktree");
     if (branch || base) throw new InvalidRequestError("branch and base only apply to a new worktree");
   }
-  return { prompt, ...(title ? { title } : {}), where, ...(environment ? { environment } : {}), ...(node ? { node } : {}), ...(branch ? { branch } : {}), ...(base ? { base } : {}), variants };
+  return { prompt, ...(jira ? { jira } : {}), ...(title ? { title } : {}), where, ...(environment ? { environment } : {}), ...(node ? { node } : {}), ...(branch ? { branch } : {}), ...(base ? { base } : {}), variants };
 }
 
 /** The task a session belongs to, from `metadata.opendevhub`; undefined when it has none or it is malformed. */
@@ -73,11 +88,13 @@ export function parseTaskMeta(metadata: unknown): TaskMeta | undefined {
   if (!metadata || typeof metadata !== "object") return undefined;
   const m = (metadata as { opendevhub?: unknown }).opendevhub;
   if (!m || typeof m !== "object") return undefined;
-  const { task, variant, of, title, branch, discarded } = m as Record<string, unknown>;
+  const { task, variant, of, title, branch, discarded, jira: rawJira } = m as Record<string, unknown>;
   if (typeof task !== "string" || !task.startsWith("tsk_")) return undefined;
   if (typeof variant !== "number" || typeof of !== "number" || !Number.isInteger(variant) || !Number.isInteger(of)) return undefined;
   if (variant < 1 || of < variant) return undefined;
-  return { task, variant, of, title: typeof title === "string" ? title : "",
+  let jira: JiraTaskSource | undefined;
+  try { if (rawJira !== undefined) jira = parseJiraTaskSource(rawJira); } catch { /* Keep older task metadata usable. */ }
+  return { task, variant, of, ...(jira ? { jira } : {}), title: typeof title === "string" ? title : "",
     ...(typeof branch === "string" ? { branch } : {}),
     ...(discarded === true ? { discarded: true } : {}) };
 }

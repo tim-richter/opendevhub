@@ -20,6 +20,11 @@ beforeEach(() => {
 });
 
 describe("OS credential store", () => {
+  it("uses a separate service for Jira credentials", async () => {
+    const store = new OsSecretStore("opendevhub.jira");
+    await store.set("jira-id", "jira-secret");
+    expect(calls.entry).toHaveBeenCalledWith("opendevhub.jira", "jira-id", { linux: { store: "secret-service" } });
+  });
   it("requires persistent Secret Service on Linux and performs native credential operations", async () => {
     const store = new OsSecretStore();
     await store.set("entry-id", "test-secret");

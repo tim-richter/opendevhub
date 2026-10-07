@@ -1,3 +1,5 @@
+import { JiraSourceCard } from "../components/JiraSourceCard";
+import type { JiraTaskSource } from "../../shared/jira";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { ProjectView, PublishResult, ReviewData, ReviewFile, ReviewMode, UpdateResult } from "../../shared/types";
@@ -165,6 +167,11 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
     () => view.sessions.filter((s) => s.directory === directory).sort((a, b) => b.updatedAt - a.updatedAt),
     [view.sessions, directory],
   );
+  const ticketSources = new Map<string, JiraTaskSource>();
+  for (const session of sessions) {
+    const source = session.task?.jira;
+    if (source && !session.task?.discarded) ticketSources.set(`${source.instanceUrl}/${source.key}`, source);
+  }
   const [sessionChoice, setSessionChoice] = useState("");
   const chosen = sessionChoice || sessions[0]?.id || "new";
 
@@ -275,6 +282,7 @@ function ReviewTarget({ view, directory, target }: { view: ProjectView; director
 
   return (
     <div className="flex flex-col gap-4">
+      {[...ticketSources].map(([id, source]) => <JiraSourceCard key={id} source={source} />)}
       <div className="sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background/95 px-4 py-2 backdrop-blur max-md:top-[45px] md:-mx-8 md:px-8">
         <Tip label={diffView.hideFiles ? "Show changed files" : "Hide changed files"}>
           <Button

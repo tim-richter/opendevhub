@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchJiraSettings,
+  saveJiraSettings,
+  fetchJiraTickets,
+  fetchJiraTicket,
   commitChanges,
   createEnv,
   createTask,
@@ -44,6 +48,23 @@ function stubFetch(status: number, body: unknown) {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Jira API", () => {
+  it("keeps saved tokens server-side and supports cancellable search and ticket requests", async () => {
+    const fetchMock = stubFetch(200, { enabled: true, url: "https://jira.example.com", hasToken: true });
+    expect((await fetchJiraSettings()).hasToken).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/jira/settings");
+    await saveJiraSettings({ enabled: false, url: "https://jira.example.com" });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).not.toHaveProperty("token");
+    const signal = new AbortController().signal;
+    await fetchJiraTickets("login & logout", 50, signal);
+    expect(fetchMock.mock.calls[2]).toEqual(["/api/jira/tickets?search=login+%26+logout&startAt=50", { signal, cache: "no-store" }]);
+    await fetchJiraTicket("APP-1?", signal);
+    expect(fetchMock.mock.calls[3]).toEqual(["/api/jira/tickets/APP-1%3F", { signal, cache: "no-store" }]);
+    stubFetch(502, { error: "Jira rejected the token" });
+    await expect(fetchJiraTickets()).rejects.toThrow("Jira rejected the token");
+  });
+});
 
 describe("Forgejo API", () => {
   it("loads safe settings and omits the token when keeping it", async () => {

@@ -7,6 +7,7 @@ import type { MonitorOptions } from "../../src/server/monitor";
 import type { Dial, HostPort, Route, RouteContainer } from "../../src/server/network";
 import type { NewSession, OpencodeEndpoint, RawAgent, RawModel, RawSession } from "../../src/server/opencode/client";
 import { AlreadyAnsweredError, BusyError, type NetworkPort, type NodeKit, type NodeKitsPort, NotFoundError, Orchestrator, UnavailableError } from "../../src/server/orchestrator";
+import { parseTaskMeta } from "../../src/server/tasks";
 import { OpencodeClient, OpencodeHttpError } from "../../src/server/opencode/client";
 import { rawSession, startFakeOpencode } from "../helpers/fake-opencode";
 import { StateStore } from "../../src/server/state";
@@ -1479,6 +1480,20 @@ describe("Orchestrator", () => {
       return s;
     }
 
+    it("associates each created worktree and session with its Jira ticket", async () => {
+      const { orch, client, store } = await started();
+      const jira = { key: "APP-12", instanceUrl: "https://jira.example.com", title: "Fix login", description: "Safari login must succeed." };
+      const prompt = `Implement APP-12: Fix login\n\n${jira.description}`;
+      const result = await orch.createTask(project.id, { prompt, jira, variants: [{}, {}] });
+      expect(result.variants.every((v) => v.directory && v.branch && v.sessionId)).toBe(true);
+      for (const [directory, options] of client.createSession.mock.calls) {
+        expect(options?.metadata).toMatchObject({ opendevhub: { task: result.task, jira } });
+        expect(result.variants.some((v) => v.directory === directory)).toBe(true);
+      }
+      expect(store.startingTask(project.id, result.task)?.jira).toEqual(jira);
+      expect(client.prompt.mock.calls.every(([, text]) => text === prompt)).toBe(true);
+    });
+
     it("starts one variant in a new worktree named after the prompt, tagged with the task", async () => {
       const { orch, client, worktrees, git, monitors } = await started();
       git.localBranches.mockResolvedValueOnce(["main", "fix-the-login-bug"]);
@@ -1580,17 +1595,22 @@ describe("Orchestrator", () => {
         s.clientFor.mockImplementation(() => new OpencodeClient({ baseUrl: fake.baseUrl, password: "pw" }));
         await s.orch.rescan();
         await s.orch.start(project.id);
+        const jira = { key: "APP-12", instanceUrl: "https://jira.example.com", title: "Login", description: "Fix login in Safari." };
         const res = await s.orch.createTask(project.id, {
           prompt: "Go",
+          jira,
           variants: [{ model: { id: "a", providerID: "p" } }, { model: { id: "b", providerID: "p" } }, { model: { id: "c", providerID: "p" } }],
         });
         expect(res.variants.map((v) => Boolean(v.sessionId))).toEqual([true, false, true]);
         expect(res.variants[1].error).toMatch(/ModelNotFoundError: unknown model b/);
         // The fake prepends new sessions: c, then a.
         expect(fake.state.sessions.map((x) => x.metadata)).toEqual([
-          { opendevhub: { task: res.task, variant: 3, of: 3, title: "Go", branch: "go-c" } },
-          { opendevhub: { task: res.task, variant: 1, of: 3, title: "Go", branch: "go-a" } },
+          { opendevhub: { task: res.task, variant: 3, of: 3, title: "Go", jira, branch: "go-c" } },
+          { opendevhub: { task: res.task, variant: 1, of: 3, title: "Go", jira, branch: "go-a" } },
         ]);
+        // A new dashboard client recovers the originating ticket from persisted session metadata.
+        const restored = await new OpencodeClient({ baseUrl: fake.baseUrl, password: "pw" }).sessions();
+        expect(restored.map((session) => parseTaskMeta(session.metadata)?.jira)).toEqual([jira, jira]);
         expect(fake.state.sessions.map((x) => x.model?.id)).toEqual(["c", "a"]);
         expect(fake.state.prompts.map((p) => [p.sessionId, (p.body as { text: string }).text, p.directory])).toEqual([
           [res.variants[0].sessionId, "Go", "/workspaces/demo.worktrees/go-a"],
@@ -1864,6 +1884,13 @@ describe("Orchestrator", () => {
 });
 
 describe("task environments", () => {
+  it("retains the ticket in isolated task sessions too", async () => {
+    const s = await withWorktree();
+    const jira = { key: "APP-12", instanceUrl: "https://jira.example.com", title: "Fix login", description: "Safari login must succeed." };
+    const result = await s.orch.createTask(project.id, { prompt: "Fix login", jira, environment: "isolated", variants: [{}] });
+    expect(result.variants[0].envId).toBeDefined();
+    expect(s.client.createSession.mock.calls[0][1]?.metadata).toMatchObject({ opendevhub: { jira } });
+  });
   it("starts each variant of an isolated task in its own container", async () => {
     const s = await withWorktree();
     const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", where: "worktree", environment: "isolated", variants: [{}, {}] });

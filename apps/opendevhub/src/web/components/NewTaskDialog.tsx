@@ -1,9 +1,10 @@
+import { jiraTaskPrompt } from "../../shared/jira";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { branchSlug, deriveTitle, MAX_VARIANTS, taskBranches } from "../../shared/tasks";
 import type { Isolation, ModelsInfo, TaskVariantSpec, TaskWhere } from "../../shared/types";
 import { createTask, fetchModels } from "../api";
-import { useDash } from "../DashboardContext";
+import { useDash, type NewTaskDraft } from "../DashboardContext";
 import { nodeChoices } from "../nodes";
 import { modelFromKey, modelKey, taskPath } from "../tasks";
 import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
@@ -28,12 +29,13 @@ const EMPTY_ROW: Row = { model: "", variant: "", agent: "" };
 export function NewTaskDialog() {
   const { snapshot, newTaskFor, closeNewTask } = useDash();
   if (!snapshot || !newTaskFor) return null;
-  // Mounted per opening, so every field starts empty.
+  // Mounted per opening, with integration context prefilled when provided.
   return <TaskForm initialProject={newTaskFor.projectId} draft={newTaskFor} onClose={closeNewTask} />;
 }
 
-function TaskForm({ initialProject, draft, onClose }: { initialProject?: string; draft?: { prompt?: string; title?: string; base?: string }; onClose: () => void }) {
+function TaskForm({ initialProject, draft, onClose }: { initialProject?: string; draft?: NewTaskDraft; onClose: () => void }) {
   const { snapshot, act } = useDash();
+  const jira = draft?.jira;
   const navigate = useNavigate();
   const projects = useMemo(
     () => [...(snapshot?.projects ?? [])].sort((a, b) => a.project.name.localeCompare(b.project.name)),
@@ -46,8 +48,8 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
       projects[0]?.project.id ??
       "",
   );
-  const [prompt, setPrompt] = useState(draft?.prompt ?? "");
-  const [title, setTitle] = useState(draft?.title ?? "");
+  const [prompt, setPrompt] = useState(() => draft?.prompt ?? (jira ? jiraTaskPrompt(jira) : ""));
+  const [title, setTitle] = useState(() => draft?.title ?? (jira ? `${jira.key}: ${jira.title}`.slice(0, 200) : ""));
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState(draft?.base ?? "");
   const [where, setWhere] = useState<TaskWhere>("worktree");
@@ -112,6 +114,7 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
     const worktree = effectiveWhere === "worktree";
     createTask(view.project.id, {
       prompt,
+      ...(jira ? { jira } : {}),
       ...(title.trim() ? { title: title.trim() } : {}),
       where: effectiveWhere,
       ...(worktree ? { environment: chosenEnv } : {}),
@@ -142,7 +145,7 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
         }}
       >
         <DialogHeader>
-          <DialogTitle>New task</DialogTitle>
+          <DialogTitle>{jira ? `New task from ${jira.key}` : "New task"}</DialogTitle>
           <DialogDescription className="sr-only">Start an agent on a prompt in one of your projects.</DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4" onSubmit={submit}>

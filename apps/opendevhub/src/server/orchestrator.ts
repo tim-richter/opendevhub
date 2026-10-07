@@ -697,6 +697,7 @@ export class Orchestrator {
       task,
       title,
       of: req.variants.length,
+      ...(req.jira ? { jira: req.jira } : {}),
       createdAt: now,
       variants: req.variants.map((_, i) => ({ variant: i + 1, ...(remoteKit ? { node } : {}), step: "queued" as const, log: [] })),
     });
@@ -774,7 +775,7 @@ export class Orchestrator {
             }
           }
           step(i, { step: "session" });
-          const meta: TaskMeta = { task, variant: i + 1, of, title, ...(branch ? { branch } : {}) };
+          const meta: TaskMeta = { task, variant: i + 1, of, title, ...(req.jira ? { jira: req.jira } : {}), ...(branch ? { branch } : {}) };
           await this.startVariant(client, result, result.directory!, meta, variantTitle(title, labels[i], of), v, req.prompt);
           step(i, { sessionId: result.sessionId });
         } catch (err) {
@@ -802,7 +803,7 @@ export class Orchestrator {
           });
           result.envId = env.id;
           step(i, { step: "session" });
-          const meta: TaskMeta = { task, variant: i + 1, of, title, branch: worktree.branch };
+          const meta: TaskMeta = { task, variant: i + 1, of, title, ...(req.jira ? { jira: req.jira } : {}), branch: worktree.branch };
           await this.startVariant(this.opencodeClient(env.id), result, worktree.path, meta, variantTitle(title, labels[i], of), req.variants[i], req.prompt);
           step(i, { sessionId: result.sessionId });
         } catch (err) {

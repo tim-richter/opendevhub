@@ -1,17 +1,4 @@
-/** Safe to return to the browser. The saved token never leaves the server. */
-export interface ForgejoSettings {
-  enabled: boolean;
-  url: string;
-  hasToken: boolean;
-}
-
-export interface ForgejoSettingsInput {
-  enabled: boolean;
-  url: string;
-  /** Omit to keep the saved token. */
-  token?: string;
-  clearToken?: boolean;
-}
+export type { IntegrationSettings as ForgejoSettings, IntegrationSettingsInput as ForgejoSettingsInput } from "./integrations";
 
 export type ForgejoPullFilter = "all" | "open" | "closed";
 export type ForgejoInbox = "authored" | "review-requested" | "assigned" | "review";

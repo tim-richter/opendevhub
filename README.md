@@ -216,6 +216,31 @@ handoff uses the existing task/session APIs without exposing the token to contai
 Forgejo REST API independently of the existing git-based Publish action. Responses larger than
 20 MiB show an error and can be opened on Forgejo instead.
 
+## Jira tickets
+
+Jira is optional and disabled by default. In **Settings**, enable **Jira** and save your
+self-hosted Jira URL and personal access token. This uses the Jira Server / Data Center
+REST v2 API with Bearer authentication; only a URL and token are needed. Include any
+instance path prefix, and use HTTPS (loopback HTTP is supported for local instances).
+
+The **Jira** sidebar link opens tickets assigned to you, most recently updated first.
+Search by an exact ticket key or a phrase across accessible projects, including tickets
+assigned to others. Select a ticket to view its description and details. **Create task**
+opens the task dialog with the ticket title and description filled in, where you choose
+the project, worktree, environment, and agent. The prompt can be edited before starting.
+
+Each variant remembers the Jira instance, key, title, and original description in its
+opencode session metadata, surviving restarts with the session. Task and checkout review
+pages show the ticket link and original requirements, even when Jira is unavailable.
+The ticket page links to its tasks among the dashboard's listed sessions.
+
+Credentials use the same protection as Forgejo, with a separate OS credential-store
+service. `$XDG_CONFIG_HOME/opendevhub/integrations/jira.json` contains only the enabled
+state, URL, and opaque credential reference. The token never reaches the browser or task
+containers. Leave the token blank to keep it; changing the URL requires a new token.
+**Remove token and disable** deletes the stored credential. Jira access is read-only.
+See the [Jira documentation](apps/docs/content/docs/jira.mdx) for details.
+
 ## Remote nodes (preview)
 
 Other machines can run task environments, reached over ssh. Add one on the Nodes page, or with

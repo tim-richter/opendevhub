@@ -24,6 +24,7 @@ import { Checks } from "./checks";
 import { Cleanup } from "./cleanup";
 import { createDashboardApp } from "./dashboard-api";
 import { FileForgejoSettings, Forgejo } from "./forgejo";
+import { FileJiraSettings, Jira } from "./jira";
 import { scanRoots } from "./discovery";
 import { EnvFiles } from "./env-files";
 import { spawnRunner } from "./exec";
@@ -263,6 +264,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     nodes,
     onboarding: new Onboarding({ roots: () => roots }),
     forgejo: new Forgejo(new FileForgejoSettings(dir)),
+    jira: new Jira(new FileJiraSettings(dir)),
     ...(usage ? { usage } : {}),
     webDir: findWebDir(),
   });

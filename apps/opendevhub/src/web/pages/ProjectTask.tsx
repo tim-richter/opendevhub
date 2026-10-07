@@ -1,3 +1,4 @@
+import { JiraSourceCard } from "../components/JiraSourceCard";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import type { ReviewData, SessionSummary, StartingVariant } from "../../shared/types";
@@ -54,6 +55,7 @@ export function ProjectTask() {
   const total = taskUsage(snapshot, task);
   const sessions = taskSessions(view, task);
   const starting = view.starting?.find((t) => t.task === task);
+  const jiraSource = starting?.jira ?? sessions.find((s) => s.task?.jira)?.task?.jira;
   // null: the changes couldn't be read.
   const [reviews, setReviews] = useState<Record<string, ReviewData | null>>({});
   const [picking, setPicking] = useState(false);
@@ -140,6 +142,7 @@ export function ProjectTask() {
           {total && <span className="tabular-nums"> · Total {formatUsage(total)}</span>}
         </span>
       </div>
+      {jiraSource && <JiraSourceCard source={jiraSource} />}
       {notice && (
         <Alert className="border-ok/40 bg-ok/10">
           <AlertDescription className="text-ok">{notice}</AlertDescription>

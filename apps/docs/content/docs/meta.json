@@ -11,6 +11,7 @@
     "checks",
     "publish",
     "forgejo",
+    "jira",
     "git-and-ssh",
     "notifications",
     "---Reference---",

@@ -14,6 +14,7 @@ import { CleanupPage } from "./pages/CleanupPage";
 import { NodesPage } from "./pages/NodesPage";
 import { UsagePage } from "./pages/UsagePage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { JiraPage, JiraTicketPage } from "./pages/JiraPage";
 import { ForgejoPage, ForgejoPullPage } from "./pages/ForgejoPage";
 
 const CheckoutTerminal = lazy(() => import("./pages/CheckoutTerminal").then((module) => ({ default: module.CheckoutTerminal })));
@@ -39,6 +40,8 @@ export function App() {
         <Route path="cleanup" element={<CleanupPage />} />
         <Route path="nodes" element={<NodesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="jira" element={<JiraPage />} />
+        <Route path="jira/:key" element={<JiraTicketPage />} />
         <Route path="forgejo" element={<ForgejoPage />} />
         <Route path="forgejo/:owner/:repo/:number" element={<ForgejoPullPage />} />
         <Route path="p/:projectId" element={<ProjectLayout />}>

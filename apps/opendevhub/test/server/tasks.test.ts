@@ -3,7 +3,16 @@ import type { RawAgent, RawModel } from "../../src/server/opencode/client";
 import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "../../src/server/tasks";
 import { InvalidRequestError } from "../../src/server/worktrees";
 
+const jira = { key: "APP-12", instanceUrl: "https://jira.example.com/jira", title: "Fix login", description: "Safari login must succeed." };
+
 describe("parseTaskRequest", () => {
+  it("preserves a validated ticket snapshot and strips unknown fields", () => {
+    expect(parseTaskRequest({ prompt: "Fix", jira: { ...jira, token: "secret" } }).jira).toEqual(jira);
+    for (const source of [null, { ...jira, key: "../APP-12" }, { ...jira, instanceUrl: "https://user:secret@example.com" },
+      { ...jira, description: {} }, { ...jira, description: "x".repeat(100_001) }]) {
+      expect(() => parseTaskRequest({ prompt: "Fix", jira: source })).toThrow();
+    }
+  });
   it("reads the node, leaving it out for this machine", () => {
     expect(parseTaskRequest({ prompt: "x", environment: "isolated", node: "box" }).node).toBe("box");
     expect(parseTaskRequest({ prompt: "x", node: "local" }).node).toBeUndefined();
@@ -63,6 +72,13 @@ describe("parseTaskRequest", () => {
 });
 
 describe("task metadata", () => {
+  it("round trips ticket snapshots from persisted metadata and retains them when discarding", () => {
+    const metadata = { opendevhub: { task: "tsk_1", variant: 1, of: 1, title: "Fix", jira } };
+    expect(parseTaskMeta(JSON.parse(JSON.stringify(metadata)))?.jira).toEqual(jira);
+    expect(parseTaskMeta(discardMetadata(metadata))?.jira).toEqual(jira);
+    expect(parseTaskMeta({ opendevhub: { ...metadata.opendevhub, jira: { ...jira, instanceUrl: "javascript:alert(1)" } } })?.jira).toBeUndefined();
+    expect(parseTaskMeta({ opendevhub: { ...metadata.opendevhub, jira: null } })?.task).toBe("tsk_1");
+  });
   it("reads opendevhub's task metadata and ignores anything else", () => {
     const meta = { task: "tsk_1", variant: 2, of: 3, title: "Fix" };
     expect(parseTaskMeta({ opendevhub: meta, other: 1 })).toEqual(meta);
