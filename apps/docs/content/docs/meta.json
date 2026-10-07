@@ -10,6 +10,7 @@
     "cleanup",
     "checks",
     "publish",
+    "forgejo",
     "git-and-ssh",
     "notifications",
     "---Reference---",

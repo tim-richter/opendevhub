@@ -1,7 +1,8 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { DashboardSnapshot } from "../shared/types";
-import { type Action, postAction, rescan as postRescan } from "./api";
+import type { ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
+import { type Action, fetchForgejoSettings, saveForgejoSettings, postAction, rescan as postRescan } from "./api";
 import { attentionCounts } from "./derive";
 import { enablePush, pushSupported, syncPush } from "./push";
 import { useDashboard } from "./useDashboard";
@@ -37,6 +38,9 @@ interface DashboardContextValue {
   closeAddProject: () => void;
   permission: Permission;
   requestPermission: () => void;
+  forgejo: ForgejoSettings | undefined;
+  forgejoError: string | undefined;
+  updateForgejo: (input: ForgejoSettingsInput) => Promise<void>;
 }
 
 const Ctx = createContext<DashboardContextValue | undefined>(undefined);
@@ -50,6 +54,24 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [newTaskFor, setNewTaskFor] = useState<{ projectId?: string }>();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [permission, setPermission] = useState<Permission>(() => (pushSupported() ? Notification.permission : "unsupported"));
+  const [forgejo, setForgejo] = useState<ForgejoSettings>();
+  const [forgejoError, setForgejoError] = useState<string>();
+
+  useEffect(() => {
+    if (!connected) return;
+    let cancelled = false;
+    void fetchForgejoSettings().then(
+      (settings) => { if (!cancelled) { setForgejo(settings); setForgejoError(undefined); } },
+      (err: unknown) => { if (!cancelled) setForgejoError(err instanceof Error ? err.message : String(err)); },
+    );
+    return () => { cancelled = true; };
+  }, [connected]);
+
+  const updateForgejo = useCallback(async (input: ForgejoSettingsInput) => {
+    const settings = await saveForgejoSettings(input);
+    setForgejo(settings);
+    setForgejoError(undefined);
+  }, []);
 
   // A clicked notification takes the user straight to the session: the service worker focuses this
   // tab and says which one.
@@ -124,8 +146,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       closeAddProject: () => setAddProjectOpen(false),
       permission,
       requestPermission,
+      forgejo,
+      forgejoError,
+      updateForgejo,
     }),
-    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, requestPermission, fail, newTask, newTaskFor, addProjectOpen],
+    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, requestPermission, fail, newTask, newTaskFor, addProjectOpen, forgejo, forgejoError, updateForgejo],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

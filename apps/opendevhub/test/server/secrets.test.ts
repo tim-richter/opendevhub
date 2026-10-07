@@ -1,0 +1,49 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CredentialStoreError, OsSecretStore } from "../../src/server/secrets";
+
+const calls = vi.hoisted(() => ({
+  entry: vi.fn(), get: vi.fn(), set: vi.fn(), remove: vi.fn(),
+}));
+vi.mock("@napi-rs/keyring", () => ({
+  AsyncEntry: class {
+    constructor(service: string, account: string, options: unknown) { calls.entry(service, account, options); }
+    getPassword = calls.get;
+    setPassword = calls.set;
+    deleteCredential = calls.remove;
+  },
+}));
+beforeEach(() => {
+  vi.resetAllMocks();
+  calls.get.mockResolvedValue("test-secret");
+  calls.set.mockResolvedValue(undefined);
+  calls.remove.mockResolvedValue(true);
+});
+
+describe("OS credential store", () => {
+  it("requires persistent Secret Service on Linux and performs native credential operations", async () => {
+    const store = new OsSecretStore();
+    await store.set("entry-id", "test-secret");
+    expect(await store.get("entry-id")).toBe("test-secret");
+    await store.remove("entry-id");
+    expect(calls.entry).toHaveBeenCalledWith("opendevhub.forgejo", "entry-id", { linux: { store: "secret-service" } });
+    expect(calls.set).toHaveBeenCalledWith("test-secret");
+    expect(calls.get).toHaveBeenCalledWith();
+    expect(calls.remove).toHaveBeenCalledWith();
+  });
+
+  it("distinguishes a missing entry from a locked or unavailable store without echoing secrets", async () => {
+    const store = new OsSecretStore();
+    calls.get.mockResolvedValue(undefined);
+    expect(await store.get("missing")).toBeUndefined();
+    for (const [mock, operation] of [
+      [calls.get, () => store.get("entry")],
+      [calls.set, () => store.set("entry", "test-secret")],
+      [calls.remove, () => store.remove("entry")],
+    ] as const) {
+      mock.mockRejectedValue(new Error("native error containing test-secret"));
+      const error = await operation().catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(CredentialStoreError);
+      expect((error as Error).message).not.toContain("test-secret");
+    }
+  });
+});

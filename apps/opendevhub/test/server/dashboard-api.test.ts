@@ -11,6 +11,8 @@ import { InvalidNodeError } from "../../src/server/config";
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
 import { StateStore } from "../../src/server/state";
+import { MemorySecretStore } from "../helpers/secrets";
+import { FileForgejoSettings, Forgejo } from "../../src/server/forgejo";
 import type { Candidate, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, ModelsInfo, PickResult, Project, TaskResult } from "../../src/shared/types";
 
 const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
@@ -111,6 +113,51 @@ function setup(webDir?: string) {
 }
 
 describe("dashboard API", () => {
+  it("persists private Forgejo settings through the API without exposing the token", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forgejo-api-"));
+    try {
+      const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("unauthorized secret-token", { status: 401 }));
+      const secrets = new MemorySecretStore();
+      const forgejo = new Forgejo(new FileForgejoSettings(dir, secrets), fetcher);
+      const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, checks, forgejo });
+      const post = (body: unknown, origin?: string) => app.request("/api/forgejo/settings", {
+        method: "POST", headers: { "content-type": "application/json", ...(origin ? { origin } : {}) }, body: JSON.stringify(body),
+      });
+      expect((await app.request("/api/forgejo/pulls")).status).toBe(412);
+      expect(fetcher).not.toHaveBeenCalled();
+      const saved = await post({ enabled: true, url: "https://forge.example.com", token: "secret-token" });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toEqual({ enabled: true, url: "https://forge.example.com", hasToken: true });
+      const res = await app.request("/api/forgejo/settings");
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(await res.text()).not.toContain("secret-token");
+      const failed = await app.request("/api/forgejo/pulls");
+      expect(failed.status).toBe(502);
+      expect(await failed.text()).not.toContain("secret-token");
+      expect((await post({ enabled: false, url: "https://forge.example.com" }, "https://attacker.example.com")).status).toBe(403);
+      expect((await forgejo.view()).enabled).toBe(true);
+      expect((await post({ enabled: true, url: "https://other.example.com" })).status).toBe(400);
+      expect(await (await app.request("/api/projects")).text()).not.toContain("secret-token");
+      await post({ enabled: false, url: "https://forge.example.com", clearToken: true });
+      expect(await new FileForgejoSettings(dir, secrets).view()).toEqual({ enabled: false, url: "https://forge.example.com", hasToken: false });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("routes Forgejo PR lists and selected diffs", async () => {
+    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const forgejo = {
+      view: vi.fn(), save: vi.fn(),
+      pulls: vi.fn(async () => ({ username: "alice", pulls: [] })),
+      diff: vi.fn(async () => ({ patch: "test diff" } as never)),
+    };
+    const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, checks, forgejo });
+    expect(await (await app.request("/api/forgejo/pulls")).json()).toEqual({ username: "alice", pulls: [] });
+    expect(await (await app.request("/api/forgejo/pulls/team/demo/7")).json()).toEqual({ patch: "test diff" });
+    expect(forgejo.diff).toHaveBeenCalledWith("team", "demo", "7");
+    expect((await setup().app.request("/api/forgejo/settings")).status).toBe(412);
+  });
+
   it("serves a usage report for a day, today by default", async () => {
     const report = { total: { cost: 1, tokens: 1 }, today: { cost: 0, tokens: 0 }, day: "2026-10-01", dayTotal: { cost: 1, tokens: 1 }, projects: [], days: [] };
     const usage = { report: vi.fn((_day: string, _today: string) => report) };

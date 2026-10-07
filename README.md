@@ -170,6 +170,37 @@ They arrive while the dashboard tab is closed, as long as the browser is running
 
 Notifications are enabled per browser and address: opening the dashboard on another host name or port (`127.0.0.1` instead of `localhost`, or `--port`) means enabling them again there. The keys and subscriptions are in `~/.local/state/opendevhub/push.json`.
 
+## Forgejo pull requests
+
+Open **Settings** in the sidebar, enable **Forgejo**, and save your instance URL and access token.
+Forgejo is optional and disabled by default. Use a token with `read:user`, `read:repository`, and `read:issue`
+scopes, with access to the private repositories you want to see. The URL must use HTTPS;
+HTTP is supported for local instances at `localhost`, `127.0.0.1`, or `::1`.
+
+The **Forgejo** sidebar link appears when enabled and opens a page with all pull requests authored by the
+connected account across repositories accessible to the token, even without a local project.
+The page defaults to **All**, including closed and merged PRs; use **Open** or **Closed / merged** to filter.
+Select one to see its syntax-highlighted diff in unified or side-by-side layout. **Refresh**
+reloads the list or diff; **Open in Forgejo** opens the original PR.
+
+Settings survive restarts in `$XDG_CONFIG_HOME/opendevhub/integrations/forgejo.json`
+(default `~/.config/opendevhub/integrations/forgejo.json`). This separate file has mode `0600`
+inside a `0700` directory. It contains the URL, enabled state, and an opaque credential reference.
+The token is stored in your OS credential store: macOS Keychain, Windows Credential Manager,
+or Secret Service on Linux (such as GNOME Keyring or KWallet). Linux needs an unlocked,
+persistent Secret Service in your desktop session. An unavailable or locked credential store
+produces an error; there is no plaintext or volatile-keyring fallback.
+
+Existing plaintext tokens are migrated into the credential store before use and removed from
+the settings file only after credential storage succeeds. The saved token is never returned by
+the API, put in browser storage, or injected into task containers. Changing the instance URL
+requires a new token. Disabling keeps the credential for later; **Remove token and disable**
+deletes it from the OS store.
+
+This view is read-only: PR comments, approvals and merging remain on Forgejo. It uses the
+Forgejo REST API independently of the existing git-based Publish action. Responses larger than
+20 MiB show an error and can be opened on Forgejo instead.
+
 ## Remote nodes (preview)
 
 Other machines can run task environments, reached over ssh. Add one on the Nodes page, or with

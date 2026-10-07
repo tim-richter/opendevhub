@@ -1,0 +1,36 @@
+---
+title: Forgejo
+description: Browse all your Forgejo pull requests and their diffs.
+icon: GitPullRequest
+---
+
+Forgejo is an optional integration, disabled by default. Open **Settings** in the sidebar,
+enable **Forgejo**, and save your instance URL and access token. Use a token with `read:user`,
+`read:repository`, and `read:issue` scopes, including access to private repositories you want to see.
+Use HTTPS; loopback HTTP is supported for local instances.
+
+The **Forgejo** sidebar link opens a page listing all PRs authored by the connected account across
+repositories accessible to the token. They do not need to be local projects. The page defaults to
+**All**, including closed and merged PRs; select **Open** or **Closed / merged** to filter. Click a PR
+to see its diff with the dashboard's syntax highlighting and unified or side-by-side layout.
+**Refresh** reloads the list or diff. **Open in Forgejo** opens the original PR.
+
+## Saved settings
+
+Settings survive restarts. The URL and token are kept separately from ordinary configuration,
+in `~/.config/opendevhub/integrations/forgejo.json` (or under `XDG_CONFIG_HOME`). This file holds
+only the URL, enabled state, and an opaque credential reference. The token is stored in macOS
+Keychain, Windows Credential Manager, or Secret Service on Linux. Linux requires an unlocked
+persistent Secret Service, such as GNOME Keyring or KWallet, in your desktop session.
+
+If the OS credential store is locked or unavailable, the operation fails with an actionable
+error. There is no plaintext or volatile-keyring fallback. Existing plaintext credentials are
+migrated before use; the plaintext token is removed from the file after secure storage succeeds.
+The saved token is never returned to the browser or injected into task containers.
+
+Leave the token field blank to keep the saved token. Changing the URL requires a new token.
+Disabling retains the connection details; **Remove token and disable** removes the saved token.
+
+The integration is read-only. Comments, approvals, and merges happen on Forgejo. Responses
+larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues
+to use your git credentials independently of this integration.

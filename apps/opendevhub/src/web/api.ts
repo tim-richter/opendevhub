@@ -1,4 +1,5 @@
 import type { StackId } from "../shared/stacks";
+import type { ForgejoDiff, ForgejoPullFilter, ForgejoPulls, ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
 import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, NodeView, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
@@ -6,6 +7,32 @@ export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
 async function failure(res: Response, what: string): Promise<Error> {
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   return new Error(body.error ?? `${what} failed (${res.status})`);
+}
+
+export async function fetchForgejoSettings(): Promise<ForgejoSettings> {
+  const res = await fetch("/api/forgejo/settings", { cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Forgejo settings");
+  return res.json();
+}
+
+export async function saveForgejoSettings(input: ForgejoSettingsInput): Promise<ForgejoSettings> {
+  const res = await fetch("/api/forgejo/settings", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await failure(res, "save Forgejo settings");
+  return res.json();
+}
+
+export async function fetchForgejoPulls(state: ForgejoPullFilter = "all", signal?: AbortSignal): Promise<ForgejoPulls> {
+  const res = await fetch(`/api/forgejo/pulls?${new URLSearchParams({ state })}`, { signal, cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Forgejo pull requests");
+  return res.json();
+}
+
+export async function fetchForgejoDiff(owner: string, repo: string, number: string, signal?: AbortSignal): Promise<ForgejoDiff> {
+  const res = await fetch(`/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}`, { signal, cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Forgejo diff");
+  return res.json();
 }
 
 export async function postAction(projectId: string, action: Action): Promise<void> {

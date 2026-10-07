@@ -5,6 +5,10 @@ import {
   createTask,
   envAction,
   fetchCheckRun,
+  fetchForgejoSettings,
+  saveForgejoSettings,
+  fetchForgejoPulls,
+  fetchForgejoDiff,
   fetchChecks,
   dismissForm,
   fetchModels,
@@ -34,6 +38,29 @@ function stubFetch(status: number, body: unknown) {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Forgejo API", () => {
+  it("loads safe settings and omits the token when keeping it", async () => {
+    const fetchMock = stubFetch(200, { enabled: true, url: "https://forge.example.com", hasToken: true });
+    expect((await fetchForgejoSettings()).hasToken).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/forgejo/settings");
+    await saveForgejoSettings({ enabled: false, url: "https://forge.example.com" });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ enabled: false, url: "https://forge.example.com" });
+    await saveForgejoSettings({ enabled: false, url: "https://forge.example.com", clearToken: true });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).clearToken).toBe(true);
+  });
+
+  it("encodes PR identifiers, passes cancellation and surfaces errors", async () => {
+    const fetchMock = stubFetch(200, { username: "alice", pulls: [] });
+    const signal = new AbortController().signal;
+    await fetchForgejoPulls("all", signal);
+    expect(fetchMock.mock.calls[0]).toEqual(["/api/forgejo/pulls?state=all", { signal, cache: "no-store" }]);
+    await fetchForgejoDiff("team?", "private#", "7", signal);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/forgejo/pulls/team%3F/private%23/7");
+    stubFetch(502, { error: "Forgejo rejected the token" });
+    await expect(fetchForgejoPulls()).rejects.toThrow("Forgejo rejected the token");
+  });
+});
 
 describe("task API", () => {
   it("starts a task and picks a variant", async () => {
