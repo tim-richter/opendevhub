@@ -21,6 +21,7 @@ import type {
   JiraTickets,
 } from "../../shared/jira";
 import { fetchJiraTicket, fetchJiraTickets } from "../api";
+import { MarkdownBody } from "../components/MarkdownBody";
 import {
   Chip,
   Empty,
@@ -348,9 +349,13 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
               </dl>
             </Section>
             <Section title="Description">
-              <div className="px-4 py-4 text-sm break-words whitespace-pre-wrap">
-                {data.description || "No description provided."}
-              </div>
+              {data.description ? (
+                <MarkdownBody className="px-4 py-4">
+                  {data.description}
+                </MarkdownBody>
+              ) : (
+                <p className="px-4 py-4 text-sm">No description provided.</p>
+              )}
             </Section>
             {linked.size > 0 && (
               <Section title="Tasks created from this ticket">

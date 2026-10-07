@@ -1,4 +1,5 @@
 import type {
+  ForgejoApprovals,
   ForgejoChecks,
   ForgejoComment,
   ForgejoConnection,
@@ -8,8 +9,11 @@ import type {
   ForgejoPullQuery,
   ForgejoPullRequest,
   ForgejoPulls,
+  ForgejoPullStack,
   ForgejoReview,
   ForgejoSettings,
+  ForgejoStackNode,
+  ForgejoStackPull,
 } from "../shared/forgejo";
 import {
   FileIntegrationSettings,
@@ -18,6 +22,39 @@ import {
 } from "./integration-settings";
 import { OsSecretStore } from "./secrets";
 import type { SecretStore } from "./secrets";
+
+/** Forgejo's page size for the paged lists this client reads. */
+const PAGE_SIZE = 50;
+
+/**
+ * Each reviewer's latest approving or change-requesting review decides their vote, as Forgejo counts them: a
+ * dismissed one no longer counts, and neither does one Forgejo doesn't consider official (e.g. from a reviewer
+ * outside the approvals whitelist).
+ */
+export const countApprovals = (
+  reviews: ForgejoReview[]
+): Pick<ForgejoApprovals, "approvedBy" | "changesRequestedBy"> => {
+  const latest = new Map<string, ForgejoReview>();
+  for (const review of reviews.toSorted((a, b) => a.id - b.id)) {
+    if (
+      review.author &&
+      (review.state === "APPROVED" || review.state === "REQUEST_CHANGES")
+    ) {
+      latest.set(review.author, review);
+    }
+  }
+  const counted = [...latest.values()].filter(
+    (r) => !r.dismissed && r.official !== false
+  );
+  return {
+    approvedBy: counted
+      .filter((r) => r.state === "APPROVED")
+      .map((r) => r.author),
+    changesRequestedBy: counted
+      .filter((r) => r.state === "REQUEST_CHANGES")
+      .map((r) => r.author),
+  };
+};
 
 export class ForgejoError extends IntegrationError {
   constructor(message: string, status: 400 | 404 | 412 | 502 = 400) {
@@ -62,16 +99,106 @@ interface Issue {
   pull_request?: { merged?: boolean } | null;
 }
 
+interface RepoPull {
+  number: number;
+  title: string;
+  base: {
+    ref: string;
+    repo_id: number;
+    repo?: { default_branch?: string } | null;
+  };
+  head: { ref: string; repo_id: number };
+}
+
+/** Pages of a repository's open pull requests read to find stacks. */
+const STACK_PAGES = 4;
+
+/** The open pull request whose head branch in this repository is `base`; a fork's same-named branch doesn't count. */
+const stackParent = (
+  open: RepoPull[],
+  base: string,
+  skip: (number: number) => boolean
+): RepoPull | undefined =>
+  open.find(
+    (p) =>
+      !skip(p.number) &&
+      p.head.ref === base &&
+      p.head.repo_id === p.base.repo_id
+  );
+
+const stackPull = (p: RepoPull): ForgejoStackPull => ({
+  base: p.base.ref,
+  head: p.head.ref,
+  number: p.number,
+  title: p.title,
+});
+
+/** The open pull requests a pull request builds on and those built on it; undefined when there are none. */
+const pullStack = (
+  open: RepoPull[],
+  current: { number: number; base: string; head?: string }
+): ForgejoPullStack | undefined => {
+  // Shared across both directions so branches that target each other in a loop end the walk.
+  const seen = new Set([current.number]);
+  const ancestors: ForgejoStackPull[] = [];
+  for (
+    let parent = stackParent(open, current.base, (n) => seen.has(n));
+    parent;
+    parent = stackParent(open, parent.base.ref, (n) => seen.has(n))
+  ) {
+    seen.add(parent.number);
+    ancestors.unshift(stackPull(parent));
+  }
+  const children = (head: string): ForgejoStackNode[] => {
+    const direct = open.filter(
+      (p) => !seen.has(p.number) && p.base.ref === head
+    );
+    for (const p of direct) {
+      seen.add(p.number);
+    }
+    return direct.map((p) => ({
+      ...stackPull(p),
+      // Nothing in this repository can target a fork's branch.
+      children: p.head.repo_id === p.base.repo_id ? children(p.head.ref) : [],
+    }));
+  };
+  const descendants = current.head ? children(current.head) : [];
+  return ancestors.length || descendants.length
+    ? { ancestors, descendants }
+    : undefined;
+};
+
+/** How long a base branch's required approvals are reused; protection rules rarely change. */
+const PROTECTION_TTL_MS = 5 * 60_000;
+
+/** How long a repository's open pull requests are reused to find stacks; the inbox refetches on every focus. */
+const STACK_TTL_MS = 60_000;
+
 export class Forgejo {
+  /** Required approvals per instance, repository and branch, shared by every pull request into that branch. */
+  private readonly protection = new Map<
+    string,
+    { at: number; required: Promise<number | undefined> }
+  >();
+  /** Open pull requests per instance and repository, shared by inbox loads in quick succession. */
+  private readonly openPullLists = new Map<
+    string,
+    { at: number; pulls: Promise<RepoPull[]> }
+  >();
+
   constructor(
     private readonly settings: FileForgejoSettings,
-    private readonly fetcher: typeof fetch = fetch
+    private readonly fetcher: typeof fetch = fetch,
+    private readonly now: () => number = Date.now
   ) {}
 
   view(): Promise<ForgejoSettings> {
     return this.settings.view();
   }
   save(input: Record<string, unknown>): Promise<ForgejoSettings> {
+    // A different instance or token may see different protection rules and repositories.
+    this.protection.clear();
+    this.openPullLists.clear();
     return this.settings.save(input);
   }
 
@@ -396,12 +523,126 @@ export class Forgejo {
       const pull = this.pull(connection, issueParts[0], issueParts[1], issue);
       pulls.set(`${pull.owner}/${pull.repo}/${pull.number}`, pull);
     }
+    await this.addStacks(connection, [...pulls.values()]);
     // Continue on nonempty pages: instance administrators can cap the requested page size.
     return {
       pulls: [...pulls.values()],
       username: user.login,
       ...(issues.length ? { nextPage: page + 1 } : {}),
     };
+  }
+
+  /**
+   * Marks open pull requests that target another branch than the default and links each to the open pull request
+   * whose head is its base. One listing per repository; stacks are a hint, so a failed listing leaves them out.
+   */
+  private async addStacks(
+    connection: SavedSettings & { token: string },
+    pulls: ForgejoPullRequest[]
+  ): Promise<void> {
+    const byRepo = new Map<string, ForgejoPullRequest[]>();
+    for (const pull of pulls) {
+      if (pull.state === "open") {
+        const key = `${pull.owner}/${pull.repo}`;
+        const group = byRepo.get(key) ?? [];
+        group.push(pull);
+        byRepo.set(key, group);
+      }
+    }
+    await Promise.all(
+      [...byRepo.values()].map(async (repoPulls) => {
+        const [{ owner, repo }] = repoPulls;
+        let open: RepoPull[];
+        try {
+          open = await this.openPulls(connection, owner, repo);
+        } catch {
+          return;
+        }
+        const byNumber = new Map(open.map((p) => [p.number, p]));
+        for (const pull of repoPulls) {
+          const listed = byNumber.get(pull.number);
+          if (!listed) {
+            continue;
+          }
+          const base = listed.base.ref;
+          const parent = stackParent(open, base, (n) => n === pull.number);
+          const defaultBranch = listed.base.repo?.default_branch;
+          if (parent || (defaultBranch && base !== defaultBranch)) {
+            pull.stack = {
+              base,
+              ...(parent
+                ? { parent: { number: parent.number, title: parent.title } }
+                : {}),
+            };
+          }
+        }
+      })
+    );
+  }
+
+  /**
+   * A repository's open pull requests, cached briefly; concurrent loads share one listing. The shared listing
+   * isn't tied to any caller's abort signal; it still times out.
+   */
+  private openPulls(
+    connection: SavedSettings & { token: string },
+    owner: string,
+    repo: string
+  ): Promise<RepoPull[]> {
+    const key = `${connection.url}\n${segment(owner)}/${segment(repo)}`;
+    const now = this.now();
+    const cached = this.openPullLists.get(key);
+    if (cached && now - cached.at < STACK_TTL_MS) {
+      return cached.pulls;
+    }
+    // Drop expired listings so repositories that leave the inbox don't stay in memory.
+    for (const [stale, entry] of this.openPullLists) {
+      if (now - entry.at >= STACK_TTL_MS) {
+        this.openPullLists.delete(stale);
+      }
+    }
+    const pulls = this.listOpenPulls(connection, owner, repo);
+    this.openPullLists.set(key, { at: now, pulls });
+    // Failures aren't cached: the next inbox load tries again.
+    pulls.catch(() => {
+      if (this.openPullLists.get(key)?.pulls === pulls) {
+        this.openPullLists.delete(key);
+      }
+    });
+    return pulls;
+  }
+
+  private async listOpenPulls(
+    connection: SavedSettings & { token: string },
+    owner: string,
+    repo: string
+  ): Promise<RepoPull[]> {
+    const open: RepoPull[] = [];
+    for (let page = 1; page <= STACK_PAGES; page += 1) {
+      const items = await this.json<RepoPull[]>(
+        connection,
+        `repos/${segment(owner)}/${segment(repo)}/pulls?state=open&page=${page}&limit=${PAGE_SIZE}`
+      );
+      if (!Array.isArray(items)) {
+        throw new ForgejoError(
+          "Forgejo returned an invalid pull request list.",
+          502
+        );
+      }
+      open.push(
+        ...items.filter(
+          (p) =>
+            Number.isSafeInteger(p?.number) &&
+            typeof p.title === "string" &&
+            typeof p.base?.ref === "string" &&
+            typeof p.head?.ref === "string"
+        )
+      );
+      if (items.length < PAGE_SIZE) {
+        break;
+      }
+    }
+    return open;
   }
 
   async pulls(state = "open", scope = "authored"): Promise<ForgejoPulls> {
@@ -480,14 +721,38 @@ export class Forgejo {
     return `repos/${segment(owner)}/${segment(repo)}/pulls/${number}`;
   }
 
+  /** A pull request's details with the stack it belongs to. */
   async details(
     owner: string,
     repo: string,
     number: string,
     signal?: AbortSignal
   ): Promise<ForgejoPullDetails> {
-    const route = this.route(owner, repo, number);
     const connection = await this.connection();
+    const details = this.pullDetails(connection, owner, repo, number, signal);
+    // Stacks are a hint: list the repository alongside the details and leave them out if that fails.
+    const open = this.openPulls(connection, owner, repo).catch(() => []);
+    const result = await details;
+    const stack = pullStack(await open, {
+      base: result.base,
+      number: result.pull.number,
+      // Only a head branch in this repository can be another pull request's base.
+      ...(result.headRepository?.toLowerCase() ===
+      `${owner}/${repo}`.toLowerCase()
+        ? { head: result.head }
+        : {}),
+    });
+    return stack ? { ...result, stack } : result;
+  }
+
+  private async pullDetails(
+    connection: SavedSettings & { token: string },
+    owner: string,
+    repo: string,
+    number: string,
+    signal?: AbortSignal
+  ): Promise<ForgejoPullDetails> {
+    const route = this.route(owner, repo, number);
     const value = await this.json<{
       number: number;
       title: string;
@@ -550,7 +815,7 @@ export class Forgejo {
     if (!Number.isSafeInteger(value) || value < 1 || value > 200) {
       throw new ForgejoError("Invalid page.");
     }
-    return `page=${value}&limit=50`;
+    return `page=${value}&limit=${PAGE_SIZE}`;
   }
 
   async comments(
@@ -597,6 +862,7 @@ export class Forgejo {
         dismissed: boolean;
         stale: boolean;
         comments_count: number;
+        official?: boolean;
       }[]
     >(await this.connection(), `${route}/reviews?${this.page(page)}`, signal);
     if (!Array.isArray(values)) {
@@ -610,12 +876,84 @@ export class Forgejo {
         commit: v.commit_id,
         dismissed: !!v.dismissed,
         id: v.id,
+        ...(typeof v.official === "boolean" ? { official: v.official } : {}),
         stale: !!v.stale,
         state: v.state,
         submittedAt: v.submitted_at,
       })),
       ...(values.length ? { nextPage: page + 1 } : {}),
     };
+  }
+
+  /** The base branch's required approvals and the reviewers who currently approve or request changes. */
+  async approvals(
+    owner: string,
+    repo: string,
+    number: string,
+    signal?: AbortSignal
+  ): Promise<ForgejoApprovals> {
+    const details = await this.pullDetails(
+      await this.connection(),
+      owner,
+      repo,
+      number,
+      signal
+    );
+    const required = await this.requiredApprovals(owner, repo, details.base);
+    const reviews: ForgejoReview[] = [];
+    // A short page is the last one; the cap bounds a pull request with an unusual number of reviews.
+    for (let page = 1; page <= 20; page += 1) {
+      const { items } = await this.reviews(owner, repo, number, page, signal);
+      reviews.push(...items);
+      if (items.length < PAGE_SIZE) {
+        break;
+      }
+    }
+    return { ...countApprovals(reviews), base: details.base, required };
+  }
+
+  /**
+   * The approvals a branch's protection requires, or undefined when it has none. Cached for a few minutes, and
+   * concurrent lookups share one request, so a list of pull requests asks once per repository and branch. The
+   * shared request isn't tied to any caller's abort signal; it still times out.
+   */
+  private async requiredApprovals(
+    owner: string,
+    repo: string,
+    base: string
+  ): Promise<number | undefined> {
+    const connection = await this.connection();
+    const route = `repos/${segment(owner)}/${segment(repo)}/branches/${base
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+    const key = `${connection.url}\n${route}`;
+    const cached = this.protection.get(key);
+    if (cached && this.now() - cached.at < PROTECTION_TTL_MS) {
+      return cached.required;
+    }
+    const required = this.json<{
+      protected?: boolean;
+      required_approvals?: number;
+    }>(connection, route).then(
+      (value) =>
+        value.protected ? (value.required_approvals ?? 0) : undefined,
+      (error: unknown) => {
+        // A deleted base branch has no protection left to satisfy.
+        if (error instanceof ForgejoError && error.status === 404) {
+          return undefined;
+        }
+        throw error;
+      }
+    );
+    this.protection.set(key, { at: this.now(), required });
+    // Failures aren't cached: the next pull request tries again.
+    required.catch(() => {
+      if (this.protection.get(key)?.required === required) {
+        this.protection.delete(key);
+      }
+    });
+    return required;
   }
 
   async reviewComments(
@@ -695,7 +1033,12 @@ export class Forgejo {
     repo: string,
     number: string
   ): Promise<ForgejoDiff> {
-    const details = await this.details(owner, repo, number);
+    const details = await this.pullDetails(
+      await this.connection(),
+      owner,
+      repo,
+      number
+    );
     return {
       base: details.base,
       commitId: details.headSha || undefined,

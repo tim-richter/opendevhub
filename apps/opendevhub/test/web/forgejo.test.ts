@@ -5,10 +5,14 @@ import type { PublishInfo } from "../../src/shared/types";
 import {
   forgejoAgentPrompt,
   forgejoFilePatches,
+  forgejoReviewComments,
+  forgejoReviewFiles,
+  forgejoStackRows,
   matchesForgejoCheckout,
   matchesForgejoPull,
   readForgejoPreference,
   saveForgejoPreference,
+  stackForgejoPulls,
 } from "../../src/web/forgejo";
 
 const details: ForgejoPullDetails = {
@@ -133,6 +137,34 @@ describe("Forgejo handoff and navigation", () => {
     expect(files.map((f) => f.patch).join("")).toBe(patch);
   });
 
+  it("turns a patch into review files with git status and binary markers", () => {
+    const files = forgejoReviewFiles(
+      "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/n.ts b/n.ts\nnew file mode 100644\n--- /dev/null\n+++ b/n.ts\n@@ -0,0 +1 @@\n+hi\ndiff --git a/gone b/gone\ndeleted file mode 100644\n--- a/gone\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\ndiff --git a/img.png b/img.png\nBinary files a/img.png and b/img.png differ\n"
+    );
+    expect(
+      files.map(({ file, status, binary }) => ({ binary, file, status }))
+    ).toStrictEqual([
+      { binary: false, file: "a.ts", status: "modified" },
+      { binary: false, file: "n.ts", status: "added" },
+      { binary: false, file: "gone", status: "deleted" },
+      { binary: true, file: "img.png", status: "modified" },
+    ]);
+    expect(files[1]).toMatchObject({ additions: 1, deletions: 0 });
+  });
+
+  it("anchors range comments to their last line and names the range", () => {
+    expect(
+      forgejoReviewComments([
+        { file: "a.ts", id: "1", line: 4, side: "new", start: 2, text: "x" },
+        { file: "a.ts", id: "2", line: 3, side: "old", text: "y" },
+        { id: "3", text: "general" },
+      ])
+    ).toStrictEqual([
+      { body: "Lines 2-4:\nx", new_position: 4, old_position: 0, path: "a.ts" },
+      { body: "y", new_position: 0, old_position: 3, path: "a.ts" },
+    ]);
+  });
+
   it("counts changed lines beginning with diff-header-like text", () => {
     const files = forgejoFilePatches(
       "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n---old\n+++new\n"
@@ -151,5 +183,81 @@ describe("Forgejo handoff and navigation", () => {
     });
     expect(readForgejoPreference("inbox")).toBe("");
     expect(() => saveForgejoPreference("layout", "split")).not.toThrow();
+  });
+});
+
+describe("stacked pull requests", () => {
+  const pull = (number: number, parent?: number, repo = "app") => ({
+    ...details.pull,
+    number,
+    repo,
+    title: `PR ${number}`,
+    ...(parent
+      ? {
+          stack: {
+            base: `feat/${parent}`,
+            parent: { number: parent, title: `PR ${parent}` },
+          },
+        }
+      : {}),
+  });
+
+  it("puts stacked pull requests under their listed parent", () => {
+    const ordered = stackForgejoPulls([
+      pull(3, 2),
+      pull(9),
+      pull(2, 1),
+      pull(1),
+      // Not listed, or in another repository: shown at the top level.
+      pull(5, 4),
+      pull(6, 1, "other"),
+    ]);
+    expect(ordered.map((p) => [p.pull.number, p.depth])).toEqual([
+      [9, 0],
+      [1, 0],
+      [2, 1],
+      [3, 2],
+      [5, 0],
+      [6, 0],
+    ]);
+  });
+
+  it("keeps branches that target each other in a loop", () => {
+    const ordered = stackForgejoPulls([pull(1, 2), pull(2, 1)]);
+    expect(ordered.map((p) => [p.pull.number, p.depth])).toEqual([
+      [1, 0],
+      [2, 1],
+    ]);
+  });
+});
+
+describe("a pull request's stack", () => {
+  const entry = (number: number) => ({
+    number,
+    title: `PR ${number}`,
+    base: "b",
+    head: "h",
+  });
+
+  it("lists what it builds on, itself, then what builds on it", () => {
+    expect(forgejoStackRows(details)).toEqual([]);
+    const rows = forgejoStackRows({
+      ...details,
+      stack: {
+        ancestors: [entry(1), entry(2)],
+        descendants: [
+          { ...entry(8), children: [{ ...entry(9), children: [] }] },
+          { ...entry(10), children: [] },
+        ],
+      },
+    });
+    expect(rows.map((r) => [r.number, r.depth, r.current])).toEqual([
+      [1, 0, false],
+      [2, 1, false],
+      [7, 2, true],
+      [8, 3, false],
+      [9, 4, false],
+      [10, 3, false],
+    ]);
   });
 });

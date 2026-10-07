@@ -26,6 +26,14 @@ export interface ForgejoPullRequest {
   url: string;
   updatedAt: string;
   state: "open" | "closed" | "merged";
+  /** Inbox only: set on an open pull request that targets another branch than its repository's default. */
+  stack?: ForgejoStack;
+}
+
+export interface ForgejoStack {
+  base: string;
+  /** The open pull request in the same repository whose head branch is this one's base. */
+  parent?: { number: number; title: string };
 }
 
 export interface ForgejoPulls {
@@ -46,6 +54,26 @@ export interface ForgejoPullDetails {
   mergeable?: boolean;
   labels: string[];
   reviewers: string[];
+  /** Set when open pull requests in the same repository build on this one or it builds on them. */
+  stack?: ForgejoPullStack;
+}
+
+export interface ForgejoStackPull {
+  number: number;
+  title: string;
+  base: string;
+  head: string;
+}
+
+export interface ForgejoStackNode extends ForgejoStackPull {
+  children: ForgejoStackNode[];
+}
+
+export interface ForgejoPullStack {
+  /** The open pull requests this one builds on, from the bottom of the stack up to its direct parent. */
+  ancestors: ForgejoStackPull[];
+  /** The open pull requests built on this one, each with those built on it. */
+  descendants: ForgejoStackNode[];
 }
 
 export interface ForgejoComment {
@@ -70,6 +98,20 @@ export interface ForgejoReview {
   dismissed: boolean;
   stale: boolean;
   commentsCount: number;
+  /** Counts towards the base branch's required approvals; missing on Forgejo versions that don't say. */
+  official?: boolean;
+}
+
+/** Where a pull request stands against its base branch's required approvals. */
+export interface ForgejoApprovals {
+  /** The branch the pull request merges into, whose protection sets `required`. */
+  base: string;
+  /** Approvals the base branch's protection requires; missing when the branch isn't protected. */
+  required?: number;
+  /** Reviewers whose latest review approves. */
+  approvedBy: string[];
+  /** Reviewers whose latest review requests changes. */
+  changesRequestedBy: string[];
 }
 
 export interface ForgejoPage<T> {

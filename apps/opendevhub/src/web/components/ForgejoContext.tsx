@@ -16,6 +16,7 @@ import {
   fetchForgejoReviews,
 } from "../api";
 import { useForgejoPages, useForgejoQuery } from "../hooks/useForgejo";
+import { MarkdownBody } from "./MarkdownBody";
 import { Chip, Note, Section } from "./Page";
 
 export interface ForgejoFeedback {
@@ -154,7 +155,7 @@ export const ForgejoContext = ({
           {c.path}:{c.line || c.oldLine || "?"}
         </p>
       )}
-      <p className="text-sm break-words whitespace-pre-wrap">{c.body}</p>
+      <MarkdownBody>{c.body}</MarkdownBody>
       {c.diffHunk && (
         <details>
           <summary className="text-muted-foreground cursor-pointer text-xs">
@@ -248,7 +249,7 @@ export const ForgejoContext = ({
               {r.submittedAt && new Date(r.submittedAt).toLocaleString()} ·{" "}
               {r.commit?.slice(0, 10)}
             </p>
-            <p className="text-sm break-words whitespace-pre-wrap">{r.body}</p>
+            <MarkdownBody>{r.body}</MarkdownBody>
             <SelectFeedback
               label="Include review in agent handoff"
               checked={!!selected[`reviews-${r.id}`]}

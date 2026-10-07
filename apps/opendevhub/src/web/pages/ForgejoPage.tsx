@@ -1,13 +1,17 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
+  BoxIcon,
+  CornerDownRightIcon,
   ExternalLinkIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
   GitPullRequestIcon,
+  LayersIcon,
+  MessageSquareIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { Component, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
@@ -24,14 +28,18 @@ import {
   fetchForgejoDiff,
   fetchForgejoPulls,
 } from "../api";
+import { ForgejoApprovals } from "../components/ForgejoApprovals";
 import { ForgejoContext, RequestState } from "../components/ForgejoContext";
 import type { ForgejoFeedback } from "../components/ForgejoContext";
 import { ForgejoHandoff } from "../components/ForgejoHandoff";
-import { ForgejoReviewEditor } from "../components/ForgejoReviewEditor";
-import { PatchView } from "../components/LazyPatchView";
+import {
+  ForgejoReviewDialog,
+  ForgejoWorktreeDialog,
+} from "../components/ForgejoReviewDialogs";
+import { ForgejoStack } from "../components/ForgejoStack";
+import { MarkdownBody } from "../components/MarkdownBody";
 import {
   Chip,
-  diffFont,
   Empty,
   Note,
   Page,
@@ -39,14 +47,26 @@ import {
   Section,
   Segmented,
 } from "../components/Page";
+import {
+  FilesToggle,
+  LayoutToggle,
+  ReviewDiffs,
+} from "../components/ReviewDiffs";
 import { DiffLinesSkeleton } from "../components/Skeletons";
+import { Tip } from "../components/Tip";
 import { useDash } from "../DashboardContext";
 import {
-  forgejoFilePatches,
+  forgejoReviewFiles,
   readForgejoPreference,
   saveForgejoPreference,
+  stackForgejoPulls,
 } from "../forgejo";
 import { useForgejoQuery } from "../hooks/useForgejo";
+import { newId, readDiffView, writeDiffView } from "../review";
+import type { DiffView, LineAnchor, ReviewComment } from "../review";
+
+/** Extra left padding per level of a stacked pull request in the list. */
+const STACK_INDENT_REM = 1.5;
 
 const ForgejoGate = ({ children }: { children: ReactNode }) => {
   const { forgejo, forgejoError } = useDash();
@@ -104,15 +124,17 @@ const PullDiff = ({
   const { forgejo } = useDash();
   const [search] = useSearchParams();
   const client = useQueryClient();
-  const [reviewing, setReviewing] = useState(
-    search.get("tab") === "review" || search.get("inbox") === "review"
-  );
+  // Draft line comments for a Forgejo review; they belong to the head commit they were written on.
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const commentsRef = useRef(comments);
+  commentsRef.current = comments;
+  const drafting = comments.length > 0;
   const key = ["pull", owner, repo, number];
   const details = useForgejoQuery(
     [...key, "details"],
     (signal) => fetchForgejoDetails(owner, repo, number, signal),
     true,
-    { refetchOnReconnect: !reviewing, refetchOnWindowFocus: !reviewing }
+    { refetchOnReconnect: !drafting, refetchOnWindowFocus: !drafting }
   );
   const patch = useForgejoQuery(
     [
@@ -124,40 +146,74 @@ const PullDiff = ({
     ],
     (signal) => fetchForgejoDiff(owner, repo, number, signal),
     !!details.data,
-    { refetchOnReconnect: !reviewing, refetchOnWindowFocus: !reviewing }
+    { refetchOnReconnect: !drafting, refetchOnWindowFocus: !drafting }
   );
-  const [style, setStyle] = useState<"unified" | "split">(() =>
-    readForgejoPreference("layout") === "split" ? "split" : "unified"
-  );
-  const [selectedFile, setSelectedFile] = useState<number | null>(null);
+  const [diffView, setDiffView] = useState(readDiffView);
+  const changeDiffView = (change: Partial<DiffView>) => {
+    const next = { ...diffView, ...change };
+    setDiffView(next);
+    writeDiffView(next);
+  };
+  const [open, setOpen] = useState<{ file: string; anchor: LineAnchor }>();
   const [feedback, setFeedback] = useState<ForgejoFeedback>({
     checks: [],
     comments: [],
     reviews: [],
   });
-  const [handoff, setHandoff] = useState(false);
+  const [dialog, setDialog] = useState<"handoff" | "review" | "worktree">();
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    setSelectedFile(null);
     setFeedback({ checks: [], comments: [], reviews: [] });
+    setComments([]);
+    setOpen(undefined);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [details.data?.headSha]);
   const files = useMemo(
-    () => forgejoFilePatches(patch.data?.patch ?? ""),
+    () => forgejoReviewFiles(patch.data?.patch ?? ""),
     [patch.data?.patch]
   );
+  const openLineComment = useCallback(
+    (file: string, anchor: LineAnchor) => setOpen({ anchor, file }),
+    []
+  );
+  const addLineComment = useCallback(
+    (file: string, anchor: LineAnchor, text: string) => {
+      setComments([
+        ...commentsRef.current,
+        {
+          file,
+          id: newId(),
+          line: anchor.line,
+          quote: anchor.quote,
+          side: anchor.side,
+          start: anchor.start,
+          startSide: anchor.startSide,
+          text,
+        },
+      ]);
+      setOpen(undefined);
+    },
+    []
+  );
+  const cancelLineComment = useCallback(() => setOpen(undefined), []);
+  const deleteComment = useCallback(
+    (id: string) => setComments(commentsRef.current.filter((c) => c.id !== id)),
+    []
+  );
+  const isOpen = details.data?.pull.state === "open";
   const url = forgejo?.url
     ? `${forgejo.url}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(number)}`
     : undefined;
   const refresh = async () => {
     // Keep old content visible while fetching. Commit-specific patch/check keys prevent mixing revisions.
     if (
-      reviewing &&
-      !confirm("Refresh the diff? Draft review comments will be discarded.")
+      drafting &&
+      !confirm(
+        "Refresh the pull request? If it has new commits, your draft review comments are discarded."
+      )
     ) {
       return;
     }
-    setReviewing(false);
     await details.refetch();
     await client.invalidateQueries({
       predicate: (query) => query.queryKey[6] !== "details",
@@ -191,17 +247,31 @@ const PullDiff = ({
                 </a>
               </Button>
             )}
-            {details.data?.pull.state === "open" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setReviewing((v) => !v)}
-              >
-                {reviewing ? "Close review editor" : "Write review"}
-              </Button>
+            {details.data?.headSha && (
+              <Tip label="Check the head commit out in a worktree of a local project">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDialog("worktree")}
+                >
+                  <BoxIcon /> Inspect in container
+                </Button>
+              </Tip>
+            )}
+            {isOpen && details.data?.headSha && (
+              <Tip label="Send your line comments as a review">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDialog("review")}
+                >
+                  <MessageSquareIcon /> Review
+                  {drafting ? ` (${comments.length})` : ""}
+                </Button>
+              </Tip>
             )}
             {details.data && (
-              <Button size="sm" onClick={() => setHandoff(true)}>
+              <Button size="sm" onClick={() => setDialog("handoff")}>
                 Continue with agent
               </Button>
             )}
@@ -223,6 +293,7 @@ const PullDiff = ({
                 details.data.pull.state === "open" && (
                   <Chip>Merge conflicts</Chip>
                 )}
+              <ForgejoApprovals pull={details.data.pull} />
               <span className="text-muted-foreground text-sm">
                 By {details.data.author}
               </span>
@@ -230,37 +301,57 @@ const PullDiff = ({
                 <Chip key={l}>{l}</Chip>
               ))}
             </div>
+            <ForgejoStack details={details.data} search={search.toString()} />
             <Section title="Description">
-              <p className="p-4 text-sm break-words whitespace-pre-wrap">
-                {details.data.body || "No description."}
-              </p>
+              {details.data.body ? (
+                <MarkdownBody className="p-4">{details.data.body}</MarkdownBody>
+              ) : (
+                <p className="p-4 text-sm">No description.</p>
+              )}
             </Section>
             <ForgejoContext
               key={details.data.headSha}
               details={details.data}
               onSelection={setFeedback}
             />
-            {handoff && (
+            {dialog === "handoff" && (
               <ForgejoHandoff
                 details={details.data}
                 feedback={feedback}
-                onClose={() => setHandoff(false)}
+                onClose={() => setDialog(undefined)}
               />
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-semibold">Changes</h2>
-              <Segmented
-                label="Diff layout"
-                value={style}
-                onChange={(value) => {
-                  setStyle(value);
-                  saveForgejoPreference("layout", value);
+            {dialog === "review" && (
+              <ForgejoReviewDialog
+                pull={details.data.pull}
+                commitId={details.data.headSha}
+                comments={comments}
+                onDelete={deleteComment}
+                onSent={() => {
+                  setComments([]);
+                  void details.refetch();
                 }}
-                options={[
-                  { id: "unified", label: "Unified" },
-                  { id: "split", label: "Side by side" },
-                ]}
+                onClose={() => setDialog(undefined)}
               />
+            )}
+            {dialog === "worktree" && (
+              <ForgejoWorktreeDialog
+                pull={details.data.pull}
+                commitId={details.data.headSha}
+                onClose={() => setDialog(undefined)}
+              />
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+              <FilesToggle view={diffView} onChange={changeDiffView} />
+              <h2 className="font-semibold">Changes</h2>
+              {isOpen && (
+                <span className="text-muted-foreground text-sm max-sm:hidden">
+                  Click the + beside a line to comment on it.
+                </span>
+              )}
+              <div className="ml-auto">
+                <LayoutToggle view={diffView} onChange={changeDiffView} />
+              </div>
             </div>
             {patch.isPending && (
               <div role="status" aria-label="Loading pull request diff">
@@ -275,69 +366,23 @@ const PullDiff = ({
                 </Button>
               </div>
             )}
-            {patch.data && reviewing && details.data.pull.state === "open" ? (
-              <ForgejoReviewEditor
-                key={details.data.headSha}
-                data={{
-                  base: details.data.base,
-                  commitId: details.data.headSha,
-                  head: details.data.head,
-                  patch: patch.data.patch,
-                  pull: details.data.pull,
-                }}
-                split={style === "split"}
-              />
-            ) : (
-              patch.data &&
-              (patch.data.patch.trim() ? (
-                <div className="grid items-start gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
-                  <nav
-                    aria-label="Changed files"
-                    className="flex flex-col gap-1 rounded-lg border p-2 lg:sticky lg:top-4 lg:max-h-[70vh] lg:overflow-y-auto"
-                  >
-                    <button
-                      type="button"
-                      className="hover:bg-muted rounded px-2 py-1.5 text-left text-sm"
-                      aria-current={selectedFile === null ? "true" : undefined}
-                      onClick={() => setSelectedFile(null)}
-                    >
-                      All changed files ({files.length})
-                    </button>
-                    {files.map((f, i) => (
-                      <button
-                        type="button"
-                        key={i}
-                        className={`hover:bg-muted rounded px-2 py-1.5 text-left text-xs break-all ${selectedFile === i ? "bg-muted" : ""}`}
-                        aria-current={selectedFile === i ? "true" : undefined}
-                        onClick={() => setSelectedFile(i)}
-                      >
-                        {f.name}{" "}
-                        <span className="whitespace-nowrap">
-                          <span className="text-ok">+{f.additions}</span>{" "}
-                          <span className="text-destructive">
-                            −{f.deletions}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </nav>
-                  <div
-                    className={`min-w-0 overflow-hidden rounded-xl border ${diffFont}`}
-                  >
-                    {(selectedFile !== null && files[selectedFile]
-                      ? [files[selectedFile]]
-                      : files
-                    ).map((f) => (
-                      <DiffBoundary key={f.patch} patch={f.patch}>
-                        <PatchView patch={f.patch} split={style === "split"} />
-                      </DiffBoundary>
-                    ))}
-                  </div>
-                </div>
+            {patch.data &&
+              (files.length ? (
+                <ReviewDiffs
+                  files={files}
+                  view={diffView}
+                  version={details.data.headSha}
+                  comments={comments}
+                  open={open}
+                  placeholder="Review comment…"
+                  onAnchor={isOpen ? openLineComment : undefined}
+                  onAdd={addLineComment}
+                  onCancel={cancelLineComment}
+                  onDelete={deleteComment}
+                />
               ) : (
                 <Empty title="No changes in this pull request" />
-              ))
-            )}
+              ))}
           </>
         )}
       </ForgejoGate>
@@ -501,20 +546,48 @@ export const ForgejoPage = () => {
         {!!pulls.length && (
           <Section title="Pull requests" hint={`${pulls.length} loaded`}>
             <ul className="divide-y">
-              {pulls.map((pull) => (
+              {stackForgejoPulls(pulls).map(({ pull, depth }) => (
                 <li key={`${pull.owner}/${pull.repo}/${pull.number}`}>
                   <Link
                     className="hover:bg-muted/50 focus-visible:outline-ring flex items-start gap-3 px-4 py-3 transition-colors focus-visible:outline-2"
+                    style={
+                      depth
+                        ? { paddingLeft: `${1 + depth * STACK_INDENT_REM}rem` }
+                        : undefined
+                    }
                     to={`/forgejo/${encodeURIComponent(pull.owner)}/${encodeURIComponent(pull.repo)}/${pull.number}?${listSearch}`}
                   >
+                    {depth > 0 && (
+                      <CornerDownRightIcon
+                        aria-label="Stacked on the pull request above"
+                        className="text-muted-foreground mt-0.5 -mr-1 size-4 shrink-0"
+                      />
+                    )}
                     <PullStateIcon state={pull.state} />
                     <div className="min-w-0 flex-1">
                       <p className="font-medium break-words">{pull.title}</p>
-                      <p className="text-muted-foreground text-sm">
-                        {pull.owner}/{pull.repo} #{pull.number} · Updated{" "}
-                        {new Date(pull.updatedAt).toLocaleString()}
+                      <p className="text-muted-foreground text-sm break-words">
+                        {pull.owner}/{pull.repo} #{pull.number}
+                        {pull.stack && (
+                          <>
+                            {" "}
+                            into{" "}
+                            <code className="text-xs">{pull.stack.base}</code>
+                          </>
+                        )}{" "}
+                        · Updated {new Date(pull.updatedAt).toLocaleString()}
                       </p>
+                      {depth === 0 && pull.stack?.parent && (
+                        <p className="text-muted-foreground flex items-center gap-1 text-sm">
+                          <LayersIcon className="size-3.5 shrink-0" />
+                          <span className="min-w-0 break-words">
+                            Stacked on #{pull.stack.parent.number}{" "}
+                            {pull.stack.parent.title}
+                          </span>
+                        </p>
+                      )}
                     </div>
+                    <ForgejoApprovals pull={pull} lazy />
                     <Chip>{pull.state}</Chip>
                   </Link>
                 </li>
@@ -553,25 +626,3 @@ export const ForgejoPullPage = () => {
     />
   );
 };
-class DiffBoundary extends Component<
-  { patch: string; children: ReactNode },
-  { failed: boolean }
-> {
-  // oxlint-disable-next-line react/state-in-constructor
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-  render() {
-    return this.state.failed ? (
-      <div>
-        <Note warn>The renderer could not display this patch. Raw diff:</Note>
-        <pre className="overflow-x-auto rounded-lg border p-4 font-mono text-xs">
-          {this.props.patch}
-        </pre>
-      </div>
-    ) : (
-      this.props.children
-    );
-  }
-}

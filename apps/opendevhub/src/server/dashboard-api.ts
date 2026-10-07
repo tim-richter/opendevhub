@@ -103,6 +103,7 @@ export interface DashboardDeps {
     | "comments"
     | "reviews"
     | "reviewComments"
+    | "approvals"
     | "checks"
     | "test"
   > &
@@ -302,6 +303,16 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   app.get("/api/forgejo/pulls/:owner/:repo/:number", (c) =>
     json(c, () =>
       requireForgejo().details(
+        param(c, "owner"),
+        param(c, "repo"),
+        param(c, "number"),
+        c.req.raw.signal
+      )
+    )
+  );
+  app.get("/api/forgejo/pulls/:owner/:repo/:number/approvals", (c) =>
+    json(c, () =>
+      requireForgejo().approvals(
         param(c, "owner"),
         param(c, "repo"),
         param(c, "number"),

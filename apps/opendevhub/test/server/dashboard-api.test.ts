@@ -464,6 +464,7 @@ describe("dashboard API", () => {
       comments: vi.fn(),
       reviews: vi.fn(),
       reviewComments: vi.fn(),
+      approvals: vi.fn(),
       checks: vi.fn(),
       review: vi.fn(async () => ({ sent: true as const })),
     };
@@ -533,6 +534,12 @@ describe("dashboard API", () => {
       comments: vi.fn(async () => ({ items: [] })),
       reviews: vi.fn(async () => ({ items: [] })),
       reviewComments: vi.fn(async () => []),
+      approvals: vi.fn(async () => ({
+        approvedBy: ["bob"],
+        base: "main",
+        changesRequestedBy: [],
+        required: 2,
+      })),
       checks: vi.fn(async () => ({
         items: [],
         state: "success",
@@ -590,6 +597,20 @@ describe("dashboard API", () => {
       "demo",
       "7",
       2,
+      expect.any(AbortSignal)
+    );
+    await expect(
+      (await app.request("/api/forgejo/pulls/team/demo/7/approvals")).json()
+    ).resolves.toStrictEqual({
+      approvedBy: ["bob"],
+      base: "main",
+      changesRequestedBy: [],
+      required: 2,
+    });
+    expect(forgejo.approvals).toHaveBeenCalledWith(
+      "team",
+      "demo",
+      "7",
       expect.any(AbortSignal)
     );
     await app.request("/api/forgejo/pulls/team/demo/7/reviews/9/comments");

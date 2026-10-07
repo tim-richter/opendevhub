@@ -2,9 +2,14 @@ import type {
   ForgejoCheck,
   ForgejoComment,
   ForgejoPullDetails,
+  ForgejoPullRequest,
   ForgejoReview,
+  ForgejoReviewComment,
+  ForgejoStackNode,
 } from "../shared/forgejo";
-import type { PublishInfo } from "../shared/types";
+import type { PublishInfo, ReviewFile } from "../shared/types";
+import { linesLabel } from "./review";
+import type { ReviewComment } from "./review";
 
 /** Only UI preferences go into storage; PR data stays in the in-memory query cache. */
 export const readForgejoPreference = (key: string): string => {
@@ -21,6 +26,96 @@ export const saveForgejoPreference = (key: string, value: string) => {
     /* Storage may be disabled. */
   }
 };
+export interface StackedForgejoPull {
+  pull: ForgejoPullRequest;
+  /** How many listed parents this pull request is stacked on. */
+  depth: number;
+}
+
+/** Orders pull requests so stacked ones follow their listed parent, keeping the list's order otherwise. */
+export const stackForgejoPulls = (
+  pulls: ForgejoPullRequest[]
+): StackedForgejoPull[] => {
+  const key = (pull: ForgejoPullRequest, number = pull.number) =>
+    `${pull.owner}/${pull.repo}/${number}`;
+  const listed = new Set(pulls.map((pull) => key(pull)));
+  const children = new Map<string, ForgejoPullRequest[]>();
+  const roots: ForgejoPullRequest[] = [];
+  for (const pull of pulls) {
+    const parent = pull.stack?.parent;
+    const parentKey = parent ? key(pull, parent.number) : undefined;
+    if (parentKey && listed.has(parentKey)) {
+      const siblings = children.get(parentKey) ?? [];
+      siblings.push(pull);
+      children.set(parentKey, siblings);
+    } else {
+      roots.push(pull);
+    }
+  }
+  const ordered: StackedForgejoPull[] = [];
+  const seen = new Set<string>();
+  const visit = (pull: ForgejoPullRequest, depth: number) => {
+    if (seen.has(key(pull))) {
+      return;
+    }
+    seen.add(key(pull));
+    ordered.push({ depth, pull });
+    for (const child of children.get(key(pull)) ?? []) {
+      visit(child, depth + 1);
+    }
+  };
+  for (const root of roots) {
+    visit(root, 0);
+  }
+  // Branches that target each other in a loop have no root; list them rather than drop them.
+  for (const pull of pulls) {
+    visit(pull, 0);
+  }
+  return ordered;
+};
+
+export interface ForgejoStackRow {
+  number: number;
+  title: string;
+  depth: number;
+  current: boolean;
+}
+
+/** A pull request's stack as indented rows: what it builds on, itself, then what builds on it. */
+export const forgejoStackRows = (
+  details: ForgejoPullDetails
+): ForgejoStackRow[] => {
+  const { stack, pull } = details;
+  if (!stack) {
+    return [];
+  }
+  const rows: ForgejoStackRow[] = stack.ancestors.map((p, depth) => ({
+    current: false,
+    depth,
+    number: p.number,
+    title: p.title,
+  }));
+  rows.push({
+    current: true,
+    depth: rows.length,
+    number: pull.number,
+    title: pull.title,
+  });
+  const visit = (nodes: ForgejoStackNode[], depth: number) => {
+    for (const node of nodes) {
+      rows.push({
+        current: false,
+        depth,
+        number: node.number,
+        title: node.title,
+      });
+      visit(node.children, depth + 1);
+    }
+  };
+  visit(stack.descendants, rows.length);
+  return rows;
+};
+
 export const matchesForgejoPull = (
   details: ForgejoPullDetails,
   info: PublishInfo
@@ -139,3 +234,48 @@ export const forgejoFilePatches = (patch: string): ForgejoFilePatch[] => {
     return { additions, deletions, name, patch: part };
   });
 };
+
+const BINARY = /^(?:Binary files .* differ|GIT binary patch)$/mu;
+const HUNK = /^@@ /mu;
+
+/** A pull request's patch as the review's changed files, so it renders like a worktree's review. */
+export const forgejoReviewFiles = (patch: string): ReviewFile[] =>
+  forgejoFilePatches(patch).map((f) => {
+    let status: ReviewFile["status"] = "modified";
+    if (/^new file mode /mu.test(f.patch)) {
+      status = "added";
+    } else if (/^deleted file mode /mu.test(f.patch)) {
+      status = "deleted";
+    }
+    return {
+      additions: f.additions,
+      binary: !HUNK.test(f.patch) && BINARY.test(f.patch),
+      deletions: f.deletions,
+      file: f.name,
+      patch: f.patch,
+      status,
+    };
+  });
+
+/**
+ * Draft line comments as Forgejo review comments. Forgejo anchors each to one line, so a range comment sits on its
+ * last line and names the range in its body.
+ */
+export const forgejoReviewComments = (
+  comments: ReviewComment[]
+): ForgejoReviewComment[] =>
+  comments.flatMap((c) =>
+    c.file && c.line !== undefined
+      ? [
+          {
+            body:
+              c.start === undefined
+                ? c.text
+                : `Lines ${linesLabel(c)}:\n${c.text}`,
+            new_position: c.side === "old" ? 0 : c.line,
+            old_position: c.side === "old" ? c.line : 0,
+            path: c.file,
+          },
+        ]
+      : []
+  );

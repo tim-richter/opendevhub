@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { jiraTicketUrl } from "../../shared/jira";
 import type { JiraTaskSource } from "../../shared/jira";
 import { useDash } from "../DashboardContext";
+import { MarkdownBody } from "./MarkdownBody";
 
 /** Keep the original requirements available even when Jira is disabled or unreachable. */
 export const JiraSourceCard = ({ source }: { source: JiraTaskSource }) => {
@@ -36,9 +37,11 @@ export const JiraSourceCard = ({ source }: { source: JiraTaskSource }) => {
         <summary className="text-muted-foreground cursor-pointer">
           Ticket description at task creation
         </summary>
-        <p className="mt-2 break-words whitespace-pre-wrap">
-          {source.description || "No description provided."}
-        </p>
+        {source.description ? (
+          <MarkdownBody className="mt-2">{source.description}</MarkdownBody>
+        ) : (
+          <p className="mt-2">No description provided.</p>
+        )}
       </details>
     </div>
   );

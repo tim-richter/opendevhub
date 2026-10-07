@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  countApprovals,
   FileForgejoSettings,
   Forgejo,
   forgejoUrl,
@@ -340,6 +341,147 @@ describe("Forgejo API client", () => {
     expect(query.get("state")).toBe("open");
   });
 
+  it("counts each reviewer's latest official, undismissed vote", () => {
+    const review = (
+      id: number,
+      author: string,
+      state: string,
+      extra: Record<string, unknown> = {}
+    ) => ({
+      author,
+      body: "",
+      commentsCount: 0,
+      commit: "c",
+      dismissed: false,
+      id,
+      stale: false,
+      state,
+      submittedAt: "now",
+      ...extra,
+    });
+    expect(
+      countApprovals([
+        review(5, "bob", "APPROVED"),
+        review(1, "bob", "REQUEST_CHANGES"),
+        review(2, "carol", "APPROVED"),
+        review(6, "carol", "COMMENT"),
+        review(3, "dave", "REQUEST_CHANGES"),
+        review(7, "erin", "APPROVED", { dismissed: true }),
+        review(8, "frank", "APPROVED", { official: false }),
+        review(4, "gina", "APPROVED"),
+        review(9, "gina", "REQUEST_CHANGES", { dismissed: true }),
+      ])
+    ).toStrictEqual({
+      approvedBy: ["bob", "carol"],
+      changesRequestedBy: ["dave"],
+    });
+  });
+
+  it("reads required approvals from the base branch's protection", async () => {
+    await settings.save(configured);
+    const details = {
+      number: 1,
+      title: "Change",
+      updated_at: "now",
+      state: "open",
+      base: { ref: "release/1.0" },
+      head: { ref: "feature", sha: "a".repeat(40) },
+    };
+    const reviews = [
+      {
+        id: 1,
+        user: { login: "bob" },
+        body: "",
+        state: "APPROVED",
+        submitted_at: "now",
+        commit_id: "a",
+        dismissed: false,
+        stale: false,
+        comments_count: 0,
+        official: true,
+      },
+    ];
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(details))
+      .mockResolvedValueOnce(
+        response({ protected: true, required_approvals: 2 })
+      )
+      .mockResolvedValueOnce(response(reviews));
+    await expect(
+      new Forgejo(settings, fetcher).approvals("team", "private", "1")
+    ).resolves.toStrictEqual({
+      approvedBy: ["bob"],
+      base: "release/1.0",
+      changesRequestedBy: [],
+      required: 2,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[1][0]).toBe(
+      `${configured.url}/api/v1/repos/team/private/branches/release/1.0`
+    );
+    fetcher
+      .mockReset()
+      .mockResolvedValueOnce(response(details))
+      .mockResolvedValueOnce(new Response("", { status: 404 }))
+      .mockResolvedValueOnce(response([]));
+    await expect(
+      new Forgejo(settings, fetcher).approvals("team", "private", "1")
+    ).resolves.toStrictEqual({
+      approvedBy: [],
+      base: "release/1.0",
+      changesRequestedBy: [],
+      required: undefined,
+    });
+  });
+
+  it("reuses a branch's required approvals across pull requests for a while", async () => {
+    await settings.save(configured);
+    const details = (number: number) => ({
+      number,
+      title: "Change",
+      updated_at: "now",
+      state: "open",
+      base: { ref: "main" },
+      head: { ref: `feature-${number}`, sha: "a".repeat(40) },
+    });
+    const branchRoute = `${configured.url}/api/v1/repos/team/private/branches/main`;
+    let protection = () => response({ protected: true, required_approvals: 2 });
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === branchRoute) {
+        return protection();
+      }
+      if (url.includes("/reviews?")) {
+        return response([]);
+      }
+      return response(details(Number(url.split("/").pop())));
+    });
+    let time = 0;
+    const forgejo = new Forgejo(settings, fetcher, () => time);
+    const branchCalls = () =>
+      fetcher.mock.calls.filter(([url]) => String(url) === branchRoute).length;
+    const [one, two] = await Promise.all([
+      forgejo.approvals("team", "private", "1"),
+      forgejo.approvals("team", "private", "2"),
+    ]);
+    expect([one.required, two.required]).toStrictEqual([2, 2]);
+    expect(branchCalls()).toBe(1);
+    time = 4 * 60_000;
+    await forgejo.approvals("team", "private", "3");
+    expect(branchCalls()).toBe(1);
+    time = 6 * 60_000;
+    protection = () => new Response("", { status: 500 });
+    await expect(forgejo.approvals("team", "private", "3")).rejects.toThrow(
+      "Forgejo request failed (500)."
+    );
+    protection = () => response({ protected: true, required_approvals: 3 });
+    await expect(
+      forgejo.approvals("team", "private", "3")
+    ).resolves.toMatchObject({ required: 3 });
+    expect(branchCalls()).toBe(3);
+  });
+
   it("submits inline comments on the loaded commit and refuses stale reviews", async () => {
     await settings.save(configured);
     const sha = "a".repeat(40);
@@ -513,9 +655,8 @@ describe("Forgejo inbox, context and connection verification", () => {
       const fetcher = vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(response({ login: "alice" }))
-        .mockResolvedValueOnce(
-          response([issue(9, { user: { login: "bob" } })])
-        );
+        .mockResolvedValueOnce(response([issue(9, { user: { login: "bob" } })]))
+        .mockResolvedValueOnce(response([]));
       const result = await new Forgejo(settings, fetcher).inbox({
         inbox,
         state: "open",
@@ -524,12 +665,165 @@ describe("Forgejo inbox, context and connection verification", () => {
       });
       expect(result.pulls[0].number).toBe(9);
       expect(result.nextPage).toBe(4);
-      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher).toHaveBeenCalledTimes(3);
       const query = new URL(String(fetcher.mock.calls[1][0])).searchParams;
       expect(query.get(filter)).toBe("true");
       expect(query.get("created")).toBeNull();
       expect(query.get("q")).toBe("fix CI");
     }
+  });
+
+  it("links stacked pull requests with one listing per repository and ignores listing failures", async () => {
+    await settings.save(configured);
+    const open = (
+      number: number,
+      base: string,
+      head: string,
+      headRepo = 1
+    ) => ({
+      number,
+      title: `PR ${number}`,
+      base: { ref: base, repo_id: 1, repo: { default_branch: "main" } },
+      head: { ref: head, repo_id: headRepo },
+    });
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/user")) {
+        return response({ login: "alice" });
+      }
+      if (url.includes("issues/search")) {
+        return response([
+          issue(1),
+          issue(2),
+          issue(3),
+          issue(4),
+          issue(5, { state: "closed" }),
+          issue(6, { repository: { full_name: "team/broken" } }),
+        ]);
+      }
+      if (url.includes("team/broken")) {
+        return response("private error", 500);
+      }
+      return response([
+        open(1, "main", "feat/a"),
+        open(2, "feat/a", "feat/b"),
+        open(3, "release/1", "fix/backport"),
+        open(4, "feat/fork", "x"),
+        open(7, "main", "feat/fork", 99),
+      ]);
+    });
+    let time = 0;
+    const forgejo = new Forgejo(settings, fetcher, () => time);
+    const { pulls } = await forgejo.inbox({ state: "all" });
+    const stacks = Object.fromEntries(pulls.map((p) => [p.number, p.stack]));
+    expect(stacks).toEqual({
+      1: undefined,
+      2: { base: "feat/a", parent: { number: 1, title: "PR 1" } },
+      3: { base: "release/1" },
+      // A fork's branch of the same name is not this repository's branch.
+      4: { base: "feat/fork" },
+      5: undefined,
+      6: undefined,
+    });
+    const listings = (repo: string) =>
+      fetcher.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes(`repos/${repo}/pulls?state=open`));
+    expect(listings("team/private")).toHaveLength(1);
+    expect(listings("team/broken")).toHaveLength(1);
+    // Listings are reused briefly; failed ones are retried on the next load.
+    time = 30_000;
+    const again = await forgejo.inbox({ state: "all" });
+    expect(again.pulls[1].stack?.parent?.number).toBe(1);
+    expect(listings("team/private")).toHaveLength(1);
+    expect(listings("team/broken")).toHaveLength(2);
+    time = 61_000;
+    await forgejo.inbox({ state: "all" });
+    expect(listings("team/private")).toHaveLength(2);
+  });
+
+  it("shows a pull request's stack below and above it, without a fork's same-named branches", async () => {
+    await settings.save(configured);
+    const open = (
+      number: number,
+      base: string,
+      head: string,
+      headRepo = 1
+    ) => ({
+      number,
+      title: `PR ${number}`,
+      base: { ref: base, repo_id: 1 },
+      head: { ref: head, repo_id: headRepo },
+    });
+    let listing = () =>
+      response([
+        open(1, "main", "feat/a"),
+        open(2, "feat/a", "feat/b"),
+        open(3, "feat/b", "feat/c"),
+        open(4, "feat/c", "feat/d"),
+        open(5, "feat/b", "feat/e"),
+        open(6, "feat/a", "feat/sibling"),
+        open(8, "feat/b", "feat/f", 99),
+        open(9, "feat/f", "feat/g"),
+      ]);
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.includes("/pulls?")) {
+        return listing();
+      }
+      const number = Number(url.split("/").pop());
+      return response({
+        number,
+        title: `PR ${number}`,
+        updated_at: "now",
+        state: "open",
+        base: { ref: number === 2 ? "feat/a" : "feat/b" },
+        head: {
+          ref: number === 2 ? "feat/b" : "feat/f",
+          sha: "a".repeat(40),
+          repo: { full_name: number === 2 ? "team/private" : "fork/private" },
+        },
+      });
+    });
+    let time = 0;
+    const forgejo = new Forgejo(settings, fetcher, () => time);
+    const pr = (number: number, children: unknown[] = []) => ({
+      number,
+      title: `PR ${number}`,
+      children,
+    });
+    const { stack } = await forgejo.details("team", "private", "2");
+    expect(stack).toMatchObject({
+      ancestors: [{ number: 1, base: "main", head: "feat/a" }],
+      descendants: [pr(3, [pr(4)]), pr(5), pr(8)],
+    });
+    // A fork's head branch can't be the base of anything here, even with a matching name.
+    const fork = await forgejo.details("team", "private", "7");
+    expect(fork.stack?.descendants).toEqual([]);
+    expect(fork.stack?.ancestors.map((p) => p.number)).toEqual([1, 2]);
+    time = 61_000;
+    listing = () => response("private error", 500);
+    const failed = await forgejo.details("team", "private", "2");
+    expect(failed.stack).toBeUndefined();
+    expect(failed.head).toBe("feat/b");
+  });
+
+  it("lists a repository's open pull requests anew after the settings change", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/user")) {
+        return response({ login: "alice" });
+      }
+      return response(url.includes("issues/search") ? [issue(1)] : []);
+    });
+    const forgejo = new Forgejo(settings, fetcher, () => 0);
+    await forgejo.inbox();
+    await forgejo.save(configured);
+    await forgejo.inbox();
+    expect(
+      fetcher.mock.calls.filter(([url]) => String(url).includes("/pulls?"))
+    ).toHaveLength(2);
   });
 
   it("filters repositories exactly and continues despite an empty filtered page", async () => {
@@ -583,6 +877,7 @@ describe("Forgejo inbox, context and connection verification", () => {
           requested_reviewers: [{ login: "alice" }],
         })
       )
+      .mockResolvedValueOnce(response([]))
       .mockResolvedValueOnce(
         new Response(new Uint8Array(20 * 1024 * 1024 + 1))
       );
@@ -599,7 +894,7 @@ describe("Forgejo inbox, context and connection verification", () => {
       reviewers: ["alice"],
       headRepository: "fork/private",
     });
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledTimes(2);
     await expect(forgejo.patch("team", "private", "7")).rejects.toThrow(
       "20 MiB"
     );

@@ -1,4 +1,5 @@
 import type {
+  ForgejoApprovals,
   ForgejoReviewInput,
   ForgejoChecks,
   ForgejoComment,
@@ -120,6 +121,13 @@ export const fetchForgejoDiff = (
   signal?: AbortSignal
 ): Promise<{ patch: string }> =>
   forgejoGet(`${forgejoPullRoute(owner, repo, number)}/patch`, signal);
+export const fetchForgejoApprovals = (
+  owner: string,
+  repo: string,
+  number: string,
+  signal?: AbortSignal
+): Promise<ForgejoApprovals> =>
+  forgejoGet(`${forgejoPullRoute(owner, repo, number)}/approvals`, signal);
 export const fetchForgejoComments = (
   owner: string,
   repo: string,

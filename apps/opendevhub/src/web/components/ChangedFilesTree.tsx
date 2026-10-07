@@ -14,6 +14,11 @@ const TRUNCATE_FIX = `
   @container measure (height > 1.5lh) { [data-truncate-marker] { opacity: 1; } }
 `;
 
+/** The tree sits in a rounded card: rows span it with a small inset, and the first and last keep clear of its corners. */
+const CARD_FIT = `
+  [data-file-tree-virtualized-scroll="true"] { padding-block: 6px; }
+`;
+
 /**
  * The review's changed files as a `@pierre/trees` file tree, with git markers and line counts. The folder all files
  * share is shown once in the tree's header, and the tree holds paths relative to it: long folder chains don't fit a narrow row.
@@ -55,7 +60,7 @@ export default function ChangedFilesTree(props: {
       );
       return file ? statsDecoration(file) : null;
     },
-    unsafeCSS: TRUNCATE_FIX,
+    unsafeCSS: TRUNCATE_FIX + CARD_FIT,
   });
 
   // Keep the tree in step when a refresh brings different files or statuses.
@@ -86,7 +91,7 @@ export default function ChangedFilesTree(props: {
           </p>
         ) : undefined
       }
-      className="block h-[min(60vh,32rem)] [--trees-font-family-override:var(--font-sans)] [--trees-theme-focus-ring:var(--ring)] [--trees-theme-list-active-selection-bg:var(--accent)] [--trees-theme-list-active-selection-fg:var(--accent-foreground)] [--trees-theme-list-hover-bg:color-mix(in_oklab,var(--accent)_60%,transparent)]"
+      className="block h-[min(60vh,32rem)] [--trees-font-family-override:var(--font-sans)] [--trees-padding-inline-override:6px] [--trees-theme-focus-ring:var(--ring)] [--trees-theme-list-active-selection-bg:var(--accent)] [--trees-theme-list-active-selection-fg:var(--accent-foreground)] [--trees-theme-list-hover-bg:color-mix(in_oklab,var(--accent)_60%,transparent)]"
       aria-label="Changed files"
     />
   );
