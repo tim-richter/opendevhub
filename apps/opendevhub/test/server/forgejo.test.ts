@@ -238,3 +238,99 @@ describe("Forgejo read-only API client", () => {
     await expect(new Forgejo(settings, fetcher).diff("team", "private", "1")).rejects.toThrow("20 MiB");
   });
 });
+
+describe("Forgejo inbox, context and connection verification", () => {
+  it("returns a page promptly and uses review and assignment filters without filtering other authors", async () => {
+    await settings.save(configured);
+    for (const [inbox, filter] of [["review-requested", "review_requested"], ["assigned", "assigned"]] as const) {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ login: "alice" }))
+        .mockResolvedValueOnce(response([issue(9, { user: { login: "bob" } })]));
+      const result = await new Forgejo(settings, fetcher).inbox({ inbox, state: "open", page: 3, q: "fix CI" });
+      expect(result.pulls[0].number).toBe(9);
+      expect(result.nextPage).toBe(4);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      const query = new URL(String(fetcher.mock.calls[1][0])).searchParams;
+      expect(query.get(filter)).toBe("true"); expect(query.get("created")).toBeNull(); expect(query.get("q")).toBe("fix CI");
+    }
+  });
+
+  it("filters repositories exactly and continues despite an empty filtered page", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ login: "alice" }))
+      .mockResolvedValueOnce(response({ id: 17 })).mockResolvedValueOnce(response([issue(1, { repository: { full_name: "team/other" } })]));
+    expect(await new Forgejo(settings, fetcher).inbox({ repository: "team/private" })).toMatchObject({ pulls: [], nextPage: 2 });
+    expect(String(fetcher.mock.calls[2][0])).toContain("priority_repo_id=17");
+    for (const input of [{ page: 0 }, { page: 201 }, { inbox: "other" }, { repository: "../private" }, { repository: "team/private/extra" }]) {
+      await expect(new Forgejo(settings, fetcher).inbox(input as never)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("loads metadata independently of an oversized patch", async () => {
+    await settings.save(configured);
+    const sha = "a".repeat(40);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ number: 7, title: "Fix", updated_at: "now", body: "Reason", user: { login: "bob" },
+      draft: true, mergeable: false, head: { ref: "refs/pull/7/head", sha, repo: { full_name: "fork/private" } }, base: { ref: "main" },
+      labels: [{ name: "bug" }], requested_reviewers: [{ login: "alice" }] }))
+      .mockResolvedValueOnce(new Response(new Uint8Array(20 * 1024 * 1024 + 1)));
+    const forgejo = new Forgejo(settings, fetcher);
+    expect(await forgejo.details("team", "private", "7")).toMatchObject({ body: "Reason", author: "bob", headSha: sha, draft: true,
+      mergeable: false, labels: ["bug"], reviewers: ["alice"], headRepository: "fork/private" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(forgejo.patch("team", "private", "7")).rejects.toThrow("20 MiB");
+  });
+
+  it("normalizes comments, reviews, inline discussion and checks, rejecting unsafe links", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response([{ id: 1, body: "Fix", user: { login: "bob" }, updated_at: "now" }]))
+      .mockResolvedValueOnce(response([{ id: 2, body: "Changes needed", state: "REQUEST_CHANGES", user: { login: "bob" }, commit_id: "a".repeat(40), comments_count: 1, stale: true }]))
+      .mockResolvedValueOnce(response([{ id: 3, body: "Line feedback", path: "a.ts", position: 4, original_position: 0, diff_hunk: "@@ -1 +1 @@\n+x", resolver: { login: "bob" } }]))
+      .mockResolvedValueOnce(response({ sha: "a".repeat(40), state: "failure", total_count: 2, statuses: [
+        { id: 4, context: "tests", status: "failure", description: "2 tests failed", target_url: "javascript:alert(1)" },
+        { id: 5, context: "lint", status: "success", target_url: "https://ci.example/job/5" },
+      ] }));
+    const forgejo = new Forgejo(settings, fetcher);
+    expect(await forgejo.comments("team", "private", "7", 2)).toMatchObject({ items: [{ id: 1, author: "bob", body: "Fix" }], nextPage: 3 });
+    expect(await forgejo.reviews("team", "private", "7")).toMatchObject({ items: [{ id: 2, state: "REQUEST_CHANGES", stale: true, commentsCount: 1 }] });
+    expect(await forgejo.reviewComments("team", "private", "7", "2")).toMatchObject([{ id: 3, path: "a.ts", line: 4, resolved: true }]);
+    const checks = await forgejo.checks("team", "private", "a".repeat(40));
+    expect(checks.items[0].url).toBeUndefined(); expect(checks.items[1].url).toBe("https://ci.example/job/5");
+    expect(checks.nextPage).toBeUndefined();
+    expect(String(fetcher.mock.calls[0][0])).toContain("/issues/7/comments?page=2");
+    await expect(forgejo.reviewComments("team", "private", "7", "1/else")).rejects.toMatchObject({ status: 400 });
+    await expect(forgejo.checks("team", "private", "main?token=bad")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("tests unsaved credentials without storing them or reusing a token on another instance", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ login: "bob" })).mockResolvedValueOnce(response({ version: "11" }))
+      .mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([]));
+    const forgejo = new Forgejo(settings, fetcher);
+    expect(await forgejo.test({ url: "https://other.example", token: "unsaved-token" })).toEqual({ username: "bob", version: "11" });
+    expect((await settings.read()).token).toBe(configured.token);
+    expect([...secrets.values.values()]).toEqual([configured.token]);
+    for (const [, init] of fetcher.mock.calls) expect(init?.headers).toMatchObject({ authorization: "token unsaved-token" });
+    await expect(forgejo.test({ url: "https://other.example" })).rejects.toThrow("Enter a token");
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it("reuses the saved token only on the same instance, even while disabled", async () => {
+    await settings.save(configured); await settings.save({ enabled: false, url: configured.url });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ login: "alice" })).mockResolvedValueOnce(response({ version: "11" }))
+      .mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([]));
+    await new Forgejo(settings, fetcher).test({ url: configured.url });
+    expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({ authorization: `token ${configured.token}` });
+    expect((await settings.view()).enabled).toBe(false);
+  });
+
+  it("propagates cancellation upstream and makes rate limits actionable", async () => {
+    await settings.save(configured);
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      controller.abort(); expect(init?.signal?.aborted).toBe(true); throw new Error("private error");
+    });
+    await expect(new Forgejo(settings, fetcher).patch("team", "private", "1", controller.signal)).rejects.toThrow("cancelled");
+    const limited = vi.fn<typeof fetch>().mockResolvedValue(new Response("private error", { status: 429 }));
+    await expect(new Forgejo(settings, limited).inbox()).rejects.toThrow("request limit");
+  });
+});

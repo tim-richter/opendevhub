@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { ForgejoDiff, ForgejoPullFilter, ForgejoPulls, ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
+import type { ForgejoChecks, ForgejoComment, ForgejoConnection, ForgejoPage, ForgejoPullDetails, ForgejoPullFilter, ForgejoPullQuery, ForgejoPulls, ForgejoReview, ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
 import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, NodeView, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
@@ -23,15 +23,42 @@ export async function saveForgejoSettings(input: ForgejoSettingsInput): Promise<
   return res.json();
 }
 
-export async function fetchForgejoPulls(state: ForgejoPullFilter = "all", signal?: AbortSignal): Promise<ForgejoPulls> {
-  const res = await fetch(`/api/forgejo/pulls?${new URLSearchParams({ state })}`, { signal, cache: "no-store" });
-  if (!res.ok) throw await failure(res, "Forgejo pull requests");
-  return res.json();
+export async function fetchForgejoPulls(input: ForgejoPullQuery | ForgejoPullFilter = "all", signal?: AbortSignal): Promise<ForgejoPulls> {
+  const options = typeof input === "string" ? { state: input } : input;
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== "") query.set(key, String(value));
+  return forgejoGet(`pulls?${query}`, signal);
 }
 
-export async function fetchForgejoDiff(owner: string, repo: string, number: string, signal?: AbortSignal): Promise<ForgejoDiff> {
-  const res = await fetch(`/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}`, { signal, cache: "no-store" });
-  if (!res.ok) throw await failure(res, "Forgejo diff");
+function forgejoPullRoute(owner: string, repo: string, number: string) {
+  return `pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}`;
+}
+async function forgejoGet<T>(route: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`/api/forgejo/${route}`, { signal, cache: "no-store" });
+  if (!res.ok) throw await failure(res, "Forgejo request");
+  return res.json();
+}
+export function fetchForgejoDetails(owner: string, repo: string, number: string, signal?: AbortSignal): Promise<ForgejoPullDetails> {
+  return forgejoGet(forgejoPullRoute(owner, repo, number), signal);
+}
+export function fetchForgejoDiff(owner: string, repo: string, number: string, signal?: AbortSignal): Promise<{ patch: string }> {
+  return forgejoGet(`${forgejoPullRoute(owner, repo, number)}/patch`, signal);
+}
+export function fetchForgejoComments(owner: string, repo: string, number: string, page: number, signal?: AbortSignal): Promise<ForgejoPage<ForgejoComment>> {
+  return forgejoGet(`${forgejoPullRoute(owner, repo, number)}/comments?page=${page}`, signal);
+}
+export function fetchForgejoReviews(owner: string, repo: string, number: string, page: number, signal?: AbortSignal): Promise<ForgejoPage<ForgejoReview>> {
+  return forgejoGet(`${forgejoPullRoute(owner, repo, number)}/reviews?page=${page}`, signal);
+}
+export function fetchForgejoReviewComments(owner: string, repo: string, number: string, id: number, signal?: AbortSignal): Promise<ForgejoComment[]> {
+  return forgejoGet(`${forgejoPullRoute(owner, repo, number)}/reviews/${id}/comments`, signal);
+}
+export function fetchForgejoChecks(owner: string, repo: string, sha: string, page: number, signal?: AbortSignal): Promise<ForgejoChecks> {
+  return forgejoGet(`checks/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(sha)}?page=${page}`, signal);
+}
+export async function testForgejoConnection(input: { url: string; token?: string }): Promise<ForgejoConnection> {
+  const res = await fetch("/api/forgejo/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  if (!res.ok) throw await failure(res, "test Forgejo connection");
   return res.json();
 }
 
@@ -177,9 +204,9 @@ export async function fetchLogs(projectId: string): Promise<string[]> {
   return ((await res.json()) as { lines: string[] }).lines;
 }
 
-export async function fetchPublishInfo(projectId: string, directory: string, remote?: string): Promise<PublishInfo> {
+export async function fetchPublishInfo(projectId: string, directory: string, remote?: string, signal?: AbortSignal): Promise<PublishInfo> {
   const query = new URLSearchParams({ directory, ...(remote ? { remote } : {}) });
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish?${query}`);
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish?${query}`, signal ? { signal } : undefined);
   if (!res.ok) throw await failure(res, "publish info");
   return (await res.json()) as PublishInfo;
 }

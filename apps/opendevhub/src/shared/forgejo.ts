@@ -14,6 +14,15 @@ export interface ForgejoSettingsInput {
 }
 
 export type ForgejoPullFilter = "all" | "open" | "closed";
+export type ForgejoInbox = "authored" | "review-requested" | "assigned";
+
+export interface ForgejoPullQuery {
+  state?: ForgejoPullFilter;
+  inbox?: ForgejoInbox;
+  q?: string;
+  repository?: string;
+  page?: number;
+}
 
 export interface ForgejoPullRequest {
   owner: string;
@@ -28,7 +37,59 @@ export interface ForgejoPullRequest {
 export interface ForgejoPulls {
   username: string;
   pulls: ForgejoPullRequest[];
+  nextPage?: number;
 }
+
+export interface ForgejoPullDetails {
+  pull: ForgejoPullRequest;
+  body: string;
+  author: string;
+  base: string;
+  head: string;
+  headSha: string;
+  headRepository?: string;
+  draft: boolean;
+  mergeable?: boolean;
+  labels: string[];
+  reviewers: string[];
+}
+
+export interface ForgejoComment {
+  id: number;
+  author: string;
+  body: string;
+  updatedAt: string;
+  path?: string;
+  line?: number;
+  oldLine?: number;
+  diffHunk?: string;
+  resolved?: boolean;
+}
+
+export interface ForgejoReview {
+  id: number;
+  author: string;
+  body: string;
+  state: string;
+  submittedAt: string;
+  commit: string;
+  dismissed: boolean;
+  stale: boolean;
+  commentsCount: number;
+}
+
+export interface ForgejoPage<T> { items: T[]; nextPage?: number }
+
+export interface ForgejoCheck {
+  id: number;
+  name: string;
+  status: string;
+  description: string;
+  url?: string;
+}
+
+export interface ForgejoChecks extends ForgejoPage<ForgejoCheck> { state: string; sha: string }
+export interface ForgejoConnection { username: string; version: string }
 
 export interface ForgejoDiff {
   pull: ForgejoPullRequest;

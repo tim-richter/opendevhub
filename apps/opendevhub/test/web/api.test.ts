@@ -9,6 +9,12 @@ import {
   saveForgejoSettings,
   fetchForgejoPulls,
   fetchForgejoDiff,
+  fetchForgejoDetails,
+  fetchForgejoComments,
+  fetchForgejoReviews,
+  fetchForgejoReviewComments,
+  fetchForgejoChecks,
+  testForgejoConnection,
   fetchChecks,
   dismissForm,
   fetchModels,
@@ -56,10 +62,29 @@ describe("Forgejo API", () => {
     await fetchForgejoPulls("all", signal);
     expect(fetchMock.mock.calls[0]).toEqual(["/api/forgejo/pulls?state=all", { signal, cache: "no-store" }]);
     await fetchForgejoDiff("team?", "private#", "7", signal);
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/forgejo/pulls/team%3F/private%23/7");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/forgejo/pulls/team%3F/private%23/7/patch");
     stubFetch(502, { error: "Forgejo rejected the token" });
     await expect(fetchForgejoPulls()).rejects.toThrow("Forgejo rejected the token");
   });
+  it("passes inbox filters, resource pagination and unsaved connection credentials", async () => {
+    const mock = stubFetch(200, {});
+    const signal = new AbortController().signal;
+    await fetchForgejoPulls({ state: "open", inbox: "review-requested", repository: "team/app", q: "fix ci", page: 3 }, signal);
+    expect(mock.mock.calls[0][0]).toBe("/api/forgejo/pulls?state=open&inbox=review-requested&repository=team%2Fapp&q=fix+ci&page=3");
+    await fetchForgejoDetails("team", "app", "7", signal);
+    await fetchForgejoComments("team", "app", "7", 2, signal);
+    await fetchForgejoReviews("team", "app", "7", 2, signal);
+    await fetchForgejoReviewComments("team", "app", "7", 9, signal);
+    await fetchForgejoChecks("team", "app", "a".repeat(40), 2, signal);
+    expect(mock.mock.calls.slice(1).map(([url]) => url)).toEqual([
+      "/api/forgejo/pulls/team/app/7", "/api/forgejo/pulls/team/app/7/comments?page=2", "/api/forgejo/pulls/team/app/7/reviews?page=2",
+      "/api/forgejo/pulls/team/app/7/reviews/9/comments", `/api/forgejo/checks/team/app/${"a".repeat(40)}?page=2`,
+    ]);
+    for (const [, init] of mock.mock.calls) expect(init).toEqual({ signal, cache: "no-store" });
+    await testForgejoConnection({ url: "https://forge.example", token: "unsaved" });
+    expect(mock.mock.calls.at(-1)).toEqual(["/api/forgejo/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "https://forge.example", token: "unsaved" }) }]);
+  });
+
 });
 
 describe("task API", () => {

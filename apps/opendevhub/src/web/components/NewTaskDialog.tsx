@@ -29,10 +29,10 @@ export function NewTaskDialog() {
   const { snapshot, newTaskFor, closeNewTask } = useDash();
   if (!snapshot || !newTaskFor) return null;
   // Mounted per opening, so every field starts empty.
-  return <TaskForm initialProject={newTaskFor.projectId} onClose={closeNewTask} />;
+  return <TaskForm initialProject={newTaskFor.projectId} draft={newTaskFor} onClose={closeNewTask} />;
 }
 
-function TaskForm({ initialProject, onClose }: { initialProject?: string; onClose: () => void }) {
+function TaskForm({ initialProject, draft, onClose }: { initialProject?: string; draft?: { prompt?: string; title?: string; base?: string }; onClose: () => void }) {
   const { snapshot, act } = useDash();
   const navigate = useNavigate();
   const projects = useMemo(
@@ -46,10 +46,10 @@ function TaskForm({ initialProject, onClose }: { initialProject?: string; onClos
       projects[0]?.project.id ??
       "",
   );
-  const [prompt, setPrompt] = useState("");
-  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState(draft?.prompt ?? "");
+  const [title, setTitle] = useState(draft?.title ?? "");
   const [branch, setBranch] = useState("");
-  const [base, setBase] = useState("");
+  const [base, setBase] = useState(draft?.base ?? "");
   const [where, setWhere] = useState<TaskWhere>("worktree");
   const [environment, setEnvironment] = useState<Isolation>();
   const [node, setNode] = useState("local");

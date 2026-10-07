@@ -3,6 +3,7 @@ import path from "node:path";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AddProjectResult, LogEvent } from "../shared/types";
+import type { ForgejoInbox, ForgejoPullFilter } from "../shared/forgejo";
 import type { Checks } from "./checks";
 import { type Cleanup, parseCleanupItems } from "./cleanup";
 import { InvalidNodeError } from "./config";
@@ -69,7 +70,7 @@ export interface DashboardDeps {
   usage?: Pick<UsageStore, "report">;
   /** Absent in tests that don't need it. */
   nodes?: Pick<Nodes, "add" | "remove">;
-  forgejo?: Pick<Forgejo, "view" | "save" | "pulls" | "diff">;
+  forgejo?: Pick<Forgejo, "view" | "save" | "pulls" | "diff" | "inbox" | "details" | "patch" | "comments" | "reviews" | "reviewComments" | "checks" | "test">;
   webDir?: string;
 }
 
@@ -157,9 +158,26 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   };
   app.get("/api/forgejo/settings", (c) => json(c, async () => requireForgejo().view()));
   app.post("/api/forgejo/settings", (c) => json(c, async (_id, b) => requireForgejo().save(b)));
-  app.get("/api/forgejo/pulls", (c) => json(c, async () => requireForgejo().pulls(c.req.query("state") ?? "all")));
-  app.get("/api/forgejo/pulls/:owner/:repo/:number", (c) => json(c, async () =>
-    requireForgejo().diff(c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!),
+  app.post("/api/forgejo/test", (c) => json(c, (_id, b) => requireForgejo().test(b, c.req.raw.signal)));
+  app.get("/api/forgejo/pulls", (c) => json(c, () => requireForgejo().inbox({
+    state: (c.req.query("state") ?? "all") as ForgejoPullFilter, inbox: (c.req.query("inbox") ?? "authored") as ForgejoInbox,
+    q: c.req.query("q"), repository: c.req.query("repository"), page: Number(c.req.query("page") ?? 1),
+  }, c.req.raw.signal)));
+  app.get("/api/forgejo/pulls/:owner/:repo/:number", (c) => json(c, () =>
+    requireForgejo().details(c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!, c.req.raw.signal),
+  ));
+  for (const resource of ["patch", "comments", "reviews"] as const) {
+    app.get(`/api/forgejo/pulls/:owner/:repo/:number/${resource}`, (c) => json(c, () => {
+      const f = requireForgejo();
+      const args = [c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!] as const;
+      return resource === "patch" ? f.patch(...args, c.req.raw.signal) : f[resource](...args, Number(c.req.query("page") ?? 1), c.req.raw.signal);
+    }));
+  }
+  app.get("/api/forgejo/pulls/:owner/:repo/:number/reviews/:review/comments", (c) => json(c, () =>
+    requireForgejo().reviewComments(c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!, c.req.param("review")!, c.req.raw.signal),
+  ));
+  app.get("/api/forgejo/checks/:owner/:repo/:sha", (c) => json(c, () =>
+    requireForgejo().checks(c.req.param("owner")!, c.req.param("repo")!, c.req.param("sha")!, Number(c.req.query("page") ?? 1), c.req.raw.signal),
   ));
 
   app.post("/api/projects/rescan", async (c) => {

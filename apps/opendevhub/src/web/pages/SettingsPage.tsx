@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Note, Page, PageHeader, Section } from "../components/Page";
 import { useDash } from "../DashboardContext";
+import { testForgejoConnection } from "../api";
 
 export function SettingsPage() {
   const { forgejo, forgejoError, updateForgejo } = useDash();
@@ -14,6 +15,17 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  const [connection, setConnection] = useState<string>();
+  const [testing, setTesting] = useState(false);
+  const test = async () => {
+    setTesting(true); setError(undefined); setConnection(undefined);
+    try {
+      const result = await testForgejoConnection({ url, ...(token.trim() ? { token: token.trim() } : {}) });
+      setConnection(`Connected as ${result.username} · API ${result.version}. Read access verified.`);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setTesting(false); }
+  };
+  useEffect(() => { setConnection(undefined); }, [url, token]);
 
   useEffect(() => {
     if (!forgejo) return;
@@ -47,7 +59,7 @@ export function SettingsPage() {
       <PageHeader title="Settings" description="Optional integrations for your dashboard." />
       <Section title="Forgejo" hint="Your pull requests and their diffs">
         <form className="flex max-w-2xl flex-col gap-5 px-4 py-4" onSubmit={(e) => void save(e)}>
-          <fieldset disabled={busy || loading} className="flex flex-col gap-5 disabled:opacity-60">
+          <fieldset disabled={busy || testing || loading} className="flex flex-col gap-5 disabled:opacity-60">
             <div className="flex items-center gap-3">
               <Switch id="forgejo-enabled" checked={enabled} onCheckedChange={(value) => { setEnabled(value); setSaved(false); }} />
               <Label htmlFor="forgejo-enabled">Enable Forgejo</Label>
@@ -64,12 +76,14 @@ export function SettingsPage() {
               <p className="text-sm text-muted-foreground">Saved in your operating system's credential store. The token is never written to the settings file or returned to the browser.</p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" disabled={!url.trim()} onClick={() => void test()}>{testing ? "Testing…" : "Test connection"}</Button>
               <Button type="submit">{busy ? "Saving…" : "Save settings"}</Button>
               {forgejo?.hasToken && <Button type="button" variant="outline" onClick={() => void save(undefined, true)}>Remove token and disable</Button>}
             </div>
           </fieldset>
           {loading && <p role="status" className="text-sm text-muted-foreground">Loading settings…</p>}
           {(error || forgejoError) && <div role="alert"><Note warn>{error || forgejoError}</Note></div>}
+          {connection && <p role="status" className="text-sm text-ok">{connection}</p>}
           {saved && <p role="status" className="text-sm text-muted-foreground">Settings saved.</p>}
         </form>
       </Section>

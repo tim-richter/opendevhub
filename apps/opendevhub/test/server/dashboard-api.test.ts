@@ -148,13 +148,32 @@ describe("dashboard API", () => {
     const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
     const forgejo = {
       view: vi.fn(), save: vi.fn(),
-      pulls: vi.fn(async () => ({ username: "alice", pulls: [] })),
-      diff: vi.fn(async () => ({ patch: "test diff" } as never)),
+      pulls: vi.fn(), diff: vi.fn(), test: vi.fn(async () => ({ username: "alice", version: "11" })),
+      inbox: vi.fn(async () => ({ username: "alice", pulls: [] })),
+      details: vi.fn(async () => ({ body: "PR description" } as never)),
+      patch: vi.fn(async () => ({ patch: "test diff" })),
+      comments: vi.fn(async () => ({ items: [] })), reviews: vi.fn(async () => ({ items: [] })),
+      reviewComments: vi.fn(async () => []), checks: vi.fn(async () => ({ items: [], state: "success", sha: "a".repeat(40) })),
     };
     const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, checks, forgejo });
     expect(await (await app.request("/api/forgejo/pulls")).json()).toEqual({ username: "alice", pulls: [] });
-    expect(await (await app.request("/api/forgejo/pulls/team/demo/7")).json()).toEqual({ patch: "test diff" });
-    expect(forgejo.diff).toHaveBeenCalledWith("team", "demo", "7");
+    expect(await (await app.request("/api/forgejo/pulls/team/demo/7")).json()).toEqual({ body: "PR description" });
+    expect(forgejo.details).toHaveBeenCalledWith("team", "demo", "7", expect.any(AbortSignal));
+    expect(await (await app.request("/api/forgejo/pulls/team/demo/7/patch")).json()).toEqual({ patch: "test diff" });
+    await app.request("/api/forgejo/pulls?state=open&inbox=assigned&page=2&q=fix&repository=team%2Fdemo");
+    expect(forgejo.inbox).toHaveBeenLastCalledWith({ state: "open", inbox: "assigned", page: 2, q: "fix", repository: "team/demo" }, expect.any(AbortSignal));
+    await app.request("/api/forgejo/pulls/team/demo/7/comments?page=3");
+    expect(forgejo.comments).toHaveBeenCalledWith("team", "demo", "7", 3, expect.any(AbortSignal));
+    await app.request("/api/forgejo/pulls/team/demo/7/reviews?page=2");
+    expect(forgejo.reviews).toHaveBeenCalledWith("team", "demo", "7", 2, expect.any(AbortSignal));
+    await app.request("/api/forgejo/pulls/team/demo/7/reviews/9/comments");
+    expect(forgejo.reviewComments).toHaveBeenCalledWith("team", "demo", "7", "9", expect.any(AbortSignal));
+    await app.request(`/api/forgejo/checks/team/demo/${"a".repeat(40)}?page=4`);
+    expect(forgejo.checks).toHaveBeenCalledWith("team", "demo", "a".repeat(40), 4, expect.any(AbortSignal));
+    const tested = await app.request("/api/forgejo/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "https://forge.example" }) });
+    expect(tested.headers.get("cache-control")).toBe("no-store");
+    expect(await tested.json()).toEqual({ username: "alice", version: "11" });
+    expect((await app.request("/api/forgejo/test", { method: "POST", headers: { origin: "https://other.example", host: "localhost" } })).status).toBe(403);
     expect((await setup().app.request("/api/forgejo/settings")).status).toBe(412);
   });
 

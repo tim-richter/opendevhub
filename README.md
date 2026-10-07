@@ -177,11 +177,23 @@ Forgejo is optional and disabled by default. Use a token with `read:user`, `read
 scopes, with access to the private repositories you want to see. The URL must use HTTPS;
 HTTP is supported for local instances at `localhost`, `127.0.0.1`, or `::1`.
 
-The **Forgejo** sidebar link appears when enabled and opens a page with all pull requests authored by the
-connected account across repositories accessible to the token, even without a local project.
-The page defaults to **All**, including closed and merged PRs; use **Open** or **Closed / merged** to filter.
-Select one to see its syntax-highlighted diff in unified or side-by-side layout. **Refresh**
-reloads the list or diff; **Open in Forgejo** opens the original PR.
+Use **Test connection** to verify the entered or saved credentials without changing settings.
+The **Forgejo** sidebar link opens an inbox for PRs **Authored by me**, **Review requested**, or
+**Assigned to me**, across repositories accessible to the token, even without a local project.
+Filter by state, search text, or exact `owner/name` repository. Pages load incrementally; the view,
+filters, and diff layout are remembered.
+
+Open a PR to see its description, labels, reviews, inline comments, and CI checks for the head commit.
+Its syntax-highlighted diff supports unified/side-by-side layout and a changed-files navigator.
+Sections load independently, and **Open in Forgejo** stays available when the diff fails.
+Select feedback or checks and choose **Continue with agent** to review an editable prompt and
+send it to a local checkout/session, or open a prefilled New task form. Matching projects and
+worktrees are suggested from remotes and recorded PR URLs. The prompt asks the agent to verify
+the PR commit before editing; the dashboard does not switch or reset checkouts automatically.
+
+TanStack Query caches PR data in memory, retains content during refresh, and refreshes stale data
+on window focus or reconnect. Requests propagate cancellation to Forgejo, and changing saved
+connection settings clears the cache. Only UI preferences are saved in browser storage.
 
 Settings survive restarts in `$XDG_CONFIG_HOME/opendevhub/integrations/forgejo.json`
 (default `~/.config/opendevhub/integrations/forgejo.json`). This separate file has mode `0600`
@@ -197,7 +209,8 @@ the API, put in browser storage, or injected into task containers. Changing the 
 requires a new token. Disabling keeps the credential for later; **Remove token and disable**
 deletes it from the OS store.
 
-This view is read-only: PR comments, approvals and merging remain on Forgejo. It uses the
+Forgejo API access is read-only: posting comments, approvals and merging remain on Forgejo. Agent
+handoff uses the existing task/session APIs without exposing the token to containers. It uses the
 Forgejo REST API independently of the existing git-based Publish action. Responses larger than
 20 MiB show an error and can be opened on Forgejo instead.
 

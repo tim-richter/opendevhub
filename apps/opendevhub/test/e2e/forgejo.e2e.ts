@@ -108,6 +108,34 @@ describe.skipIf(!enabled)("e2e: Forgejo publishing and PR dashboard", () => {
       expect(diff.patch).toContain("+b");
       expect(diff.patch).toContain("+c");
       expect(diff).toMatchObject({ head: "refs/pull/1/head", base: "main" });
+      const details = await forgejo.details(addB.owner, addB.repo, String(addB.number));
+      expect(details.body).toBe("Adds b.");
+      expect(details.headSha).toMatch(/^[a-f0-9]{40}$/);
+      expect((await forgejo.inbox({ state: "open", repository: `${USER}/demo` })).pulls).toHaveLength(2);
+      expect(await forgejo.test({ url: web })).toMatchObject({ username: USER });
+      const api = async (route: string, method: string, body: unknown, authorization = auth) => {
+        const res = await fetch(`${web}/api/v1/${route}`, { method, headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(body) });
+        expect(res.ok).toBe(true);
+        return res;
+      };
+      await api(`repos/${USER}/demo/issues/${addB.number}/comments`, "POST", { body: "Please add a null case." });
+      expect((await forgejo.comments(USER, "demo", String(addB.number))).items[0].body).toBe("Please add a null case.");
+      await api(`repos/${USER}/demo/pulls/${addB.number}`, "PATCH", { assignees: [USER] });
+      expect((await forgejo.inbox({ inbox: "assigned", state: "open" })).pulls.map((p) => p.number)).toContain(addB.number);
+      await api(`repos/${USER}/demo/statuses/${details.headSha}`, "POST", { state: "failure", context: "tests", description: "Null case failed", target_url: `${web}/${USER}/demo/actions` });
+      expect((await forgejo.checks(USER, "demo", details.headSha)).items).toMatchObject([{ name: "tests", status: "failure", description: "Null case failed" }]);
+      docker("exec", "-u", "git", id, "forgejo", "admin", "user", "create", "--username", "reviewer", "--password", PASS, "--email", "reviewer@example.com", "--admin", "--must-change-password=false");
+      const reviewerAuth = "Basic " + Buffer.from(`reviewer:${PASS}`).toString("base64");
+      await api(`repos/${USER}/demo/pulls/${addB.number}/requested_reviewers`, "POST", { reviewers: ["reviewer"] });
+      const reviewerToken = await (await api("users/reviewer/tokens", "POST", { name: "inbox-reader", scopes: ["read:user", "read:repository", "read:issue"] }, reviewerAuth)).json() as { sha1: string };
+      const reviewerSettings = new FileForgejoSettings(path.join(tmp, "reviewer"), new MemorySecretStore());
+      await reviewerSettings.save({ enabled: true, url: web, token: reviewerToken.sha1 });
+      expect((await new Forgejo(reviewerSettings).inbox({ inbox: "review-requested", state: "open" })).pulls.map((p) => p.number)).toContain(addB.number);
+      await api(`repos/${USER}/demo/pulls/${addB.number}/reviews`, "POST", { body: "Please improve coverage", event: "REQUEST_CHANGES", commit_id: details.headSha,
+        comments: [{ path: "b.txt", new_position: 1, body: "Add null coverage here" }] }, reviewerAuth);
+      const reviews = await forgejo.reviews(USER, "demo", String(addB.number));
+      expect(reviews.items.at(-1)).toMatchObject({ author: "reviewer", state: "REQUEST_CHANGES" });
+      expect((await forgejo.reviewComments(USER, "demo", String(addB.number), String(reviews.items.at(-1)!.id)))[0]).toMatchObject({ path: "b.txt", body: "Add null coverage here" });
       const closed = await fetch(`${web}/api/v1/repos/${USER}/demo/pulls/${addB.number}`, {
         method: "PATCH", headers: { authorization: auth, "content-type": "application/json" },
         body: JSON.stringify({ state: "closed" }),

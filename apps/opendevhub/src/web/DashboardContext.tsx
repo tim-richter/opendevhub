@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import type { DashboardSnapshot } from "../shared/types";
 import type { ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
 import { type Action, fetchForgejoSettings, saveForgejoSettings, postAction, rescan as postRescan } from "./api";
@@ -29,8 +30,8 @@ interface DashboardContextValue {
   /** Shows a failed request in the error banner. */
   report: (err: unknown) => void;
   /** Opens the New task dialog, with a project preselected when given. */
-  newTask: (projectId?: string) => void;
-  newTaskFor: { projectId?: string } | undefined;
+  newTask: (projectId?: string, draft?: { prompt: string; title?: string; base?: string }) => void;
+  newTaskFor: { projectId?: string; prompt?: string; title?: string; base?: string } | undefined;
   closeNewTask: () => void;
   /** Whether the Add project dialog is open. */
   addProjectOpen: boolean;
@@ -51,7 +52,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string>();
   const [scanning, setScanning] = useState(false);
-  const [newTaskFor, setNewTaskFor] = useState<{ projectId?: string }>();
+  const [newTaskFor, setNewTaskFor] = useState<DashboardContextValue["newTaskFor"]>();
+  const queryClient = useQueryClient();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [permission, setPermission] = useState<Permission>(() => (pushSupported() ? Notification.permission : "unsupported"));
   const [forgejo, setForgejo] = useState<ForgejoSettings>();
@@ -61,17 +63,19 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     if (!connected) return;
     let cancelled = false;
     void fetchForgejoSettings().then(
-      (settings) => { if (!cancelled) { setForgejo(settings); setForgejoError(undefined); } },
+      (settings) => { if (!cancelled) { queryClient.removeQueries({ queryKey: ["forgejo"] }); setForgejo(settings); setForgejoError(undefined); } },
       (err: unknown) => { if (!cancelled) setForgejoError(err instanceof Error ? err.message : String(err)); },
     );
     return () => { cancelled = true; };
-  }, [connected]);
+  }, [connected, queryClient]);
 
   const updateForgejo = useCallback(async (input: ForgejoSettingsInput) => {
     const settings = await saveForgejoSettings(input);
+    await queryClient.cancelQueries({ queryKey: ["forgejo"] });
+    queryClient.removeQueries({ queryKey: ["forgejo"] });
     setForgejo(settings);
     setForgejoError(undefined);
-  }, []);
+  }, [queryClient]);
 
   // A clicked notification takes the user straight to the session: the service worker focuses this
   // tab and says which one.
@@ -107,7 +111,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       .catch(fail)
       .finally(() => setScanning(false));
   }, [fail]);
-  const newTask = useCallback((projectId?: string) => setNewTaskFor({ projectId }), []);
+  const newTask = useCallback((projectId?: string, draft?: { prompt: string; title?: string; base?: string }) => setNewTaskFor({ projectId, ...draft }), []);
   const loadLogs = useCallback((projectId: string) => void fetchLogs(projectId).catch(fail), [fetchLogs, fail]);
   const requestPermission = useCallback(
     () =>
