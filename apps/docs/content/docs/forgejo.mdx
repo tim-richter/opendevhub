@@ -1,17 +1,18 @@
 ---
 title: Forgejo
-description: Browse all your Forgejo pull requests and their diffs.
+description: Browse your pull requests and review changes on Forgejo.
 icon: GitPullRequest
 ---
 
 Forgejo is an optional integration, disabled by default. Open **Settings** in the sidebar,
 enable **Forgejo**, and save your instance URL and access token. Use a token with `read:user`,
 `read:repository`, and `read:issue` scopes, including access to private repositories you want to see.
+For submitting reviews, grant `write:repository` and `write:issue` access.
 Use HTTPS; loopback HTTP is supported for local instances.
 
 The **Forgejo** sidebar link opens a page listing all PRs authored by the connected account across
 repositories accessible to the token. They do not need to be local projects. The page defaults to
-**All**, including closed and merged PRs; select **Open** or **Closed / merged** to filter. Click a PR
+**Open** PRs authored by you; select **All** or **Closed / merged** to change the filter. Click a PR
 to see its diff with the dashboard's syntax highlighting and unified or side-by-side layout.
 **Refresh** reloads the list or diff. **Open in Forgejo** opens the original PR.
 
@@ -31,6 +32,18 @@ The saved token is never returned to the browser or injected into task container
 Leave the token field blank to keep the saved token. Changing the URL requires a new token.
 Disabling retains the connection details; **Remove token and disable** removes the saved token.
 
-The integration is read-only. Comments, approvals, and merges happen on Forgejo. Responses
+The **Review** tab lists open PRs across repositories accessible to the token. Select a PR,
+click the + beside a diff line, and add comments. Add a summary, choose Comment, Approve,
+or Request changes, then **Send review to Forgejo**. Drafts stay in the page until sent;
+refreshing or leaving the page discards them. Reviews target the loaded commit; if the PR
+changes, refresh and review its latest diff before sending.
+
+To inspect the full code, select the matching local project and create a PR worktree on a new
+branch. The project container must be running with worktrees mounted. This fetches
+`refs/pull/<number>/head` from a matching git remote, including fork PRs, using the container's
+existing git credentials. Open the worktree using the project container or start its own container.
+The saved Forgejo token is never passed to git or a container.
+
+Merges happen on Forgejo. Responses
 larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues
 to use your git credentials independently of this integration.

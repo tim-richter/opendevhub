@@ -149,7 +149,7 @@ describe("protected Forgejo settings", () => {
   });
 });
 
-describe("Forgejo read-only API client", () => {
+describe("Forgejo API client", () => {
   it("makes no upstream requests when disabled", async () => {
     const fetcher = vi.fn();
     const forgejo = new Forgejo(settings, fetcher);
@@ -181,16 +181,49 @@ describe("Forgejo read-only API client", () => {
     expect(JSON.stringify(result)).not.toContain("test-secret");
   });
 
-  it("defaults to all authored PRs, including closed and merged", async () => {
+  it("defaults to open authored PRs", async () => {
     await settings.save(configured);
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(response({ login: "alice" }))
       .mockResolvedValueOnce(response([issue(1), issue(2, { state: "closed" }), issue(3, { state: "closed", pull_request: { merged: true } }), issue(4, { user: { login: "bob" } })]))
       .mockResolvedValueOnce(response([]));
     const result = await new Forgejo(settings, fetcher).pulls();
-    expect(result.pulls.map((p) => [p.number, p.state])).toEqual([[3, "merged"], [2, "closed"], [1, "open"]]);
-    expect(String(fetcher.mock.calls[1][0])).toContain("state=all");
+    expect(result.pulls.map((p) => [p.number, p.state])).toEqual([[1, "open"]]);
+    expect(String(fetcher.mock.calls[1][0])).toContain("state=open");
     await expect(new Forgejo(settings, fetcher).pulls("invalid")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("lists open review candidates across authors without the created filter", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ login: "alice" }))
+      .mockResolvedValueOnce(response([issue(1), issue(2, { user: { login: "bob" } }), issue(3, { state: "closed" })]))
+      .mockResolvedValueOnce(response([]));
+    const result = await new Forgejo(settings, fetcher).pulls("all", "review");
+    expect(result.pulls.map((p) => p.number)).toEqual([2, 1]);
+    const query = new URL(String(fetcher.mock.calls[1][0])).searchParams;
+    expect(query.get("created")).toBeNull();
+    expect(query.get("state")).toBe("open");
+  });
+
+  it("submits inline comments on the loaded commit and refuses stale reviews", async () => {
+    await settings.save(configured);
+    const sha = "a".repeat(40);
+    const details = { number: 1, title: "Change", updated_at: "now", state: "open", base: { ref: "main" }, head: { ref: "feature", sha } };
+    const input = { commitId: sha, body: "Summary", event: "COMMENT", comments: [{ path: "a.txt", body: "Fix this", old_position: 0, new_position: 1 }] };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response(details)).mockResolvedValueOnce(new Response("patch"))
+      .mockResolvedValueOnce(response({ id: 4 }));
+    await expect(new Forgejo(settings, fetcher).review("team", "private", "1", input)).resolves.toEqual({ sent: true });
+    expect(fetcher.mock.calls[2][0]).toBe(`${configured.url}/api/v1/repos/team/private/pulls/1/reviews`);
+    expect(JSON.parse(String(fetcher.mock.calls[2][1]?.body))).toEqual({ commit_id: sha, body: input.body, event: input.event, comments: input.comments });
+    expect(fetcher.mock.calls[2][1]).toMatchObject({ method: "POST", redirect: "error" });
+    fetcher.mockReset().mockResolvedValueOnce(response({ ...details, head: { ref: "feature", sha: "b".repeat(40) } })).mockResolvedValueOnce(new Response("patch"));
+    await expect(new Forgejo(settings, fetcher).review("team", "private", "1", input)).rejects.toThrow("PR changed");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockReset();
+    await expect(new Forgejo(settings, fetcher).review("team", "private", "1", { ...input, comments: [{ ...input.comments[0], new_position: -1 }] })).rejects.toThrow("Invalid review comment");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("gets the diff from a constructed API path, never the upstream diff URL", async () => {

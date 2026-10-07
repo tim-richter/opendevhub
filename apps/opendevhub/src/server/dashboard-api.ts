@@ -69,7 +69,7 @@ export interface DashboardDeps {
   usage?: Pick<UsageStore, "report">;
   /** Absent in tests that don't need it. */
   nodes?: Pick<Nodes, "add" | "remove">;
-  forgejo?: Pick<Forgejo, "view" | "save" | "pulls" | "diff">;
+  forgejo?: Pick<Forgejo, "view" | "save" | "pulls" | "diff"> & Partial<Pick<Forgejo, "review">>;
   webDir?: string;
 }
 
@@ -157,7 +157,21 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   };
   app.get("/api/forgejo/settings", (c) => json(c, async () => requireForgejo().view()));
   app.post("/api/forgejo/settings", (c) => json(c, async (_id, b) => requireForgejo().save(b)));
-  app.get("/api/forgejo/pulls", (c) => json(c, async () => requireForgejo().pulls(c.req.query("state") ?? "all")));
+  app.get("/api/forgejo/pulls", (c) => json(c, async () => requireForgejo().pulls(c.req.query("state") ?? "open", c.req.query("scope") ?? "authored")));
+  app.post("/api/forgejo/pulls/:owner/:repo/:number/reviews", (c) => json(c, async (_id, b) => {
+    const forgejo = requireForgejo();
+    if (!forgejo.review) throw new UnavailableError("Forgejo reviews are not available");
+    return forgejo.review(c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!, b);
+  }));
+  app.post("/api/forgejo/pulls/:owner/:repo/:number/worktree", (c) => json(c, async (_id, b) => {
+    const diff = await requireForgejo().diff(c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!);
+    if (diff.pull.state !== "open") throw new ForgejoError("This pull request is no longer open.");
+    if (!diff.commitId || diff.commitId !== b.commitId) throw new ForgejoError("The PR changed. Refresh its diff before creating a worktree.");
+    return orchestrator.createWorktree(str(b.projectId) ?? "", {
+      branch: str(b.branch) ?? "",
+      pull: { url: diff.pull.url, number: diff.pull.number, commitId: diff.commitId ?? "" },
+    });
+  }));
   app.get("/api/forgejo/pulls/:owner/:repo/:number", (c) => json(c, async () =>
     requireForgejo().diff(c.req.param("owner")!, c.req.param("repo")!, c.req.param("number")!),
   ));

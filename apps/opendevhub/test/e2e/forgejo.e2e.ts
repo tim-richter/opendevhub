@@ -114,7 +114,8 @@ describe.skipIf(!enabled)("e2e: Forgejo publishing and PR dashboard", () => {
       });
       expect(closed.ok).toBe(true);
       expect((await forgejo.pulls("open")).pulls).toHaveLength(1);
-      expect((await forgejo.pulls()).pulls).toHaveLength(2);
+      expect((await forgejo.pulls()).pulls).toHaveLength(1);
+      expect((await forgejo.pulls("all")).pulls).toHaveLength(2);
       expect((await forgejo.pulls("closed")).pulls[0]).toMatchObject({ number: addB.number, state: "closed" });
     } finally {
       docker("rm", "-f", id);

@@ -194,10 +194,11 @@ export class Forgejo {
     return { ...settings, token: settings.token };
   }
 
-  private async request(connection: SavedSettings & { token: string }, route: string, accept = "application/json"): Promise<string> {
+  private async request(connection: SavedSettings & { token: string }, route: string, accept = "application/json", body?: unknown): Promise<string> {
     try {
       const response = await this.fetcher(`${connection.url}/api/v1/${route}`, {
-        headers: { authorization: `token ${connection.token}`, accept },
+        headers: { authorization: `token ${connection.token}`, accept, ...(body ? { "content-type": "application/json" } : {}) },
+        ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
         // Never forward the token to a redirect destination, including another path on this server.
         redirect: "error",
         signal: AbortSignal.timeout(30_000),
@@ -247,20 +248,22 @@ export class Forgejo {
     };
   }
 
-  async pulls(state = "all"): Promise<ForgejoPulls> {
+  async pulls(state = "open", scope = "authored"): Promise<ForgejoPulls> {
     if (!["all", "open", "closed"].includes(state)) throw new ForgejoError("Invalid pull request state.");
+    if (!["authored", "review"].includes(scope)) throw new ForgejoError("Invalid pull request scope.");
+    if (scope === "review") state = "open";
     const connection = await this.connection();
     const user = await this.json<{ login: string }>(connection, "user");
     if (!user || typeof user.login !== "string" || !user.login) throw new ForgejoError("Forgejo returned an invalid account.", 502);
     const pulls = new Map<string, ForgejoPullRequest>();
     for (let page = 1; page <= 200; page++) {
-      const query = new URLSearchParams({ type: "pulls", state, created: "true", page: String(page), limit: "50", sort: "recentupdate" });
+      const query = new URLSearchParams({ type: "pulls", state, ...(scope === "authored" ? { created: "true" } : {}), page: String(page), limit: "50", sort: "recentupdate" });
       const issues = await this.json<Issue[]>(connection, `repos/issues/search?${query}`);
       if (!Array.isArray(issues)) throw new ForgejoError("Forgejo returned an invalid pull request list.", 502);
       if (issues.length === 0) return { username: user.login, pulls: [...pulls.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) };
       for (const issue of issues) {
         // Also filter locally: older servers may ignore search filters.
-        if (!issue?.pull_request || (state !== "all" && issue.state !== state) || issue.user?.login !== user.login) continue;
+        if (!issue?.pull_request || (state !== "all" && issue.state !== state) || (scope === "authored" && issue.user?.login !== user.login)) continue;
         const parts = issue.repository?.full_name?.split("/");
         if (!parts || parts.length !== 2) throw new ForgejoError("Forgejo returned an invalid repository.", 502);
         const pull = this.pull(connection, parts[0], parts[1], issue);
@@ -274,12 +277,33 @@ export class Forgejo {
     if (!/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number))) throw new ForgejoError("Invalid pull request number.");
     const route = `repos/${segment(owner)}/${segment(repo)}/pulls/${number}`;
     const connection = await this.connection();
-    const value = await this.json<{ number: number; title: string; updated_at: string; state: string; merged: boolean; base: { ref: string }; head: { ref: string } }>(connection, route);
+    const value = await this.json<{ number: number; title: string; updated_at: string; state: string; merged: boolean; base: { ref: string }; head: { ref: string; sha?: string } }>(connection, route);
     const pull = this.pull(connection, owner, repo, value);
     if (value.number !== Number(number) || typeof value.base?.ref !== "string" || typeof value.head?.ref !== "string") {
       throw new ForgejoError("Forgejo returned invalid pull request details.", 502);
     }
     const patch = await this.request(connection, `${route}.diff`, "text/plain");
-    return { pull, base: value.base.ref, head: value.head.ref, patch };
+    return { pull, base: value.base.ref, head: value.head.ref, commitId: value.head.sha, patch };
+  }
+
+  async review(owner: string, repo: string, number: string, input: Record<string, unknown>): Promise<{ sent: true }> {
+    if (typeof input.commitId !== "string" || !/^[0-9a-f]{40,64}$/i.test(input.commitId) ||
+        typeof input.body !== "string" || input.body.length > 100_000 ||
+        !["COMMENT", "APPROVED", "REQUEST_CHANGES"].includes(String(input.event)) ||
+        !Array.isArray(input.comments) || input.comments.length > 200) throw new ForgejoError("Invalid review.");
+    const comments = input.comments.map((c) => {
+      if (!c || typeof c.path !== "string" || !c.path || typeof c.body !== "string" || !c.body.trim() || c.body.length > 100_000 ||
+          !Number.isSafeInteger(c.old_position) || !Number.isSafeInteger(c.new_position) ||
+          !((c.old_position > 0 && c.new_position === 0) || (c.new_position > 0 && c.old_position === 0))) throw new ForgejoError("Invalid review comment.");
+      return { path: c.path, body: c.body, old_position: c.old_position, new_position: c.new_position };
+    });
+    if (input.event === "COMMENT" && !input.body.trim() && !comments.length) throw new ForgejoError("Add a comment before sending the review.");
+    const diff = await this.diff(owner, repo, number);
+    if (diff.pull.state !== "open") throw new ForgejoError("This pull request is no longer open.");
+    if (diff.commitId !== input.commitId) throw new ForgejoError("The PR changed. Refresh its diff before sending a review.");
+    await this.request(await this.connection(), `repos/${segment(owner)}/${segment(repo)}/pulls/${number}/reviews`, "application/json", {
+      commit_id: input.commitId, body: input.body, event: input.event, comments,
+    });
+    return { sent: true };
   }
 }

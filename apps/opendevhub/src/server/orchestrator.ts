@@ -118,7 +118,7 @@ export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
 export type GitPort = Pick<
   GitOps,
   | "currentBranch" | "recordedBase" | "aheadBehind" | "isClean" | "isPushed" | "commit" | "update" | "mergeInto" | "deleteBranch"
-  | "localBranches" | "remotes" | "fetchPrune" | "branchRefs" | "remoteHead" | "isAncestor"
+  | "fetchPull" | "localBranches" | "remotes" | "fetchPrune" | "branchRefs" | "remoteHead" | "isAncestor"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;
@@ -428,7 +428,7 @@ export class Orchestrator {
 
   createWorktree(
     id: ProjectId,
-    req: { branch: string; base?: string; startSession?: boolean; prompt?: string },
+    req: { branch: string; base?: string; startSession?: boolean; prompt?: string; pull?: { url: string; number: number; commitId: string } },
   ): Promise<{ worktree: Worktree; sessionId?: string }> {
     const branch = validateBranch(req.branch);
     const base = req.base?.trim() || undefined;
@@ -446,7 +446,7 @@ export class Orchestrator {
         workspaceFolder: ws,
         root,
         branch,
-        base,
+        base: req.pull ? await this.deps.git.fetchPull(p, ws, req.pull.url, req.pull.number, req.pull.commitId) : base,
         onLine: (l) => this.log(id, l),
       });
       const list = await this.deps.worktrees.list(p, ws, root).catch(() => [...(rt.worktrees ?? []), worktree]);
