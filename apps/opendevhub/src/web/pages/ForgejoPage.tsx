@@ -103,7 +103,6 @@ function PullDiff({ owner, repo, number }: { owner: string; repo: string; number
   const [handoff, setHandoff] = useState(false);
   useEffect(() => { setSelectedFile(null); setFeedback({ comments: [], reviews: [], checks: [] }); }, [details.data?.headSha]);
   const files = useMemo(() => forgejoFilePatches(patch.data?.patch ?? ""), [patch.data?.patch]);
-  const shownPatch = selectedFile !== null && files[selectedFile] ? files[selectedFile].patch : patch.data?.patch ?? "";
   const url = forgejo?.url ? `${forgejo.url}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(number)}` : undefined;
   const refresh = async () => {
     // Keep old content visible while fetching. Commit-specific patch/check keys prevent mixing revisions.
@@ -135,7 +134,7 @@ function PullDiff({ owner, repo, number }: { owner: string; repo: string; number
           <nav aria-label="Changed files" className="flex flex-col gap-1 rounded-lg border p-2 lg:sticky lg:top-4 lg:max-h-[70vh] lg:overflow-y-auto">
             <button className="rounded px-2 py-1.5 text-left text-sm hover:bg-muted" aria-current={selectedFile === null ? "true" : undefined} onClick={() => setSelectedFile(null)}>All changed files ({files.length})</button>
             {files.map((f, i) => <button key={i} className={`rounded px-2 py-1.5 text-left text-xs break-all hover:bg-muted ${selectedFile === i ? "bg-muted" : ""}`} aria-current={selectedFile === i ? "true" : undefined} onClick={() => setSelectedFile(i)}>{f.name} <span className="whitespace-nowrap"><span className="text-ok">+{f.additions}</span> <span className="text-destructive">−{f.deletions}</span></span></button>)}
-          </nav><div className={`min-w-0 overflow-hidden rounded-xl border ${diffFont}`}><DiffBoundary key={shownPatch} patch={shownPatch}><PatchView patch={shownPatch} split={style === "split"} /></DiffBoundary></div>
+          </nav><div className={`min-w-0 overflow-hidden rounded-xl border ${diffFont}`}>{(selectedFile !== null && files[selectedFile] ? [files[selectedFile]] : files).map((f) => <DiffBoundary key={f.patch} patch={f.patch}><PatchView patch={f.patch} split={style === "split"} /></DiffBoundary>)}</div>
         </div> : <Empty title="No changes in this pull request" />)}
       </>}
     </ForgejoGate>

@@ -34,6 +34,7 @@ import { GitOps } from "./git";
 import { Images } from "./images";
 import { Network, parseRouteMode } from "./network";
 import { NodeKits, buildNodeKit } from "./node-kits";
+import { LOCAL_NODE } from "./host";
 import { Nodes } from "./nodes";
 import { Onboarding } from "./onboarding";
 import { OpencodeClient } from "./opencode/client";
@@ -274,8 +275,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     resolveTarget: proxyTargets(store, orchestrator),
     terminalTarget: (id, directory) => {
       const target = orchestrator.terminalTarget(id, directory);
-      const conn = target.node ? nodes.connection(target.node) : undefined;
-      if (target.node && (!conn?.online || !conn.target)) throw new Error("The node is offline");
+      const remote = target.node && target.node !== LOCAL_NODE ? target.node : undefined;
+      const conn = remote ? nodes.connection(remote) : undefined;
+      if (remote && (!conn?.online || !conn.target)) throw new Error("The node is offline");
       return { ...target, ssh: conn?.target };
     },
   });

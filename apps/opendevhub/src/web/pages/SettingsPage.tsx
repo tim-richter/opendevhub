@@ -1,3 +1,4 @@
+import { BookOpenIcon, RefreshCwIcon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +9,13 @@ import type { IntegrationSettings, IntegrationSettingsInput } from "../../shared
 import { useDash } from "../DashboardContext";
 import { testForgejoConnection } from "../api";
 
+const DOCS_URL = "https://tim-richter.github.io/opendevhub/";
+
 export function SettingsPage() {
   const { forgejo, forgejoError, updateForgejo, jira, jiraError, updateJira } = useDash();
   return <Page>
     <PageHeader title="Settings" description="Optional integrations for your dashboard." />
+    <GeneralSection />
     <IntegrationSettingsForm name="Forgejo" hint="Your pull requests and their diffs" settings={forgejo} settingsError={forgejoError} update={updateForgejo}
       tokenHelp="Use a token with read:user, read:repository, and read:issue scopes, including private repositories you want to see." />
     <IntegrationSettingsForm name="Jira" hint="Assigned tickets and tasks" settings={jira} settingsError={jiraError} update={updateJira}
@@ -99,6 +103,24 @@ function IntegrationSettingsForm({ name, hint, settings, settingsError, update, 
         {connection && <p role="status" className="text-sm text-ok">{connection}</p>}
         {saved && <p role="status" className="text-sm text-muted-foreground">Settings saved.</p>}
       </form>
+    </Section>
+  );
+}
+
+function GeneralSection() {
+  const { snapshot, rescan, scanning } = useDash();
+  return (
+    <Section title="General" hint="Project discovery and help">
+      <div className="flex flex-wrap gap-2 px-4 py-4">
+        <Button variant="outline" disabled={scanning} onClick={rescan} title={snapshot?.roots.join("\n")}>
+          <RefreshCwIcon className={scanning ? "animate-spin" : undefined} /> {scanning ? "Scanning…" : "Rescan roots"}
+        </Button>
+        <Button asChild variant="outline">
+          <a href={DOCS_URL} target="_blank" rel="noreferrer">
+            <BookOpenIcon /> Documentation
+          </a>
+        </Button>
+      </div>
     </Section>
   );
 }

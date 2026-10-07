@@ -1,4 +1,4 @@
-import { BellIcon, BookOpenIcon, CircleDollarSignIcon, EraserIcon, GitPullRequestIcon, LayoutGridIcon, ListIcon, TicketIcon, PlusIcon, RefreshCwIcon, SearchIcon, ServerIcon, SettingsIcon, XIcon } from "lucide-react";
+import { BellIcon, CircleDollarSignIcon, EraserIcon, GitPullRequestIcon, LayoutGridIcon, ListIcon, TicketIcon, PlusIcon, SearchIcon, ServerIcon, SettingsIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -25,6 +25,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { AddProjectDialog } from "../components/AddProjectDialog";
 import { CommandPalette } from "../components/CommandPalette";
@@ -40,7 +41,6 @@ import { formatCost, opensNewTask, projectIdFromPath } from "../tasks";
 import { formatUsage } from "../usage";
 
 const FILTER_THRESHOLD = 8;
-const DOCS_URL = "https://tim-richter.github.io/opendevhub/";
 
 export function Shell() {
   const { snapshot, connected, newTask, newTaskFor, addProjectOpen } = useDash();
@@ -131,10 +131,11 @@ function CheckoutItems({ view }: { view: ProjectView }) {
 }
 
 function AppSidebar({ onSearch }: { onSearch: () => void }) {
-  const { snapshot, connected, rescan, scanning, permission, requestPermission, openAddProject, forgejo, jira } = useDash();
+  const { snapshot, connected, permission, requestPermission, openAddProject, forgejo, jira } = useDash();
   const { setOpenMobile } = useSidebar();
   const [filter, setFilter] = useState("");
   const location = useLocation();
+  const settingsActive = useMatch("/settings") !== null;
 
   useEffect(() => setOpenMobile(false), [location.pathname, setOpenMobile]);
 
@@ -225,32 +226,30 @@ function AppSidebar({ onSearch }: { onSearch: () => void }) {
       </SidebarContent>
 
       <SidebarFooter className="border-t">
-        <SidebarMenu>
-          <NavItem to="/settings">
-            <SettingsIcon /> Settings
-          </NavItem>
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild variant="ghost" size="icon-sm" className={cn(settingsActive && "bg-sidebar-accent text-sidebar-accent-foreground")}>
+                <NavLink to="/settings" aria-label="Settings">
+                  <SettingsIcon />
+                </NavLink>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Settings</TooltipContent>
+          </Tooltip>
           {permission === "default" && (
-            <SidebarMenuItem>
-              <SidebarMenuButton size="sm" className="text-muted-foreground" onClick={requestPermission}>
-                <BellIcon /> Enable notifications
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label="Enable notifications" onClick={requestPermission}>
+                  <BellIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Enable notifications</TooltipContent>
+            </Tooltip>
           )}
-          <SidebarMenuItem>
-            <SidebarMenuButton size="sm" className="text-muted-foreground" disabled={scanning} onClick={rescan} title={snapshot.roots.join("\n")}>
-              <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan roots"}
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild size="sm" className="text-muted-foreground">
-              <a href={DOCS_URL} target="_blank" rel="noreferrer">
-                <BookOpenIcon /> Documentation
-              </a>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
-          <span className={cn("size-2 rounded-full", connected ? "bg-ok" : "animate-pulse bg-warn")} /> {connected ? "Live" : "Reconnecting…"}
+          <div className="ml-auto flex items-center gap-2 px-2 text-xs text-muted-foreground">
+            <span className={cn("size-2 rounded-full", connected ? "bg-ok" : "animate-pulse bg-warn")} /> {connected ? "Live" : "Reconnecting…"}
+          </div>
         </div>
       </SidebarFooter>
     </Sidebar>

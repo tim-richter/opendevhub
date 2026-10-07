@@ -242,12 +242,14 @@ export class Forgejo {
   async checks(owner: string, repo: string, sha: string, page = 1, signal?: AbortSignal): Promise<ForgejoChecks> {
     if (!/^[a-f0-9]{40,64}$/i.test(sha)) throw new ForgejoError("Invalid commit.");
     const value = await this.json<{ state: string; sha: string; total_count: number;
-      statuses: { id: number; context: string; status: string; description: string; target_url?: string }[] }>(await this.connection(),
+      statuses: { id: number; context: string; status: string; description: string; target_url?: string }[] | null }>(await this.connection(),
       `repos/${segment(owner)}/${segment(repo)}/commits/${sha}/status?${this.page(page)}`, signal);
-    if (!value || !Array.isArray(value.statuses)) throw new ForgejoError("Forgejo returned invalid checks.", 502);
-    return { state: value.state, sha: value.sha, items: value.statuses.map((s) => ({ id: s.id, name: s.context, status: s.status,
+    // Forgejo serializes a commit without any statuses as `null`, not `[]`.
+    const statuses = value?.statuses ?? [];
+    if (!value || !Array.isArray(statuses)) throw new ForgejoError("Forgejo returned invalid checks.", 502);
+    return { state: value.state, sha: value.sha, items: statuses.map((s) => ({ id: s.id, name: s.context, status: s.status,
       description: s.description ?? "", url: safeWebUrl(s.target_url) })),
-      ...(value.statuses.length && (page - 1) * value.statuses.length + value.statuses.length < value.total_count ? { nextPage: page + 1 } : {}) };
+      ...(statuses.length && (page - 1) * statuses.length + statuses.length < value.total_count ? { nextPage: page + 1 } : {}) };
   }
 
   async diff(owner: string, repo: string, number: string): Promise<ForgejoDiff> {
