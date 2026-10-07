@@ -28,6 +28,8 @@ function setup(webDir?: string) {
     createEnv: vi.fn(async (_id: string, _path: string) => ({ envId: "demo-abc123-x-0a1b" })),
     startEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
     stopEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+    rebuildEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+    restartEnvOpencode: vi.fn((_id: string, _env: string) => Promise.resolve()),
     removeEnv: vi.fn(async (_id: string, _env: string) => {}),
     bringHome: vi.fn(async (_id: string, _dir: string) => ({ branch: "fix" })),
     start: vi.fn(() => Promise.resolve()),

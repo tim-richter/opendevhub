@@ -56,6 +56,8 @@ export type DashboardOrchestrator = Pick<
   | "createEnv"
   | "startEnv"
   | "stopEnv"
+  | "rebuildEnv"
+  | "restartEnvOpencode"
   | "removeEnv"
 >;
 
@@ -311,6 +313,8 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   const envActions = {
     start: (id: string, envId: string) => orchestrator.startEnv(id, envId),
     stop: (id: string, envId: string) => orchestrator.stopEnv(id, envId),
+    rebuild: (id: string, envId: string) => orchestrator.rebuildEnv(id, envId),
+    "restart-opencode": (id: string, envId: string) => orchestrator.restartEnvOpencode(id, envId),
   } as const;
   for (const [route, run] of Object.entries(envActions)) {
     app.post(`/api/projects/:id/envs/:env/${route}`, (c) => {

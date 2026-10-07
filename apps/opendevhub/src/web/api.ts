@@ -286,7 +286,7 @@ export function createEnv(projectId: string, path: string): Promise<{ envId: str
   return postJson(projectId, "envs", { path }, "create container");
 }
 
-export async function envAction(projectId: string, envId: string, action: "start" | "stop"): Promise<void> {
+export async function envAction(projectId: string, envId: string, action: "start" | "stop" | "rebuild" | "restart-opencode"): Promise<void> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/envs/${encodeURIComponent(envId)}/${action}`, { method: "POST" });
   if (!res.ok) throw await failure(res, `${action} container`);
 }

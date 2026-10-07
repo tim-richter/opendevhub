@@ -51,7 +51,7 @@ export function useCheckoutActions(view: ProjectView) {
   };
 
   const ownContainer = (c: Checkout) => busy(`env:${c.directory}`, () => createEnv(view.project.id, c.directory));
-  const containerAction = (env: EnvironmentView, action: "start" | "stop") =>
+  const containerAction = (env: EnvironmentView, action: "start" | "stop" | "rebuild" | "restart-opencode") =>
     busy(`env:${env.id}`, () => envAction(view.project.id, env.id, action));
   const removeContainer = (env: EnvironmentView, label: string) => {
     const text = env.node
@@ -104,6 +104,17 @@ export function ContainerMenu({ view, checkout: c, compact }: { view: ProjectVie
                 Start container
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              disabled={settling}
+              onSelect={() => {
+                if (confirm(`Rebuild the container of ${c.label}? Running sessions will be interrupted.`)) containerAction(env, "rebuild");
+              }}
+            >
+              Rebuild container
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={settling || state !== "running"} onSelect={() => containerAction(env, "restart-opencode")}>
+              Restart opencode
+            </DropdownMenuItem>
             <DropdownMenuItem disabled={settling} onSelect={() => removeContainer(env, c.label)}>
               Remove container
             </DropdownMenuItem>

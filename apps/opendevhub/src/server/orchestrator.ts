@@ -327,6 +327,23 @@ export class Orchestrator {
     return this.exclusiveEnv(env, () => this.stopContainer(env));
   }
 
+  /** Recreates a worktree's container from its devcontainer config; running sessions are interrupted. */
+  rebuildEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
+    const env = this.requireTaskEnv(projectId, envId);
+    this.kit(env);
+    return this.exclusiveEnv(env, async () => {
+      this.stopMonitor(env.id);
+      await this.closePorts(env.id);
+      await this.bringUpTask(env, true);
+    });
+  }
+
+  restartEnvOpencode(projectId: ProjectId, envId: EnvId): Promise<void> {
+    const env = this.requireTaskEnv(projectId, envId);
+    this.kit(env);
+    return this.exclusiveEnv(env, () => this.relaunchOpencode(env));
+  }
+
   /** Deletes a worktree's container; the worktree and its files stay, its sessions go. */
   removeEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
     const env = this.requireTaskEnv(projectId, envId);
@@ -1511,7 +1528,7 @@ export class Orchestrator {
    * Starts a task container: the base image for the worktree's config, the override config, `up`, then
    * route, relay, ports and opencode as for the main container. Records the error and rethrows it.
    */
-  private async bringUpTask(env: TaskEnv): Promise<void> {
+  private async bringUpTask(env: TaskEnv, rebuild = false): Promise<void> {
     const { store } = this.deps;
     const kit = this.kit(env);
     const { containers } = kit;
@@ -1539,7 +1556,7 @@ export class Orchestrator {
       const rec = store.environment(env.id);
       if (rec) store.putEnvironment({ ...rec, image });
       this.setupStep(env, "container");
-      const up = await this.upTask(env);
+      const up = await this.upTask(env, rebuild);
       store.updateRuntime(env.id, { containerId: up.containerId });
       const info = await containers.inspect(up.containerId);
       if (!info?.running) throw new CommandError("container is not running after devcontainer up");
@@ -1557,17 +1574,17 @@ export class Orchestrator {
       const target = await this.startRelay(env, info.ip, route);
       await this.forwardPorts(env, target);
       await this.prepareCredentials(env, target);
-      await this.launchOpencode(env, store.runtime(env.id).password);
+      await this.launchOpencode(env, rebuild ? undefined : store.runtime(env.id).password);
     } catch (err) {
       this.fail(env, err);
       throw err;
     }
   }
 
-  private upTask(env: TaskEnv): ReturnType<ContainersPort["up"]> {
+  private upTask(env: TaskEnv, rebuild: boolean): ReturnType<ContainersPort["up"]> {
     const { containers } = this.kit(env);
     const next = (this.taskUps.get(env.node) ?? Promise.resolve()).then(() =>
-      containers.up(env.target, { rebuild: false, onLine: (l) => this.envLog(env, l) }),
+      containers.up(env.target, { rebuild, onLine: (l) => this.envLog(env, l) }),
     );
     this.taskUps.set(env.node, next.catch(() => {}));
     return next;
