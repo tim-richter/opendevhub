@@ -341,7 +341,8 @@ export class OpencodeClient {
   async generate(
     sessionId: string,
     prompt: string,
-    directory?: string
+    directory?: string,
+    timeoutMs = GENERATE_TIMEOUT_MS
   ): Promise<string> {
     const path = `/api/session/${encodeURIComponent(sessionId)}/generate`;
     const res = await this.request(
@@ -349,7 +350,7 @@ export class OpencodeClient {
       path,
       { prompt },
       directory,
-      GENERATE_TIMEOUT_MS
+      timeoutMs
     );
     return ((await res.json()) as { data: { text: string } }).data.text;
   }

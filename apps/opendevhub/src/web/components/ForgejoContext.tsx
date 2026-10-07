@@ -14,19 +14,16 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 import type {
+  AiFinding,
   ForgejoCheck,
   ForgejoComment,
   ForgejoPullDetails,
   ForgejoReview,
 } from "../../shared/forgejo";
-import {
-  fetchForgejoChecks,
-  fetchForgejoComments,
-  fetchForgejoReviewComments,
-  fetchForgejoReviews,
-} from "../api";
+import { fetchForgejoReviewComments } from "../api";
 import { forgejoReviewers } from "../forgejo";
-import { useForgejoPages, useForgejoQuery } from "../hooks/useForgejo";
+import { useForgejoQuery } from "../hooks/useForgejo";
+import { usePullFeedback } from "../hooks/usePullFeedback";
 import { MarkdownBody } from "./MarkdownBody";
 import { Chip, Note, PanelSection, Section } from "./Page";
 
@@ -34,7 +31,36 @@ export interface ForgejoFeedback {
   comments: ForgejoComment[];
   reviews: ForgejoReview[];
   checks: ForgejoCheck[];
+  ai: AiFinding[];
 }
+
+export type FeedbackKind = keyof ForgejoFeedback;
+export type FeedbackValue = ForgejoComment | ForgejoReview | ForgejoCheck;
+
+/** Feedback picked for an agent handoff, keyed `<kind>-<id>`. */
+export type FeedbackSelection = Record<
+  string,
+  { kind: FeedbackKind; value: FeedbackValue | AiFinding }
+>;
+
+export const feedbackKey = (kind: FeedbackKind, id: number | string) =>
+  `${kind}-${id}`;
+
+/** The selection as the handoff wants it, in the order things were picked. */
+export const selectedFeedback = (
+  selection: FeedbackSelection
+): ForgejoFeedback => {
+  const of = <T,>(kind: FeedbackKind) =>
+    Object.values(selection)
+      .filter((v) => v.kind === kind)
+      .map((v) => v.value as T);
+  return {
+    ai: of<AiFinding>("ai"),
+    checks: of<ForgejoCheck>("checks"),
+    comments: of<ForgejoComment>("comments"),
+    reviews: of<ForgejoReview>("reviews"),
+  };
+};
 export const RequestState = ({
   query,
 }: {
@@ -150,62 +176,24 @@ export const ForgejoContext = ({
   details,
   description,
   stack,
-  onSelection,
+  selected,
+  onPick,
+  collapsed = false,
 }: {
   details: ForgejoPullDetails;
   description: ReactNode;
   stack: ReactNode;
-  onSelection: (feedback: ForgejoFeedback) => void;
+  selected: FeedbackSelection;
+  /** Without it nothing can be picked for a handoff. */
+  onPick?: (kind: FeedbackKind, value: FeedbackValue, checked: boolean) => void;
+  /** Starts with the conversation folded away, for when the diff is what matters. */
+  collapsed?: boolean;
 }) => {
   const { owner, repo, number } = details.pull;
   const args = [owner, repo, String(number)] as const;
-  const key = ["pull", ...args];
-  const comments = useForgejoPages([...key, "comments"], (page, signal) =>
-    fetchForgejoComments(...args, page, signal)
-  );
-  const reviews = useForgejoPages([...key, "reviews"], (page, signal) =>
-    fetchForgejoReviews(...args, page, signal)
-  );
-  const checks = useForgejoPages(
-    ["checks", owner, repo, details.headSha],
-    (page, signal) =>
-      fetchForgejoChecks(owner, repo, details.headSha, page, signal),
-    !!details.headSha
-  );
-  const [selected, setSelected] = useState<
-    Record<
-      string,
-      {
-        kind: keyof ForgejoFeedback;
-        value: ForgejoComment | ForgejoReview | ForgejoCheck;
-      }
-    >
-  >({});
-  const pick = (
-    kind: keyof ForgejoFeedback,
-    value: ForgejoComment | ForgejoReview | ForgejoCheck,
-    checked: boolean
-  ) => {
-    const next = { ...selected };
-    const id = `${kind}-${value.id}`;
-    if (checked) {
-      next[id] = { kind, value };
-    } else {
-      delete next[id];
-    }
-    setSelected(next);
-    onSelection({
-      checks: Object.values(next)
-        .filter((v) => v.kind === "checks")
-        .map((v) => v.value as ForgejoCheck),
-      comments: Object.values(next)
-        .filter((v) => v.kind === "comments")
-        .map((v) => v.value as ForgejoComment),
-      reviews: Object.values(next)
-        .filter((v) => v.kind === "reviews")
-        .map((v) => v.value as ForgejoReview),
-    });
-  };
+  const { comments, reviews, checks, allComments, allReviews, allChecks } =
+    usePullFeedback(details);
+  const [showConversation, setShowConversation] = useState(!collapsed);
   const commentCard = (c: ForgejoComment) => (
     <article
       key={c.id}
@@ -233,11 +221,13 @@ export const ForgejoContext = ({
           <pre className="overflow-x-auto p-2 text-xs">{c.diffHunk}</pre>
         </details>
       )}
-      <SelectFeedback
-        label="Include in agent handoff"
-        checked={!!selected[`comments-${c.id}`]}
-        onChange={(checked) => pick("comments", c, checked)}
-      />
+      {onPick && (
+        <SelectFeedback
+          label="Add to handoff"
+          checked={!!selected[feedbackKey("comments", c.id)]}
+          onChange={(checked) => onPick("comments", c, checked)}
+        />
+      )}
     </article>
   );
   const reviewCard = (r: ForgejoReview) => (
@@ -261,11 +251,13 @@ export const ForgejoContext = ({
         {r.stale && <Chip>Stale</Chip>}
       </div>
       {r.body && <MarkdownBody>{r.body}</MarkdownBody>}
-      <SelectFeedback
-        label="Include review in agent handoff"
-        checked={!!selected[`reviews-${r.id}`]}
-        onChange={(checked) => pick("reviews", r, checked)}
-      />
+      {onPick && (
+        <SelectFeedback
+          label="Add review to handoff"
+          checked={!!selected[feedbackKey("reviews", r.id)]}
+          onChange={(checked) => onPick("reviews", r, checked)}
+        />
+      )}
       {!!r.commentsCount && (
         <ReviewComments
           args={args}
@@ -276,11 +268,6 @@ export const ForgejoContext = ({
       )}
     </article>
   );
-  const allComments = unique(
-    comments.data?.pages.flatMap((p) => p.items) ?? []
-  );
-  const allReviews = unique(reviews.data?.pages.flatMap((p) => p.items) ?? []);
-  const allChecks = unique(checks.data?.pages.flatMap((p) => p.items) ?? []);
   const timeline: TimelineEntry[] = [
     ...allReviews
       .filter((r) => !HIDDEN_REVIEW_STATES.has(r.state))
@@ -340,13 +327,15 @@ export const ForgejoContext = ({
             <ul>
               {allChecks.map((c) => (
                 <li key={c.id} className="flex items-start gap-2 px-4 py-1.5">
-                  <input
-                    type="checkbox"
-                    className="accent-primary mt-1 shrink-0"
-                    aria-label={`Include ${c.name} in agent handoff`}
-                    checked={!!selected[`checks-${c.id}`]}
-                    onChange={(e) => pick("checks", c, e.target.checked)}
-                  />
+                  {onPick && (
+                    <input
+                      type="checkbox"
+                      className="accent-primary mt-1 shrink-0"
+                      aria-label={`Add ${c.name} to handoff`}
+                      checked={!!selected[feedbackKey("checks", c.id)]}
+                      onChange={(e) => onPick("checks", c, e.target.checked)}
+                    />
+                  )}
                   <span className="mt-0.5 shrink-0">
                     {checkIcon(c.status)}
                     <span className="sr-only">{c.status}</span>
@@ -378,9 +367,9 @@ export const ForgejoContext = ({
               ))}
             </ul>
           )}
-          {!!allChecks.length && (
+          {onPick && !!allChecks.length && (
             <p className="text-muted-foreground px-4 pt-1 text-xs">
-              Ticked checks are included when you continue with an agent.
+              Ticked checks go to the agent with the handoff.
             </p>
           )}
           <More query={checks} />
@@ -419,20 +408,39 @@ export const ForgejoContext = ({
       </Card>
       <div className="flex min-w-0 flex-col gap-4">
         {description}
-        <Section title="Conversation">
+        <Section
+          title="Conversation"
+          hint={
+            loadedConversation ? (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0"
+                aria-expanded={showConversation}
+                onClick={() => setShowConversation((v) => !v)}
+              >
+                {showConversation ? "Hide" : `Show ${timeline.length}`}
+              </Button>
+            ) : undefined
+          }
+        >
           <RequestState query={comments} />
           <RequestState query={reviews} />
-          {loadedConversation && !timeline.length && (
-            <p className="text-muted-foreground p-4 text-sm">
-              No comments or reviews yet.
-            </p>
+          {showConversation && (
+            <>
+              {loadedConversation && !timeline.length && (
+                <p className="text-muted-foreground p-4 text-sm">
+                  No comments or reviews yet.
+                </p>
+              )}
+              {timeline.map((entry) =>
+                entry.kind === "review"
+                  ? reviewCard(entry.review)
+                  : commentCard(entry.comment)
+              )}
+              <More query={moreConversation} />
+            </>
           )}
-          {timeline.map((entry) =>
-            entry.kind === "review"
-              ? reviewCard(entry.review)
-              : commentCard(entry.comment)
-          )}
-          <More query={moreConversation} />
         </Section>
       </div>
     </div>
@@ -475,6 +483,3 @@ const ReviewComments = ({
     </div>
   );
 };
-const unique = <T extends { id: number }>(items: T[]): T[] => [
-  ...new Map(items.map((i) => [i.id, i])).values(),
-];

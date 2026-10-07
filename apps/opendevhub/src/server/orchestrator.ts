@@ -895,6 +895,51 @@ export class Orchestrator {
     return session.id;
   }
 
+  /**
+   * Text generated in a checkout without adding to a session's history: in the given idle session of that
+   * checkout, or in a new empty session titled `title` that stays around to follow up in.
+   */
+  async generateIn(
+    id: ProjectId,
+    directory: string,
+    prompt: string,
+    options: { sessionId?: string; title: string; timeoutMs?: number }
+  ): Promise<{ sessionId: string; text: string }> {
+    const project = this.requireProject(id);
+    this.checkDirectory(id, directory);
+    if (options.sessionId) {
+      const session = this.deps.store
+        .sessionsOf(id)
+        .find((s) => s.id === options.sessionId);
+      if (!session || session.directory !== directory) {
+        throw new NotFoundError(options.sessionId, "session");
+      }
+      if (session.status !== "idle") {
+        throw new InvalidRequestError("the session is still working");
+      }
+      const text = await this.opencodeClient(session.envId ?? id).generate(
+        session.id,
+        prompt,
+        directory,
+        options.timeoutMs
+      );
+      return { sessionId: session.id, text };
+    }
+    const env = this.envForDirectory(project, directory);
+    const client = this.opencodeClient(env.id);
+    const session = await client.createSession(directory, {
+      title: options.title,
+    });
+    this.monitors.get(env.id)?.reconcile?.();
+    const text = await client.generate(
+      session.id,
+      prompt,
+      directory,
+      options.timeoutMs
+    );
+    return { sessionId: session.id, text };
+  }
+
   /** Deletes one of the project's sessions with its subagents, stopping it first when it isn't idle. */
   async removeSession(id: ProjectId, sessionId: string): Promise<void> {
     this.requireProject(id);

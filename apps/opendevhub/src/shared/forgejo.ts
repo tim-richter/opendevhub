@@ -156,3 +156,24 @@ export interface ForgejoReviewInput {
   event: "COMMENT" | "APPROVED" | "REQUEST_CHANGES";
   comments: ForgejoReviewComment[];
 }
+
+export type AiSeverity = "blocker" | "major" | "minor" | "nit";
+
+/** One point an AI review raised; without a file it is about the pull request as a whole. */
+export interface AiFinding {
+  file?: string;
+  /** The last line it covers: in the new file, or in the old one for removed lines. */
+  line?: number;
+  side?: "new" | "old";
+  /** The first line of a range on the same side; missing for a single line. */
+  start?: number;
+  severity: AiSeverity;
+  body: string;
+}
+
+export interface AiReviewResult {
+  /** The session the findings came from; it stays open to follow up in. */
+  sessionId: string;
+  summary: string;
+  findings: AiFinding[];
+}

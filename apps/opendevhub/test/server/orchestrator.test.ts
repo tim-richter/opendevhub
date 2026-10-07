@@ -551,7 +551,8 @@ function setup(
       ) => {}
     ),
     generate: vi.fn(
-      async (_sid: string, _prompt: string, _dir?: string) => "feat: do things"
+      async (_sid: string, _prompt: string, _dir?: string, _timeout?: number) =>
+        "feat: do things"
     ),
     interrupt: vi.fn(async (_sid: string, _dir?: string) => {}),
     sessions: vi.fn(async (): Promise<RawSession[]> => []),
@@ -2444,6 +2445,53 @@ describe(Orchestrator, () => {
       expect(client.generate.mock.calls[0][0]).toBe("ses_new");
       client.generate.mockRejectedValueOnce(new Error("no model"));
       await expect(orch.commitMessage(project.id, wt)).resolves.toBe("");
+    });
+
+    it("generates in a given idle session of the checkout, or in a new one", async () => {
+      const { orch, client, store } = await running();
+      const session = {
+        id: "ses_review",
+        projectId: project.id,
+        title: "AI review",
+        directory: wt,
+        updatedAt: 1,
+        status: "running" as const,
+      };
+      store.setSessions(project.id, [session]);
+      const options = {
+        sessionId: "ses_review",
+        title: "AI review",
+        timeoutMs: 5,
+      };
+      await expect(
+        orch.generateIn(project.id, wt, "findings?", options)
+      ).rejects.toThrow(InvalidRequestError);
+      await expect(
+        orch.generateIn(project.id, wt, "findings?", {
+          ...options,
+          sessionId: "ses_x",
+        })
+      ).rejects.toThrow(/ses_x/u);
+      store.setSessions(project.id, [{ ...session, status: "idle" }]);
+      await expect(
+        orch.generateIn(project.id, wt, "findings?", options)
+      ).resolves.toEqual({ sessionId: "ses_review", text: "feat: do things" });
+      expect(client.generate).toHaveBeenLastCalledWith(
+        "ses_review",
+        "findings?",
+        wt,
+        5
+      );
+
+      await expect(
+        orch.generateIn(project.id, wt, "review the diff", {
+          title: "AI review",
+        })
+      ).resolves.toEqual({ sessionId: "ses_new", text: "feat: do things" });
+      expect(client.createSession).toHaveBeenLastCalledWith(wt, {
+        title: "AI review",
+      });
+      expect(client.prompt).not.toHaveBeenCalled();
     });
 
     it("commits, refusing an empty message or a clean checkout", async () => {

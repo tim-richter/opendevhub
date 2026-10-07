@@ -408,9 +408,18 @@ export const acceptSuggestion = (o: {
   o.request === o.latest && !o.current.trim() ? o.suggestion : o.current;
 
 /** What a review annotation in the diff shows: a saved comment, or the box for writing one. */
+/** Something shown inside the diff that isn't one of your draft comments, drawn by the page that owns it. */
+export interface DiffNote {
+  id: string;
+  file: string;
+  line: number;
+  side: "new" | "old";
+}
+
 export type ReviewAnnotation =
   | { kind: "comment"; comment: ReviewComment }
-  | { kind: "draft"; anchor: LineAnchor };
+  | { kind: "draft"; anchor: LineAnchor }
+  | { kind: "note"; id: string };
 
 const toSide = (side: "new" | "old") =>
   side === "old" ? "deletions" : "additions";
@@ -448,11 +457,12 @@ export const anchorFromRange = (
   };
 };
 
-/** One file's comments, plus the open comment box, as annotations for `@pierre/diffs`. */
+/** One file's comments and notes, plus the open comment box, as annotations for `@pierre/diffs`. */
 export const annotationsFor = (
   comments: ReviewComment[],
   file: string,
-  open: LineAnchor | undefined
+  open: LineAnchor | undefined,
+  notes: DiffNote[] = []
 ): DiffLineAnnotation<ReviewAnnotation>[] => {
   const annotations: DiffLineAnnotation<ReviewAnnotation>[] = comments.flatMap(
     (comment) =>
@@ -466,6 +476,15 @@ export const annotationsFor = (
           ]
         : []
   );
+  for (const note of notes) {
+    if (note.file === file) {
+      annotations.push({
+        lineNumber: note.line,
+        metadata: { id: note.id, kind: "note" },
+        side: toSide(note.side),
+      });
+    }
+  }
   if (open) {
     annotations.push({
       lineNumber: open.line,

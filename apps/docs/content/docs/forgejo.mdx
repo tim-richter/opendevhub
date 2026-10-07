@@ -1,6 +1,6 @@
 ---
 title: Forgejo
-description: Browse PRs, reviews and checks, and hand feedback to an agent.
+description: Browse PRs, hand reviewers' feedback to an agent, or review with AI suggestions.
 icon: GitPullRequest
 ---
 
@@ -12,13 +12,29 @@ The **Forgejo** sidebar opens an inbox with **Authored by me**, **Review request
 
 ## Pull request context
 
-Open a PR to see its description, labels, draft/merge status, requested reviewers, discussion, reviews, and CI checks for its head commit. Expand a review to read its inline comments. Comments and reviews load in pages; checks link to their upstream details when available. Select feedback or checks with **Include in agent handoff**.
+Open a PR to see its description, labels, draft/merge status, requested reviewers, discussion, reviews, and CI checks for its head commit. Other people's inline comments appear in the diff at their lines, as long as those lines are still in it. Comments and reviews load in pages; checks link to their upstream details when available.
+
+A PR page has two modes, switched at the top right and kept in the URL (`?mode=address` or `?mode=review`):
+
+- **Address feedback**: someone reviewed the PR and an agent should act on it. Tick comments, reviews, failing checks and AI findings with **Add to handoff**, or use **Pick all open feedback** in the bar at the bottom (unresolved comments, reviews that request changes or say something, failing checks, open AI findings). **Hand off to agent…** sends what you picked. The diff is read-only.
+- **Review**: you review the PR. Comment on lines with the + in the gutter, run an **AI review**, and accept, edit or dismiss what it suggests. **Submit review…** sends your comments and summary to Forgejo. The conversation starts collapsed.
+
+PRs opened from **Review requested** or **Review all** start in Review; everything else starts in Address feedback.
+
+## AI review
+
+**AI review** runs an agent on the PR's head commit:
+
+- **Agent review** (the default) starts a session in a checkout of the PR: a matching local checkout, or a new worktree at the head commit. The agent reads the change and the code around it, may run tests, and changes nothing. When the session goes idle, the dashboard asks it for its findings as JSON. **Collect findings now** doesn't wait for that. The session stays around, so you can follow up in it.
+- **Quick review** sends only the description and the diff to a new session in any running checkout of the repository, and returns findings straight away.
+
+A finding on a line the diff doesn't show moves to the nearest shown line within three lines, because Forgejo only accepts comments on lines in the diff. Findings that can't be placed, and findings about the PR as a whole, are listed under the AI review with its summary. In Review mode, **Accept** turns a suggestion into one of your draft comments (or adds a general one to the summary); in Address feedback mode, findings can go to the agent like any other feedback. The run and its findings are remembered in the browser for that PR and head commit, so a reload picks up where it left off; a new head commit starts over.
 
 The diff supports syntax highlighting, a changed-files navigator, and unified or side-by-side layout. The selected layout is remembered. Metadata and discussion load independently of the diff, so a failed or oversized patch does not hide the PR context. **Open in Forgejo** remains available when requests fail.
 
-## Continue with agent
+## Hand off to agent
 
-**Continue with agent** opens an editable prompt containing the PR URL, head branch and commit, base branch, description, and selected feedback/check descriptions. The dashboard inspects running local projects' remotes and recorded publish URLs to suggest the matching repository and checkout, including worktrees published through AGit. You can also choose a project manually.
+**Hand off to agent…** opens an editable prompt containing the PR URL, head branch and commit, base branch, description, and selected feedback/check descriptions. The dashboard inspects running local projects' remotes and recorded publish URLs to suggest the matching repository and checkout, including worktrees published through AGit. You can also choose a project manually.
 
 Choose a checkout and an existing session, or start a new session there. Sending to a running session queues the feedback behind its current turn. **Create new task…** opens the usual task form with the prompt and title filled in so you can choose a worktree, model, and environment. The prompt asks the agent to verify the PR commit before editing and fetch it with the project's git credentials into a separate worktree if necessary. The dashboard does not automatically switch or reset an existing checkout. A repository without a local project must be added first.
 
@@ -34,4 +50,4 @@ If the OS credential store is locked or unavailable, the operation fails with an
 
 Leave the token field blank to keep the saved token. Changing the URL requires a new token. Disabling retains the connection details; **Remove token and disable** removes the saved token.
 
-Read scopes are sufficient for browsing and agent handoff. **Write review** lets you add inline comments, a summary, and choose Comment, Approve, or Request changes. Submitting a review requires `write:repository` and `write:issue` scopes. Drafts are discarded when leaving the editor or refreshing. Reviews target the loaded commit; if it changes, refresh before submitting. The editor also offers **Create PR worktree**, which fetches the PR ref using the project’s git credentials and verifies the commit before creating a new worktree. Merging remains on Forgejo. Agent handoff uses opendevhub’s existing task/session APIs and does not give the Forgejo token to containers. Responses larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues to use your git credentials independently of this integration.
+Read scopes are sufficient for browsing, agent handoff and AI review. **Submit review…** sends your inline comments and summary and lets you choose Comment, Approve, or Request changes. Submitting a review requires `write:repository` and `write:issue` scopes. Drafts are discarded when you leave the page or when a refresh brings in a new head commit. Reviews target the loaded commit; if it changes, refresh before submitting. **Inspect in container** creates a PR worktree: it fetches the PR ref using the project’s git credentials and verifies the commit before creating a new worktree. Merging remains on Forgejo. Agent handoff uses opendevhub’s existing task/session APIs and does not give the Forgejo token to containers. Responses larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues to use your git credentials independently of this integration.

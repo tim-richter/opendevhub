@@ -30,6 +30,7 @@ import {
   selectionFor,
 } from "../review";
 import type {
+  DiffNote,
   DiffView,
   LineAnchor,
   ReviewAnnotation,
@@ -112,6 +113,9 @@ export const ReviewDiffs = (props: {
   /** Loads a diff that didn't come with the others. */
   load?: (file: string) => Promise<string | undefined>;
   comments: ReviewComment[];
+  /** Other people's comments or suggestions shown in the diff, drawn by `renderNote`. */
+  notes?: DiffNote[];
+  renderNote?: (id: string) => ReactNode;
   open?: { file: string; anchor: LineAnchor };
   placeholder: string;
   onAnchor?: (file: string, anchor: LineAnchor) => void;
@@ -153,6 +157,8 @@ export const ReviewDiffs = (props: {
           view={props.view}
           wholeFilePatch={props.wholeFilePatches ?? false}
           comments={props.comments}
+          notes={props.notes}
+          renderNote={props.renderNote}
           open={props.open?.file === f.file ? props.open.anchor : undefined}
           placeholder={props.placeholder}
           onAnchor={
@@ -204,6 +210,8 @@ const FileDiff = (props: {
   view: DiffView;
   wholeFilePatch: boolean;
   comments: ReviewComment[];
+  notes?: DiffNote[];
+  renderNote?: (id: string) => ReactNode;
   /** The line whose comment box is open in this file. */
   open: LineAnchor | undefined;
   placeholder: string;
@@ -223,12 +231,15 @@ const FileDiff = (props: {
     }
   });
   const annotations = useMemo(
-    () => annotationsFor(props.comments, file.file, props.open),
-    [props.comments, file.file, props.open]
+    () => annotationsFor(props.comments, file.file, props.open, props.notes),
+    [props.comments, file.file, props.open, props.notes]
   );
   const selectedLines = useMemo(() => selectionFor(props.open), [props.open]);
   const renderAnnotation = useStableCallback(
     (a: DiffLineAnnotation<ReviewAnnotation>) => {
+      if (a.metadata.kind === "note") {
+        return props.renderNote?.(a.metadata.id) ?? null;
+      }
       if (a.metadata.kind === "draft") {
         const { anchor } = a.metadata;
         return (

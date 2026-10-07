@@ -1,4 +1,5 @@
 import type {
+  AiFinding,
   ForgejoCheck,
   ForgejoComment,
   ForgejoPullDetails,
@@ -8,8 +9,8 @@ import type {
   ForgejoStackNode,
 } from "../shared/forgejo";
 import type { PublishInfo, ReviewFile } from "../shared/types";
-import { linesLabel } from "./review";
-import type { ReviewComment } from "./review";
+import { linesLabel, parsePatch } from "./review";
+import type { DiffNote, ReviewComment } from "./review";
 
 /** Only UI preferences go into storage; PR data stays in the in-memory query cache. */
 export const readForgejoPreference = (key: string): string => {
@@ -228,6 +229,7 @@ export const forgejoAgentPrompt = (
     comments?: ForgejoComment[];
     reviews?: ForgejoReview[];
     checks?: ForgejoCheck[];
+    ai?: AiFinding[];
   }
 ): string => {
   const lines = [
@@ -249,6 +251,10 @@ export const forgejoAgentPrompt = (
     ...(feedback.checks ?? []).map(
       (c) =>
         `\nCheck: ${c.name} (${c.status})\n${c.description.slice(0, 4000)}${c.url ? `\nDetails: ${c.url}` : ""}`
+    ),
+    ...(feedback.ai ?? []).map(
+      (f) =>
+        `\nAI review finding (${f.severity})${f.file ? ` on ${f.file}:${f.line === undefined ? "?" : linesLabel({ ...f, startSide: f.side })}` : ""}:\n${f.body.slice(0, 8000)}`
     ),
   ];
   // Stay below the task/session prompt limit. The handoff editor displays the exact prompt.
@@ -368,3 +374,170 @@ export const forgejoReviewers = (
   }
   return [...latest].map(([name, state]) => ({ name, state }));
 };
+
+/** Address: act on the feedback others left. Review: write your own, with AI suggestions. */
+export type PullMode = "address" | "review";
+
+/** Your own pull requests open in Address mode; ones you were asked to review open in Review mode. */
+export const defaultPullMode = (inbox: string | null): PullMode =>
+  inbox === "review-requested" || inbox === "review" ? "review" : "address";
+
+/** Changed and context lines of each file's diff, per side: the lines a comment can sit on. */
+const commentableLines = (
+  files: ReviewFile[]
+): Map<string, { new: number[]; old: number[] }> =>
+  new Map(
+    files.map((f) => {
+      const lines = { new: [] as number[], old: [] as number[] };
+      for (const hunk of parsePatch(f.patch ?? "")) {
+        for (const l of hunk.lines) {
+          if (l.kind === "del" && l.oldNo !== undefined) {
+            lines.old.push(l.oldNo);
+          } else if (l.newNo !== undefined) {
+            lines.new.push(l.newNo);
+          }
+        }
+      }
+      return [f.file, lines];
+    })
+  );
+
+/** How far an AI finding may move to reach a line that is in the diff. */
+const SNAP_LINES = 3;
+
+export interface AiSuggestion extends AiFinding {
+  id: string;
+}
+
+/**
+ * AI findings placed in the diff: a finding on a line the diff doesn't show moves to the nearest shown line of
+ * its file within a few lines, since Forgejo only takes comments on lines in the diff. Findings with no such line,
+ * or none at all, are general.
+ */
+export const placeAiFindings = (
+  findings: AiFinding[],
+  files: ReviewFile[],
+  idPrefix = "ai"
+): { inline: AiSuggestion[]; general: AiSuggestion[] } => {
+  const shown = commentableLines(files);
+  const inline: AiSuggestion[] = [];
+  const general: AiSuggestion[] = [];
+  for (const [i, f] of findings.entries()) {
+    const id = `${idPrefix}-${i}`;
+    const lines = f.file ? shown.get(f.file)?.[f.side ?? "new"] : undefined;
+    const target = f.line;
+    if (!lines || target === undefined) {
+      general.push({ ...f, id });
+      continue;
+    }
+    let nearest: number | undefined;
+    for (const l of lines) {
+      if (
+        nearest === undefined ||
+        Math.abs(l - target) < Math.abs(nearest - target)
+      ) {
+        nearest = l;
+      }
+    }
+    if (nearest === undefined || Math.abs(nearest - target) > SNAP_LINES) {
+      general.push({ ...f, id });
+      continue;
+    }
+    const start =
+      f.start !== undefined && f.start < nearest && lines.includes(f.start)
+        ? f.start
+        : undefined;
+    inline.push({
+      body: f.body,
+      file: f.file,
+      id,
+      line: nearest,
+      severity: f.severity,
+      side: f.side ?? "new",
+      ...(start === undefined ? {} : { start }),
+    });
+  }
+  return { general, inline };
+};
+
+/** An accepted AI suggestion as one of your draft comments. */
+export const suggestionComment = (
+  s: AiSuggestion,
+  text = s.body
+): ReviewComment => ({
+  file: s.file,
+  id: s.id,
+  line: s.line,
+  side: s.side,
+  ...(s.start === undefined
+    ? {}
+    : { start: s.start, startSide: s.side ?? "new" }),
+  text,
+});
+
+/** Where an inline Forgejo comment sits in the current diff, if its line is still in it. */
+export const forgejoCommentNote = (
+  comment: ForgejoComment,
+  files: ReviewFile[]
+): DiffNote | undefined => {
+  if (!comment.path) {
+    return undefined;
+  }
+  const lines = commentableLines(
+    files.filter((f) => f.file === comment.path)
+  ).get(comment.path);
+  const id = `comments-${comment.id}`;
+  if (comment.line && lines?.new.includes(comment.line)) {
+    return { file: comment.path, id, line: comment.line, side: "new" };
+  }
+  if (comment.oldLine && lines?.old.includes(comment.oldLine)) {
+    return { file: comment.path, id, line: comment.oldLine, side: "old" };
+  }
+  return undefined;
+};
+
+/** An AI review in progress or done, remembered per pull request so a reload picks it up again. */
+export interface AiReviewRun {
+  /** Tells a late answer for an earlier run apart from the current one. */
+  id: string;
+  headSha: string;
+  projectId: string;
+  directory: string;
+  /** "agent": a session investigates first. "quick": findings straight from the diff. */
+  kind: "agent" | "quick";
+  /** waiting: for the checkout's opencode. reviewing: the session works. collecting: generating findings. */
+  stage: "waiting" | "reviewing" | "collecting" | "done" | "failed";
+  sessionId?: string;
+  /** When the current stage began. */
+  startedAt: number;
+  error?: string;
+  summary?: string;
+  findings?: AiFinding[];
+  /** Ids of suggestions accepted or dismissed. */
+  handled?: string[];
+}
+
+const aiRunKey = (pull: ForgejoPullRequest) =>
+  `ai-review:${pull.owner}/${pull.repo}/${pull.number}`;
+
+export const readAiRun = (
+  pull: ForgejoPullRequest,
+  headSha: string
+): AiReviewRun | undefined => {
+  try {
+    const run = JSON.parse(
+      readForgejoPreference(aiRunKey(pull)) || "null"
+    ) as AiReviewRun | null;
+    return run && run.headSha === headSha && typeof run.stage === "string"
+      ? run
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export const saveAiRun = (
+  pull: ForgejoPullRequest,
+  run: AiReviewRun | undefined
+): void =>
+  saveForgejoPreference(aiRunKey(pull), run ? JSON.stringify(run) : "");

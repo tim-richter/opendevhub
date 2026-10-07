@@ -3,7 +3,11 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import type { ForgejoPullDetails } from "../../src/shared/forgejo";
 import type { PublishInfo } from "../../src/shared/types";
 import {
+  defaultPullMode,
   forgejoAgentPrompt,
+  forgejoCommentNote,
+  placeAiFindings,
+  suggestionComment,
   forgejoFilePatches,
   forgejoReviewComments,
   forgejoReviewFiles,
@@ -320,5 +324,139 @@ describe("forgejoReviewers", () => {
       { name: "bob", state: "REQUEST_REVIEW" },
       { name: "carol", state: "REQUEST_REVIEW" },
     ]);
+  });
+});
+
+const PATCH = [
+  "diff --git a/src/a.ts b/src/a.ts",
+  "--- a/src/a.ts",
+  "+++ b/src/a.ts",
+  "@@ -10,4 +10,5 @@",
+  " ten",
+  "-eleven",
+  "+eleven!",
+  "+eleven and a half",
+  " twelve",
+  " thirteen",
+].join("\n");
+const files = forgejoReviewFiles(PATCH);
+
+describe("placeAiFindings", () => {
+  it("keeps findings on shown lines, snaps near ones and makes the rest general", () => {
+    const { inline, general } = placeAiFindings(
+      [
+        { file: "src/a.ts", line: 11, severity: "major", body: "on" },
+        { file: "src/a.ts", line: 16, severity: "minor", body: "near" },
+        { file: "src/a.ts", line: 40, severity: "minor", body: "far" },
+        {
+          file: "src/a.ts",
+          line: 11,
+          side: "old",
+          severity: "nit",
+          body: "old",
+        },
+        {
+          file: "src/a.ts",
+          line: 12,
+          start: 10,
+          severity: "minor",
+          body: "range",
+        },
+        { file: "other.ts", line: 1, severity: "minor", body: "elsewhere" },
+        { severity: "blocker", body: "overall" },
+      ],
+      files,
+      "r"
+    );
+    expect(inline).toEqual([
+      {
+        id: "r-0",
+        file: "src/a.ts",
+        line: 11,
+        side: "new",
+        severity: "major",
+        body: "on",
+      },
+      {
+        id: "r-1",
+        file: "src/a.ts",
+        line: 14,
+        side: "new",
+        severity: "minor",
+        body: "near",
+      },
+      {
+        id: "r-3",
+        file: "src/a.ts",
+        line: 11,
+        side: "old",
+        severity: "nit",
+        body: "old",
+      },
+      {
+        id: "r-4",
+        file: "src/a.ts",
+        line: 12,
+        start: 10,
+        side: "new",
+        severity: "minor",
+        body: "range",
+      },
+    ]);
+    expect(general.map((g) => g.id)).toEqual(["r-2", "r-5", "r-6"]);
+    expect(suggestionComment(inline[3], "edited")).toEqual({
+      id: "r-4",
+      file: "src/a.ts",
+      line: 12,
+      side: "new",
+      start: 10,
+      startSide: "new",
+      text: "edited",
+    });
+  });
+});
+
+describe("forgejoCommentNote", () => {
+  const comment = { id: 5, author: "bob", body: "x", updatedAt: "now" };
+  it("places inline comments on lines still in the diff", () => {
+    expect(
+      forgejoCommentNote({ ...comment, path: "src/a.ts", line: 12 }, files)
+    ).toEqual({ id: "comments-5", file: "src/a.ts", line: 12, side: "new" });
+    expect(
+      forgejoCommentNote({ ...comment, path: "src/a.ts", oldLine: 11 }, files)
+    ).toEqual({ id: "comments-5", file: "src/a.ts", line: 11, side: "old" });
+    expect(
+      forgejoCommentNote({ ...comment, path: "src/a.ts", line: 99 }, files)
+    ).toBeUndefined();
+    expect(forgejoCommentNote(comment, files)).toBeUndefined();
+  });
+});
+
+describe("defaultPullMode", () => {
+  it("opens review inboxes in review mode", () => {
+    expect(defaultPullMode("review-requested")).toBe("review");
+    expect(defaultPullMode("review")).toBe("review");
+    expect(defaultPullMode("authored")).toBe("address");
+    expect(defaultPullMode(null)).toBe("address");
+  });
+});
+
+describe("forgejoAgentPrompt with AI findings", () => {
+  it("lists picked AI findings with their place", () => {
+    const prompt = forgejoAgentPrompt(details, {
+      ai: [
+        {
+          file: "a.ts",
+          line: 9,
+          start: 7,
+          side: "new",
+          severity: "major",
+          body: "Null",
+        },
+        { severity: "minor", body: "Docs" },
+      ],
+    });
+    expect(prompt).toContain("AI review finding (major) on a.ts:7-9:\nNull");
+    expect(prompt).toContain("AI review finding (minor):\nDocs");
   });
 });
