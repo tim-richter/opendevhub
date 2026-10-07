@@ -1,20 +1,35 @@
 import { describe, expect, it } from "vitest";
+
 import { deriveSessions, rollUp } from "../../src/server/status";
 import { rawSession } from "../helpers/fake-opencode";
 
 const base = { active: new Set<string>(), permissions: [], forms: [] };
 
-describe("deriveSessions", () => {
+describe(deriveSessions, () => {
   it("tags sessions with the environment they run in, when given", () => {
     const sessions = [rawSession("ses_1")];
-    expect(deriveSessions("p", { ...base, envId: "p-feat-0a1b", sessions })[0].envId).toBe("p-feat-0a1b");
-    expect(deriveSessions("p", { ...base, sessions })[0]).not.toHaveProperty("envId");
+    expect(
+      deriveSessions("p", { ...base, envId: "p-feat-0a1b", sessions })[0].envId
+    ).toBe("p-feat-0a1b");
+    expect(deriveSessions("p", { ...base, sessions })[0]).not.toHaveProperty(
+      "envId"
+    );
   });
 
   it("maps sessions to idle summaries with titles and directories", () => {
-    const out = deriveSessions("p", { ...base, sessions: [rawSession("ses_1", { title: "  " })] });
-    expect(out).toEqual([
-      { id: "ses_1", projectId: "p", title: "Untitled session", directory: "/workspaces/demo", updatedAt: 1, status: "idle" },
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [rawSession("ses_1", { title: "  " })],
+    });
+    expect(out).toStrictEqual([
+      {
+        id: "ses_1",
+        projectId: "p",
+        title: "Untitled session",
+        directory: "/workspaces/demo",
+        updatedAt: 1,
+        status: "idle",
+      },
     ]);
   });
 
@@ -28,7 +43,7 @@ describe("deriveSessions", () => {
       ],
       permissions: [{ id: "p1", sessionID: "a", action: "bash" }],
     });
-    expect(Object.fromEntries(out.map((s) => [s.id, s.status]))).toEqual({
+    expect(Object.fromEntries(out.map((s) => [s.id, s.status]))).toStrictEqual({
       a: "needs-permission",
       b: "needs-answer",
       c: "running",
@@ -38,24 +53,38 @@ describe("deriveSessions", () => {
   it("rolls child (subagent) sessions up into their root parent and hides them", () => {
     const out = deriveSessions("p", {
       ...base,
-      sessions: [rawSession("root"), rawSession("child", { parentID: "root" }), rawSession("grand", { parentID: "child" })],
+      sessions: [
+        rawSession("root"),
+        rawSession("child", { parentID: "root" }),
+        rawSession("grand", { parentID: "child" }),
+      ],
       permissions: [{ id: "p1", sessionID: "grand", action: "edit" }],
     });
-    expect(out.map((s) => [s.id, s.status])).toEqual([["root", "needs-permission"]]);
+    expect(out.map((s) => [s.id, s.status])).toStrictEqual([
+      ["root", "needs-permission"],
+    ]);
   });
 
   it("survives parent cycles", () => {
     const out = deriveSessions("p", {
       ...base,
-      sessions: [rawSession("x", { parentID: "y" }), rawSession("y", { parentID: "x" })],
+      sessions: [
+        rawSession("x", { parentID: "y" }),
+        rawSession("y", { parentID: "x" }),
+      ],
       active: new Set(["x"]),
     });
-    expect(out).toEqual([]);
+    expect(out).toStrictEqual([]);
   });
 
   it("hides archived sessions", () => {
-    const out = deriveSessions("p", { ...base, sessions: [rawSession("a", { time: { created: 1, updated: 1, archived: 2 } })] });
-    expect(out).toEqual([]);
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [
+        rawSession("a", { time: { created: 1, updated: 1, archived: 2 } }),
+      ],
+    });
+    expect(out).toStrictEqual([]);
   });
 
   it("sorts attention first, then most recently updated", () => {
@@ -68,22 +97,51 @@ describe("deriveSessions", () => {
       ],
       forms: [{ id: "f", sessionID: "ask", title: "?" }],
     });
-    expect(out.map((s) => s.id)).toEqual(["ask", "new", "old"]);
+    expect(out.map((s) => s.id)).toStrictEqual(["ask", "new", "old"]);
   });
+
   it("attaches pending items to the root session, keeping the asking session's id", () => {
     const out = deriveSessions("p", {
       ...base,
       sessions: [rawSession("root"), rawSession("child", { parentID: "root" })],
       permissions: [
-        { id: "per_1", sessionID: "child", action: "bash", resources: ["npm test"], save: ["npm *"], message: "run tests" },
+        {
+          id: "per_1",
+          sessionID: "child",
+          action: "bash",
+          resources: ["npm test"],
+          save: ["npm *"],
+          message: "run tests",
+        },
       ],
-      forms: [{ id: "frm_1", sessionID: "root", title: "Which DB?", fields: [{ key: "db", type: "string" }] }],
+      forms: [
+        {
+          id: "frm_1",
+          sessionID: "root",
+          title: "Which DB?",
+          fields: [{ key: "db", type: "string" }],
+        },
+      ],
     });
-    expect(out[0].pending).toEqual({
+    expect(out[0].pending).toStrictEqual({
       permissions: [
-        { id: "per_1", sessionId: "child", action: "bash", resources: ["npm test"], save: ["npm *"], message: "run tests" },
+        {
+          id: "per_1",
+          sessionId: "child",
+          action: "bash",
+          resources: ["npm test"],
+          save: ["npm *"],
+          message: "run tests",
+        },
       ],
-      forms: [{ id: "frm_1", sessionId: "root", title: "Which DB?", fields: [{ key: "db", type: "string" }] }],
+      forms: [
+        {
+          id: "frm_1",
+          sessionId: "root",
+          title: "Which DB?",
+          fields: [{ key: "db", type: "string" }],
+        },
+      ],
     });
   });
 
@@ -96,8 +154,10 @@ describe("deriveSessions", () => {
     });
     const byId = Object.fromEntries(out.map((s) => [s.id, s]));
     expect(byId.b.pending).toBeUndefined();
-    expect(byId.a.pending).toEqual({
-      permissions: [{ id: "per_1", sessionId: "a", action: "edit", resources: [] }],
+    expect(byId.a.pending).toStrictEqual({
+      permissions: [
+        { id: "per_1", sessionId: "a", action: "edit", resources: [] },
+      ],
       forms: [{ id: "frm_1", sessionId: "a", title: "q", fields: [] }],
     });
   });
@@ -115,7 +175,9 @@ describe("deriveSessions", () => {
         ["old", 100],
       ]),
     });
-    expect(out[0].pending?.permissions.map((p) => [p.id, p.createdAt])).toEqual([
+    expect(
+      out[0].pending?.permissions.map((p) => [p.id, p.createdAt])
+    ).toStrictEqual([
       ["old", 100],
       ["new", 200],
     ]);
@@ -126,15 +188,30 @@ describe("deriveSessions", () => {
       ...base,
       sessions: [rawSession("a")],
       permissions: [
-        { id: "p1", sessionID: "a", action: "edit", metadata: { patch: "--- a\n+++ b\n" } },
-        { id: "p2", sessionID: "a", action: "edit", metadata: { diff: { not: "a string" } } },
+        {
+          id: "p1",
+          sessionID: "a",
+          action: "edit",
+          metadata: { patch: "--- a\n+++ b\n" },
+        },
+        {
+          id: "p2",
+          sessionID: "a",
+          action: "edit",
+          metadata: { diff: { not: "a string" } },
+        },
       ],
     });
-    expect(out[0].pending?.permissions.map((p) => p.diff)).toEqual(["--- a\n+++ b\n", undefined]);
+    expect(out[0].pending?.permissions.map((p) => p.diff)).toStrictEqual([
+      "--- a\n+++ b\n",
+      undefined,
+    ]);
   });
 
   it("carries task metadata, model, cost and tokens, and hides discarded variants", () => {
-    const meta = (variant: number, extra = {}) => ({ opendevhub: { task: "tsk_1", variant, of: 2, title: "Fix", ...extra } });
+    const meta = (variant: number, extra = {}) => ({
+      opendevhub: { task: "tsk_1", variant, of: 2, title: "Fix", ...extra },
+    });
     const out = deriveSessions("p", {
       ...base,
       sessions: [
@@ -142,46 +219,89 @@ describe("deriveSessions", () => {
           metadata: meta(1),
           model: { id: "m", providerID: "p", variant: "default" },
           cost: 0.25,
-          tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 100, write: 0 } },
+          tokens: {
+            input: 10,
+            output: 5,
+            reasoning: 1,
+            cache: { read: 100, write: 0 },
+          },
         }),
         rawSession("b", { metadata: meta(2, { discarded: true }) }),
-        rawSession("c", { metadata: { opendevhub: { task: "nope" } }, model: { id: "n", providerID: "p", variant: "high" } }),
+        rawSession("c", {
+          metadata: { opendevhub: { task: "nope" } },
+          model: { id: "n", providerID: "p", variant: "high" },
+        }),
       ],
     });
-    expect(out.map((s) => s.id)).toEqual(["a", "c"]);
-    expect(out[0]).toMatchObject({ task: { task: "tsk_1", variant: 1, of: 2, title: "Fix" }, model: { id: "m", providerID: "p" }, cost: 0.25, tokens: 16 });
+    expect(out.map((s) => s.id)).toStrictEqual(["a", "c"]);
+    expect(out[0]).toMatchObject({
+      task: { task: "tsk_1", variant: 1, of: 2, title: "Fix" },
+      model: { id: "m", providerID: "p" },
+      cost: 0.25,
+      tokens: 16,
+    });
     expect(out[0].model).not.toHaveProperty("variant");
     expect(out[1]).not.toHaveProperty("task");
-    expect(out[1].model).toEqual({ id: "n", providerID: "p", variant: "high" });
+    expect(out[1].model).toStrictEqual({
+      id: "n",
+      providerID: "p",
+      variant: "high",
+    });
   });
 });
 
-const tokens = (input: number, output = 0, reasoning = 0) => ({ input, output, reasoning, cache: { read: 7, write: 7 } });
+const tokens = (input: number, output = 0, reasoning = 0) => ({
+  input,
+  output,
+  reasoning,
+  cache: { read: 7, write: 7 },
+});
 
-describe("rollUp", () => {
+describe(rollUp, () => {
   it("adds children and grandchildren into the root, without cache tokens", () => {
     const out = rollUp([
-      rawSession("root", { cost: 1, tokens: tokens(10, 5, 1), time: { created: 1, updated: 100 } }),
-      rawSession("child", { parentID: "root", cost: 0.5, tokens: tokens(4), time: { created: 1, updated: 300 } }),
-      rawSession("grand", { parentID: "child", cost: 0.25, tokens: tokens(2), time: { created: 1, updated: 200 } }),
+      rawSession("root", {
+        cost: 1,
+        tokens: tokens(10, 5, 1),
+        time: { created: 1, updated: 100 },
+      }),
+      rawSession("child", {
+        parentID: "root",
+        cost: 0.5,
+        tokens: tokens(4),
+        time: { created: 1, updated: 300 },
+      }),
+      rawSession("grand", {
+        parentID: "child",
+        cost: 0.25,
+        tokens: tokens(2),
+        time: { created: 1, updated: 200 },
+      }),
     ]);
-    expect([...out.keys()]).toEqual(["root"]);
-    expect(out.get("root")).toEqual({ cost: 1.75, tokens: 22, updatedAt: 300 });
+    expect([...out.keys()]).toStrictEqual(["root"]);
+    expect(out.get("root")).toStrictEqual({
+      cost: 1.75,
+      tokens: 22,
+      updatedAt: 300,
+    });
   });
 
   it("leaves cost and tokens undefined when nobody reports them, and counts a missing one as absent", () => {
     const out = rollUp([rawSession("a"), rawSession("b", { cost: 2 })]);
-    expect(out.get("a")).toEqual({ updatedAt: 1 });
-    expect(out.get("b")).toEqual({ cost: 2, updatedAt: 1 });
+    expect(out.get("a")).toStrictEqual({ updatedAt: 1 });
+    expect(out.get("b")).toStrictEqual({ cost: 2, updatedAt: 1 });
   });
 
   it("treats a child whose parent is missing as its own root", () => {
     const out = rollUp([rawSession("orphan", { parentID: "gone", cost: 1 })]);
-    expect(out.get("orphan")).toEqual({ cost: 1, updatedAt: 1 });
+    expect(out.get("orphan")).toStrictEqual({ cost: 1, updatedAt: 1 });
   });
 
   it("survives parent cycles", () => {
-    const out = rollUp([rawSession("x", { parentID: "y", cost: 1 }), rawSession("y", { parentID: "x", cost: 1 })]);
+    const out = rollUp([
+      rawSession("x", { parentID: "y", cost: 1 }),
+      rawSession("y", { parentID: "x", cost: 1 }),
+    ]);
     expect([...out.values()].reduce((n, r) => n + (r.cost ?? 0), 0)).toBe(2);
   });
 });

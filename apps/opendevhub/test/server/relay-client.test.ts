@@ -1,6 +1,12 @@
 import net from "node:net";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RelayError, openRelayConnection, pingRelay } from "../../src/server/relay/client";
+
+import {
+  RelayError,
+  openRelayConnection,
+  pingRelay,
+} from "../../src/server/relay/client";
 import { freePort, startRelay } from "../helpers/relay";
 
 let relay: Awaited<ReturnType<typeof startRelay>>;
@@ -10,14 +16,25 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await relay.stop();
-  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  await Promise.all(
+    servers.splice(0).map((s) => new Promise((r) => s.close(r)))
+  );
 });
 
 describe("relay client", () => {
   it("pings with the right token and fails with the wrong one or no relay", async () => {
-    expect(await pingRelay({ host: "127.0.0.1", port: relay.port, token: "secret" })).toBe(true);
-    expect(await pingRelay({ host: "127.0.0.1", port: relay.port, token: "wrong" }, 300)).toBe(false);
-    expect(await pingRelay({ host: "127.0.0.1", port: await freePort(), token: "secret" }, 300)).toBe(false);
+    await expect(
+      pingRelay({ host: "127.0.0.1", port: relay.port, token: "secret" })
+    ).resolves.toBeTruthy();
+    await expect(
+      pingRelay({ host: "127.0.0.1", port: relay.port, token: "wrong" }, 300)
+    ).resolves.toBeFalsy();
+    await expect(
+      pingRelay(
+        { host: "127.0.0.1", port: await freePort(), token: "secret" },
+        300
+      )
+    ).resolves.toBeFalsy();
   });
 
   it("opens a piped connection after OK, handing over early upstream bytes", async () => {
@@ -25,9 +42,14 @@ describe("relay client", () => {
     const banner = net.createServer((c) => c.write("hello-banner"));
     servers.push(banner);
     await new Promise<void>((r) => banner.listen(port, "127.0.0.1", r));
-    const { socket, rest } = await openRelayConnection({ host: "127.0.0.1", port: relay.port, token: "secret" }, port);
+    const { socket, rest } = await openRelayConnection(
+      { host: "127.0.0.1", port: relay.port, token: "secret" },
+      port
+    );
     const later = await new Promise<string>((resolve) => {
-      if (rest.length) return resolve(rest.toString());
+      if (rest.length) {
+        return resolve(rest.toString());
+      }
       socket.once("data", (d) => resolve(d.toString()));
       socket.resume();
     });
@@ -36,17 +58,19 @@ describe("relay client", () => {
   });
 
   it("rejects with RelayError(ECONNREFUSED) when nothing listens in the container", async () => {
-    const err = await openRelayConnection({ host: "127.0.0.1", port: relay.port, token: "secret" }, await freePort()).catch(
-      (e: unknown) => e,
-    );
+    const err = await openRelayConnection(
+      { host: "127.0.0.1", port: relay.port, token: "secret" },
+      await freePort()
+    ).catch((error: unknown) => error);
     expect(err).toBeInstanceOf(RelayError);
     expect((err as RelayError).code).toBe("ECONNREFUSED");
   });
 
   it("rejects with a plain error when the relay is unreachable", async () => {
-    const err = await openRelayConnection({ host: "127.0.0.1", port: await freePort(), token: "secret" }, 80).catch(
-      (e: unknown) => e,
-    );
+    const err = await openRelayConnection(
+      { host: "127.0.0.1", port: await freePort(), token: "secret" },
+      80
+    ).catch((error: unknown) => error);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(RelayError);
   });

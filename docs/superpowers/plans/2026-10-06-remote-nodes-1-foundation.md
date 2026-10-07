@@ -2,27 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Configure ssh machines as nodes, keep a supervised ssh connection to each, show
-their health and capacity in the dashboard, and have a `Route` that reaches a container on a
-node. Nothing is placed on nodes yet; that is Plan 2.
+**Goal:** Configure ssh machines as nodes, keep a supervised ssh connection to each, show their health and capacity in the dashboard, and have a `Route` that reaches a container on a node. Nothing is placed on nodes yet; that is Plan 2.
 
-**Architecture:** A `Host` interface (`run`, `dial`, `readFile`, `writeFile`) describes a
-machine. `localHost` is this one. `SshHost` runs each command as `ssh -S <ctl> <dest> '<cmd>'`
-and dials with `ssh -S <ctl> -W ip:port <dest>`, both through a ControlMaster that a
-`NodeConnection` keeps alive as a child process, with preflight and backoff. A `Nodes`
-registry owns the connections, persists them in `config.json`, samples their stats and
-publishes `NodeView`s in the dashboard snapshot. `sshRoute` builds a `Route` from a host's
-`dial`, reusing the gateway route's loopback tunnels.
+**Architecture:** A `Host` interface (`run`, `dial`, `readFile`, `writeFile`) describes a machine. `localHost` is this one. `SshHost` runs each command as `ssh -S <ctl> <dest> '<cmd>'` and dials with `ssh -S <ctl> -W ip:port <dest>`, both through a ControlMaster that a `NodeConnection` keeps alive as a child process, with preflight and backoff. A `Nodes` registry owns the connections, persists them in `config.json`, samples their stats and publishes `NodeView`s in the dashboard snapshot. `sshRoute` builds a `Route` from a host's `dial`, reusing the gateway route's loopback tunnels.
 
-**Tech Stack:** TypeScript (Node ≥ 22.13, ESM), Hono, vitest, React and Tailwind with
-shadcn/ui in `src/web`, and OpenSSH's `ssh` client. No new npm dependencies.
+**Tech Stack:** TypeScript (Node ≥ 22.13, ESM), Hono, vitest, React and Tailwind with shadcn/ui in `src/web`, and OpenSSH's `ssh` client. No new npm dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-10-06-remote-nodes-design.md` (sections "Nodes",
-"`Host`", "NodeConnection", and "Runtime → Route"). Plan 2 covers placement, git actions, adopt
-per host, offline handling for environments, and cleanup.
+**Spec:** `docs/superpowers/specs/2026-10-06-remote-nodes-design.md` (sections "Nodes", "`Host`", "NodeConnection", and "Runtime → Route"). Plan 2 covers placement, git actions, adopt per host, offline handling for environments, and cleanup.
 
-All paths below are relative to `apps/opendevhub/` unless they start with `docs/`. Run
-commands from `apps/opendevhub/`. Work happens directly on `main`.
+All paths below are relative to `apps/opendevhub/` unless they start with `docs/`. Run commands from `apps/opendevhub/`. Work happens directly on `main`.
 
 ## Global Constraints
 
@@ -77,10 +65,12 @@ commands from `apps/opendevhub/`. Work happens directly on `main`.
 ### Task 1: Runner stdin input
 
 **Files:**
+
 - Modify: `src/server/exec.ts`
 - Test: `test/server/exec.test.ts`
 
 **Interfaces:**
+
 - Produces: `RunOptions.input?: string`. It is written to the child's stdin, which is then closed. Without it, stdin stays `"ignore"` as today.
 
 - [ ] **Step 1: Write the failing test**
@@ -88,17 +78,20 @@ commands from `apps/opendevhub/`. Work happens directly on `main`.
 Add inside `describe("spawnRunner", …)` in `test/server/exec.test.ts`:
 
 ```ts
-  it("writes input to stdin and closes it", async () => {
-    const r = await spawnRunner(node, ["-e", "process.stdin.pipe(process.stdout)"], { input: "hello\nworld" });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toBe("hello\nworld");
-  });
+it("writes input to stdin and closes it", async () => {
+  const r = await spawnRunner(
+    node,
+    ["-e", "process.stdin.pipe(process.stdout)"],
+    { input: "hello\nworld" }
+  );
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout).toBe("hello\nworld");
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm vitest run test/server/exec.test.ts`
-Expected: FAIL. `stdout` is `""` (stdin is ignored), or a TypeScript error because `input` doesn't exist.
+Run: `pnpm vitest run test/server/exec.test.ts` Expected: FAIL. `stdout` is `""` (stdin is ignored), or a TypeScript error because `input` doesn't exist.
 
 - [ ] **Step 3: Implement**
 
@@ -112,22 +105,21 @@ In `src/server/exec.ts`, add to `RunOptions`:
 Change the `spawn` call's options and feed stdin right after it:
 
 ```ts
-    const child = spawn(cmd, args, {
-      env: { ...process.env, ...opts.env },
-      stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-      detached: opts.detached === true,
-    });
-    if (opts.input !== undefined) {
-      // A child that exits without reading would otherwise raise EPIPE here.
-      child.stdin?.on("error", () => {});
-      child.stdin?.end(opts.input);
-    }
+const child = spawn(cmd, args, {
+  env: { ...process.env, ...opts.env },
+  stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  detached: opts.detached === true,
+});
+if (opts.input !== undefined) {
+  // A child that exits without reading would otherwise raise EPIPE here.
+  child.stdin?.on("error", () => {});
+  child.stdin?.end(opts.input);
+}
 ```
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm vitest run test/server/exec.test.ts`
-Expected: PASS (all tests in the file).
+Run: `pnpm vitest run test/server/exec.test.ts` Expected: PASS (all tests in the file).
 
 - [ ] **Step 5: Commit**
 
@@ -141,11 +133,13 @@ git commit -m "feat(server): runner can write stdin"
 ### Task 2: `Host` interface, `localHost`, node types
 
 **Files:**
+
 - Create: `src/server/host.ts`
 - Modify: `src/shared/types.ts`
 - Test: `test/server/host.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Runner`, `spawnRunner` from `src/server/exec.ts`.
 - Produces:
 
@@ -216,16 +210,22 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
+
 import { LOCAL_NODE, localHost } from "../../src/server/host";
 
 const servers: net.Server[] = [];
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  await Promise.all(
+    servers.splice(0).map((s) => new Promise((r) => s.close(r)))
+  );
 });
 
 async function echoServer(): Promise<number> {
-  const server = net.createServer((s) => s.on("data", (d) => s.write(`echo:${d.toString()}`)));
+  const server = net.createServer((s) =>
+    s.on("data", (d) => s.write(`echo:${d.toString()}`))
+  );
   servers.push(server);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return (server.address() as net.AddressInfo).port;
@@ -252,7 +252,9 @@ describe("localHost", () => {
   it("dials TCP ports", async () => {
     const port = await echoServer();
     const stream = await localHost().dial("127.0.0.1", port);
-    const reply = new Promise<string>((resolve) => stream.once("data", (d: Buffer) => resolve(d.toString())));
+    const reply = new Promise<string>((resolve) =>
+      stream.once("data", (d: Buffer) => resolve(d.toString()))
+    );
     stream.write("hi");
     expect(await reply).toBe("echo:hi");
     stream.destroy();
@@ -261,15 +263,16 @@ describe("localHost", () => {
   it("rejects a dial to a closed port", async () => {
     const port = await echoServer();
     await new Promise((r) => servers.pop()!.close(r));
-    await expect(localHost().dial("127.0.0.1", port)).rejects.toMatchObject({ code: "ECONNREFUSED" });
+    await expect(localHost().dial("127.0.0.1", port)).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
   });
 });
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `pnpm vitest run test/server/host.test.ts`
-Expected: FAIL with "Cannot find module '../../src/server/host'" or an equivalent resolve error.
+Run: `pnpm vitest run test/server/host.test.ts` Expected: FAIL with "Cannot find module '../../src/server/host'" or an equivalent resolve error.
 
 - [ ] **Step 4: Implement**
 
@@ -280,6 +283,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
+
 import type { NodeId } from "../shared/types";
 import { type Runner, spawnRunner } from "./exec";
 
@@ -323,8 +327,7 @@ export function localHost(run: Runner = spawnRunner): Host {
 
 - [ ] **Step 5: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/host.test.ts && pnpm typecheck`
-Expected: PASS, and no type errors.
+Run: `pnpm vitest run test/server/host.test.ts && pnpm typecheck` Expected: PASS, and no type errors.
 
 - [ ] **Step 6: Commit**
 
@@ -338,10 +341,12 @@ git commit -m "feat(server): Host interface and the local host"
 ### Task 3: `SshHost` and ssh helpers
 
 **Files:**
+
 - Create: `src/server/ssh.ts`
 - Test: `test/server/ssh.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Host` and `NodeId` (Task 2); `RunOptions.input` (Task 1).
 - Produces:
 
@@ -367,7 +372,9 @@ Create `test/server/ssh.test.ts`:
 ```ts
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+
 import { describe, expect, it } from "vitest";
+
 import { spawnRunner } from "../../src/server/exec";
 import {
   SshHost,
@@ -397,28 +404,55 @@ describe("shellQuote", () => {
   });
 
   it("survives a real shell unchanged", async () => {
-    const args = ["a b", "it's", "$HOME", "", "back\\slash", "semi;colon", "{{json .}}"];
-    const r = await spawnRunner("sh", ["-c", remoteCommand("printf", ["%s|", ...args])]);
+    const args = [
+      "a b",
+      "it's",
+      "$HOME",
+      "",
+      "back\\slash",
+      "semi;colon",
+      "{{json .}}",
+    ];
+    const r = await spawnRunner("sh", [
+      "-c",
+      remoteCommand("printf", ["%s|", ...args]),
+    ]);
     expect(r.stdout).toBe(args.map((a) => `${a}|`).join(""));
   });
 });
 
 describe("remoteCommand", () => {
   it("prefixes env assignments with env", () => {
-    expect(remoteCommand("docker", ["ps"], { A: "1", B: "x y" })).toBe("env A=1 'B=x y' docker ps");
+    expect(remoteCommand("docker", ["ps"], { A: "1", B: "x y" })).toBe(
+      "env A=1 'B=x y' docker ps"
+    );
   });
 });
 
 describe("ssh arguments", () => {
   it("never prompts and reuses the master", () => {
-    expect(clientArgs(target)).toEqual(["-S", "/tmp/odh/box.sock", "-o", "BatchMode=yes"]);
+    expect(clientArgs(target)).toEqual([
+      "-S",
+      "/tmp/odh/box.sock",
+      "-o",
+      "BatchMode=yes",
+    ]);
   });
 
   it("runs the master in the foreground with keepalives", () => {
     expect(masterArgs(target)).toEqual([
-      "-M", "-N", "-S", "/tmp/odh/box.sock",
-      "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-      "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+      "-M",
+      "-N",
+      "-S",
+      "/tmp/odh/box.sock",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=3",
       "tim@box",
     ]);
     expect(masterArgs(target)).not.toContain("-f");
@@ -432,15 +466,24 @@ describe("ssh arguments", () => {
 
 describe("describeSshFailure", () => {
   it("asks for a host key and ssh key on auth problems", () => {
-    expect(describeSshFailure("tim@box", "Host key verification failed.\n")).toBe(
-      "add the host key and an ssh key for tim@box first (run `ssh tim@box` once)",
+    expect(
+      describeSshFailure("tim@box", "Host key verification failed.\n")
+    ).toBe(
+      "add the host key and an ssh key for tim@box first (run `ssh tim@box` once)"
     );
-    expect(describeSshFailure("tim@box", "tim@box: Permission denied (publickey).\n")).toContain("add the host key");
+    expect(
+      describeSshFailure("tim@box", "tim@box: Permission denied (publickey).\n")
+    ).toContain("add the host key");
   });
 
   it("quotes ssh's last line otherwise", () => {
-    expect(describeSshFailure("tim@box", "debug\nssh: connect to host box port 22: No route to host\n")).toBe(
-      "ssh to tim@box failed: ssh: connect to host box port 22: No route to host",
+    expect(
+      describeSshFailure(
+        "tim@box",
+        "debug\nssh: connect to host box port 22: No route to host\n"
+      )
+    ).toBe(
+      "ssh to tim@box failed: ssh: connect to host box port 22: No route to host"
     );
     expect(describeSshFailure("tim@box", "")).toBe("ssh to tim@box exited");
   });
@@ -451,11 +494,22 @@ describe("SshHost.run", () => {
     const fake = fakeRunner();
     const host = new SshHost("box", target, fake.run);
     const onLine = () => {};
-    await host.run("docker", ["ps", "--filter", "label=a b"], { env: { X: "1" }, timeoutMs: 5, onLine });
+    await host.run("docker", ["ps", "--filter", "label=a b"], {
+      env: { X: "1" },
+      timeoutMs: 5,
+      onLine,
+    });
     expect(fake.calls).toEqual([
       {
         cmd: "ssh",
-        args: ["-S", "/tmp/odh/box.sock", "-o", "BatchMode=yes", "tim@box", "env X=1 docker ps --filter 'label=a b'"],
+        args: [
+          "-S",
+          "/tmp/odh/box.sock",
+          "-o",
+          "BatchMode=yes",
+          "tim@box",
+          "env X=1 docker ps --filter 'label=a b'",
+        ],
         opts: { timeoutMs: 5, onLine },
       },
     ]);
@@ -465,17 +519,29 @@ describe("SshHost.run", () => {
 describe("SshHost files", () => {
   it("reads with cat and reports failures with ssh's stderr", async () => {
     const ok = fakeRunner(() => ({ stdout: "{}\n" }));
-    expect(await new SshHost("box", target, ok.run).readFile("/x/a b.json")).toBe("{}\n");
+    expect(
+      await new SshHost("box", target, ok.run).readFile("/x/a b.json")
+    ).toBe("{}\n");
     expect(ok.calls[0].args.at(-1)).toBe("cat '/x/a b.json'");
 
-    const missing = fakeRunner(() => ({ exitCode: 1, stderr: "cat: /x: No such file or directory\n" }));
-    await expect(new SshHost("box", target, missing.run).readFile("/x")).rejects.toThrow(/reading \/x on box failed: .*No such file/);
+    const missing = fakeRunner(() => ({
+      exitCode: 1,
+      stderr: "cat: /x: No such file or directory\n",
+    }));
+    await expect(
+      new SshHost("box", target, missing.run).readFile("/x")
+    ).rejects.toThrow(/reading \/x on box failed: .*No such file/);
   });
 
   it("writes through stdin, creating the folder", async () => {
     const fake = fakeRunner();
-    await new SshHost("box", target, fake.run).writeFile("/x/y.json", "content");
-    expect(fake.calls[0].args.at(-1)).toBe(`sh -c 'mkdir -p "$(dirname "$1")" && cat > "$1"' sh /x/y.json`);
+    await new SshHost("box", target, fake.run).writeFile(
+      "/x/y.json",
+      "content"
+    );
+    expect(fake.calls[0].args.at(-1)).toBe(
+      `sh -c 'mkdir -p "$(dirname "$1")" && cat > "$1"' sh /x/y.json`
+    );
     expect(fake.calls[0].opts?.input).toBe("content");
   });
 });
@@ -486,15 +552,31 @@ describe("SshHost.dial", () => {
     const calls: string[][] = [];
     const fake: Spawn = (cmd, args) => {
       calls.push([cmd, ...args]);
-      return spawn(process.execPath, ["-e", script], { stdio: ["pipe", "pipe", "pipe"] });
+      return spawn(process.execPath, ["-e", script], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
     };
     return { fake, calls };
   }
 
   it("opens a channel with -W through the master", async () => {
     const { fake, calls } = scripted("process.stdin.pipe(process.stdout)");
-    const stream = await new SshHost("box", target, fakeRunner().run, fake).dial("172.17.0.5", 4096);
-    expect(calls[0]).toEqual(["ssh", "-S", "/tmp/odh/box.sock", "-o", "BatchMode=yes", "-W", "172.17.0.5:4096", "tim@box"]);
+    const stream = await new SshHost(
+      "box",
+      target,
+      fakeRunner().run,
+      fake
+    ).dial("172.17.0.5", 4096);
+    expect(calls[0]).toEqual([
+      "ssh",
+      "-S",
+      "/tmp/odh/box.sock",
+      "-o",
+      "BatchMode=yes",
+      "-W",
+      "172.17.0.5:4096",
+      "tim@box",
+    ]);
     stream.write("ping");
     const [data] = (await once(stream, "data")) as [Buffer];
     expect(data.toString()).toBe("ping");
@@ -503,9 +585,14 @@ describe("SshHost.dial", () => {
 
   it("fails the stream with ssh's message when the channel can't open", async () => {
     const { fake } = scripted(
-      "process.stderr.write('channel 0: open failed: connect failed: Connection refused\\nstdio forwarding failed\\n'); process.exit(255)",
+      "process.stderr.write('channel 0: open failed: connect failed: Connection refused\\nstdio forwarding failed\\n'); process.exit(255)"
     );
-    const stream = await new SshHost("box", target, fakeRunner().run, fake).dial("172.17.0.5", 9);
+    const stream = await new SshHost(
+      "box",
+      target,
+      fakeRunner().run,
+      fake
+    ).dial("172.17.0.5", 9);
     const [err] = (await once(stream, "error")) as [Error];
     expect(err.message).toContain("Connection refused");
   });
@@ -514,8 +601,7 @@ describe("SshHost.dial", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/ssh.test.ts`
-Expected: FAIL, because `src/server/ssh` doesn't exist.
+Run: `pnpm vitest run test/server/ssh.test.ts` Expected: FAIL, because `src/server/ssh` doesn't exist.
 
 - [ ] **Step 3: Implement**
 
@@ -524,19 +610,28 @@ Create `src/server/ssh.ts`:
 ```ts
 import { type ChildProcess, spawn as nodeSpawn } from "node:child_process";
 import { Duplex } from "node:stream";
+
 import type { NodeId } from "../shared/types";
 import { type Runner, spawnRunner } from "./exec";
 import type { Host } from "./host";
 
 /** Quotes a word for a POSIX shell; safe words stay readable. */
 export function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)
+    ? value
+    : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The single string ssh hands to the remote shell for `cmd args`, with `env` set for it. */
-export function remoteCommand(cmd: string, args: string[], env: Record<string, string> = {}): string {
+export function remoteCommand(
+  cmd: string,
+  args: string[],
+  env: Record<string, string> = {}
+): string {
   const vars = Object.entries(env).map(([k, v]) => `${k}=${v}`);
-  return [...(vars.length > 0 ? ["env", ...vars] : []), cmd, ...args].map(shellQuote).join(" ");
+  return [...(vars.length > 0 ? ["env", ...vars] : []), cmd, ...args]
+    .map(shellQuote)
+    .join(" ");
 }
 
 export interface SshTarget {
@@ -554,9 +649,18 @@ export function clientArgs(t: SshTarget): string[] {
 /** The master, in the foreground: a daemonized ssh (-f) keeps captured stdio open, and its exit is our signal. */
 export function masterArgs(t: SshTarget): string[] {
   return [
-    "-M", "-N", "-S", t.control,
-    "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-    "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+    "-M",
+    "-N",
+    "-S",
+    t.control,
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
     t.dest,
   ];
 }
@@ -567,18 +671,25 @@ export function parseSshPort(sshG: string): number {
   return m ? Number(m[1]) : 22;
 }
 
-const AUTH_FAILURE = /Host key verification failed|Permission denied|REMOTE HOST IDENTIFICATION HAS CHANGED|No ED25519 host key is known|host key for .* has changed/i;
+const AUTH_FAILURE =
+  /Host key verification failed|Permission denied|REMOTE HOST IDENTIFICATION HAS CHANGED|No ED25519 host key is known|host key for .* has changed/i;
 
 /** One line for the dashboard from what ssh printed before it gave up. */
 export function describeSshFailure(dest: string, stderr: string): string {
-  if (AUTH_FAILURE.test(stderr)) return `add the host key and an ssh key for ${dest} first (run \`ssh ${dest}\` once)`;
-  const last = stderr.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).at(-1);
+  if (AUTH_FAILURE.test(stderr))
+    return `add the host key and an ssh key for ${dest} first (run \`ssh ${dest}\` once)`;
+  const last = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .at(-1);
   return last ? `ssh to ${dest} failed: ${last}` : `ssh to ${dest} exited`;
 }
 
 export type Spawn = (cmd: string, args: string[]) => ChildProcess;
 
-export const defaultSpawn: Spawn = (cmd, args) => nodeSpawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+export const defaultSpawn: Spawn = (cmd, args) =>
+  nodeSpawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
 
 /** A node reached over ssh. Every call goes through the ControlMaster that a NodeConnection keeps open. */
 export class SshHost implements Host {
@@ -586,37 +697,63 @@ export class SshHost implements Host {
     readonly id: NodeId,
     private readonly target: SshTarget,
     private readonly local: Runner = spawnRunner,
-    private readonly spawn: Spawn = defaultSpawn,
+    private readonly spawn: Spawn = defaultSpawn
   ) {}
 
   readonly run: Runner = (cmd, args, opts = {}) => {
     const { env, ...rest } = opts;
-    return this.local("ssh", [...clientArgs(this.target), this.target.dest, remoteCommand(cmd, args, env)], rest);
+    return this.local(
+      "ssh",
+      [
+        ...clientArgs(this.target),
+        this.target.dest,
+        remoteCommand(cmd, args, env),
+      ],
+      rest
+    );
   };
 
   async readFile(file: string): Promise<string> {
     const r = await this.run("cat", [file], { timeoutMs: 30_000 });
-    if (r.exitCode !== 0) throw new Error(`reading ${file} on ${this.id} failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
+    if (r.exitCode !== 0)
+      throw new Error(
+        `reading ${file} on ${this.id} failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`
+      );
     return r.stdout;
   }
 
   async writeFile(file: string, content: string): Promise<void> {
-    const r = await this.run("sh", ["-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", file], {
-      input: content,
-      timeoutMs: 30_000,
-    });
-    if (r.exitCode !== 0) throw new Error(`writing ${file} on ${this.id} failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`);
+    const r = await this.run(
+      "sh",
+      ["-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", file],
+      {
+        input: content,
+        timeoutMs: 30_000,
+      }
+    );
+    if (r.exitCode !== 0)
+      throw new Error(
+        `writing ${file} on ${this.id} failed: ${r.stderr.trim() || `exit ${r.exitCode}`}`
+      );
   }
 
   /** A channel to `ip:port` from the node (`ssh -W`), as a stream over the ssh process's stdio. */
   dial(ip: string, port: number): Promise<Duplex> {
     return new Promise((resolve, reject) => {
-      const child = this.spawn("ssh", [...clientArgs(this.target), "-W", `${ip}:${port}`, this.target.dest]);
+      const child = this.spawn("ssh", [
+        ...clientArgs(this.target),
+        "-W",
+        `${ip}:${port}`,
+        this.target.dest,
+      ]);
       let stderr = "";
       child.stderr?.on("data", (c: Buffer) => {
         stderr = (stderr + c.toString("utf8")).slice(-2000);
       });
-      const stream = Duplex.from({ readable: child.stdout!, writable: child.stdin! });
+      const stream = Duplex.from({
+        readable: child.stdout!,
+        writable: child.stdin!,
+      });
       stream.on("close", () => {
         if (child.exitCode === null) child.kill();
       });
@@ -625,7 +762,11 @@ export class SshHost implements Host {
       // "close" comes after stderr is drained, so the message is complete.
       child.once("close", (code) => {
         if (code !== 0 && !stream.destroyed) {
-          stream.destroy(new Error(stderr.trim() || `ssh -W ${ip}:${port} exited with ${code}`));
+          stream.destroy(
+            new Error(
+              stderr.trim() || `ssh -W ${ip}:${port} exited with ${code}`
+            )
+          );
         }
       });
     });
@@ -635,8 +776,7 @@ export class SshHost implements Host {
 
 - [ ] **Step 4: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/ssh.test.ts && pnpm typecheck`
-Expected: PASS, and no type errors.
+Run: `pnpm vitest run test/server/ssh.test.ts && pnpm typecheck` Expected: PASS, and no type errors.
 
 - [ ] **Step 5: Commit**
 
@@ -650,20 +790,29 @@ git commit -m "feat(server): SshHost runs commands and dials through an ssh mast
 ### Task 4: Nodes in `config.json`
 
 **Files:**
+
 - Modify: `src/server/config.ts`
 - Test: `test/server/config.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LOCAL_NODE` (Task 2), `NodeId` (Task 2).
 - Produces:
 
 ```ts
-export interface NodeConfig { id: NodeId; ssh: string; label?: string }
+export interface NodeConfig {
+  id: NodeId;
+  ssh: string;
+  label?: string;
+}
 // Config gains: nodes?: NodeConfig[];
 export class InvalidNodeError extends Error {}
-export function validateSshDestination(dest: string): string;          // trimmed; throws InvalidNodeError
+export function validateSshDestination(dest: string): string; // trimmed; throws InvalidNodeError
 export function nodeIdFor(name: string, taken: string[]): NodeId;
-export function addNode(cfg: Config, input: { ssh: string; label?: string }): { config: Config; node: NodeConfig };
+export function addNode(
+  cfg: Config,
+  input: { ssh: string; label?: string }
+): { config: Config; node: NodeConfig };
 export function removeNode(cfg: Config, id: NodeId): Config;
 ```
 
@@ -691,9 +840,11 @@ describe("nodes in config", () => {
             { id: "box", ssh: "tim@dupe" },
             "junk",
           ],
-        }),
+        })
       );
-      expect(loadConfig(dir).nodes).toEqual([{ id: "box", ssh: "tim@box", label: "Workstation" }]);
+      expect(loadConfig(dir).nodes).toEqual([
+        { id: "box", ssh: "tim@box", label: "Workstation" },
+      ]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -702,7 +853,11 @@ describe("nodes in config", () => {
   it("round-trips nodes through saveConfig", () => {
     const dir = tmp();
     try {
-      saveConfig(dir, { roots: ["/a"], port: 7777, nodes: [{ id: "box", ssh: "box" }] });
+      saveConfig(dir, {
+        roots: ["/a"],
+        port: 7777,
+        nodes: [{ id: "box", ssh: "box" }],
+      });
       expect(loadConfig(dir).nodes).toEqual([{ id: "box", ssh: "box" }]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -740,15 +895,32 @@ describe("nodes in config", () => {
 
   it("adds a node with an id from its label, and refuses the same destination twice", () => {
     const base = { roots: [], port: 7777 };
-    const { config, node } = addNode(base, { ssh: "tim@box", label: " Workstation " });
-    expect(node).toEqual({ id: "workstation", ssh: "tim@box", label: "Workstation" });
+    const { config, node } = addNode(base, {
+      ssh: "tim@box",
+      label: " Workstation ",
+    });
+    expect(node).toEqual({
+      id: "workstation",
+      ssh: "tim@box",
+      label: "Workstation",
+    });
     expect(config.nodes).toEqual([node]);
     expect(() => addNode(config, { ssh: "tim@box" })).toThrow(/already a node/);
-    expect(addNode(config, { ssh: "tim@other" }).node).toEqual({ id: "other", ssh: "tim@other" });
+    expect(addNode(config, { ssh: "tim@other" }).node).toEqual({
+      id: "other",
+      ssh: "tim@other",
+    });
   });
 
   it("removes a node by id", () => {
-    const cfg = { roots: [], port: 7777, nodes: [{ id: "a", ssh: "a" }, { id: "b", ssh: "b" }] };
+    const cfg = {
+      roots: [],
+      port: 7777,
+      nodes: [
+        { id: "a", ssh: "a" },
+        { id: "b", ssh: "b" },
+      ],
+    };
     expect(removeNode(cfg, "a").nodes).toEqual([{ id: "b", ssh: "b" }]);
   });
 });
@@ -756,8 +928,7 @@ describe("nodes in config", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/config.test.ts`
-Expected: FAIL, because `addNode`, `nodeIdFor`, `validateSshDestination` and `InvalidNodeError` aren't exported.
+Run: `pnpm vitest run test/server/config.test.ts` Expected: FAIL, because `addNode`, `nodeIdFor`, `validateSshDestination` and `InvalidNodeError` aren't exported.
 
 - [ ] **Step 3: Implement**
 
@@ -785,7 +956,10 @@ const SSH_DEST = /^[^-\s]\S*$/;
 
 export function validateSshDestination(dest: string): string {
   const d = dest.trim();
-  if (!SSH_DEST.test(d)) throw new InvalidNodeError(`invalid ssh destination: ${JSON.stringify(dest)}`);
+  if (!SSH_DEST.test(d))
+    throw new InvalidNodeError(
+      `invalid ssh destination: ${JSON.stringify(dest)}`
+    );
   return d;
 }
 
@@ -793,9 +967,15 @@ export function validateSshDestination(dest: string): string {
 export function nodeIdFor(name: string, taken: string[]): NodeId {
   const host = name.replace(/^.*@/, "").replace(/:\d+$/, "");
   const base =
-    host.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50).replace(/-+$/, "") || "node";
+    host
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50)
+      .replace(/-+$/, "") || "node";
   let id = base;
-  for (let n = 2; id === LOCAL_NODE || taken.includes(id); n++) id = `${base}-${n}`;
+  for (let n = 2; id === LOCAL_NODE || taken.includes(id); n++)
+    id = `${base}-${n}`;
   return id;
 }
 
@@ -804,19 +984,46 @@ function readNodes(raw: unknown): NodeConfig[] {
   const out: NodeConfig[] = [];
   for (const value of raw) {
     const n = value as { id?: unknown; ssh?: unknown; label?: unknown };
-    if (!n || typeof n !== "object" || typeof n.id !== "string" || typeof n.ssh !== "string") continue;
-    if (!NODE_ID.test(n.id) || n.id === LOCAL_NODE || out.some((o) => o.id === n.id) || !SSH_DEST.test(n.ssh)) continue;
-    out.push({ id: n.id, ssh: n.ssh, ...(typeof n.label === "string" && n.label ? { label: n.label } : {}) });
+    if (
+      !n ||
+      typeof n !== "object" ||
+      typeof n.id !== "string" ||
+      typeof n.ssh !== "string"
+    )
+      continue;
+    if (
+      !NODE_ID.test(n.id) ||
+      n.id === LOCAL_NODE ||
+      out.some((o) => o.id === n.id) ||
+      !SSH_DEST.test(n.ssh)
+    )
+      continue;
+    out.push({
+      id: n.id,
+      ssh: n.ssh,
+      ...(typeof n.label === "string" && n.label ? { label: n.label } : {}),
+    });
   }
   return out;
 }
 
-export function addNode(cfg: Config, input: { ssh: string; label?: string }): { config: Config; node: NodeConfig } {
+export function addNode(
+  cfg: Config,
+  input: { ssh: string; label?: string }
+): { config: Config; node: NodeConfig } {
   const ssh = validateSshDestination(input.ssh);
   const label = input.label?.trim() || undefined;
   const nodes = cfg.nodes ?? [];
-  if (nodes.some((n) => n.ssh === ssh)) throw new InvalidNodeError(`${ssh} is already a node`);
-  const node: NodeConfig = { id: nodeIdFor(label ?? ssh, nodes.map((n) => n.id)), ssh, ...(label ? { label } : {}) };
+  if (nodes.some((n) => n.ssh === ssh))
+    throw new InvalidNodeError(`${ssh} is already a node`);
+  const node: NodeConfig = {
+    id: nodeIdFor(
+      label ?? ssh,
+      nodes.map((n) => n.id)
+    ),
+    ssh,
+    ...(label ? { label } : {}),
+  };
   return { config: { ...cfg, nodes: [...nodes, node] }, node };
 }
 
@@ -829,8 +1036,7 @@ In `loadConfig`, compute `const nodes = readNodes(raw.nodes);` and add `...(node
 
 - [ ] **Step 4: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/config.test.ts test/server/cli.test.ts && pnpm typecheck`
-Expected: PASS. `loadAndSaveStartupConfig` keeps `nodes` because it spreads the saved config.
+Run: `pnpm vitest run test/server/config.test.ts test/server/cli.test.ts && pnpm typecheck` Expected: PASS. `loadAndSaveStartupConfig` keeps `nodes` because it spreads the saved config.
 
 - [ ] **Step 5: Commit**
 
@@ -844,16 +1050,27 @@ git commit -m "feat(server): nodes in config.json, with safe ssh destinations"
 ### Task 5: Node preflight and stats
 
 **Files:**
+
 - Create: `src/server/node-preflight.ts`
 - Test: `test/server/node-preflight.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Host` (Task 2); `parseGitVersion`, `supportsRelativePaths` from `src/server/worktrees.ts`; `LABEL`, `ENV_LABEL` from `src/server/containers.ts`.
 - Produces:
 
 ```ts
-export function nodePreflight(host: Pick<Host, "run" | "dial">, sshPort: number, dest: string): Promise<string[]>;
-export function probeForwarding(host: Pick<Host, "dial">, sshPort: number, dest: string, timeoutMs?: number): Promise<string | undefined>;
+export function nodePreflight(
+  host: Pick<Host, "run" | "dial">,
+  sshPort: number,
+  dest: string
+): Promise<string[]>;
+export function probeForwarding(
+  host: Pick<Host, "dial">,
+  sshPort: number,
+  dest: string,
+  timeoutMs?: number
+): Promise<string | undefined>;
 export function parseNodeStats(stdout: string): NodeStats | undefined;
 export function nodeStats(run: Runner): Promise<NodeStats | undefined>;
 ```
@@ -864,13 +1081,27 @@ Create `test/server/node-preflight.test.ts`:
 
 ```ts
 import { PassThrough } from "node:stream";
+
 import { describe, expect, it } from "vitest";
+
 import type { RunResult } from "../../src/server/exec";
-import { nodePreflight, nodeStats, parseNodeStats, probeForwarding } from "../../src/server/node-preflight";
+import {
+  nodePreflight,
+  nodeStats,
+  parseNodeStats,
+  probeForwarding,
+} from "../../src/server/node-preflight";
 import { type Call, fakeRunner } from "../helpers/fake-runner";
 
 /** A dial that answers like sshd, fails with `error`, or never answers. */
-function dialer(mode: { banner?: string; error?: string; reject?: string; silent?: boolean } = { banner: "SSH-2.0-OpenSSH_9.6\r\n" }) {
+function dialer(
+  mode: {
+    banner?: string;
+    error?: string;
+    reject?: string;
+    silent?: boolean;
+  } = { banner: "SSH-2.0-OpenSSH_9.6\r\n" }
+) {
   const calls: Array<[string, number]> = [];
   const dial = async (ip: string, port: number) => {
     calls.push([ip, port]);
@@ -888,27 +1119,49 @@ function dialer(mode: { banner?: string; error?: string; reject?: string; silent
 function tools(overrides: Partial<Record<string, Partial<RunResult>>> = {}) {
   return fakeRunner((c: Call) => {
     const key = c.cmd === "sh" ? "home" : c.cmd;
-    return overrides[key] ?? (c.cmd === "git" ? { stdout: "git version 2.49.0\n" } : {});
+    return (
+      overrides[key] ??
+      (c.cmd === "git" ? { stdout: "git version 2.49.0\n" } : {})
+    );
   });
 }
 
 describe("nodePreflight", () => {
   it("passes when every tool is there and forwarding works", async () => {
     const { dial, calls } = dialer();
-    expect(await nodePreflight({ run: tools().run, dial }, 2222, "tim@box")).toEqual([]);
+    expect(
+      await nodePreflight({ run: tools().run, dial }, 2222, "tim@box")
+    ).toEqual([]);
     expect(calls).toEqual([["127.0.0.1", 2222]]);
   });
 
   it("says a missing tool may just be off the non-interactive PATH", async () => {
-    const errors = await nodePreflight({ run: tools({ devcontainer: { exitCode: 127 } }).run, dial: dialer().dial }, 22, "tim@box");
+    const errors = await nodePreflight(
+      {
+        run: tools({ devcontainer: { exitCode: 127 } }).run,
+        dial: dialer().dial,
+      },
+      22,
+      "tim@box"
+    );
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/devcontainer CLI not found on the PATH of a non-interactive ssh shell/);
+    expect(errors[0]).toMatch(
+      /devcontainer CLI not found on the PATH of a non-interactive ssh shell/
+    );
     expect(errors[0]).toMatch(/nvm/);
   });
 
   it("reports a Docker daemon it can't reach, an old git and an unwritable folder", async () => {
-    const run = tools({ docker: { exitCode: 1 }, git: { stdout: "git version 2.43.0\n" }, home: { exitCode: 1 } }).run;
-    const errors = await nodePreflight({ run, dial: dialer().dial }, 22, "tim@box");
+    const run = tools({
+      docker: { exitCode: 1 },
+      git: { stdout: "git version 2.43.0\n" },
+      home: { exitCode: 1 },
+    }).run;
+    const errors = await nodePreflight(
+      { run, dial: dialer().dial },
+      22,
+      "tim@box"
+    );
     expect(errors).toEqual([
       "the Docker daemon is not reachable (is Docker running, and may the ssh user use it?)",
       "git 2.48 or newer is needed (found git version 2.43.0)",
@@ -923,27 +1176,56 @@ describe("probeForwarding", () => {
   });
 
   it("is fine when the port refuses: the channel itself opened", async () => {
-    expect(await probeForwarding(dialer({ error: "channel 0: open failed: connect failed: Connection refused" }), 22, "tim@box")).toBeUndefined();
+    expect(
+      await probeForwarding(
+        dialer({
+          error: "channel 0: open failed: connect failed: Connection refused",
+        }),
+        22,
+        "tim@box"
+      )
+    ).toBeUndefined();
   });
 
   it("names AllowTcpForwarding when sshd prohibits it", async () => {
-    const d = dialer({ error: "channel 0: open failed: administratively prohibited: open failed" });
-    expect(await probeForwarding(d, 22, "tim@box")).toBe("sshd on tim@box does not allow TCP forwarding (AllowTcpForwarding)");
+    const d = dialer({
+      error: "channel 0: open failed: administratively prohibited: open failed",
+    });
+    expect(await probeForwarding(d, 22, "tim@box")).toBe(
+      "sshd on tim@box does not allow TCP forwarding (AllowTcpForwarding)"
+    );
   });
 
   it("reports a dial that can't start and a channel that stays silent", async () => {
-    expect(await probeForwarding(dialer({ reject: "spawn ssh ENOENT" }), 22, "tim@box")).toBe("opening an ssh channel to tim@box failed: spawn ssh ENOENT");
-    expect(await probeForwarding(dialer({ silent: true, banner: undefined }), 22, "tim@box", 20)).toBe(
-      "sshd on tim@box did not answer through a forwarded channel",
-    );
+    expect(
+      await probeForwarding(
+        dialer({ reject: "spawn ssh ENOENT" }),
+        22,
+        "tim@box"
+      )
+    ).toBe("opening an ssh channel to tim@box failed: spawn ssh ENOENT");
+    expect(
+      await probeForwarding(
+        dialer({ silent: true, banner: undefined }),
+        22,
+        "tim@box",
+        20
+      )
+    ).toBe("sshd on tim@box did not answer through a forwarded channel");
   });
 });
 
 describe("node stats", () => {
-  const sample = "8\nMemTotal:       32768000 kB\nMemAvailable:   16384000 kB\n2\n3\n";
+  const sample =
+    "8\nMemTotal:       32768000 kB\nMemAvailable:   16384000 kB\n2\n3\n";
 
   it("parses cpus, memory in bytes and both container counts", () => {
-    expect(parseNodeStats(sample)).toEqual({ cpus: 8, memTotal: 32768000 * 1024, memAvailable: 16384000 * 1024, containers: 5 });
+    expect(parseNodeStats(sample)).toEqual({
+      cpus: 8,
+      memTotal: 32768000 * 1024,
+      memAvailable: 16384000 * 1024,
+      containers: 5,
+    });
   });
 
   it("is undefined when /proc/meminfo is missing (macOS)", () => {
@@ -955,15 +1237,16 @@ describe("node stats", () => {
     expect(await nodeStats(ok.run)).toMatchObject({ cpus: 8 });
     expect(ok.calls[0].cmd).toBe("sh");
     expect(ok.calls[0].args[1]).toContain("label=opendevhub.env");
-    expect(await nodeStats(fakeRunner(() => ({ exitCode: 255 })).run)).toBeUndefined();
+    expect(
+      await nodeStats(fakeRunner(() => ({ exitCode: 255 })).run)
+    ).toBeUndefined();
   });
 });
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/node-preflight.test.ts`
-Expected: FAIL, because the module doesn't exist.
+Run: `pnpm vitest run test/server/node-preflight.test.ts` Expected: FAIL, because the module doesn't exist.
 
 - [ ] **Step 3: Implement**
 
@@ -971,6 +1254,7 @@ Create `src/server/node-preflight.ts`:
 
 ```ts
 import type { Duplex } from "node:stream";
+
 import type { NodeStats } from "../shared/types";
 import { ENV_LABEL, LABEL } from "./containers";
 import type { Runner } from "./exec";
@@ -982,18 +1266,38 @@ const PATH_HINT =
   "on the PATH of a non-interactive ssh shell (tools installed through nvm or a login profile aren't on it; see the README)";
 
 /** What keeps a node from running environments; empty when it's ready. */
-export async function nodePreflight(host: Pick<Host, "run" | "dial">, sshPort: number, dest: string): Promise<string[]> {
+export async function nodePreflight(
+  host: Pick<Host, "run" | "dial">,
+  sshPort: number,
+  dest: string
+): Promise<string[]> {
   const errors: string[] = [];
-  const docker = await host.run("docker", ["version", "--format", "{{.Server.Version}}"], { timeoutMs: TIMEOUT_MS });
+  const docker = await host.run(
+    "docker",
+    ["version", "--format", "{{.Server.Version}}"],
+    { timeoutMs: TIMEOUT_MS }
+  );
   if (docker.exitCode === 127) errors.push(`docker not found ${PATH_HINT}`);
-  else if (docker.exitCode !== 0) errors.push("the Docker daemon is not reachable (is Docker running, and may the ssh user use it?)");
-  const devcontainer = await host.run("devcontainer", ["--version"], { timeoutMs: TIMEOUT_MS });
-  if (devcontainer.exitCode !== 0) errors.push(`devcontainer CLI not found ${PATH_HINT}`);
+  else if (docker.exitCode !== 0)
+    errors.push(
+      "the Docker daemon is not reachable (is Docker running, and may the ssh user use it?)"
+    );
+  const devcontainer = await host.run("devcontainer", ["--version"], {
+    timeoutMs: TIMEOUT_MS,
+  });
+  if (devcontainer.exitCode !== 0)
+    errors.push(`devcontainer CLI not found ${PATH_HINT}`);
   const git = await host.run("git", ["--version"], { timeoutMs: TIMEOUT_MS });
   if (git.exitCode !== 0) errors.push(`git not found ${PATH_HINT}`);
-  else if (!supportsRelativePaths(parseGitVersion(git.stdout))) errors.push(`git 2.48 or newer is needed (found ${git.stdout.trim()})`);
-  const home = await host.run("sh", ["-c", 'mkdir -p "$HOME/.opendevhub" && test -w "$HOME/.opendevhub"'], { timeoutMs: TIMEOUT_MS });
-  if (home.exitCode !== 0) errors.push("~/.opendevhub can't be created or isn't writable");
+  else if (!supportsRelativePaths(parseGitVersion(git.stdout)))
+    errors.push(`git 2.48 or newer is needed (found ${git.stdout.trim()})`);
+  const home = await host.run(
+    "sh",
+    ["-c", 'mkdir -p "$HOME/.opendevhub" && test -w "$HOME/.opendevhub"'],
+    { timeoutMs: TIMEOUT_MS }
+  );
+  if (home.exitCode !== 0)
+    errors.push("~/.opendevhub can't be created or isn't writable");
   const forwarding = await probeForwarding(host, sshPort, dest);
   if (forwarding) errors.push(forwarding);
   return errors;
@@ -1007,7 +1311,7 @@ export async function probeForwarding(
   host: Pick<Host, "dial">,
   sshPort: number,
   dest: string,
-  timeoutMs = 5000,
+  timeoutMs = 5000
 ): Promise<string | undefined> {
   let stream: Duplex;
   try {
@@ -1023,12 +1327,22 @@ export async function probeForwarding(
       stream.destroy();
       resolve(result);
     };
-    const timer = setTimeout(() => done(`sshd on ${dest} did not answer through a forwarded channel`), timeoutMs);
+    const timer = setTimeout(
+      () => done(`sshd on ${dest} did not answer through a forwarded channel`),
+      timeoutMs
+    );
     stream.once("data", (chunk: Buffer) =>
-      done(chunk.toString("utf8").startsWith("SSH-") ? undefined : `unexpected answer through a forwarded channel to ${dest}`),
+      done(
+        chunk.toString("utf8").startsWith("SSH-")
+          ? undefined
+          : `unexpected answer through a forwarded channel to ${dest}`
+      )
     );
     stream.once("error", (err: Error) => {
-      if (/administratively prohibited/i.test(err.message)) done(`sshd on ${dest} does not allow TCP forwarding (AllowTcpForwarding)`);
+      if (/administratively prohibited/i.test(err.message))
+        done(
+          `sshd on ${dest} does not allow TCP forwarding (AllowTcpForwarding)`
+        );
       else if (/Connection refused/i.test(err.message)) done(undefined);
       else done(`a forwarded channel to ${dest} failed: ${err.message}`);
     });
@@ -1044,16 +1358,32 @@ const STATS_SCRIPT = [
 
 /** `nproc`, two /proc/meminfo lines and two container counts. */
 export function parseNodeStats(stdout: string): NodeStats | undefined {
-  const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   const kb = (key: string) => {
-    const m = new RegExp(`^${key}:\\s+(\\d+)\\s*kB$`).exec(lines.find((l) => l.startsWith(`${key}:`)) ?? "");
+    const m = new RegExp(`^${key}:\\s+(\\d+)\\s*kB$`).exec(
+      lines.find((l) => l.startsWith(`${key}:`)) ?? ""
+    );
     return m ? Number(m[1]) * 1024 : undefined;
   };
   const memTotal = kb("MemTotal");
   const memAvailable = kb("MemAvailable");
   const numbers = lines.filter((l) => /^\d+$/.test(l)).map(Number);
-  if (numbers.length < 3 || !(numbers[0] > 0) || memTotal === undefined || memAvailable === undefined) return undefined;
-  return { cpus: numbers[0], memTotal, memAvailable, containers: numbers[1] + numbers[2] };
+  if (
+    numbers.length < 3 ||
+    !(numbers[0] > 0) ||
+    memTotal === undefined ||
+    memAvailable === undefined
+  )
+    return undefined;
+  return {
+    cpus: numbers[0],
+    memTotal,
+    memAvailable,
+    containers: numbers[1] + numbers[2],
+  };
 }
 
 /** A node's capacity, or undefined when it can't be read (no /proc/meminfo, ssh down). */
@@ -1065,8 +1395,7 @@ export async function nodeStats(run: Runner): Promise<NodeStats | undefined> {
 
 - [ ] **Step 4: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/node-preflight.test.ts && pnpm typecheck`
-Expected: PASS. If `containers.ts` → `worktrees.ts` creates an import cycle that typecheck reports, import `LABEL` and `ENV_LABEL` the same way `cleanup.ts` does.
+Run: `pnpm vitest run test/server/node-preflight.test.ts && pnpm typecheck` Expected: PASS. If `containers.ts` → `worktrees.ts` creates an import cycle that typecheck reports, import `LABEL` and `ENV_LABEL` the same way `cleanup.ts` does.
 
 - [ ] **Step 5: Commit**
 
@@ -1080,10 +1409,12 @@ git commit -m "feat(server): node preflight and capacity stats"
 ### Task 6: `NodeConnection`
 
 **Files:**
+
 - Create: `src/server/node-connection.ts`
 - Test: `test/server/node-connection.test.ts`
 
 **Interfaces:**
+
 - Consumes: `NodeConfig` (Task 4); `SshHost`, `Spawn`, `defaultSpawn`, `masterArgs`, `parseSshPort`, `describeSshFailure` (Task 3); `nodePreflight` (Task 5).
 - Produces:
 
@@ -1094,18 +1425,22 @@ export interface NodeConnectionOptions {
   onChange: () => void;
   run?: Runner;
   spawn?: Spawn;
-  preflight?: (host: SshHost, sshPort: number, dest: string) => Promise<string[]>;
-  readyTimeoutMs?: number;   // default 20_000
-  readyIntervalMs?: number;  // default 250
-  retryMinMs?: number;       // default 1_000
-  retryMaxMs?: number;       // default 60_000
+  preflight?: (
+    host: SshHost,
+    sshPort: number,
+    dest: string
+  ) => Promise<string[]>;
+  readyTimeoutMs?: number; // default 20_000
+  readyIntervalMs?: number; // default 250
+  retryMinMs?: number; // default 1_000
+  retryMaxMs?: number; // default 60_000
 }
 export function nextDelay(current: number, max: number): number;
 export class NodeConnection {
   readonly host: SshHost;
   constructor(opts: NodeConnectionOptions);
   get online(): boolean;
-  view(): NodeView;          // without stats
+  view(): NodeView; // without stats
   start(): void;
   close(): Promise<void>;
 }
@@ -1122,11 +1457,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { NodeConnection, nextDelay } from "../../src/server/node-connection";
 import { type Call, fakeRunner } from "../helpers/fake-runner";
 
-type FakeChild = ChildProcess & { exitWith(code: number, stderr?: string): void };
+type FakeChild = ChildProcess & {
+  exitWith(code: number, stderr?: string): void;
+};
 
 function fakeChild(): FakeChild {
   const child = new EventEmitter() as FakeChild;
@@ -1154,12 +1493,18 @@ afterEach(async () => {
   await Promise.all(open.splice(0).map((c) => c.close()));
 });
 
-function setup(opts: { check?: (n: number) => number; preflight?: () => Promise<string[]> } = {}) {
+function setup(
+  opts: {
+    check?: (n: number) => number;
+    preflight?: () => Promise<string[]>;
+  } = {}
+) {
   const controlDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-ctl-"));
   const masters: FakeChild[] = [];
   let checks = 0;
   const runner = fakeRunner((c: Call) => {
-    if (c.args.includes("-O") && c.args.includes("check")) return { exitCode: (opts.check ?? (() => 0))(++checks) };
+    if (c.args.includes("-O") && c.args.includes("check"))
+      return { exitCode: (opts.check ?? (() => 0))(++checks) };
     if (c.args[0] === "-G") return { stdout: "user tim\nport 2222\n" };
     return {};
   });
@@ -1197,7 +1542,12 @@ describe("nextDelay", () => {
 describe("NodeConnection", () => {
   it("starts the master, runs preflight with the resolved port and goes online", async () => {
     const { conn, masters, preflight, onChange, controlDir } = setup();
-    expect(conn.view()).toEqual({ id: "box", label: "Box", ssh: "tim@box", state: "connecting" });
+    expect(conn.view()).toEqual({
+      id: "box",
+      label: "Box",
+      ssh: "tim@box",
+      state: "connecting",
+    });
     conn.start();
     await vi.waitFor(() => expect(conn.view().state).toBe("online"));
     expect(masters).toHaveLength(1);
@@ -1212,20 +1562,26 @@ describe("NodeConnection", () => {
     await vi.waitFor(() => expect(masters).toHaveLength(1));
     masters[0].exitWith(255, "Host key verification failed.\r\n");
     await vi.waitFor(() => expect(conn.view().state).toBe("unreachable"));
-    expect(conn.view().reason).toBe("add the host key and an ssh key for tim@box first (run `ssh tim@box` once)");
+    expect(conn.view().reason).toBe(
+      "add the host key and an ssh key for tim@box first (run `ssh tim@box` once)"
+    );
     await vi.waitFor(() => expect(masters.length).toBeGreaterThanOrEqual(2));
   });
 
   it("gives up waiting for a master that never gets ready, and kills it", async () => {
     const { conn, masters } = setup({ check: () => 255 });
     conn.start();
-    await vi.waitFor(() => expect(conn.view().state).toBe("unreachable"), { timeout: 2000 });
+    await vi.waitFor(() => expect(conn.view().state).toBe("unreachable"), {
+      timeout: 2000,
+    });
     expect(conn.view().reason).toMatch(/did not connect within/);
     expect(masters[0].kill).toHaveBeenCalled();
   });
 
   it("shows preflight errors as needing setup", async () => {
-    const { conn } = setup({ preflight: async () => ["docker not found", "git not found"] });
+    const { conn } = setup({
+      preflight: async () => ["docker not found", "git not found"],
+    });
     conn.start();
     await vi.waitFor(() => expect(conn.view().state).toBe("error"));
     expect(conn.view().reason).toBe("docker not found; git not found");
@@ -1237,7 +1593,9 @@ describe("NodeConnection", () => {
     await vi.waitFor(() => expect(conn.online).toBe(true));
     masters[0].exitWith(255, "Timeout, server box not responding.\n");
     await vi.waitFor(() => expect(conn.view().state).toBe("unreachable"));
-    expect(conn.view().reason).toBe("ssh to tim@box failed: Timeout, server box not responding.");
+    expect(conn.view().reason).toBe(
+      "ssh to tim@box failed: Timeout, server box not responding."
+    );
     await vi.waitFor(() => expect(conn.online).toBe(true));
     expect(masters).toHaveLength(2);
   });
@@ -1262,7 +1620,9 @@ describe("NodeConnection", () => {
     conn.start();
     await vi.waitFor(() => expect(conn.online).toBe(true));
     await conn.close();
-    expect(runner.calls.some((c) => c.args.includes("-O") && c.args.includes("exit"))).toBe(true);
+    expect(
+      runner.calls.some((c) => c.args.includes("-O") && c.args.includes("exit"))
+    ).toBe(true);
     expect(masters[0].kill).toHaveBeenCalled();
   });
 });
@@ -1270,8 +1630,7 @@ describe("NodeConnection", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/node-connection.test.ts`
-Expected: FAIL, because the module doesn't exist.
+Run: `pnpm vitest run test/server/node-connection.test.ts` Expected: FAIL, because the module doesn't exist.
 
 - [ ] **Step 3: Implement**
 
@@ -1281,11 +1640,20 @@ Create `src/server/node-connection.ts`:
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
 import type { NodeState, NodeView } from "../shared/types";
 import type { NodeConfig } from "./config";
 import { type Runner, spawnRunner } from "./exec";
 import { nodePreflight } from "./node-preflight";
-import { SshHost, type Spawn, type SshTarget, defaultSpawn, describeSshFailure, masterArgs, parseSshPort } from "./ssh";
+import {
+  SshHost,
+  type Spawn,
+  type SshTarget,
+  defaultSpawn,
+  describeSshFailure,
+  masterArgs,
+  parseSshPort,
+} from "./ssh";
 
 export interface NodeConnectionOptions {
   node: NodeConfig;
@@ -1294,7 +1662,11 @@ export interface NodeConnectionOptions {
   onChange: () => void;
   run?: Runner;
   spawn?: Spawn;
-  preflight?: (host: SshHost, sshPort: number, dest: string) => Promise<string[]>;
+  preflight?: (
+    host: SshHost,
+    sshPort: number,
+    dest: string
+  ) => Promise<string[]>;
   readyTimeoutMs?: number;
   readyIntervalMs?: number;
   retryMinMs?: number;
@@ -1323,9 +1695,17 @@ export class NodeConnection {
   private closed = false;
 
   constructor(private readonly opts: NodeConnectionOptions) {
-    this.target = { dest: opts.node.ssh, control: path.join(opts.controlDir, `${opts.node.id}.sock`) };
+    this.target = {
+      dest: opts.node.ssh,
+      control: path.join(opts.controlDir, `${opts.node.id}.sock`),
+    };
     this.run = opts.run ?? spawnRunner;
-    this.host = new SshHost(opts.node.id, this.target, this.run, opts.spawn ?? defaultSpawn);
+    this.host = new SshHost(
+      opts.node.id,
+      this.target,
+      this.run,
+      opts.spawn ?? defaultSpawn
+    );
     this.delay = opts.retryMinMs ?? 1000;
   }
 
@@ -1335,7 +1715,13 @@ export class NodeConnection {
 
   view(): NodeView {
     const { node } = this.opts;
-    return { id: node.id, label: node.label ?? node.ssh, ssh: node.ssh, state: this.state, ...(this.reason ? { reason: this.reason } : {}) };
+    return {
+      id: node.id,
+      label: node.label ?? node.ssh,
+      ssh: node.ssh,
+      state: this.state,
+      ...(this.reason ? { reason: this.reason } : {}),
+    };
   }
 
   start(): void {
@@ -1348,7 +1734,11 @@ export class NodeConnection {
     const master = this.master;
     this.master = undefined;
     if (master && master.exitCode === null) {
-      await this.run("ssh", ["-S", this.target.control, "-O", "exit", this.target.dest], { timeoutMs: 5000 }).catch(() => undefined);
+      await this.run(
+        "ssh",
+        ["-S", this.target.control, "-O", "exit", this.target.dest],
+        { timeoutMs: 5000 }
+      ).catch(() => undefined);
       master.kill();
     }
   }
@@ -1358,8 +1748,15 @@ export class NodeConnection {
     this.set("connecting");
     try {
       await this.openMaster();
-      const port = parseSshPort((await this.run("ssh", ["-G", this.target.dest], { timeoutMs: 10_000 })).stdout);
-      const errors = await (this.opts.preflight ?? nodePreflight)(this.host, port, this.target.dest);
+      const port = parseSshPort(
+        (await this.run("ssh", ["-G", this.target.dest], { timeoutMs: 10_000 }))
+          .stdout
+      );
+      const errors = await (this.opts.preflight ?? nodePreflight)(
+        this.host,
+        port,
+        this.target.dest
+      );
       if (this.closed) return;
       if (errors.length > 0) {
         this.set("error", errors.join("; "));
@@ -1378,11 +1775,17 @@ export class NodeConnection {
   /** Starts a fresh master and resolves once `ssh -O check` answers; rejects with ssh's reason when it exits first. */
   private async openMaster(): Promise<void> {
     this.stopMaster();
-    fs.mkdirSync(path.dirname(this.target.control), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.dirname(this.target.control), {
+      recursive: true,
+      mode: 0o700,
+    });
     fs.chmodSync(path.dirname(this.target.control), 0o700);
     // A socket left by a crash makes the new ssh silently skip being a master.
     fs.rmSync(this.target.control, { force: true });
-    const child = (this.opts.spawn ?? defaultSpawn)("ssh", masterArgs(this.target));
+    const child = (this.opts.spawn ?? defaultSpawn)(
+      "ssh",
+      masterArgs(this.target)
+    );
     this.master = child;
     let stderr = "";
     let exited = false;
@@ -1408,11 +1811,17 @@ export class NodeConnection {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (exited) throw new Error(describeSshFailure(this.target.dest, stderr));
-      const check = await this.run("ssh", ["-S", this.target.control, "-O", "check", this.target.dest], { timeoutMs: 5000 });
+      const check = await this.run(
+        "ssh",
+        ["-S", this.target.control, "-O", "check", this.target.dest],
+        { timeoutMs: 5000 }
+      );
       if (check.exitCode === 0 && !exited) return;
       if (Date.now() > deadline) {
         this.stopMaster();
-        throw new Error(`ssh to ${this.target.dest} did not connect within ${Math.round(timeoutMs / 1000)} s`);
+        throw new Error(
+          `ssh to ${this.target.dest} did not connect within ${Math.round(timeoutMs / 1000)} s`
+        );
       }
       await sleep(this.opts.readyIntervalMs ?? 250);
     }
@@ -1429,7 +1838,8 @@ export class NodeConnection {
     if (this.closed) return;
     clearTimeout(this.retryTimer);
     const wait = ms ?? this.delay;
-    if (ms === undefined) this.delay = nextDelay(this.delay, this.opts.retryMaxMs ?? 60_000);
+    if (ms === undefined)
+      this.delay = nextDelay(this.delay, this.opts.retryMaxMs ?? 60_000);
     this.retryTimer = setTimeout(() => void this.connect(), wait);
     this.retryTimer.unref?.();
   }
@@ -1445,8 +1855,7 @@ export class NodeConnection {
 
 - [ ] **Step 4: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/node-connection.test.ts && pnpm typecheck`
-Expected: PASS. If the "never gets ready" test runs past vitest's 10 s timeout, check that `readyTimeoutMs: 200` is being passed through.
+Run: `pnpm vitest run test/server/node-connection.test.ts && pnpm typecheck` Expected: PASS. If the "never gets ready" test runs past vitest's 10 s timeout, check that `readyTimeoutMs: 200` is being passed through.
 
 - [ ] **Step 5: Commit**
 
@@ -1460,11 +1869,13 @@ git commit -m "feat(server): NodeConnection keeps an ssh master alive with prefl
 ### Task 7: `Nodes` registry and the snapshot
 
 **Files:**
+
 - Create: `src/server/nodes.ts`
 - Modify: `src/server/state.ts`
 - Test: `test/server/nodes.test.ts`, `test/server/state.test.ts`
 
 **Interfaces:**
+
 - Consumes: `loadConfig`, `saveConfig`, `addNode`, `removeNode`, `InvalidNodeError`, `NodeConfig` (Task 4); `NodeConnection` (Task 6); `nodeStats` (Task 5); `Host`, `localHost`, `LOCAL_NODE` (Task 2); `NotFoundError` from `src/server/orchestrator.ts`.
 - Produces:
 
@@ -1506,17 +1917,23 @@ export class Nodes {
 Add to `test/server/state.test.ts` (inside its top-level `describe`, or in a new `describe("nodes", …)`; use the constructor pattern the file already uses):
 
 ```ts
-  it("publishes nodes in the snapshot and skips no-op updates", () => {
-    const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
-    const changes = vi.fn();
-    store.subscribe(changes);
-    expect(store.snapshot().nodes).toBeUndefined();
-    const nodes = [{ id: "local", label: "This machine", state: "online" as const }];
-    store.setNodes(nodes);
-    store.setNodes([...nodes]);
-    expect(store.snapshot().nodes).toEqual(nodes);
-    expect(changes).toHaveBeenCalledTimes(1);
+it("publishes nodes in the snapshot and skips no-op updates", () => {
+  const store = new StateStore({
+    port: 7777,
+    persisted: { projects: {} },
+    persist: () => {},
   });
+  const changes = vi.fn();
+  store.subscribe(changes);
+  expect(store.snapshot().nodes).toBeUndefined();
+  const nodes = [
+    { id: "local", label: "This machine", state: "online" as const },
+  ];
+  store.setNodes(nodes);
+  store.setNodes([...nodes]);
+  expect(store.snapshot().nodes).toEqual(nodes);
+  expect(changes).toHaveBeenCalledTimes(1);
+});
 ```
 
 Import `vi` from vitest if the file doesn't yet.
@@ -1529,8 +1946,15 @@ Create `test/server/nodes.test.ts`:
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InvalidNodeError, loadConfig, saveConfig, type NodeConfig } from "../../src/server/config";
+
+import {
+  InvalidNodeError,
+  loadConfig,
+  saveConfig,
+  type NodeConfig,
+} from "../../src/server/config";
 import { localHost } from "../../src/server/host";
 import { type NodeConnectionPort, Nodes } from "../../src/server/nodes";
 import { NotFoundError } from "../../src/server/orchestrator";
@@ -1539,15 +1963,28 @@ import { fakeRunner } from "../helpers/fake-runner";
 
 const dirs: string[] = [];
 afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0))
+    fs.rmSync(d, { recursive: true, force: true });
 });
 
 function fakeConnection(node: NodeConfig, online: boolean) {
-  const host = { ...localHost(fakeRunner(() => ({ stdout: "4\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n1\n0\n" })).run), id: node.id };
+  const host = {
+    ...localHost(
+      fakeRunner(() => ({
+        stdout: "4\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n1\n0\n",
+      })).run
+    ),
+    id: node.id,
+  };
   return {
     host,
     online,
-    view: (): NodeView => ({ id: node.id, label: node.label ?? node.ssh, ssh: node.ssh, state: online ? "online" : "unreachable" }),
+    view: (): NodeView => ({
+      id: node.id,
+      label: node.label ?? node.ssh,
+      ssh: node.ssh,
+      state: online ? "online" : "unreachable",
+    }),
     start: vi.fn(),
     close: vi.fn(async () => {}),
   } satisfies NodeConnectionPort;
@@ -1556,10 +1993,19 @@ function fakeConnection(node: NodeConfig, online: boolean) {
 function setup(nodes: NodeConfig[] = [], online = true) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-reg-"));
   dirs.push(configDir);
-  saveConfig(configDir, { roots: ["/src"], port: 7777, ...(nodes.length ? { nodes } : {}) });
+  saveConfig(configDir, {
+    roots: ["/src"],
+    port: 7777,
+    ...(nodes.length ? { nodes } : {}),
+  });
   const store = { setNodes: vi.fn() };
   const connections = new Map<string, ReturnType<typeof fakeConnection>>();
-  const stats = vi.fn(async () => ({ cpus: 4, memTotal: 1024, memAvailable: 512, containers: 1 }));
+  const stats = vi.fn(async () => ({
+    cpus: 4,
+    memTotal: 1024,
+    memAvailable: 512,
+    containers: 1,
+  }));
   const registry = new Nodes({
     configDir,
     controlDir: path.join(configDir, "ssh"),
@@ -1578,11 +2024,16 @@ function setup(nodes: NodeConfig[] = [], online = true) {
 
 describe("Nodes", () => {
   it("opens configured nodes on start and lists local first", async () => {
-    const { registry, store, connections } = setup([{ id: "box", ssh: "tim@box" }]);
+    const { registry, store, connections } = setup([
+      { id: "box", ssh: "tim@box" },
+    ]);
     registry.start();
     expect(connections.get("box")?.start).toHaveBeenCalled();
     expect(registry.list().map((n) => n.id)).toEqual(["local", "box"]);
-    expect(registry.list()[0]).toMatchObject({ label: "This machine", state: "online" });
+    expect(registry.list()[0]).toMatchObject({
+      label: "This machine",
+      state: "online",
+    });
     expect(store.setNodes).toHaveBeenCalled();
     await registry.close();
   });
@@ -1590,7 +2041,9 @@ describe("Nodes", () => {
   it("samples stats for local and online nodes", async () => {
     const { registry, store } = setup([{ id: "box", ssh: "tim@box" }]);
     registry.start();
-    await vi.waitFor(() => expect(registry.list().every((n) => n.stats?.cpus === 4)).toBe(true));
+    await vi.waitFor(() =>
+      expect(registry.list().every((n) => n.stats?.cpus === 4)).toBe(true)
+    );
     expect(store.setNodes.mock.calls.at(-1)?.[0]).toEqual(registry.list());
     await registry.close();
   });
@@ -1608,27 +2061,35 @@ describe("Nodes", () => {
     const { registry, configDir, connections } = setup();
     const view = await registry.add({ ssh: "tim@box", label: "Box" });
     expect(view).toMatchObject({ id: "box", label: "Box", ssh: "tim@box" });
-    expect(loadConfig(configDir).nodes).toEqual([{ id: "box", ssh: "tim@box", label: "Box" }]);
+    expect(loadConfig(configDir).nodes).toEqual([
+      { id: "box", ssh: "tim@box", label: "Box" },
+    ]);
     expect(connections.get("box")?.start).toHaveBeenCalled();
     await registry.close();
   });
 
   it("rejects bad input without saving", async () => {
     const { registry, configDir } = setup();
-    await expect(registry.add({ ssh: "-oProxyCommand=x" })).rejects.toBeInstanceOf(InvalidNodeError);
+    await expect(
+      registry.add({ ssh: "-oProxyCommand=x" })
+    ).rejects.toBeInstanceOf(InvalidNodeError);
     await expect(registry.add({})).rejects.toBeInstanceOf(InvalidNodeError);
     expect(loadConfig(configDir).nodes).toBeUndefined();
   });
 
   it("removes a node: closes it and drops it from config", async () => {
-    const { registry, configDir, connections } = setup([{ id: "box", ssh: "tim@box" }]);
+    const { registry, configDir, connections } = setup([
+      { id: "box", ssh: "tim@box" },
+    ]);
     registry.start();
     await registry.remove("box");
     expect(connections.get("box")?.close).toHaveBeenCalled();
     expect(loadConfig(configDir).nodes).toBeUndefined();
     expect(registry.list().map((n) => n.id)).toEqual(["local"]);
     await expect(registry.remove("box")).rejects.toBeInstanceOf(NotFoundError);
-    await expect(registry.remove("local")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(registry.remove("local")).rejects.toBeInstanceOf(
+      NotFoundError
+    );
     await registry.close();
   });
 
@@ -1647,7 +2108,10 @@ describe("Nodes", () => {
   });
 
   it("closes every connection and stops sampling", async () => {
-    const { registry, connections, stats } = setup([{ id: "a", ssh: "a" }, { id: "b", ssh: "b" }]);
+    const { registry, connections, stats } = setup([
+      { id: "a", ssh: "a" },
+      { id: "b", ssh: "b" },
+    ]);
     registry.start();
     await registry.close();
     for (const c of connections.values()) expect(c.close).toHaveBeenCalled();
@@ -1660,8 +2124,7 @@ describe("Nodes", () => {
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/nodes.test.ts test/server/state.test.ts`
-Expected: FAIL, because `nodes.ts` and `setNodes` don't exist.
+Run: `pnpm vitest run test/server/nodes.test.ts test/server/state.test.ts` Expected: FAIL, because `nodes.ts` and `setNodes` don't exist.
 
 - [ ] **Step 4: Implement the store part**
 
@@ -1693,7 +2156,14 @@ Create `src/server/nodes.ts`:
 
 ```ts
 import type { NodeId, NodeStats, NodeView } from "../shared/types";
-import { InvalidNodeError, type NodeConfig, addNode, loadConfig, removeNode, saveConfig } from "./config";
+import {
+  InvalidNodeError,
+  type NodeConfig,
+  addNode,
+  loadConfig,
+  removeNode,
+  saveConfig,
+} from "./config";
 import type { Runner } from "./exec";
 import { type Host, LOCAL_NODE, localHost } from "./host";
 import { NodeConnection } from "./node-connection";
@@ -1734,7 +2204,8 @@ export class Nodes {
   }
 
   start(): void {
-    for (const node of loadConfig(this.opts.configDir).nodes ?? []) this.open(node);
+    for (const node of loadConfig(this.opts.configDir).nodes ?? [])
+      this.open(node);
     this.publish();
     void this.sample();
   }
@@ -1758,7 +2229,8 @@ export class Nodes {
   }
 
   async add(input: { ssh: unknown; label?: unknown }): Promise<NodeView> {
-    if (typeof input.ssh !== "string") throw new InvalidNodeError("an ssh destination is required");
+    if (typeof input.ssh !== "string")
+      throw new InvalidNodeError("an ssh destination is required");
     // Re-read so settings saved meanwhile (forges, projects) aren't lost.
     const { config, node } = addNode(loadConfig(this.opts.configDir), {
       ssh: input.ssh,
@@ -1773,7 +2245,10 @@ export class Nodes {
   async remove(id: NodeId): Promise<void> {
     const conn = this.connections.get(id);
     if (!conn) throw new NotFoundError(`no node ${id}`);
-    saveConfig(this.opts.configDir, removeNode(loadConfig(this.opts.configDir), id));
+    saveConfig(
+      this.opts.configDir,
+      removeNode(loadConfig(this.opts.configDir), id)
+    );
     this.connections.delete(id);
     this.stats.delete(id);
     await conn.close();
@@ -1790,7 +2265,11 @@ export class Nodes {
     const connect =
       this.opts.connect ??
       ((n: NodeConfig, onChange: () => void) =>
-        new NodeConnection({ node: n, controlDir: this.opts.controlDir, onChange }));
+        new NodeConnection({
+          node: n,
+          controlDir: this.opts.controlDir,
+          onChange,
+        }));
     const conn = connect(node, () => this.publish());
     this.connections.set(node.id, conn);
     conn.start();
@@ -1813,11 +2292,14 @@ export class Nodes {
         const stats = await read(host.run).catch(() => undefined);
         if (stats) this.stats.set(id, stats);
         else this.stats.delete(id);
-      }),
+      })
     );
     if (this.stopped) return;
     this.publish();
-    this.timer = setTimeout(() => void this.sample(), this.opts.statsIntervalMs ?? 10_000);
+    this.timer = setTimeout(
+      () => void this.sample(),
+      this.opts.statsIntervalMs ?? 10_000
+    );
     this.timer.unref?.();
   }
 }
@@ -1825,8 +2307,7 @@ export class Nodes {
 
 - [ ] **Step 6: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/nodes.test.ts test/server/state.test.ts && pnpm typecheck`
-Expected: PASS. If importing `NotFoundError` from `orchestrator.ts` makes a cycle that typecheck or the tests trip over, move `NotFoundError` to a new `src/server/errors.ts`, re-export it from `orchestrator.ts`, and import it from there in `nodes.ts`.
+Run: `pnpm vitest run test/server/nodes.test.ts test/server/state.test.ts && pnpm typecheck` Expected: PASS. If importing `NotFoundError` from `orchestrator.ts` makes a cycle that typecheck or the tests trip over, move `NotFoundError` to a new `src/server/errors.ts`, re-export it from `orchestrator.ts`, and import it from there in `nodes.ts`.
 
 - [ ] **Step 7: Commit**
 
@@ -1840,10 +2321,12 @@ git commit -m "feat(server): Nodes registry publishes node health and capacity"
 ### Task 8: API endpoints, CLI subcommand, and wiring
 
 **Files:**
+
 - Modify: `src/server/dashboard-api.ts`, `src/server/cli.ts`
 - Test: `test/server/dashboard-api.test.ts`, `test/server/cli.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Nodes` (Task 7); `addNode`, `removeNode`, `loadConfig`, `saveConfig`, `InvalidNodeError` (Task 4).
 - Produces:
   - `DashboardDeps.nodes?: Pick<Nodes, "add" | "remove">`.
@@ -1861,18 +2344,35 @@ describe("node endpoints", () => {
     const base = setup();
     const nodes = {
       add: vi.fn(async (input: { ssh: unknown; label?: unknown }) => {
-        if (input.ssh === "-bad") throw new InvalidNodeError("invalid ssh destination");
-        return { id: "box", label: "Box", ssh: String(input.ssh), state: "connecting" as const };
+        if (input.ssh === "-bad")
+          throw new InvalidNodeError("invalid ssh destination");
+        return {
+          id: "box",
+          label: "Box",
+          ssh: String(input.ssh),
+          state: "connecting" as const,
+        };
       }),
       remove: vi.fn(async (id: string) => {
         if (id !== "box") throw new NotFoundError(`no node ${id}`);
       }),
     };
-    const app = createDashboardApp({ store: base.store, orchestrator: base.orchestrator, onboarding: base.onboarding, push: base.push, cleanup: base.cleanup, nodes });
+    const app = createDashboardApp({
+      store: base.store,
+      orchestrator: base.orchestrator,
+      onboarding: base.onboarding,
+      push: base.push,
+      cleanup: base.cleanup,
+      nodes,
+    });
     return { app, nodes };
   }
   const post = (app: ReturnType<typeof createDashboardApp>, body: unknown) =>
-    app.request("/api/nodes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    app.request("/api/nodes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
 
   it("adds a node", async () => {
     const { app, nodes } = withNodes();
@@ -1889,9 +2389,13 @@ describe("node endpoints", () => {
 
   it("removes a node, and answers 404 for an unknown one", async () => {
     const { app, nodes } = withNodes();
-    expect((await app.request("/api/nodes/box", { method: "DELETE" })).status).toBe(200);
+    expect(
+      (await app.request("/api/nodes/box", { method: "DELETE" })).status
+    ).toBe(200);
     expect(nodes.remove).toHaveBeenCalledWith("box");
-    expect((await app.request("/api/nodes/nope", { method: "DELETE" })).status).toBe(404);
+    expect(
+      (await app.request("/api/nodes/nope", { method: "DELETE" })).status
+    ).toBe(404);
   });
 
   it("answers 412 when nodes aren't available", async () => {
@@ -1912,7 +2416,10 @@ describe("runNodesCommand", () => {
   function run(dir: string, ...argv: string[]) {
     const out: string[] = [];
     const err: string[] = [];
-    const code = runNodesCommand(argv, dir, { log: (s) => out.push(s), error: (s) => err.push(s) });
+    const code = runNodesCommand(argv, dir, {
+      log: (s) => out.push(s),
+      error: (s) => err.push(s),
+    });
     return { code, out, err };
   }
 
@@ -1920,7 +2427,9 @@ describe("runNodesCommand", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-nodes-"));
     try {
       saveConfig(dir, { roots: ["/a"], port: 7777 });
-      expect(run(dir, "list").out).toEqual(["No nodes yet. Add one: opendevhub nodes add user@host"]);
+      expect(run(dir, "list").out).toEqual([
+        "No nodes yet. Add one: opendevhub nodes add user@host",
+      ]);
       const added = run(dir, "add", "tim@box", "--label", "Box");
       expect(added.code).toBe(0);
       expect(added.out[0]).toMatch(/added node box \(tim@box\)/);
@@ -1955,8 +2464,7 @@ describe("runNodesCommand", () => {
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/dashboard-api.test.ts test/server/cli.test.ts`
-Expected: FAIL, because the endpoints and `runNodesCommand` are missing.
+Run: `pnpm vitest run test/server/dashboard-api.test.ts test/server/cli.test.ts` Expected: FAIL, because the endpoints and `runNodesCommand` are missing.
 
 - [ ] **Step 4: Implement the API**
 
@@ -1974,12 +2482,16 @@ In `src/server/dashboard-api.ts`:
 - In `createDashboardApp`, destructure `nodes` and, after the cleanup routes, add:
 
 ```ts
-  const requireNodes = () => {
-    if (!nodes) throw new UnavailableError("remote nodes are not available");
-    return nodes;
-  };
-  app.post("/api/nodes", (c) => json(c, (_id, b) => requireNodes().add({ ssh: b.ssh, label: b.label })));
-  app.delete("/api/nodes/:id", (c) => json(c, async (id) => void (await requireNodes().remove(id))));
+const requireNodes = () => {
+  if (!nodes) throw new UnavailableError("remote nodes are not available");
+  return nodes;
+};
+app.post("/api/nodes", (c) =>
+  json(c, (_id, b) => requireNodes().add({ ssh: b.ssh, label: b.label }))
+);
+app.delete("/api/nodes/:id", (c) =>
+  json(c, async (id) => void (await requireNodes().remove(id)))
+);
 ```
 
 `json` answers `{ ok: true }` when the handler returns `undefined`.
@@ -2001,29 +2513,47 @@ Remote nodes:
 - Add:
 
 ```ts
-const NODES_USAGE = "usage: opendevhub nodes add <ssh-destination> [--label <name>] | nodes list | nodes remove <id>";
+const NODES_USAGE =
+  "usage: opendevhub nodes add <ssh-destination> [--label <name>] | nodes list | nodes remove <id>";
 
 /** `opendevhub nodes …`: edits config.json; a running opendevhub picks changes up on restart. */
-export function runNodesCommand(argv: string[], dir: string, out: { log(s: string): void; error(s: string): void }): number {
+export function runNodesCommand(
+  argv: string[],
+  dir: string,
+  out: { log(s: string): void; error(s: string): void }
+): number {
   const [sub, ...rest] = argv;
   try {
     if (sub === "list") {
       const nodes = loadConfig(dir).nodes ?? [];
-      if (nodes.length === 0) out.log("No nodes yet. Add one: opendevhub nodes add user@host");
-      for (const n of nodes) out.log([n.id, n.ssh, ...(n.label ? [n.label] : [])].join("\t"));
+      if (nodes.length === 0)
+        out.log("No nodes yet. Add one: opendevhub nodes add user@host");
+      for (const n of nodes)
+        out.log([n.id, n.ssh, ...(n.label ? [n.label] : [])].join("\t"));
       return 0;
     }
     if (sub === "add") {
-      const { values, positionals } = parseArgs({ args: rest, options: { label: { type: "string" } }, allowPositionals: true, strict: true });
+      const { values, positionals } = parseArgs({
+        args: rest,
+        options: { label: { type: "string" } },
+        allowPositionals: true,
+        strict: true,
+      });
       if (positionals.length !== 1) throw new Error(NODES_USAGE);
-      const { config, node } = addNode(loadConfig(dir), { ssh: positionals[0], ...(values.label ? { label: values.label } : {}) });
+      const { config, node } = addNode(loadConfig(dir), {
+        ssh: positionals[0],
+        ...(values.label ? { label: values.label } : {}),
+      });
       saveConfig(dir, config);
-      out.log(`added node ${node.id} (${node.ssh}); a running opendevhub connects to it after a restart, or add it on the Nodes page instead`);
+      out.log(
+        `added node ${node.id} (${node.ssh}); a running opendevhub connects to it after a restart, or add it on the Nodes page instead`
+      );
       return 0;
     }
     if (sub === "remove" && rest.length === 1) {
       const cfg = loadConfig(dir);
-      if (!cfg.nodes?.some((n) => n.id === rest[0])) throw new Error(`no node ${rest[0]}`);
+      if (!cfg.nodes?.some((n) => n.id === rest[0]))
+        throw new Error(`no node ${rest[0]}`);
       saveConfig(dir, removeNode(cfg, rest[0]));
       out.log(`removed node ${rest[0]}`);
       return 0;
@@ -2039,25 +2569,28 @@ export function runNodesCommand(argv: string[], dir: string, out: { log(s: strin
 - At the top of `main`, before `parseCli`:
 
 ```ts
-  if (argv[0] === "nodes") {
-    process.exitCode = runNodesCommand(argv.slice(1), configDir(), console);
-    return;
-  }
+if (argv[0] === "nodes") {
+  process.exitCode = runNodesCommand(argv.slice(1), configDir(), console);
+  return;
+}
 ```
 
 - In `main`, after `store.setRoots(...)`:
 
 ```ts
-  const nodes = new Nodes({ configDir: dir, controlDir: path.join(dir, "ssh"), store });
-  nodes.start();
+const nodes = new Nodes({
+  configDir: dir,
+  controlDir: path.join(dir, "ssh"),
+  store,
+});
+nodes.start();
 ```
 
 Pass `nodes` to `createDashboardApp({ … })`. In `shutdown`, add `await nodes.close();` right after `await orchestrator.shutdown();`.
 
 - [ ] **Step 6: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/dashboard-api.test.ts test/server/cli.test.ts && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/server/dashboard-api.test.ts test/server/cli.test.ts && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -2071,18 +2604,23 @@ git commit -m "feat(server): add and remove nodes from the API and the CLI"
 ### Task 9: The `ssh` route
 
 **Files:**
+
 - Modify: `src/server/network.ts`, `src/server/port-forwarder.ts`
 - Test: `test/server/network.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Host` (Task 2).
 - Produces:
 
 ```ts
-export type Dial = (port: number) => Promise<Duplex>;               // was Promise<net.Socket>
+export type Dial = (port: number) => Promise<Duplex>; // was Promise<net.Socket>
 // Route.kind: "direct" | "gateway" | "ssh"
 export function openTunnel(dial: () => Promise<Duplex>): Promise<Tunnel>;
-export function tunnelRoute(kind: "gateway" | "ssh", dial: Dial): Promise<Route>;
+export function tunnelRoute(
+  kind: "gateway" | "ssh",
+  dial: Dial
+): Promise<Route>;
 export function sshRoute(host: Pick<Host, "dial">, ip: string): Promise<Route>;
 ```
 
@@ -2130,8 +2668,7 @@ describe("sshRoute", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/server/network.test.ts`
-Expected: FAIL, because `sshRoute` isn't exported.
+Run: `pnpm vitest run test/server/network.test.ts` Expected: FAIL, because `sshRoute` isn't exported.
 
 - [ ] **Step 3: Implement**
 
@@ -2145,12 +2682,17 @@ In `src/server/network.ts`:
 
 ```ts
 /** Loopback tunnels for opencode and the relay, each connection through `dial`. */
-export async function tunnelRoute(kind: "gateway" | "ssh", dial: Dial): Promise<Route> {
+export async function tunnelRoute(
+  kind: "gateway" | "ssh",
+  dial: Dial
+): Promise<Route> {
   const opencode = await openTunnel(() => dial(OPENCODE_PORT));
-  const relay = await openTunnel(() => dial(RELAY_PORT)).catch(async (err: unknown) => {
-    await opencode.close();
-    throw err;
-  });
+  const relay = await openTunnel(() => dial(RELAY_PORT)).catch(
+    async (err: unknown) => {
+      await opencode.close();
+      throw err;
+    }
+  );
   return {
     kind,
     opencode: opencode.address,
@@ -2171,15 +2713,14 @@ export function sshRoute(host: Pick<Host, "dial">, ip: string): Promise<Route> {
 - Replace the tail of `Network.route` (from `const dial: Dial = …` to the end of the method) with:
 
 ```ts
-    return tunnelRoute("gateway", (port) => gateway.connect(container.ip, port));
+return tunnelRoute("gateway", (port) => gateway.connect(container.ip, port));
 ```
 
 In `src/server/port-forwarder.ts`, import `type { Duplex } from "node:stream"`. Change the `Forward.sockets` set, the `upstream` variable and the `pipe` parameter from `net.Socket` to `Duplex`. Client sockets are `net.Socket`, which is a `Duplex`, so the set still holds them.
 
 - [ ] **Step 4: Run tests and typecheck**
 
-Run: `pnpm vitest run test/server/network.test.ts test/server/port-forwarder.test.ts test/server/gateway.test.ts && pnpm typecheck`
-Expected: PASS. Typecheck may name other places that assumed `net.Socket` from a `Dial`. Change those to `Duplex` the same way, without changing behaviour.
+Run: `pnpm vitest run test/server/network.test.ts test/server/port-forwarder.test.ts test/server/gateway.test.ts && pnpm typecheck` Expected: PASS. Typecheck may name other places that assumed `net.Socket` from a `Dial`. Change those to `Duplex` the same way, without changing behaviour.
 
 - [ ] **Step 5: Commit**
 
@@ -2193,11 +2734,13 @@ git commit -m "feat(server): ssh route tunnels to a container through a node"
 ### Task 10: Nodes page in the dashboard
 
 **Files:**
+
 - Modify: `src/web/api.ts`, `src/web/App.tsx`, `src/web/layout/Shell.tsx`
 - Create: `src/web/nodes.ts`, `src/web/pages/NodesPage.tsx`
 - Test: `test/web/nodes.test.ts`
 
 **Interfaces:**
+
 - Consumes: `NodeView`, `NodeStats`, `NodeState` (Task 2); `POST /api/nodes` and `DELETE /api/nodes/:id` (Task 8); `formatMemory` from `src/web/resources.ts`.
 - Produces:
 
@@ -2205,7 +2748,9 @@ git commit -m "feat(server): ssh route tunnels to a container through a node"
 // src/web/nodes.ts
 export function nodeStateLabel(state: NodeState): string;
 export function nodeStateClass(state: NodeState): string;
-export function formatNodeStats(stats: NodeStats | undefined): string | undefined;
+export function formatNodeStats(
+  stats: NodeStats | undefined
+): string | undefined;
 export function nodesNeedingAttention(nodes: NodeView[] | undefined): number;
 // src/web/api.ts
 export function addNode(ssh: string, label?: string): Promise<NodeView>;
@@ -2218,7 +2763,12 @@ Create `test/web/nodes.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { formatNodeStats, nodeStateLabel, nodesNeedingAttention } from "../../src/web/nodes";
+
+import {
+  formatNodeStats,
+  nodeStateLabel,
+  nodesNeedingAttention,
+} from "../../src/web/nodes";
 
 const GiB = 1024 ** 3;
 
@@ -2231,12 +2781,22 @@ describe("node view helpers", () => {
   });
 
   it("formats stats on one line", () => {
-    expect(formatNodeStats({ cpus: 8, memTotal: 32 * GiB, memAvailable: 12.5 * GiB, containers: 3 })).toBe(
-      "8 CPUs · 12.5 GiB free of 32.0 GiB · 3 containers",
-    );
-    expect(formatNodeStats({ cpus: 1, memTotal: GiB, memAvailable: 512 * 1024 ** 2, containers: 1 })).toBe(
-      "1 CPU · 512 MiB free of 1.0 GiB · 1 container",
-    );
+    expect(
+      formatNodeStats({
+        cpus: 8,
+        memTotal: 32 * GiB,
+        memAvailable: 12.5 * GiB,
+        containers: 3,
+      })
+    ).toBe("8 CPUs · 12.5 GiB free of 32.0 GiB · 3 containers");
+    expect(
+      formatNodeStats({
+        cpus: 1,
+        memTotal: GiB,
+        memAvailable: 512 * 1024 ** 2,
+        containers: 1,
+      })
+    ).toBe("1 CPU · 512 MiB free of 1.0 GiB · 1 container");
     expect(formatNodeStats(undefined)).toBeUndefined();
   });
 
@@ -2248,7 +2808,7 @@ describe("node view helpers", () => {
         { id: "a", label: "a", state: "unreachable" },
         { id: "b", label: "b", state: "error" },
         { id: "c", label: "c", state: "connecting" },
-      ]),
+      ])
     ).toBe(2);
   });
 });
@@ -2256,8 +2816,7 @@ describe("node view helpers", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm vitest run test/web/nodes.test.ts`
-Expected: FAIL, because the module doesn't exist.
+Run: `pnpm vitest run test/web/nodes.test.ts` Expected: FAIL, because the module doesn't exist.
 
 - [ ] **Step 3: Implement the helpers and API calls**
 
@@ -2288,7 +2847,9 @@ export function nodeStateClass(state: NodeState): string {
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 /** "8 CPUs · 12.5 GiB free of 32.0 GiB · 3 containers". */
-export function formatNodeStats(stats: NodeStats | undefined): string | undefined {
+export function formatNodeStats(
+  stats: NodeStats | undefined
+): string | undefined {
   if (!stats) return undefined;
   return [
     plural(stats.cpus, "CPU"),
@@ -2298,7 +2859,9 @@ export function formatNodeStats(stats: NodeStats | undefined): string | undefine
 }
 
 export function nodesNeedingAttention(nodes: NodeView[] | undefined): number {
-  return (nodes ?? []).filter((n) => n.state === "unreachable" || n.state === "error").length;
+  return (nodes ?? []).filter(
+    (n) => n.state === "unreachable" || n.state === "error"
+  ).length;
 }
 ```
 
@@ -2318,15 +2881,16 @@ export async function addNode(ssh: string, label?: string): Promise<NodeView> {
 }
 
 export async function removeNode(id: string): Promise<void> {
-  const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw await failure(res, "remove node");
 }
 ```
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm vitest run test/web/nodes.test.ts`
-Expected: PASS.
+Run: `pnpm vitest run test/web/nodes.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Build the page**
 
@@ -2334,14 +2898,30 @@ Create `src/web/pages/NodesPage.tsx`:
 
 ```tsx
 import { type FormEvent, useState } from "react";
-import type { NodeView } from "../../shared/types";
+
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+
+import type { NodeView } from "../../shared/types";
 import { addNode, removeNode } from "../api";
-import { Chip, muted, Note, Page, PageHeader, Section } from "../components/Page";
+import {
+  Chip,
+  muted,
+  Note,
+  Page,
+  PageHeader,
+  Section,
+} from "../components/Page";
 import { useDash } from "../DashboardContext";
 import { formatNodeStats, nodeStateClass, nodeStateLabel } from "../nodes";
 
@@ -2352,12 +2932,21 @@ function NodeRow(props: { node: NodeView; onRemove?: () => void }) {
     <div className="flex flex-col gap-1 border-b px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{node.label}</span>
-        {node.ssh && node.ssh !== node.label && <span className="font-mono text-sm text-muted-foreground">{node.ssh}</span>}
+        {node.ssh && node.ssh !== node.label && (
+          <span className="text-muted-foreground font-mono text-sm">
+            {node.ssh}
+          </span>
+        )}
         <Chip variant="outline" className={nodeStateClass(node.state)}>
           {nodeStateLabel(node.state)}
         </Chip>
         {props.onRemove && (
-          <Button size="sm" variant="ghost" className="ml-auto h-7" onClick={props.onRemove}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-7"
+            onClick={props.onRemove}
+          >
             Remove
           </Button>
         )}
@@ -2401,36 +2990,71 @@ export function NodesPage() {
 
   return (
     <Page>
-      <PageHeader title="Nodes" description="Machines that run task environments, reached over ssh. Tasks can't be placed on them yet." />
+      <PageHeader
+        title="Nodes"
+        description="Machines that run task environments, reached over ssh. Tasks can't be placed on them yet."
+      />
 
       <Section title="Machines">
         {nodes.map((node) => (
-          <NodeRow key={node.id} node={node} onRemove={node.id === "local" ? undefined : () => setRemoving(node)} />
+          <NodeRow
+            key={node.id}
+            node={node}
+            onRemove={node.id === "local" ? undefined : () => setRemoving(node)}
+          />
         ))}
       </Section>
 
-      <Section title="Add a node" hint="needs Docker, the devcontainer CLI and git ≥ 2.48 on the machine, and an ssh key that works without a prompt">
-        <form className="flex flex-wrap items-end gap-3 px-4 py-3" onSubmit={(e) => void submit(e)}>
+      <Section
+        title="Add a node"
+        hint="needs Docker, the devcontainer CLI and git ≥ 2.48 on the machine, and an ssh key that works without a prompt"
+      >
+        <form
+          className="flex flex-wrap items-end gap-3 px-4 py-3"
+          onSubmit={(e) => void submit(e)}
+        >
           <div className="flex min-w-56 flex-1 flex-col gap-1.5">
             <Label htmlFor="node-ssh">ssh destination</Label>
-            <Input id="node-ssh" placeholder="tim@workstation" value={ssh} onChange={(e) => setSsh(e.target.value)} autoComplete="off" spellCheck={false} />
+            <Input
+              id="node-ssh"
+              placeholder="tim@workstation"
+              value={ssh}
+              onChange={(e) => setSsh(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
           </div>
           <div className="flex min-w-40 flex-col gap-1.5">
             <Label htmlFor="node-label">Label (optional)</Label>
-            <Input id="node-label" placeholder="Workstation" value={label} onChange={(e) => setLabel(e.target.value)} />
+            <Input
+              id="node-label"
+              placeholder="Workstation"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
           </div>
           <Button type="submit" disabled={busy || ssh.trim() === ""}>
             Add node
           </Button>
         </form>
-        {error && <Note warn className="mx-4 mb-3">{error}</Note>}
+        {error && (
+          <Note warn className="mx-4 mb-3">
+            {error}
+          </Note>
+        )}
       </Section>
 
-      <Dialog open={!!removing} onOpenChange={(open) => !open && setRemoving(undefined)}>
+      <Dialog
+        open={!!removing}
+        onOpenChange={(open) => !open && setRemoving(undefined)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remove {removing?.label}?</DialogTitle>
-            <DialogDescription>opendevhub disconnects and forgets this node. Nothing on the machine is deleted.</DialogDescription>
+            <DialogDescription>
+              opendevhub disconnects and forgets this node. Nothing on the
+              machine is deleted.
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRemoving(undefined)}>
@@ -2456,21 +3080,28 @@ In `src/web/App.tsx`, import `NodesPage` and add `<Route path="nodes" element={<
 In `src/web/layout/Shell.tsx`, add `ServerIcon` to the `lucide-react` import, import `nodesNeedingAttention` from `../nodes`, and add after the Cleanup `NavItem`:
 
 ```tsx
-            <NavItem to="/nodes" badge={nodesNeedingAttention(snapshot.nodes) > 0 && <Count n={nodesNeedingAttention(snapshot.nodes)} tone="attention" />}>
-              <ServerIcon /> Nodes
-            </NavItem>
+<NavItem
+  to="/nodes"
+  badge={
+    nodesNeedingAttention(snapshot.nodes) > 0 && (
+      <Count n={nodesNeedingAttention(snapshot.nodes)} tone="attention" />
+    )
+  }
+>
+  <ServerIcon /> Nodes
+</NavItem>
 ```
 
 `Count` is the component the Sessions item already uses.
 
 - [ ] **Step 7: Typecheck, test, build**
 
-Run: `pnpm typecheck && pnpm vitest run test/web && pnpm build`
-Expected: PASS, and the build succeeds.
+Run: `pnpm typecheck && pnpm vitest run test/web && pnpm build` Expected: PASS, and the build succeeds.
 
 - [ ] **Step 8: Check it in the browser**
 
 Run `pnpm dev` and `pnpm dev:web` (or use the `run` skill). Open `/nodes`. Check:
+
 - "This machine" is listed as Online with stats (on Linux).
 - Adding `-x` shows the "invalid ssh destination" note.
 - Adding `nosuchhost.invalid` lists it, and within about 15 s it shows "Unreachable" with ssh's reason.
@@ -2490,10 +3121,12 @@ git commit -m "feat(web): Nodes page to add, watch and remove nodes"
 ### Task 11: Integration test against `ssh localhost`, and docs
 
 **Files:**
+
 - Create: `test/server/ssh-localhost.test.ts`
 - Modify: `../../README.md`
 
 **Interfaces:**
+
 - Consumes: `NodeConnection` (Task 6), `SshHost` (Task 3), `sshRoute` (Task 9).
 
 - [ ] **Step 1: Write the opt-in integration test**
@@ -2510,7 +3143,9 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
 import { afterAll, describe, expect, it } from "vitest";
+
 import { sshRoute } from "../../src/server/network";
 import { NodeConnection } from "../../src/server/node-connection";
 
@@ -2518,7 +3153,12 @@ const enabled = process.env.ODH_TEST_SSH_LOCALHOST === "1";
 
 describe.skipIf(!enabled)("ssh localhost", () => {
   const controlDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-it-"));
-  const conn = new NodeConnection({ node: { id: "it", ssh: "localhost" }, controlDir, onChange: () => {}, preflight: async () => [] });
+  const conn = new NodeConnection({
+    node: { id: "it", ssh: "localhost" },
+    controlDir,
+    onChange: () => {},
+    preflight: async () => [],
+  });
   afterAll(async () => {
     await conn.close();
     fs.rmSync(controlDir, { recursive: true, force: true });
@@ -2526,7 +3166,9 @@ describe.skipIf(!enabled)("ssh localhost", () => {
 
   it("connects, runs commands, moves files and dials", async () => {
     conn.start();
-    await expect.poll(() => conn.view().state, { timeout: 20_000 }).toBe("online");
+    await expect
+      .poll(() => conn.view().state, { timeout: 20_000 })
+      .toBe("online");
 
     const r = await conn.host.run("printf", ["%s|", "a b", "it's", "$HOME"]);
     expect(r.stdout).toBe("a b|it's|$HOME|");
@@ -2535,13 +3177,19 @@ describe.skipIf(!enabled)("ssh localhost", () => {
     await conn.host.writeFile(file, "über\n");
     expect(await conn.host.readFile(file)).toBe("über\n");
 
-    const server = net.createServer((s) => s.on("data", (d) => s.write(`echo:${d.toString()}`)));
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const server = net.createServer((s) =>
+      s.on("data", (d) => s.write(`echo:${d.toString()}`))
+    );
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve)
+    );
     const port = (server.address() as net.AddressInfo).port;
     const route = await sshRoute(conn.host, "127.0.0.1");
     const stream = await route.dial!(port);
     stream.write("hi");
-    const reply = await new Promise<string>((resolve) => stream.once("data", (d: Buffer) => resolve(d.toString())));
+    const reply = await new Promise<string>((resolve) =>
+      stream.once("data", (d: Buffer) => resolve(d.toString()))
+    );
     expect(reply).toBe("echo:hi");
     stream.destroy();
     await route.close();
@@ -2552,12 +3200,9 @@ describe.skipIf(!enabled)("ssh localhost", () => {
 
 - [ ] **Step 2: Run it**
 
-Run: `pnpm vitest run test/server/ssh-localhost.test.ts`
-Expected: skipped (1 skipped).
+Run: `pnpm vitest run test/server/ssh-localhost.test.ts` Expected: skipped (1 skipped).
 
-Then, if `ssh -o BatchMode=yes localhost true` succeeds on this machine:
-Run: `ODH_TEST_SSH_LOCALHOST=1 pnpm vitest run test/server/ssh-localhost.test.ts`
-Expected: PASS. If localhost isn't set up (for example "Host key verification failed"), report that in the task summary instead of changing the machine's ssh config.
+Then, if `ssh -o BatchMode=yes localhost true` succeeds on this machine: Run: `ODH_TEST_SSH_LOCALHOST=1 pnpm vitest run test/server/ssh-localhost.test.ts` Expected: PASS. If localhost isn't set up (for example "Host key verification failed"), report that in the task summary instead of changing the machine's ssh config.
 
 - [ ] **Step 3: Document**
 
@@ -2566,29 +3211,20 @@ In `README.md` at the repo root, add a section before `## Development`:
 ```markdown
 ## Remote nodes (preview)
 
-Other machines can join as nodes, reached over ssh. Tasks can't be placed on them yet; for now
-the Nodes page shows whether each one is reachable and ready, and how much CPU and memory it
-has free.
+Other machines can join as nodes, reached over ssh. Tasks can't be placed on them yet; for now the Nodes page shows whether each one is reachable and ready, and how much CPU and memory it has free.
 
-Add one on the Nodes page, or with `opendevhub nodes add tim@workstation --label Workstation`
-(then restart opendevhub). A node needs:
+Add one on the Nodes page, or with `opendevhub nodes add tim@workstation --label Workstation` (then restart opendevhub). A node needs:
 
-- Docker, the devcontainer CLI and git 2.48 or newer, on the PATH of a **non-interactive** ssh
-  shell. Tools installed through nvm or a login profile often aren't: check with
-  `ssh tim@workstation 'devcontainer --version'`, and if it fails, link the binary into
-  `/usr/local/bin` or set PATH in `~/.ssh/environment` (with `PermitUserEnvironment yes`).
+- Docker, the devcontainer CLI and git 2.48 or newer, on the PATH of a **non-interactive** ssh shell. Tools installed through nvm or a login profile often aren't: check with `ssh tim@workstation 'devcontainer --version'`, and if it fails, link the binary into `/usr/local/bin` or set PATH in `~/.ssh/environment` (with `PermitUserEnvironment yes`).
 - An ssh key that logs in without a prompt, and a known host key: run `ssh tim@workstation` once.
 - `AllowTcpForwarding yes` in its sshd config (the default).
 
-opendevhub keeps one ssh connection per node (a ControlMaster under
-`~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Nothing is
-installed on the node and nothing listens there besides sshd.
+opendevhub keeps one ssh connection per node (a ControlMaster under `~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Nothing is installed on the node and nothing listens there besides sshd.
 ```
 
 - [ ] **Step 4: Full verification**
 
-Run: `pnpm typecheck && pnpm test && pnpm build`
-Expected: everything passes, and the build succeeds.
+Run: `pnpm typecheck && pnpm test && pnpm build` Expected: everything passes, and the build succeeds.
 
 - [ ] **Step 5: Commit**
 

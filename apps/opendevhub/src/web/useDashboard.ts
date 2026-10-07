@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+
 import type { DashboardSnapshot } from "../shared/types";
 import { fetchLogs, subscribe } from "./api";
 import { staleNotificationTags } from "./derive";
@@ -7,7 +8,7 @@ import { closeNotifications } from "./push";
 const MAX_LOG_LINES = 500;
 const LOG_FLUSH_MS = 150;
 
-export function useDashboard() {
+export const useDashboard = () => {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot>();
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<Record<string, string[]>>({});
@@ -23,21 +24,25 @@ export function useDashboard() {
       pending = {};
       setLogs((all) => {
         const next = { ...all };
-        for (const [id, lines] of Object.entries(batch)) next[id] = [...(all[id] ?? []), ...lines].slice(-MAX_LOG_LINES);
+        for (const [id, lines] of Object.entries(batch)) {
+          next[id] = [...(all[id] ?? []), ...lines].slice(-MAX_LOG_LINES);
+        }
         return next;
       });
     };
     const unsubscribe = subscribe({
-      onSnapshot: (next) => {
-        // Notifications come from the server by Web Push; drop the ones answered meanwhile.
-        void closeNotifications((tags) => staleNotificationTags(next, tags)).catch(() => {});
-        setSnapshot(next);
-      },
+      onConnection: setConnected,
       onLog: ({ projectId, line }) => {
         (pending[projectId] ??= []).push(line);
         timer ??= setTimeout(flush, LOG_FLUSH_MS);
       },
-      onConnection: setConnected,
+      onSnapshot: (next) => {
+        // Notifications come from the server by Web Push; drop the ones answered meanwhile.
+        void closeNotifications((tags) =>
+          staleNotificationTags(next, tags)
+        ).catch(() => undefined);
+        setSnapshot(next);
+      },
     });
     return () => {
       clearTimeout(timer);
@@ -50,5 +55,5 @@ export function useDashboard() {
     setLogs((all) => ({ ...all, [projectId]: lines }));
   }, []);
 
-  return { snapshot, connected, logs, loadLogs };
-}
+  return { connected, loadLogs, logs, snapshot };
+};

@@ -1,18 +1,32 @@
-import { useState } from "react";
 import { SettingsIcon } from "lucide-react";
-import type { ProjectView } from "../../shared/types";
+import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+import type { ProjectView } from "../../shared/types";
 import { ChecksSettings } from "./ChecksSettings";
 import { Tip } from "./Tip";
 
 /** A gear in the project's header that opens its settings. */
-export function ProjectSettingsButton({ view }: { view: ProjectView }) {
+export const ProjectSettingsButton = ({ view }: { view: ProjectView }) => {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Tip label="Project settings">
-        <Button variant="ghost" size="icon" className="text-muted-foreground" aria-label="Project settings" onClick={() => setOpen(true)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground"
+          aria-label="Project settings"
+          onClick={() => setOpen(true)}
+        >
           <SettingsIcon />
         </Button>
       </Tip>
@@ -28,4 +42,4 @@ export function ProjectSettingsButton({ view }: { view: ProjectView }) {
       </Dialog>
     </>
   );
-}
+};

@@ -15,15 +15,30 @@ export interface CardKey {
   modified: boolean;
 }
 
-const ACTIONS: Record<string, CardAction> = { Enter: "once", a: "always", r: "reject", j: "next", k: "prev" };
+const ACTIONS: Record<string, CardAction> = {
+  Enter: "once",
+  a: "always",
+  j: "next",
+  k: "prev",
+  r: "reject",
+};
 
 /** Which action a keydown on a pending card triggers, if any. */
-export function cardAction(k: CardKey, mountedAt: number, now: number): CardAction | undefined {
-  if (!k.onCard || k.modified || k.repeat || now - mountedAt < ARM_DELAY_MS) return undefined;
+export const cardAction = (
+  k: CardKey,
+  mountedAt: number,
+  now: number
+): CardAction | undefined => {
+  if (!k.onCard || k.modified || k.repeat || now - mountedAt < ARM_DELAY_MS) {
+    return undefined;
+  }
   return ACTIONS[k.key];
-}
+};
 
 /** A card that appears after the previous one was answered may only take focus from nowhere or from its own stack. */
-export function canTakeFocus<T>(active: T | null, body: T, stack: { contains(node: T): boolean } | null): boolean {
-  return active === null || active === body || (stack?.contains(active) ?? false);
-}
+export const canTakeFocus = <T>(
+  active: T | null,
+  body: T,
+  stack: { contains: (node: T) => boolean } | null
+): boolean =>
+  active === null || active === body || (stack?.contains(active) ?? false);

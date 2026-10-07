@@ -1,4 +1,7 @@
-export type { IntegrationSettings as JiraSettings, IntegrationSettingsInput as JiraSettingsInput } from "./integrations";
+export type {
+  IntegrationSettings as JiraSettings,
+  IntegrationSettingsInput as JiraSettingsInput,
+} from "./integrations";
 
 export interface JiraTicketSummary {
   key: string;
@@ -34,12 +37,11 @@ export interface JiraTaskSource {
   description: string;
 }
 
-export const JIRA_KEY = /^[A-Z][A-Z0-9_]*-[1-9]\d*$/;
+export const JIRA_KEY = /^[A-Z][A-Z0-9_]*-[1-9]\d*$/u;
 
-export function jiraTicketUrl(ticket: Pick<JiraTaskSource, "instanceUrl" | "key">): string {
-  return `${ticket.instanceUrl}/browse/${encodeURIComponent(ticket.key)}`;
-}
+export const jiraTicketUrl = (
+  ticket: Pick<JiraTaskSource, "instanceUrl" | "key">
+): string => `${ticket.instanceUrl}/browse/${encodeURIComponent(ticket.key)}`;
 
-export function jiraTaskPrompt(ticket: JiraTaskSource): string {
-  return `Implement ${ticket.key}: ${ticket.title}\n\nTicket: ${jiraTicketUrl(ticket)}\n\n${ticket.description || "No description provided."}`;
-}
+export const jiraTaskPrompt = (ticket: JiraTaskSource): string =>
+  `Implement ${ticket.key}: ${ticket.title}\n\nTicket: ${jiraTicketUrl(ticket)}\n\n${ticket.description || "No description provided."}`;

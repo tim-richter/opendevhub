@@ -13,13 +13,17 @@ export class RelayError extends Error {
   }
 }
 
-function handshake(
+const handshake = (
   target: RelayTarget,
   line: string,
-  timeoutMs: number,
-): Promise<{ socket: net.Socket; reply: string; rest: Buffer }> {
-  return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: target.host, port: target.port, allowHalfOpen: true });
+  timeoutMs: number
+): Promise<{ socket: net.Socket; reply: string; rest: Buffer }> =>
+  new Promise((resolve, reject) => {
+    const socket = net.connect({
+      allowHalfOpen: true,
+      host: target.host,
+      port: target.port,
+    });
     let buf = Buffer.alloc(0);
     const cleanup = () => {
       clearTimeout(timer);
@@ -37,80 +41,126 @@ function handshake(
       buf = Buffer.concat([buf, chunk]);
       const nl = buf.indexOf(10);
       if (nl === -1) {
-        if (buf.length > 256) fail(new Error("relay sent an oversized reply"));
+        if (buf.length > 256) {
+          fail(new Error("relay sent an oversized reply"));
+        }
         return;
       }
       cleanup();
       socket.pause();
-      resolve({ socket, reply: buf.subarray(0, nl).toString("utf8").trim(), rest: buf.subarray(nl + 1) });
+      resolve({
+        reply: buf.subarray(0, nl).toString("utf-8").trim(),
+        rest: buf.subarray(nl + 1),
+        socket,
+      });
     };
-    const timer = setTimeout(() => fail(new Error("relay handshake timed out")), timeoutMs);
+    const timer = setTimeout(
+      () => fail(new Error("relay handshake timed out")),
+      timeoutMs
+    );
     socket.on("data", onData);
     socket.on("error", fail);
     socket.on("close", onClose);
     socket.once("connect", () => socket.write(line));
   });
-}
 
 /** The relay's answer to ping; older relays answer a bare PONG and are replaced (they have no agent verbs). */
 const PONG = "PONG 2";
 
-export async function pingRelay(target: RelayTarget, timeoutMs = 1000): Promise<boolean> {
+export const pingRelay = async (
+  target: RelayTarget,
+  timeoutMs = 1000
+): Promise<boolean> => {
   try {
-    const { socket, reply } = await handshake(target, `${target.token} ping\n`, timeoutMs);
+    const { socket, reply } = await handshake(
+      target,
+      `${target.token} ping\n`,
+      timeoutMs
+    );
     socket.destroy();
     return reply === PONG;
   } catch {
     return false;
   }
-}
+};
 
-export async function openRelayConnection(
+export const openRelayConnection = async (
   target: RelayTarget,
   port: number,
-  timeoutMs = 5000,
-): Promise<{ socket: net.Socket; rest: Buffer }> {
-  const { socket, reply, rest } = await handshake(target, `${target.token} ${port}\n`, timeoutMs);
-  if (reply === "OK") return { socket, rest };
+  timeoutMs = 5000
+): Promise<{ socket: net.Socket; rest: Buffer }> => {
+  const { socket, reply, rest } = await handshake(
+    target,
+    `${target.token} ${port}\n`,
+    timeoutMs
+  );
+  if (reply === "OK") {
+    return { rest, socket };
+  }
   socket.destroy();
   throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
-}
+};
 
 /**
  * Opens a connection to `host:port` through a relay running in gateway mode (ODH_RELAY_REMOTE=1).
  * The socket is returned paused; bytes the upstream sent along with the OK are pushed back onto it,
  * so it can be piped as is.
  */
-export async function openGatewayConnection(
+export const openGatewayConnection = async (
   target: RelayTarget,
   host: string,
   port: number,
-  timeoutMs = 5000,
-): Promise<net.Socket> {
-  const { socket, reply, rest } = await handshake(target, `${target.token} ${host} ${port}\n`, timeoutMs);
+  timeoutMs = 5000
+): Promise<net.Socket> => {
+  const { socket, reply, rest } = await handshake(
+    target,
+    `${target.token} ${host} ${port}\n`,
+    timeoutMs
+  );
   if (reply !== "OK") {
     socket.destroy();
     throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
   }
-  if (rest.length) socket.unshift(rest);
+  if (rest.length) {
+    socket.unshift(rest);
+  }
   return socket;
-}
+};
 
 /** Opens the relay's agent control connection; resolves after OK with the socket paused and any bytes that came along. */
-export async function openAgentControl(target: RelayTarget, timeoutMs = 5000): Promise<{ socket: net.Socket; rest: Buffer }> {
-  const { socket, reply, rest } = await handshake(target, `${target.token} agent-listen\n`, timeoutMs);
-  if (reply === "OK") return { socket, rest };
+export const openAgentControl = async (
+  target: RelayTarget,
+  timeoutMs = 5000
+): Promise<{ socket: net.Socket; rest: Buffer }> => {
+  const { socket, reply, rest } = await handshake(
+    target,
+    `${target.token} agent-listen\n`,
+    timeoutMs
+  );
+  if (reply === "OK") {
+    return { rest, socket };
+  }
   socket.destroy();
   throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
-}
+};
 
 /** Takes the container client the relay announced as `CONN <id>`; the socket is returned paused, ready to pipe. */
-export async function acceptAgentConnection(target: RelayTarget, id: number, timeoutMs = 5000): Promise<net.Socket> {
-  const { socket, reply, rest } = await handshake(target, `${target.token} agent-accept ${id}\n`, timeoutMs);
+export const acceptAgentConnection = async (
+  target: RelayTarget,
+  id: number,
+  timeoutMs = 5000
+): Promise<net.Socket> => {
+  const { socket, reply, rest } = await handshake(
+    target,
+    `${target.token} agent-accept ${id}\n`,
+    timeoutMs
+  );
   if (reply !== "OK") {
     socket.destroy();
     throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
   }
-  if (rest.length) socket.unshift(rest);
+  if (rest.length) {
+    socket.unshift(rest);
+  }
   return socket;
-}
+};

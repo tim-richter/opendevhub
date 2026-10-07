@@ -2,22 +2,28 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
+
 import { LOCAL_NODE, localHost } from "../../src/server/host";
 
 const servers: net.Server[] = [];
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  await Promise.all(
+    servers.splice(0).map((s) => new Promise((r) => s.close(r)))
+  );
 });
 
 async function echoServer(): Promise<number> {
-  const server = net.createServer((s) => s.on("data", (d) => s.write(`echo:${d.toString()}`)));
+  const server = net.createServer((s) =>
+    s.on("data", (d) => s.write(`echo:${d.toString()}`))
+  );
   servers.push(server);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return (server.address() as net.AddressInfo).port;
 }
 
-describe("localHost", () => {
+describe(localHost, () => {
   it("knows this machine's home folder", () => {
     expect(localHost().home).toBe(os.homedir());
   });
@@ -33,7 +39,7 @@ describe("localHost", () => {
       const host = localHost();
       const file = path.join(dir, "a", "b", "c.json");
       await host.writeFile(file, "{}\n");
-      expect(await host.readFile(file)).toBe("{}\n");
+      await expect(host.readFile(file)).resolves.toBe("{}\n");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -42,15 +48,19 @@ describe("localHost", () => {
   it("dials TCP ports", async () => {
     const port = await echoServer();
     const stream = await localHost().dial("127.0.0.1", port);
-    const reply = new Promise<string>((resolve) => stream.once("data", (d: Buffer) => resolve(d.toString())));
+    const reply = new Promise<string>((resolve) =>
+      stream.once("data", (d: Buffer) => resolve(d.toString()))
+    );
     stream.write("hi");
-    expect(await reply).toBe("echo:hi");
+    await expect(reply).resolves.toBe("echo:hi");
     stream.destroy();
   });
 
   it("rejects a dial to a closed port", async () => {
     const port = await echoServer();
     await new Promise((r) => servers.pop()!.close(r));
-    await expect(localHost().dial("127.0.0.1", port)).rejects.toMatchObject({ code: "ECONNREFUSED" });
+    await expect(localHost().dial("127.0.0.1", port)).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
   });
 });

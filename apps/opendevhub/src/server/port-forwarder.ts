@@ -1,5 +1,6 @@
-import type { Duplex } from "node:stream";
 import net from "node:net";
+import type { Duplex } from "node:stream";
+
 import type { ForwardedPort } from "../shared/types";
 import type { Dial } from "./network";
 import type { PortSpec } from "./ports";
@@ -31,12 +32,22 @@ export interface PortForwarderOptions {
   logIntervalMs?: number;
 }
 
-function closeServers(servers: net.Server[]): Promise<void> {
-  return Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(() => resolve())))).then(() => {});
-}
+const closeServers = (servers: net.Server[]): Promise<void> =>
+  Promise.all(
+    servers.map(
+      (s) =>
+        new Promise<void>((resolve) => {
+          s.close(() => resolve());
+        })
+    )
+  ).then(() => undefined);
 
-function listen(server: net.Server, port: number, host: string): Promise<NodeJS.ErrnoException | undefined> {
-  return new Promise((resolve) => {
+const listen = (
+  server: net.Server,
+  port: number,
+  host: string
+): Promise<NodeJS.ErrnoException | undefined> =>
+  new Promise((resolve) => {
     const onError = (err: NodeJS.ErrnoException) => {
       server.off("listening", onListening);
       resolve(err);
@@ -49,7 +60,6 @@ function listen(server: net.Server, port: number, host: string): Promise<NodeJS.
     server.once("listening", onListening);
     server.listen(port, host);
   });
-}
 
 export class PortForwarder {
   private readonly forwards = new Map<string, Forward[]>();
@@ -60,29 +70,35 @@ export class PortForwarder {
     projectId: string,
     target: ForwardTarget,
     ports: PortSpec[],
-    onLog: (line: string) => void = () => {},
-    events: ForwardEvents = {},
+    onLog: (line: string) => void = () => undefined,
+    events: ForwardEvents = {}
   ): Promise<ForwardedPort[]> {
     await this.close(projectId);
     const list: Forward[] = [];
     this.forwards.set(projectId, list);
     const results: ForwardedPort[] = [];
-    for (const spec of ports) results.push(await this.openOne(spec, target, list, onLog, events));
+    for (const spec of ports) {
+      results.push(await this.openOne(spec, target, list, onLog, events));
+    }
     return results;
   }
 
   async close(projectId: string): Promise<void> {
     const list = this.forwards.get(projectId);
-    if (!list) return;
+    if (!list) {
+      return;
+    }
     this.forwards.delete(projectId);
     await Promise.all(
       list.map(
         (f) =>
           new Promise<void>((resolve) => {
-            for (const s of f.sockets) s.destroy();
+            for (const s of f.sockets) {
+              s.destroy();
+            }
             void closeServers(f.servers).then(resolve);
-          }),
-      ),
+          })
+      )
     );
   }
 
@@ -95,7 +111,7 @@ export class PortForwarder {
     target: ForwardTarget,
     list: Forward[],
     onLog: (line: string) => void,
-    events: ForwardEvents,
+    events: ForwardEvents
   ): Promise<ForwardedPort> {
     const labelled = spec.label === undefined ? {} : { label: spec.label };
     const sockets = new Set<Duplex>();
@@ -119,7 +135,9 @@ export class PortForwarder {
         client.destroy();
         upstream?.destroy();
         sockets.delete(client);
-        if (upstream) sockets.delete(upstream);
+        if (upstream) {
+          sockets.delete(upstream);
+        }
       };
       client.on("error", destroy);
       client.on("close", destroy);
@@ -133,7 +151,9 @@ export class PortForwarder {
         sockets.add(socket);
         socket.on("error", destroy);
         socket.on("close", destroy);
-        if (rest?.length) client.write(rest);
+        if (rest?.length) {
+          client.write(rest);
+        }
         client.pipe(socket);
         socket.pipe(client);
         client.resume();
@@ -146,18 +166,26 @@ export class PortForwarder {
         if (target.dial) {
           target.dial(spec.containerPort).then(
             (socket) => pipe(socket),
-            (err: Error) => {
-              const code = err instanceof RelayError ? err.code : undefined;
+            (error: Error) => {
+              const code = error instanceof RelayError ? error.code : undefined;
               const hint = code === "ECONNREFUSED" ? refusedHint : "";
-              logLimited(`ports: ${spec.containerPort}: ${code ?? err.message}${hint}`);
+              logLimited(
+                `ports: ${spec.containerPort}: ${code ?? error.message}${hint}`
+              );
               destroy();
-            },
+            }
           );
           return;
         }
-        const socket = net.connect({ host: target.host, port: spec.containerPort, allowHalfOpen: true });
+        const socket = net.connect({
+          allowHalfOpen: true,
+          host: target.host,
+          port: spec.containerPort,
+        });
         const onConnectError = (err: NodeJS.ErrnoException) => {
-          logLimited(`ports: ${spec.containerPort}: ${err.message}${err.code === "ECONNREFUSED" ? refusedHint : ""}`);
+          logLimited(
+            `ports: ${spec.containerPort}: ${err.message}${err.code === "ECONNREFUSED" ? refusedHint : ""}`
+          );
           socket.destroy();
           destroy();
         };
@@ -168,55 +196,89 @@ export class PortForwarder {
         });
       };
 
-      if (!target.relay) return direct();
-      openRelayConnection({ ...target.relay, host: target.relay.host ?? target.host }, spec.containerPort).then(
+      if (!target.relay) {
+        return direct();
+      }
+      openRelayConnection(
+        { ...target.relay, host: target.relay.host ?? target.host },
+        spec.containerPort
+      ).then(
         ({ socket, rest }) => pipe(socket, rest),
-        (err: Error) => {
-          if (err instanceof RelayError) {
+        (error: Error) => {
+          if (error instanceof RelayError) {
             logLimited(
-              err.code === "ECONNREFUSED"
+              error.code === "ECONNREFUSED"
                 ? `ports: ${spec.containerPort}: nothing is listening on port ${spec.containerPort} inside the container`
-                : `ports: ${spec.containerPort}: relay could not connect (${err.code})`,
+                : `ports: ${spec.containerPort}: relay could not connect (${error.code})`
             );
             destroy();
             return;
           }
-          if (client.destroyed) return;
+          if (client.destroyed) {
+            return;
+          }
           events.onRelayUnreachable?.();
-          logLimited(`ports: ${spec.containerPort}: relay unreachable (${err.message}), connecting directly`);
+          logLimited(
+            `ports: ${spec.containerPort}: relay unreachable (${error.message}), connecting directly`
+          );
           direct();
-        },
+        }
       );
     };
-    const newServer = () => net.createServer({ allowHalfOpen: true }, handleClient);
+    const newServer = () =>
+      net.createServer({ allowHalfOpen: true }, handleClient);
 
     const bindHost = this.opts.bindHost ?? "127.0.0.1";
     // ::1 is bound best-effort alongside the default: if another app holds the port there,
     // `localhost:<port>` would reach that app instead, so the port counts as taken.
     const extraHosts = this.opts.bindHost === undefined ? ["::1"] : [];
-    const last = Math.min(65535, spec.containerPort + (this.opts.maxOffset ?? 100));
-    for (let port = spec.containerPort; port <= last; port++) {
+    const last = Math.min(
+      65_535,
+      spec.containerPort + (this.opts.maxOffset ?? 100)
+    );
+    for (let port = spec.containerPort; port <= last; port += 1) {
       const main = newServer();
       const err = await listen(main, port, bindHost);
-      if (err?.code === "EADDRINUSE") continue;
-      if (err) return { status: "failed", containerPort: spec.containerPort, ...labelled, reason: err.message };
+      if (err?.code === "EADDRINUSE") {
+        continue;
+      }
+      if (err) {
+        return {
+          status: "failed",
+          containerPort: spec.containerPort,
+          ...labelled,
+          reason: err.message,
+        };
+      }
       const servers = [main];
       let taken = false;
       for (const host of extraHosts) {
         const extra = newServer();
         const extraErr = await listen(extra, port, host);
-        if (!extraErr) servers.push(extra);
-        else if (extraErr.code === "EADDRINUSE") taken = true;
+        if (!extraErr) {
+          servers.push(extra);
+        } else if (extraErr.code === "EADDRINUSE") {
+          taken = true;
+        }
         // any other error (e.g. IPv6 disabled): serve IPv4 only
-        if (taken) break;
+        if (taken) {
+          break;
+        }
       }
       if (taken) {
         await closeServers(servers);
         continue;
       }
-      for (const server of servers) server.on("error", () => {});
+      for (const server of servers) {
+        server.on("error", () => undefined);
+      }
       list.push({ servers, sockets });
-      return { status: "forwarded", containerPort: spec.containerPort, ...labelled, hostPort: port };
+      return {
+        status: "forwarded",
+        containerPort: spec.containerPort,
+        ...labelled,
+        hostPort: port,
+      };
     }
     return {
       status: "failed",

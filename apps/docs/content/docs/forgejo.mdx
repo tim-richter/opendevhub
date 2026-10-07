@@ -4,77 +4,34 @@ description: Browse PRs, reviews and checks, and hand feedback to an agent.
 icon: GitPullRequest
 ---
 
-Forgejo is an optional integration, disabled by default. Open **Settings** in the sidebar,
-enable **Forgejo**, and save your instance URL and access token. Use a token with `read:user`,
-`read:repository`, and `read:issue` scopes, including access to private repositories you want to see.
-Use HTTPS; loopback HTTP is supported for local instances.
+Forgejo is an optional integration, disabled by default. Open **Settings** in the sidebar, enable **Forgejo**, and save your instance URL and access token. Use a token with `read:user`, `read:repository`, and `read:issue` scopes, including access to private repositories you want to see. Use HTTPS; loopback HTTP is supported for local instances.
 
-Use **Test connection** before saving to verify the API, authenticated account, and read access.
-Testing uses the entered token, or the saved token when the URL is unchanged, without saving anything.
+Use **Test connection** before saving to verify the API, authenticated account, and read access. Testing uses the entered token, or the saved token when the URL is unchanged, without saving anything.
 
-The **Forgejo** sidebar opens an inbox with **Authored by me**, **Review requested**, and
-**Assigned to me** views. Filter by **All**, **Open**, or **Closed / merged**, search PR text,
-or enter an exact repository as `owner/name`. Repositories do not need to be local projects.
-Use **Load more pull requests** to fetch additional pages. Your selected view and filters are
-remembered, and returning from a PR preserves them.
+The **Forgejo** sidebar opens an inbox with **Authored by me**, **Review requested**, and **Assigned to me** views. Filter by **All**, **Open**, or **Closed / merged**, search PR text, or enter an exact repository as `owner/name`. Repositories do not need to be local projects. Use **Load more pull requests** to fetch additional pages. Your selected view and filters are remembered, and returning from a PR preserves them.
 
 ## Pull request context
 
-Open a PR to see its description, labels, draft/merge status, requested reviewers, discussion,
-reviews, and CI checks for its head commit. Expand a review to read its inline comments.
-Comments and reviews load in pages; checks link to their upstream details when available.
-Select feedback or checks with **Include in agent handoff**.
+Open a PR to see its description, labels, draft/merge status, requested reviewers, discussion, reviews, and CI checks for its head commit. Expand a review to read its inline comments. Comments and reviews load in pages; checks link to their upstream details when available. Select feedback or checks with **Include in agent handoff**.
 
-The diff supports syntax highlighting, a changed-files navigator, and unified or side-by-side
-layout. The selected layout is remembered. Metadata and discussion load independently of the
-diff, so a failed or oversized patch does not hide the PR context. **Open in Forgejo** remains
-available when requests fail.
+The diff supports syntax highlighting, a changed-files navigator, and unified or side-by-side layout. The selected layout is remembered. Metadata and discussion load independently of the diff, so a failed or oversized patch does not hide the PR context. **Open in Forgejo** remains available when requests fail.
 
 ## Continue with agent
 
-**Continue with agent** opens an editable prompt containing the PR URL, head branch and commit,
-base branch, description, and selected feedback/check descriptions. The dashboard inspects
-running local projects' remotes and recorded publish URLs to suggest the matching repository
-and checkout, including worktrees published through AGit. You can also choose a project manually.
+**Continue with agent** opens an editable prompt containing the PR URL, head branch and commit, base branch, description, and selected feedback/check descriptions. The dashboard inspects running local projects' remotes and recorded publish URLs to suggest the matching repository and checkout, including worktrees published through AGit. You can also choose a project manually.
 
-Choose a checkout and an existing session, or start a new session there. Sending to a running
-session queues the feedback behind its current turn. **Create new task…** opens the usual task
-form with the prompt and title filled in so you can choose a worktree, model, and environment.
-The prompt asks the agent to verify the PR commit before editing and fetch it with the project's
-git credentials into a separate worktree if necessary. The dashboard does not automatically
-switch or reset an existing checkout. A repository without a local project must be added first.
+Choose a checkout and an existing session, or start a new session there. Sending to a running session queues the feedback behind its current turn. **Create new task…** opens the usual task form with the prompt and title filled in so you can choose a worktree, model, and environment. The prompt asks the agent to verify the PR commit before editing and fetch it with the project's git credentials into a separate worktree if necessary. The dashboard does not automatically switch or reset an existing checkout. A repository without a local project must be added first.
 
 ## Refresh and caching
 
-PR data uses an in-memory TanStack Query cache. Fresh cached pages reappear immediately when
-navigating, and stale data refreshes when the window regains focus or the connection returns.
-**Refresh** keeps existing content visible during the request. Failed sections offer **Retry**;
-rate-limit errors ask you to wait before refreshing. Navigation cancels unused API requests,
-and cancellation is passed through to Forgejo. Changing saved connection settings clears the
-Forgejo query cache. Only UI preferences are persisted in browser storage.
+PR data uses an in-memory TanStack Query cache. Fresh cached pages reappear immediately when navigating, and stale data refreshes when the window regains focus or the connection returns. **Refresh** keeps existing content visible during the request. Failed sections offer **Retry**; rate-limit errors ask you to wait before refreshing. Navigation cancels unused API requests, and cancellation is passed through to Forgejo. Changing saved connection settings clears the Forgejo query cache. Only UI preferences are persisted in browser storage.
 
 ## Saved settings
 
-Settings survive restarts. The URL and token are kept separately from ordinary configuration,
-in `~/.config/opendevhub/integrations/forgejo.json` (or under `XDG_CONFIG_HOME`). This file holds
-only the URL, enabled state, and an opaque credential reference. The token is stored in macOS
-Keychain, Windows Credential Manager, or Secret Service on Linux. Linux requires an unlocked
-persistent Secret Service, such as GNOME Keyring or KWallet, in your desktop session.
+Settings survive restarts. The URL and token are kept separately from ordinary configuration, in `~/.config/opendevhub/integrations/forgejo.json` (or under `XDG_CONFIG_HOME`). This file holds only the URL, enabled state, and an opaque credential reference. The token is stored in macOS Keychain, Windows Credential Manager, or Secret Service on Linux. Linux requires an unlocked persistent Secret Service, such as GNOME Keyring or KWallet, in your desktop session.
 
-If the OS credential store is locked or unavailable, the operation fails with an actionable
-error. There is no plaintext or volatile-keyring fallback. Existing plaintext credentials are
-migrated before use; the plaintext token is removed from the file after secure storage succeeds.
-The saved token is never returned to the browser or injected into task containers.
+If the OS credential store is locked or unavailable, the operation fails with an actionable error. There is no plaintext or volatile-keyring fallback. Existing plaintext credentials are migrated before use; the plaintext token is removed from the file after secure storage succeeds. The saved token is never returned to the browser or injected into task containers.
 
-Leave the token field blank to keep the saved token. Changing the URL requires a new token.
-Disabling retains the connection details; **Remove token and disable** removes the saved token.
+Leave the token field blank to keep the saved token. Changing the URL requires a new token. Disabling retains the connection details; **Remove token and disable** removes the saved token.
 
-Read scopes are sufficient for browsing and agent handoff. **Write review** lets you add inline
-comments, a summary, and choose Comment, Approve, or Request changes. Submitting a review requires
-`write:repository` and `write:issue` scopes. Drafts are discarded when leaving the editor or refreshing.
-Reviews target the loaded commit; if it changes, refresh before submitting. The editor also offers
-**Create PR worktree**, which fetches the PR ref using the project’s git credentials and verifies
-the commit before creating a new worktree. Merging remains on Forgejo.
-Agent handoff uses opendevhub’s existing task/session APIs and does not give the Forgejo token to
-containers. Responses larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues
-to use your git credentials independently of this integration.
+Read scopes are sufficient for browsing and agent handoff. **Write review** lets you add inline comments, a summary, and choose Comment, Approve, or Request changes. Submitting a review requires `write:repository` and `write:issue` scopes. Drafts are discarded when leaving the editor or refreshing. Reviews target the loaded commit; if it changes, refresh before submitting. The editor also offers **Create PR worktree**, which fetches the PR ref using the project’s git credentials and verifies the commit before creating a new worktree. Merging remains on Forgejo. Agent handoff uses opendevhub’s existing task/session APIs and does not give the Forgejo token to containers. Responses larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues to use your git credentials independently of this integration.

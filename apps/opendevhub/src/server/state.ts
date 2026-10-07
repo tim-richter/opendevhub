@@ -29,7 +29,13 @@ export interface StoreOptions {
   persist: (state: PersistedState) => void;
 }
 
-const DURABLE_KEYS = ["containerId", "password", "workspaceFolder", "relayToken", "remoteUser"] as const;
+const DURABLE_KEYS = [
+  "containerId",
+  "password",
+  "workspaceFolder",
+  "relayToken",
+  "remoteUser",
+] as const;
 
 /** A task environment opendevhub created: its worktree, and the image it was last started from. */
 export interface EnvRecord {
@@ -41,24 +47,24 @@ export interface EnvRecord {
   node?: NodeId;
 }
 
-function durable(r: ProjectRuntime): PersistedRuntime {
-  return {
-    containerId: r.containerId,
-    password: r.password,
-    workspaceFolder: r.workspaceFolder,
-    relayToken: r.relayToken,
-    ...(r.remoteUser ? { remoteUser: r.remoteUser } : {}),
-  };
-}
+const durable = (r: ProjectRuntime): PersistedRuntime => ({
+  containerId: r.containerId,
+  password: r.password,
+  relayToken: r.relayToken,
+  workspaceFolder: r.workspaceFolder,
+  ...(r.remoteUser ? { remoteUser: r.remoteUser } : {}),
+});
 
-function publicRuntime(r: ProjectRuntime): PublicRuntime {
+const publicRuntime = (r: ProjectRuntime): PublicRuntime => {
   const { password: _password, relayToken: _relayToken, ...rest } = r;
   return rest;
-}
+};
 
-function defaultRuntime(projectId: ProjectId): ProjectRuntime {
-  return { projectId, containerState: "stopped", opencode: "absent" };
-}
+const defaultRuntime = (projectId: ProjectId): ProjectRuntime => ({
+  containerState: "stopped",
+  opencode: "absent",
+  projectId,
+});
 
 export class StateStore {
   private projectsById = new Map<ProjectId, Project>();
@@ -79,17 +85,31 @@ export class StateStore {
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
       this.runtimes.set(id, { ...defaultRuntime(id), ...saved });
     }
-    for (const [id, saved] of Object.entries(opts.persisted.environments ?? {})) {
-      if (!saved?.worktree?.path || !saved.projectId) continue;
+    for (const [id, saved] of Object.entries(
+      opts.persisted.environments ?? {}
+    )) {
+      if (!saved?.worktree?.path || !saved.projectId) {
+        continue;
+      }
       const { projectId, worktree, image, node, ...runtime } = saved;
-      this.envs.set(id, { id, projectId, worktree, ...(image ? { image } : {}), ...(node ? { node } : {}) });
+      this.envs.set(id, {
+        id,
+        projectId,
+        worktree,
+        ...(image ? { image } : {}),
+        ...(node ? { node } : {}),
+      });
       this.runtimes.set(id, { ...defaultRuntime(projectId), ...runtime });
     }
   }
 
   setProjects(list: Project[]): void {
     this.projectsById = new Map(list.map((p) => [p.id, p]));
-    for (const p of list) if (!this.runtimes.has(p.id)) this.runtimes.set(p.id, defaultRuntime(p.id));
+    for (const p of list) {
+      if (!this.runtimes.has(p.id)) {
+        this.runtimes.set(p.id, defaultRuntime(p.id));
+      }
+    }
     this.emit();
   }
 
@@ -107,16 +127,24 @@ export class StateStore {
 
   updateRuntime(id: ProjectId, patch: Partial<ProjectRuntime>): void {
     const current = this.runtime(id);
-    const changed = (Object.keys(patch) as (keyof ProjectRuntime)[]).filter((k) => current[k] !== patch[k]);
-    if (changed.length === 0) return;
+    const changed = (Object.keys(patch) as (keyof ProjectRuntime)[]).filter(
+      (k) => current[k] !== patch[k]
+    );
+    if (changed.length === 0) {
+      return;
+    }
     this.runtimes.set(id, { ...current, ...patch });
-    if (changed.some((k) => (DURABLE_KEYS as readonly string[]).includes(k))) this.save();
+    if (changed.some((k) => (DURABLE_KEYS as readonly string[]).includes(k))) {
+      this.save();
+    }
     this.emit();
   }
 
   setSessions(id: ProjectId, list: SessionSummary[]): void {
     const current = this.sessions.get(id) ?? [];
-    if (JSON.stringify(current) === JSON.stringify(list)) return;
+    if (JSON.stringify(current) === JSON.stringify(list)) {
+      return;
+    }
     this.sessions.set(id, list);
     const owner = this.envs.get(id)?.projectId ?? id;
     this.pruneStarting(owner);
@@ -125,7 +153,12 @@ export class StateStore {
 
   /** Records a task whose variants are being set up. */
   putStarting(projectId: ProjectId, task: StartingTask): void {
-    this.startingTasks.set(projectId, [...(this.startingTasks.get(projectId) ?? []).filter((t) => t.task !== task.task), task]);
+    this.startingTasks.set(projectId, [
+      ...(this.startingTasks.get(projectId) ?? []).filter(
+        (t) => t.task !== task.task
+      ),
+      task,
+    ]);
     this.emit();
   }
 
@@ -133,18 +166,32 @@ export class StateStore {
     return this.startingTasks.get(projectId)?.find((t) => t.task === task);
   }
 
-  updateStarting(projectId: ProjectId, task: string, variant: number, patch: Partial<Omit<StartingVariant, "variant" | "log">>): void {
+  updateStarting(
+    projectId: ProjectId,
+    task: string,
+    variant: number,
+    patch: Partial<Omit<StartingVariant, "variant" | "log">>
+  ): void {
     const v = this.startingVariant(projectId, task, variant);
-    if (!v) return;
+    if (!v) {
+      return;
+    }
     Object.assign(v, patch);
     this.pruneStarting(projectId);
     this.emit();
   }
 
   /** Keeps the last 30 lines. */
-  appendStartingLog(projectId: ProjectId, task: string, variant: number, line: string): void {
+  appendStartingLog(
+    projectId: ProjectId,
+    task: string,
+    variant: number,
+    line: string
+  ): void {
     const v = this.startingVariant(projectId, task, variant);
-    if (!v) return;
+    if (!v) {
+      return;
+    }
     v.log = [...v.log, line].slice(-30);
     this.emit();
   }
@@ -152,34 +199,58 @@ export class StateStore {
   /** Drops the variants that failed or got their session; false when the task isn't listed. */
   dismissStarting(projectId: ProjectId, task: string): boolean {
     const t = this.startingTask(projectId, task);
-    if (!t) return false;
-    t.variants = t.variants.filter((v) => v.step !== "failed" && v.step !== "session");
+    if (!t) {
+      return false;
+    }
+    t.variants = t.variants.filter(
+      (v) => v.step !== "failed" && v.step !== "session"
+    );
     this.pruneStarting(projectId);
     this.emit();
     return true;
   }
 
-  private startingVariant(projectId: ProjectId, task: string, variant: number): StartingVariant | undefined {
-    return this.startingTask(projectId, task)?.variants.find((v) => v.variant === variant);
+  private startingVariant(
+    projectId: ProjectId,
+    task: string,
+    variant: number
+  ): StartingVariant | undefined {
+    return this.startingTask(projectId, task)?.variants.find(
+      (v) => v.variant === variant
+    );
   }
 
   /** Variants whose session is listed are running; tasks without variants are done. */
   private pruneStarting(projectId: ProjectId): void {
     const tasks = this.startingTasks.get(projectId);
-    if (!tasks) return;
+    if (!tasks) {
+      return;
+    }
     const listed = new Set(this.sessionsOf(projectId).map((s) => s.id));
-    for (const t of tasks) t.variants = t.variants.filter((v) => !v.sessionId || !listed.has(v.sessionId));
+    for (const t of tasks) {
+      t.variants = t.variants.filter(
+        (v) => !v.sessionId || !listed.has(v.sessionId)
+      );
+    }
     const left = tasks.filter((t) => t.variants.length > 0);
-    if (left.length > 0) this.startingTasks.set(projectId, left);
-    else this.startingTasks.delete(projectId);
+    if (left.length > 0) {
+      this.startingTasks.set(projectId, left);
+    } else {
+      this.startingTasks.delete(projectId);
+    }
   }
 
   /** The project's sessions across its main and task environments. */
   sessionsOf(id: ProjectId): SessionSummary[] {
     const main = this.sessions.get(id) ?? [];
     const envs = this.environments(id);
-    if (envs.length === 0) return main;
-    return [...main, ...envs.flatMap((e) => this.sessions.get(e.id) ?? [])].sort(compareSessions);
+    if (envs.length === 0) {
+      return main;
+    }
+    return [
+      ...main,
+      ...envs.flatMap((e) => this.sessions.get(e.id) ?? []),
+    ].toSorted(compareSessions);
   }
 
   environments(projectId: ProjectId): EnvRecord[] {
@@ -192,13 +263,17 @@ export class StateStore {
 
   putEnvironment(rec: EnvRecord): void {
     this.envs.set(rec.id, rec);
-    if (!this.runtimes.has(rec.id)) this.runtimes.set(rec.id, defaultRuntime(rec.projectId));
+    if (!this.runtimes.has(rec.id)) {
+      this.runtimes.set(rec.id, defaultRuntime(rec.projectId));
+    }
     this.save();
     this.emit();
   }
 
   removeEnvironment(id: EnvId): void {
-    if (!this.envs.delete(id)) return;
+    if (!this.envs.delete(id)) {
+      return;
+    }
     this.runtimes.delete(id);
     this.sessions.delete(id);
     delete this.resourceStats[id];
@@ -207,7 +282,11 @@ export class StateStore {
   }
 
   setIsolation(projectId: ProjectId, info: IsolationInfo): void {
-    if (JSON.stringify(this.isolationInfo.get(projectId)) === JSON.stringify(info)) return;
+    if (
+      JSON.stringify(this.isolationInfo.get(projectId)) === JSON.stringify(info)
+    ) {
+      return;
+    }
     this.isolationInfo.set(projectId, info);
     this.emit();
   }
@@ -232,29 +311,39 @@ export class StateStore {
   }
 
   setUsage(totals: UsageTotals | undefined): void {
-    if (JSON.stringify(this.usageTotals) === JSON.stringify(totals)) return;
+    if (JSON.stringify(this.usageTotals) === JSON.stringify(totals)) {
+      return;
+    }
     this.usageTotals = totals;
     this.emit();
   }
 
   setResources(stats: Record<EnvId, ResourceStats>): void {
-    if (JSON.stringify(this.resourceStats) === JSON.stringify(stats)) return;
+    if (JSON.stringify(this.resourceStats) === JSON.stringify(stats)) {
+      return;
+    }
     this.resourceStats = stats;
     this.emit();
   }
 
   setNodes(views: NodeView[]): void {
-    if (JSON.stringify(this.nodeViews) === JSON.stringify(views)) return;
+    if (JSON.stringify(this.nodeViews) === JSON.stringify(views)) {
+      return;
+    }
     this.nodeViews = views;
     this.emit();
   }
 
   /** The containers of running environments, main and task, for the resource sampler. */
   runningContainers(): RunningContainer[] {
-    return [...this.projectsById.keys(), ...this.envs.keys()].flatMap((envId) => {
-      const r = this.runtimes.get(envId);
-      return r?.containerState === "running" && r.containerId ? [{ envId, containerId: r.containerId }] : [];
-    });
+    return [...this.projectsById.keys(), ...this.envs.keys()].flatMap(
+      (envId) => {
+        const r = this.runtimes.get(envId);
+        return r?.containerState === "running" && r.containerId
+          ? [{ containerId: r.containerId, envId }]
+          : [];
+      }
+    );
   }
 
   preflight(): Preflight {
@@ -263,19 +352,25 @@ export class StateStore {
 
   snapshot(): DashboardSnapshot {
     return {
-      roots: this.roots,
-      preflight: this.preflightState,
       editors: this.editorList,
+      preflight: this.preflightState,
       projects: this.projects().map((project) => {
         const isolation = this.isolationInfo.get(project.id);
         const envs = this.environments(project.id);
-        const remote: Worktree[] = envs.flatMap((e) => (e.node ? [{ path: e.worktree.path, branch: e.worktree.branch, node: e.node }] : []));
+        const remote: Worktree[] = envs.flatMap((e) =>
+          e.node
+            ? [
+                {
+                  branch: e.worktree.branch,
+                  node: e.node,
+                  path: e.worktree.path,
+                },
+              ]
+            : []
+        );
         const runtime = publicRuntime(this.runtime(project.id));
+        const starting = this.startingTasks.get(project.id);
         return {
-          project,
-          runtime: remote.length > 0 ? { ...runtime, worktrees: [...(runtime.worktrees ?? []), ...remote] } : runtime,
-          sessions: this.sessionsOf(project.id),
-          openUrl: projectUrl(project.id, this.opts.port),
           environments: envs.map((e) => ({
             id: e.id,
             worktree: e.worktree,
@@ -284,12 +379,25 @@ export class StateStore {
             runtime: publicRuntime(this.runtime(e.id)),
             openUrl: projectUrl(e.id, this.opts.port),
           })),
+          openUrl: projectUrl(project.id, this.opts.port),
+          project,
+          runtime:
+            remote.length > 0
+              ? {
+                  ...runtime,
+                  worktrees: [...(runtime.worktrees ?? []), ...remote],
+                }
+              : runtime,
+          sessions: this.sessionsOf(project.id),
           ...(isolation ? { isolation } : {}),
-          ...(this.startingTasks.has(project.id) ? { starting: structuredClone(this.startingTasks.get(project.id)!) } : {}),
+          ...(starting ? { starting: structuredClone(starting) } : {}),
         };
       }),
+      roots: this.roots,
       ...(this.usageTotals ? { usage: this.usageTotals } : {}),
-      ...(Object.keys(this.resourceStats).length > 0 ? { resources: this.resourceStats } : {}),
+      ...(Object.keys(this.resourceStats).length > 0
+        ? { resources: this.resourceStats }
+        : {}),
       ...(this.nodeViews.length > 0 ? { nodes: this.nodeViews } : {}),
     };
   }
@@ -303,8 +411,12 @@ export class StateStore {
     const projects: Record<ProjectId, PersistedRuntime> = {};
     const environments: Record<EnvId, PersistedEnv> = {};
     for (const [id, r] of this.runtimes) {
-      if (this.envs.has(id)) continue;
-      if (r.containerId || r.password || r.workspaceFolder || r.relayToken) projects[id] = durable(r);
+      if (this.envs.has(id)) {
+        continue;
+      }
+      if (r.containerId || r.password || r.workspaceFolder || r.relayToken) {
+        projects[id] = durable(r);
+      }
     }
     for (const [id, e] of this.envs) {
       environments[id] = {
@@ -315,10 +427,16 @@ export class StateStore {
         ...durable(this.runtime(id)),
       };
     }
-    this.opts.persist(Object.keys(environments).length > 0 ? { projects, environments } : { projects });
+    this.opts.persist(
+      Object.keys(environments).length > 0
+        ? { environments, projects }
+        : { projects }
+    );
   }
 
   private emit(): void {
-    for (const fn of this.listeners) fn();
+    for (const fn of this.listeners) {
+      fn();
+    }
   }
 }

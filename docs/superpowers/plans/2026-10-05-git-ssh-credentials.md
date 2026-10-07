@@ -36,11 +36,13 @@
 ### Task 1: The `sshAgent` setting and runtime fields
 
 **Files:**
+
 - Modify: `src/server/env-config.ts:15-38` (`EnvSettings`, `resolveEnvSettings`)
 - Modify: `src/shared/types.ts:48-66` (`ProjectRuntime`)
 - Test: `test/server/env-config.test.ts:25-37`
 
 **Interfaces:**
+
 - Produces: `EnvSettings.sshAgent: boolean`; `type SshAgentState = "forwarded" | "off" | "unavailable"` exported from `src/shared/types.ts`; `ProjectRuntime.sshAgent?: SshAgentState` and `ProjectRuntime.sshAgentReason?: string`. These are not persisted, because `DURABLE_KEYS` in `state.ts` stays unchanged, and they are public (`PublicRuntime` only omits password and relayToken).
 
 - [ ] **Step 1: Write the failing tests**
@@ -50,25 +52,56 @@ Replace the `resolveEnvSettings` describe block in `test/server/env-config.test.
 ```ts
 describe("resolveEnvSettings", () => {
   it("defaults to shared with no key files and the ssh-agent forwarded", () => {
-    expect(resolveEnvSettings(undefined, undefined)).toEqual({ isolation: "shared", keyFiles: [], sshAgent: true });
+    expect(resolveEnvSettings(undefined, undefined)).toEqual({
+      isolation: "shared",
+      keyFiles: [],
+      sshAgent: true,
+    });
   });
   it("reads the devcontainer customization, and the config.json override wins", () => {
-    expect(resolveEnvSettings({ isolation: "isolated", keyFiles: ["package-lock.json"] }, undefined)).toEqual({
+    expect(
+      resolveEnvSettings(
+        { isolation: "isolated", keyFiles: ["package-lock.json"] },
+        undefined
+      )
+    ).toEqual({
       isolation: "isolated",
       keyFiles: ["package-lock.json"],
       sshAgent: true,
     });
-    expect(resolveEnvSettings({ isolation: "isolated" }, { isolation: "shared" }).isolation).toBe("shared");
-    expect(resolveEnvSettings({ keyFiles: ["a"] }, { keyFiles: ["b"] }).keyFiles).toEqual(["b"]);
+    expect(
+      resolveEnvSettings({ isolation: "isolated" }, { isolation: "shared" })
+        .isolation
+    ).toBe("shared");
+    expect(
+      resolveEnvSettings({ keyFiles: ["a"] }, { keyFiles: ["b"] }).keyFiles
+    ).toEqual(["b"]);
   });
   it("turns the ssh-agent off from either place, config.json first", () => {
-    expect(resolveEnvSettings({ sshAgent: false }, undefined).sshAgent).toBe(false);
-    expect(resolveEnvSettings(undefined, { sshAgent: false }).sshAgent).toBe(false);
-    expect(resolveEnvSettings({ sshAgent: false }, { sshAgent: true }).sshAgent).toBe(true);
-    expect(resolveEnvSettings({ sshAgent: true }, { sshAgent: false }).sshAgent).toBe(false);
+    expect(resolveEnvSettings({ sshAgent: false }, undefined).sshAgent).toBe(
+      false
+    );
+    expect(resolveEnvSettings(undefined, { sshAgent: false }).sshAgent).toBe(
+      false
+    );
+    expect(
+      resolveEnvSettings({ sshAgent: false }, { sshAgent: true }).sshAgent
+    ).toBe(true);
+    expect(
+      resolveEnvSettings({ sshAgent: true }, { sshAgent: false }).sshAgent
+    ).toBe(false);
   });
   it("ignores invalid values and unsafe key files", () => {
-    expect(resolveEnvSettings({ isolation: "yes", keyFiles: ["ok.lock", "/etc/passwd", "../x", "-x", 3, "a b"], sshAgent: "no" }, null)).toEqual({
+    expect(
+      resolveEnvSettings(
+        {
+          isolation: "yes",
+          keyFiles: ["ok.lock", "/etc/passwd", "../x", "-x", 3, "a b"],
+          sshAgent: "no",
+        },
+        null
+      )
+    ).toEqual({
       isolation: "shared",
       keyFiles: ["ok.lock"],
       sshAgent: true,
@@ -79,8 +112,7 @@ describe("resolveEnvSettings", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/env-config.test.ts`
-Expected: FAIL. The `toEqual` checks miss `sshAgent`, and `sshAgent` is `undefined`.
+Run: `npx vitest run test/server/env-config.test.ts` Expected: FAIL. The `toEqual` checks miss `sshAgent`, and `sshAgent` is `undefined`.
 
 - [ ] **Step 3: Implement**
 
@@ -97,15 +129,33 @@ export interface EnvSettings {
 ```
 
 ```ts
-export function resolveEnvSettings(custom: unknown, override: unknown): EnvSettings {
+export function resolveEnvSettings(
+  custom: unknown,
+  override: unknown
+): EnvSettings {
   const c = record(custom);
   const o = record(override);
-  const isolation = [o.isolation, c.isolation].find((v): v is Isolation => v === "shared" || v === "isolated") ?? "shared";
-  const files = Array.isArray(o.keyFiles) ? o.keyFiles : Array.isArray(c.keyFiles) ? c.keyFiles : [];
-  const sshAgent = [o.sshAgent, c.sshAgent].find((v): v is boolean => typeof v === "boolean") ?? true;
+  const isolation =
+    [o.isolation, c.isolation].find(
+      (v): v is Isolation => v === "shared" || v === "isolated"
+    ) ?? "shared";
+  const files = Array.isArray(o.keyFiles)
+    ? o.keyFiles
+    : Array.isArray(c.keyFiles)
+      ? c.keyFiles
+      : [];
+  const sshAgent =
+    [o.sshAgent, c.sshAgent].find(
+      (v): v is boolean => typeof v === "boolean"
+    ) ?? true;
   return {
     isolation,
-    keyFiles: files.filter((f): f is string => typeof f === "string" && KEY_FILE.test(f) && !f.split("/").includes("..")),
+    keyFiles: files.filter(
+      (f): f is string =>
+        typeof f === "string" &&
+        KEY_FILE.test(f) &&
+        !f.split("/").includes("..")
+    ),
     sshAgent,
   };
 }
@@ -129,8 +179,7 @@ and add to `ProjectRuntime` after `relay?`:
 
 - [ ] **Step 4: Run the tests and the type check**
 
-Run: `npx vitest run test/server/env-config.test.ts && npm run typecheck`
-Expected: PASS; no type errors.
+Run: `npx vitest run test/server/env-config.test.ts && npm run typecheck` Expected: PASS; no type errors.
 
 - [ ] **Step 5: Commit**
 
@@ -144,12 +193,14 @@ git commit -m "feat: sshAgent setting and the ssh-agent state on runtimes"
 ### Task 2: Relay script agent verbs
 
 **Files:**
+
 - Modify: `src/server/relay/script.ts` (whole script)
 - Modify: `src/server/relay/client.ts` (`pingRelay`)
 - Modify: `test/server/relay-script.test.ts` (ping expectations)
 - Create: `test/server/relay-agent.test.ts`
 
 **Interfaces:**
+
 - Produces: relay protocol verbs `<token> agent-listen` → `OK\n`, then `CONN <id>\n` lines; `<token> agent-accept <id>` → `OK\n` + pipe, or `ERR ENOENT\n`. The socket path comes from `ODH_AGENT_SOCK` (default `/tmp/opendevhub-ssh-agent.sock`). `ping` now answers `PONG 2\n`, and `pingRelay` only accepts `PONG 2`, so a relay from an older opendevhub (still answering `PONG`) counts as not running. `RelayRuntime` then kills it and launches the new script; the existing `start()` logic already does this when ping fails.
 
 - [ ] **Step 1: Write the failing tests**
@@ -161,7 +212,9 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { startRelay } from "../helpers/relay";
 
 type Relay = Awaited<ReturnType<typeof startRelay>>;
@@ -243,14 +296,21 @@ describe("relay agent verbs", () => {
     await control.line(0);
     const a = agentClient();
     const b = agentClient();
-    const ids = [(await control.line(1)).split(" ")[1], (await control.line(2)).split(" ")[1]];
+    const ids = [
+      (await control.line(1)).split(" ")[1],
+      (await control.line(2)).split(" ")[1],
+    ];
     expect(new Set(ids).size).toBe(2);
     for (const id of ids) {
       const accept = connect(`secret agent-accept ${id}\n`);
       await accept.line(0);
       accept.socket.write(`for-${id}\n`);
     }
-    await vi.waitFor(() => expect([a.received(), b.received()].sort()).toEqual(ids.map((id) => `for-${id}\n`).sort()));
+    await vi.waitFor(() =>
+      expect([a.received(), b.received()].sort()).toEqual(
+        ids.map((id) => `for-${id}\n`).sort()
+      )
+    );
   });
 
   it("answers ERR ENOENT for an unknown id", async () => {
@@ -289,7 +349,9 @@ describe("relay agent verbs", () => {
     const client = agentClient();
     await control.line(1);
     control.socket.destroy();
-    await vi.waitFor(() => expect(fs.existsSync(sock)).toBe(false), { timeout: 4000 });
+    await vi.waitFor(() => expect(fs.existsSync(sock)).toBe(false), {
+      timeout: 4000,
+    });
     await client.closed;
   });
 
@@ -312,7 +374,10 @@ describe("relay agent verbs", () => {
   });
 
   it("is refused by the gateway relay", async () => {
-    const gateway = await startRelay("secret", { ODH_AGENT_SOCK: sock, ODH_RELAY_REMOTE: "1" });
+    const gateway = await startRelay("secret", {
+      ODH_AGENT_SOCK: sock,
+      ODH_RELAY_REMOTE: "1",
+    });
     try {
       const control = connect("secret agent-listen\n", gateway.port);
       await control.closed;
@@ -329,8 +394,7 @@ In `test/server/relay-script.test.ts`, change both ping expectations (`"answers 
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/relay-agent.test.ts test/server/relay-script.test.ts`
-Expected: FAIL. The agent verbs close the connection silently, and ping returns `PONG`.
+Run: `npx vitest run test/server/relay-agent.test.ts test/server/relay-script.test.ts` Expected: FAIL. The agent verbs close the connection silently, and ping returns `PONG`.
 
 - [ ] **Step 3: Implement the script**
 
@@ -548,9 +612,16 @@ In `src/server/relay/client.ts`, `pingRelay`:
 /** The relay's answer to ping; older relays answer a bare PONG and are replaced (they have no agent verbs). */
 const PONG = "PONG 2";
 
-export async function pingRelay(target: RelayTarget, timeoutMs = 1000): Promise<boolean> {
+export async function pingRelay(
+  target: RelayTarget,
+  timeoutMs = 1000
+): Promise<boolean> {
   try {
-    const { socket, reply } = await handshake(target, `${target.token} ping\n`, timeoutMs);
+    const { socket, reply } = await handshake(
+      target,
+      `${target.token} ping\n`,
+      timeoutMs
+    );
     socket.destroy();
     return reply === PONG;
   } catch {
@@ -561,8 +632,7 @@ export async function pingRelay(target: RelayTarget, timeoutMs = 1000): Promise<
 
 - [ ] **Step 4: Run the relay tests**
 
-Run: `npx vitest run test/server/relay-agent.test.ts test/server/relay-script.test.ts test/server/relay-client.test.ts test/server/relay-runtime.test.ts test/server/gateway.test.ts`
-Expected: PASS. The first `RELAY_SCRIPT` test also checks that the script is still single-quote free.
+Run: `npx vitest run test/server/relay-agent.test.ts test/server/relay-script.test.ts test/server/relay-client.test.ts test/server/relay-runtime.test.ts test/server/gateway.test.ts` Expected: PASS. The first `RELAY_SCRIPT` test also checks that the script is still single-quote free.
 
 - [ ] **Step 5: Commit**
 
@@ -576,11 +646,13 @@ git commit -m "feat: relay serves a forwarded ssh-agent socket (agent-listen, ag
 ### Task 3: Host-side `AgentTunnel`
 
 **Files:**
+
 - Modify: `src/server/relay/client.ts` (add `openAgentControl`, `acceptAgentConnection`)
 - Create: `src/server/relay/agent.ts`
 - Create: `test/server/agent-tunnel.test.ts`
 
 **Interfaces:**
+
 - Consumes: relay verbs from Task 2; `RelayTarget { host: string; port: number; token: string }` from `client.ts`; `SshAgentState` from Task 1.
 - Produces:
   - `openAgentControl(target: RelayTarget, timeoutMs?: number): Promise<{ socket: net.Socket; rest: Buffer }>`
@@ -601,8 +673,14 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type AgentStatus, AgentTunnel, hostAgentProblem } from "../../src/server/relay/agent";
+
+import {
+  type AgentStatus,
+  AgentTunnel,
+  hostAgentProblem,
+} from "../../src/server/relay/agent";
 import { startRelay } from "../helpers/relay";
 
 let dir: string;
@@ -634,13 +712,23 @@ afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function tunnel(port = relay.port, hostSocket: () => string | undefined = () => hostSock) {
+function tunnel(
+  port = relay.port,
+  hostSocket: () => string | undefined = () => hostSock
+) {
   const statuses: AgentStatus[] = [];
   const logs: string[] = [];
   const onRelayLost = vi.fn();
   const t = new AgentTunnel(
     { host: "127.0.0.1", port, token: "secret" },
-    { onLog: (l) => logs.push(l), onStatus: (s) => statuses.push(s), onRelayLost, hostSocket, retryMinMs: 50, retryMaxMs: 200 },
+    {
+      onLog: (l) => logs.push(l),
+      onStatus: (s) => statuses.push(s),
+      onRelayLost,
+      hostSocket,
+      retryMinMs: 50,
+      retryMaxMs: 200,
+    }
   );
   tunnels.push(t);
   return { t, statuses, logs, onRelayLost, last: () => statuses.at(-1) };
@@ -659,7 +747,9 @@ function ask(request: string): Promise<string> {
 
 describe("hostAgentProblem", () => {
   it("explains a missing or wrong SSH_AUTH_SOCK", () => {
-    expect(hostAgentProblem(undefined)).toBe("SSH_AUTH_SOCK is not set on this machine");
+    expect(hostAgentProblem(undefined)).toBe(
+      "SSH_AUTH_SOCK is not set on this machine"
+    );
     expect(hostAgentProblem(path.join(dir, "nope"))).toMatch(/does not exist/);
     fs.writeFileSync(path.join(dir, "file"), "");
     expect(hostAgentProblem(path.join(dir, "file"))).toMatch(/is not a socket/);
@@ -680,14 +770,23 @@ describe("AgentTunnel", () => {
     const { t, last } = tunnel();
     t.start();
     await vi.waitFor(() => expect(last()?.state).toBe("forwarded"));
-    expect(await Promise.all([ask("one"), ask("two"), ask("three")])).toEqual(["agent:one", "agent:two", "agent:three"]);
+    expect(await Promise.all([ask("one"), ask("two"), ask("three")])).toEqual([
+      "agent:one",
+      "agent:two",
+      "agent:three",
+    ]);
   });
 
   it("does not connect without SSH_AUTH_SOCK", async () => {
     const { t, last, logs } = tunnel(relay.port, () => undefined);
     t.start();
-    expect(last()).toEqual({ state: "unavailable", reason: "SSH_AUTH_SOCK is not set on this machine" });
-    expect(logs).toContain("ssh-agent: unavailable (SSH_AUTH_SOCK is not set on this machine)");
+    expect(last()).toEqual({
+      state: "unavailable",
+      reason: "SSH_AUTH_SOCK is not set on this machine",
+    });
+    expect(logs).toContain(
+      "ssh-agent: unavailable (SSH_AUTH_SOCK is not set on this machine)"
+    );
     await new Promise((r) => setTimeout(r, 200));
     expect(fs.existsSync(containerSock)).toBe(false);
   });
@@ -700,7 +799,9 @@ describe("AgentTunnel", () => {
     fs.rmSync(hostSock, { force: true });
     expect(await ask("list")).toBe("");
     expect(await ask("again")).toBe("");
-    expect(logs.filter((l) => l.includes("can't reach the agent on this machine"))).toHaveLength(1);
+    expect(
+      logs.filter((l) => l.includes("can't reach the agent on this machine"))
+    ).toHaveLength(1);
     hostAgent = await startHostAgent();
   }, 15_000);
 
@@ -712,8 +813,13 @@ describe("AgentTunnel", () => {
     await relay.stop();
     await vi.waitFor(() => expect(last()?.state).toBe("unavailable"));
     await vi.waitFor(() => expect(onRelayLost).toHaveBeenCalled());
-    relay = await startRelay("secret", { ODH_AGENT_SOCK: containerSock, ODH_RELAY_PORT: String(port) });
-    await vi.waitFor(() => expect(last()?.state).toBe("forwarded"), { timeout: 3000 });
+    relay = await startRelay("secret", {
+      ODH_AGENT_SOCK: containerSock,
+      ODH_RELAY_PORT: String(port),
+    });
+    await vi.waitFor(() => expect(last()?.state).toBe("forwarded"), {
+      timeout: 3000,
+    });
     expect(await ask("back")).toBe("agent:back");
   });
 
@@ -723,7 +829,9 @@ describe("AgentTunnel", () => {
     await vi.waitFor(() => expect(last()?.state).toBe("forwarded"));
     const count = statuses.length;
     t.stop();
-    await vi.waitFor(() => expect(fs.existsSync(containerSock)).toBe(false), { timeout: 4000 });
+    await vi.waitFor(() => expect(fs.existsSync(containerSock)).toBe(false), {
+      timeout: 4000,
+    });
     expect(statuses).toHaveLength(count);
   });
 });
@@ -731,8 +839,7 @@ describe("AgentTunnel", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/agent-tunnel.test.ts`
-Expected: FAIL, because `../../src/server/relay/agent` does not exist.
+Run: `npx vitest run test/server/agent-tunnel.test.ts` Expected: FAIL, because `../../src/server/relay/agent` does not exist.
 
 - [ ] **Step 3: Add the client handshakes**
 
@@ -740,16 +847,31 @@ Append to `src/server/relay/client.ts`:
 
 ```ts
 /** Opens the relay's agent control connection; resolves after OK with the socket paused and any bytes that came along. */
-export async function openAgentControl(target: RelayTarget, timeoutMs = 5000): Promise<{ socket: net.Socket; rest: Buffer }> {
-  const { socket, reply, rest } = await handshake(target, `${target.token} agent-listen\n`, timeoutMs);
+export async function openAgentControl(
+  target: RelayTarget,
+  timeoutMs = 5000
+): Promise<{ socket: net.Socket; rest: Buffer }> {
+  const { socket, reply, rest } = await handshake(
+    target,
+    `${target.token} agent-listen\n`,
+    timeoutMs
+  );
   if (reply === "OK") return { socket, rest };
   socket.destroy();
   throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
 }
 
 /** Takes the container client the relay announced as `CONN <id>`; the socket is returned paused, ready to pipe. */
-export async function acceptAgentConnection(target: RelayTarget, id: number, timeoutMs = 5000): Promise<net.Socket> {
-  const { socket, reply, rest } = await handshake(target, `${target.token} agent-accept ${id}\n`, timeoutMs);
+export async function acceptAgentConnection(
+  target: RelayTarget,
+  id: number,
+  timeoutMs = 5000
+): Promise<net.Socket> {
+  const { socket, reply, rest } = await handshake(
+    target,
+    `${target.token} agent-accept ${id}\n`,
+    timeoutMs
+  );
   if (reply !== "OK") {
     socket.destroy();
     throw new RelayError(reply.startsWith("ERR ") ? reply.slice(4) : "EPROTO");
@@ -766,8 +888,13 @@ Create `src/server/relay/agent.ts`:
 ```ts
 import fs from "node:fs";
 import net from "node:net";
+
 import type { SshAgentState } from "../../shared/types";
-import { type RelayTarget, acceptAgentConnection, openAgentControl } from "./client";
+import {
+  type RelayTarget,
+  acceptAgentConnection,
+  openAgentControl,
+} from "./client";
 
 /** Where the relay serves the forwarded agent inside the container. */
 export const AGENT_SOCKET = "/tmp/opendevhub-ssh-agent.sock";
@@ -794,10 +921,14 @@ export interface AgentTunnelOptions {
 const WARN_INTERVAL_MS = 60_000;
 
 /** Why the host's agent can't be forwarded; undefined when SSH_AUTH_SOCK is a socket. */
-export function hostAgentProblem(socketPath: string | undefined): string | undefined {
+export function hostAgentProblem(
+  socketPath: string | undefined
+): string | undefined {
   if (!socketPath) return "SSH_AUTH_SOCK is not set on this machine";
   try {
-    return fs.statSync(socketPath).isSocket() ? undefined : `SSH_AUTH_SOCK (${socketPath}) is not a socket`;
+    return fs.statSync(socketPath).isSocket()
+      ? undefined
+      : `SSH_AUTH_SOCK (${socketPath}) is not a socket`;
   } catch {
     return `SSH_AUTH_SOCK (${socketPath}) does not exist`;
   }
@@ -833,7 +964,7 @@ export class AgentTunnel {
 
   constructor(
     private readonly target: RelayTarget,
-    private readonly opts: AgentTunnelOptions,
+    private readonly opts: AgentTunnelOptions
   ) {
     this.delay = opts.retryMinMs ?? 1000;
   }
@@ -857,7 +988,9 @@ export class AgentTunnel {
   }
 
   private hostSocket(): string | undefined {
-    return (this.opts.hostSocket ?? (() => process.env.SSH_AUTH_SOCK))() || undefined;
+    return (
+      (this.opts.hostSocket ?? (() => process.env.SSH_AUTH_SOCK))() || undefined
+    );
   }
 
   private now(): number {
@@ -870,7 +1003,11 @@ export class AgentTunnel {
     if (key === this.status) return;
     this.status = key;
     this.opts.onStatus(status);
-    this.opts.onLog(status.state === "forwarded" ? "ssh-agent: forwarded" : `ssh-agent: unavailable (${status.reason})`);
+    this.opts.onLog(
+      status.state === "forwarded"
+        ? "ssh-agent: forwarded"
+        : `ssh-agent: unavailable (${status.reason})`
+    );
   }
 
   private async connect(): Promise<void> {
@@ -880,7 +1017,10 @@ export class AgentTunnel {
     try {
       ({ socket, rest } = await openAgentControl(this.target));
     } catch (err) {
-      this.setStatus({ state: "unavailable", reason: `relay: ${message(err)}` });
+      this.setStatus({
+        state: "unavailable",
+        reason: `relay: ${message(err)}`,
+      });
       this.opts.onRelayLost?.();
       this.retry();
       return;
@@ -907,7 +1047,10 @@ export class AgentTunnel {
     socket.on("close", () => {
       if (this.control === socket) this.control = undefined;
       if (this.stopped) return;
-      this.setStatus({ state: "unavailable", reason: "lost the relay connection; reconnecting" });
+      this.setStatus({
+        state: "unavailable",
+        reason: "lost the relay connection; reconnecting",
+      });
       this.retry();
     });
     if (rest.length) onData(rest);
@@ -929,7 +1072,9 @@ export class AgentTunnel {
       if (!socketPath) throw new Error("SSH_AUTH_SOCK is not set");
       local = await connectUnix(socketPath);
     } catch (err) {
-      this.warn(`ssh-agent: can't reach the agent on this machine (${message(err)})`);
+      this.warn(
+        `ssh-agent: can't reach the agent on this machine (${message(err)})`
+      );
       return;
     }
     let remote: net.Socket;
@@ -972,8 +1117,7 @@ export class AgentTunnel {
 
 - [ ] **Step 5: Run the tests**
 
-Run: `npx vitest run test/server/agent-tunnel.test.ts test/server/relay-client.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/agent-tunnel.test.ts test/server/relay-client.test.ts` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -987,11 +1131,13 @@ git commit -m "feat: AgentTunnel pipes container ssh-agent clients to the host a
 ### Task 4: `Credentials`: identity, known_hosts and `core.sshCommand`
 
 **Files:**
+
 - Create: `src/server/credentials.ts`
 - Modify: `src/server/git.ts:10-11` (`IDENTITY_HINT` wording)
 - Create: `test/server/credentials.test.ts`
 
 **Interfaces:**
+
 - Consumes: `AGENT_SSH_COMMAND` from `src/server/relay/agent.ts` (Task 3); `Containers.exec(target, command, { env, timeoutMs })` (passes each env entry as `--remote-env K=V`); `Runner` from `exec.ts`.
 - Produces:
   - `sshHosts(remotes: string): string[]`
@@ -1008,7 +1154,9 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { Containers } from "../../src/server/containers";
 import {
   Credentials,
@@ -1022,7 +1170,12 @@ import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
 import type { Project } from "../../src/shared/types";
 import { type Call, fakeRunner } from "../helpers/fake-runner";
 
-const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/src/demo/.devcontainer.json" };
+const project: Project = {
+  id: "demo-abc123",
+  name: "demo",
+  path: "/src/demo",
+  devcontainerPath: "/src/demo/.devcontainer.json",
+};
 
 describe("sshHosts", () => {
   it("names ssh remotes as known_hosts does and skips the rest", () => {
@@ -1037,20 +1190,35 @@ describe("sshHosts", () => {
       "rel\t../b (fetch)",
       "alias\twork:team/app.git (fetch)",
     ].join("\n");
-    expect(sshHosts(remotes)).toEqual(["github.com", "[git.example.com]:2222", "codeberg.org", "gitlab.com", "work"]);
+    expect(sshHosts(remotes)).toEqual([
+      "github.com",
+      "[git.example.com]:2222",
+      "codeberg.org",
+      "gitlab.com",
+      "work",
+    ]);
   });
 });
 
 /** Runs a container script with real sh and git against a throwaway HOME. */
 function sh(script: string, home: string, env: Record<string, string>) {
   return spawnSync("sh", ["-c", script], {
-    env: { HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", ...env },
+    env: {
+      HOME: home,
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      GIT_CONFIG_NOSYSTEM: "1",
+      ...env,
+    },
     encoding: "utf8",
   });
 }
 const git = (home: string, ...args: string[]) =>
-  spawnSync("git", args, { env: { HOME: home, PATH: process.env.PATH ?? "", GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8" }).stdout.trim();
-const hasSshKeygen = spawnSync("sh", ["-c", "command -v ssh-keygen"]).status === 0;
+  spawnSync("git", args, {
+    env: { HOME: home, PATH: process.env.PATH ?? "", GIT_CONFIG_NOSYSTEM: "1" },
+    encoding: "utf8",
+  }).stdout.trim();
+const hasSshKeygen =
+  spawnSync("sh", ["-c", "command -v ssh-keygen"]).status === 0;
 
 describe("container scripts (real sh and git)", () => {
   let home: string;
@@ -1060,16 +1228,24 @@ describe("container scripts (real sh and git)", () => {
   afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
   it("sets the identity verbatim when the container has none", () => {
-    const r = sh(IDENTITY_SCRIPT, home, { ODH_GIT_NAME: "Tim O'Brien Zoë", ODH_GIT_EMAIL: "t@example.com" });
+    const r = sh(IDENTITY_SCRIPT, home, {
+      ODH_GIT_NAME: "Tim O'Brien Zoë",
+      ODH_GIT_EMAIL: "t@example.com",
+    });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("set");
-    expect(git(home, "config", "--global", "user.name")).toBe("Tim O'Brien Zoë");
+    expect(git(home, "config", "--global", "user.name")).toBe(
+      "Tim O'Brien Zoë"
+    );
     expect(git(home, "config", "--global", "user.email")).toBe("t@example.com");
   });
 
   it("only fills in what is missing", () => {
     git(home, "config", "--global", "user.name", "Container Name");
-    sh(IDENTITY_SCRIPT, home, { ODH_GIT_NAME: "Host Name", ODH_GIT_EMAIL: "h@example.com" });
+    sh(IDENTITY_SCRIPT, home, {
+      ODH_GIT_NAME: "Host Name",
+      ODH_GIT_EMAIL: "h@example.com",
+    });
     expect(git(home, "config", "--global", "user.name")).toBe("Container Name");
     expect(git(home, "config", "--global", "user.email")).toBe("h@example.com");
   });
@@ -1077,125 +1253,230 @@ describe("container scripts (real sh and git)", () => {
   it("reports nothing to do when both are set", () => {
     git(home, "config", "--global", "user.name", "A");
     git(home, "config", "--global", "user.email", "a@example.com");
-    expect(sh(IDENTITY_SCRIPT, home, { ODH_GIT_NAME: "B", ODH_GIT_EMAIL: "b@example.com" }).stdout).not.toContain("set");
+    expect(
+      sh(IDENTITY_SCRIPT, home, {
+        ODH_GIT_NAME: "B",
+        ODH_GIT_EMAIL: "b@example.com",
+      }).stdout
+    ).not.toContain("set");
   });
 
   it("sets core.sshCommand only when unset, and removes only its own", () => {
     const env = { ODH_SSH_COMMAND: AGENT_SSH_COMMAND };
     sh(SSH_COMMAND_ON, home, env);
-    expect(git(home, "config", "--global", "core.sshCommand")).toBe(AGENT_SSH_COMMAND);
+    expect(git(home, "config", "--global", "core.sshCommand")).toBe(
+      AGENT_SSH_COMMAND
+    );
     sh(SSH_COMMAND_OFF, home, env);
     expect(git(home, "config", "--global", "core.sshCommand")).toBe("");
 
     git(home, "config", "--global", "core.sshCommand", "ssh -i ~/.ssh/deploy");
     expect(sh(SSH_COMMAND_ON, home, env).stdout).toContain("kept");
     expect(sh(SSH_COMMAND_OFF, home, env).status).toBe(0);
-    expect(git(home, "config", "--global", "core.sshCommand")).toBe("ssh -i ~/.ssh/deploy");
+    expect(git(home, "config", "--global", "core.sshCommand")).toBe(
+      "ssh -i ~/.ssh/deploy"
+    );
   });
 
-  it.skipIf(!hasSshKeygen)("adds known_hosts lines once, creating ~/.ssh with mode 700", () => {
-    spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", path.join(home, "hostkey")]);
-    const key = fs.readFileSync(path.join(home, "hostkey.pub"), "utf8").trim().split(" ").slice(0, 2).join(" ");
-    const line = `example.org ${key}`;
-    const env = { ODH_HOST: "example.org", ODH_LINES: line };
-    expect(sh(KNOWN_HOSTS_SCRIPT, home, env).stdout).toContain("added");
-    expect(fs.statSync(path.join(home, ".ssh")).mode & 0o777).toBe(0o700);
-    expect(sh(KNOWN_HOSTS_SCRIPT, home, env).stdout).not.toContain("added");
-    expect(fs.readFileSync(path.join(home, ".ssh/known_hosts"), "utf8")).toBe(`${line}\n`);
-  });
+  it.skipIf(!hasSshKeygen)(
+    "adds known_hosts lines once, creating ~/.ssh with mode 700",
+    () => {
+      spawnSync("ssh-keygen", [
+        "-q",
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-f",
+        path.join(home, "hostkey"),
+      ]);
+      const key = fs
+        .readFileSync(path.join(home, "hostkey.pub"), "utf8")
+        .trim()
+        .split(" ")
+        .slice(0, 2)
+        .join(" ");
+      const line = `example.org ${key}`;
+      const env = { ODH_HOST: "example.org", ODH_LINES: line };
+      expect(sh(KNOWN_HOSTS_SCRIPT, home, env).stdout).toContain("added");
+      expect(fs.statSync(path.join(home, ".ssh")).mode & 0o777).toBe(0o700);
+      expect(sh(KNOWN_HOSTS_SCRIPT, home, env).stdout).not.toContain("added");
+      expect(fs.readFileSync(path.join(home, ".ssh/known_hosts"), "utf8")).toBe(
+        `${line}\n`
+      );
+    }
+  );
 });
 
 describe("Credentials.prepare", () => {
-  const remotes = "origin\tgit@github.com:a/b.git (fetch)\nfork\tssh://git@git.example.com:2222/a/b.git (fetch)\n";
+  const remotes =
+    "origin\tgit@github.com:a/b.git (fetch)\nfork\tssh://git@git.example.com:2222/a/b.git (fetch)\n";
 
-  function setup(host: { name?: string; email?: string; known?: Record<string, string> } = {}, container: (c: Call) => { exitCode?: number; stdout?: string } = () => ({})) {
+  function setup(
+    host: {
+      name?: string;
+      email?: string;
+      known?: Record<string, string>;
+    } = {},
+    container: (c: Call) => { exitCode?: number; stdout?: string } = () => ({})
+  ) {
     const { run, calls } = fakeRunner((c) => {
-      if (c.cmd === "git" && c.args.includes("user.name")) return host.name ? { stdout: `${host.name}\n` } : { exitCode: 1 };
-      if (c.cmd === "git" && c.args.includes("user.email")) return host.email ? { stdout: `${host.email}\n` } : { exitCode: 1 };
-      if (c.cmd === "git" && c.args.includes("remote")) return { stdout: remotes };
+      if (c.cmd === "git" && c.args.includes("user.name"))
+        return host.name ? { stdout: `${host.name}\n` } : { exitCode: 1 };
+      if (c.cmd === "git" && c.args.includes("user.email"))
+        return host.email ? { stdout: `${host.email}\n` } : { exitCode: 1 };
+      if (c.cmd === "git" && c.args.includes("remote"))
+        return { stdout: remotes };
       if (c.cmd === "ssh-keygen") {
         const line = host.known?.[c.args[1]];
-        return line ? { stdout: `# Host ${c.args[1]} found: line 3\n${line}\n` } : { exitCode: 1 };
+        return line
+          ? { stdout: `# Host ${c.args[1]} found: line 3\n${line}\n` }
+          : { exitCode: 1 };
       }
       if (c.cmd === "devcontainer") return container(c);
       return {};
     });
     const lines: string[] = [];
-    const credentials = new Credentials({ run, containers: new Containers(run), knownHostsFile: "/home/me/.ssh/known_hosts" });
-    const prepare = (sshAgent = true) => credentials.prepare(project, project.path, { sshAgent, onLine: (l) => lines.push(l) });
+    const credentials = new Credentials({
+      run,
+      containers: new Containers(run),
+      knownHostsFile: "/home/me/.ssh/known_hosts",
+    });
+    const prepare = (sshAgent = true) =>
+      credentials.prepare(project, project.path, {
+        sshAgent,
+        onLine: (l) => lines.push(l),
+      });
     const execs = () => calls.filter((c) => c.cmd === "devcontainer");
-    const envOf = (c: Call) => c.args.filter((_, i) => c.args[i - 1] === "--remote-env");
+    const envOf = (c: Call) =>
+      c.args.filter((_, i) => c.args[i - 1] === "--remote-env");
     return { prepare, calls, lines, execs, envOf };
   }
 
   it("reads the identity in the project folder and passes it through the environment", async () => {
-    const s = setup({ name: "Tim Richter", email: "tim@example.com" }, (c) => (c.args.at(-1) === IDENTITY_SCRIPT ? { stdout: "set\n" } : {}));
+    const s = setup({ name: "Tim Richter", email: "tim@example.com" }, (c) =>
+      c.args.at(-1) === IDENTITY_SCRIPT ? { stdout: "set\n" } : {}
+    );
     await s.prepare();
-    expect(s.calls.find((c) => c.args.includes("user.name"))?.args).toEqual(["-C", "/src/demo", "config", "--get", "user.name"]);
+    expect(s.calls.find((c) => c.args.includes("user.name"))?.args).toEqual([
+      "-C",
+      "/src/demo",
+      "config",
+      "--get",
+      "user.name",
+    ]);
     const identity = s.execs().find((c) => c.args.at(-1) === IDENTITY_SCRIPT)!;
-    expect(s.envOf(identity)).toEqual(["ODH_GIT_NAME=Tim Richter", "ODH_GIT_EMAIL=tim@example.com"]);
+    expect(s.envOf(identity)).toEqual([
+      "ODH_GIT_NAME=Tim Richter",
+      "ODH_GIT_EMAIL=tim@example.com",
+    ]);
     expect(identity.args.at(-1)).not.toContain("Tim");
-    expect(s.lines).toContain("git: identity set (Tim Richter <tim@example.com>)");
+    expect(s.lines).toContain(
+      "git: identity set (Tim Richter <tim@example.com>)"
+    );
   });
 
   it("says so when this machine has no identity, and touches nothing", async () => {
     const s = setup();
     await s.prepare();
-    expect(s.lines).toContain("git: no user.name/user.email on this machine; commits in the container will fail");
-    expect(s.execs().some((c) => c.args.at(-1) === IDENTITY_SCRIPT)).toBe(false);
+    expect(s.lines).toContain(
+      "git: no user.name/user.email on this machine; commits in the container will fail"
+    );
+    expect(s.execs().some((c) => c.args.at(-1) === IDENTITY_SCRIPT)).toBe(
+      false
+    );
   });
 
   it("reports a container without git", async () => {
-    const s = setup({ name: "T", email: "t@e" }, (c) => (c.args.at(-1) === IDENTITY_SCRIPT ? { stdout: "no-git\n" } : {}));
+    const s = setup({ name: "T", email: "t@e" }, (c) =>
+      c.args.at(-1) === IDENTITY_SCRIPT ? { stdout: "no-git\n" } : {}
+    );
     await s.prepare();
     expect(s.lines).toContain("git: not found in the container");
   });
 
   it("copies known_hosts lines for ssh remotes the host knows, looking up ports as [host]:port", async () => {
     const s = setup(
-      { known: { "github.com": "github.com ssh-ed25519 AAAA1", "[git.example.com]:2222": "[git.example.com]:2222 ssh-ed25519 AAAA2" } },
-      (c) => (c.args.at(-1) === KNOWN_HOSTS_SCRIPT ? { stdout: "added\n" } : {}),
+      {
+        known: {
+          "github.com": "github.com ssh-ed25519 AAAA1",
+          "[git.example.com]:2222": "[git.example.com]:2222 ssh-ed25519 AAAA2",
+        },
+      },
+      (c) => (c.args.at(-1) === KNOWN_HOSTS_SCRIPT ? { stdout: "added\n" } : {})
     );
     await s.prepare();
-    expect(s.calls.filter((c) => c.cmd === "ssh-keygen").map((c) => c.args)).toEqual([
+    expect(
+      s.calls.filter((c) => c.cmd === "ssh-keygen").map((c) => c.args)
+    ).toEqual([
       ["-F", "github.com", "-f", "/home/me/.ssh/known_hosts"],
       ["-F", "[git.example.com]:2222", "-f", "/home/me/.ssh/known_hosts"],
     ]);
-    const known = s.execs().filter((c) => c.args.at(-1) === KNOWN_HOSTS_SCRIPT).map(s.envOf);
+    const known = s
+      .execs()
+      .filter((c) => c.args.at(-1) === KNOWN_HOSTS_SCRIPT)
+      .map(s.envOf);
     expect(known).toEqual([
       ["ODH_HOST=github.com", "ODH_LINES=github.com ssh-ed25519 AAAA1"],
-      ["ODH_HOST=[git.example.com]:2222", "ODH_LINES=[git.example.com]:2222 ssh-ed25519 AAAA2"],
+      [
+        "ODH_HOST=[git.example.com]:2222",
+        "ODH_LINES=[git.example.com]:2222 ssh-ed25519 AAAA2",
+      ],
     ]);
-    expect(s.lines).toContain("ssh: added known_hosts for github.com, [git.example.com]:2222");
+    expect(s.lines).toContain(
+      "ssh: added known_hosts for github.com, [git.example.com]:2222"
+    );
   });
 
   it("hints at verifying a host this machine doesn't know", async () => {
-    const s = setup({ known: { "github.com": "github.com ssh-ed25519 AAAA1" } });
+    const s = setup({
+      known: { "github.com": "github.com ssh-ed25519 AAAA1" },
+    });
     await s.prepare();
-    expect(s.lines).toContain('ssh: git.example.com (port 2222) is not in known_hosts on this machine; run "ssh -p 2222 git.example.com" once to verify it');
+    expect(s.lines).toContain(
+      'ssh: git.example.com (port 2222) is not in known_hosts on this machine; run "ssh -p 2222 git.example.com" once to verify it'
+    );
   });
 
   it("sets or removes git's ssh command with the agent setting", async () => {
     const on = setup();
     await on.prepare(true);
-    expect(on.execs().find((c) => c.args.at(-1) === SSH_COMMAND_ON)).toBeDefined();
-    expect(on.envOf(on.execs().find((c) => c.args.at(-1) === SSH_COMMAND_ON)!)).toEqual([`ODH_SSH_COMMAND=${AGENT_SSH_COMMAND}`]);
+    expect(
+      on.execs().find((c) => c.args.at(-1) === SSH_COMMAND_ON)
+    ).toBeDefined();
+    expect(
+      on.envOf(on.execs().find((c) => c.args.at(-1) === SSH_COMMAND_ON)!)
+    ).toEqual([`ODH_SSH_COMMAND=${AGENT_SSH_COMMAND}`]);
     const off = setup();
     await off.prepare(false);
-    expect(off.execs().find((c) => c.args.at(-1) === SSH_COMMAND_OFF)).toBeDefined();
-    expect(off.execs().some((c) => c.args.at(-1) === SSH_COMMAND_ON)).toBe(false);
+    expect(
+      off.execs().find((c) => c.args.at(-1) === SSH_COMMAND_OFF)
+    ).toBeDefined();
+    expect(off.execs().some((c) => c.args.at(-1) === SSH_COMMAND_ON)).toBe(
+      false
+    );
   });
 
   it("logs a project's own core.sshCommand", async () => {
-    const s = setup({}, (c) => (c.args.at(-1) === SSH_COMMAND_ON ? { stdout: "kept\n" } : {}));
+    const s = setup({}, (c) =>
+      c.args.at(-1) === SSH_COMMAND_ON ? { stdout: "kept\n" } : {}
+    );
     await s.prepare();
-    expect(s.lines).toContain("git: the container sets its own core.sshCommand; leaving it as is");
+    expect(s.lines).toContain(
+      "git: the container sets its own core.sshCommand; leaving it as is"
+    );
   });
 
   it("never throws: a failing step is logged and the next one still runs", async () => {
-    const s = setup({ name: "T", email: "t@e" }, (c) => (c.args.at(-1) === IDENTITY_SCRIPT ? { exitCode: 1, stdout: "boom" } : {}));
+    const s = setup({ name: "T", email: "t@e" }, (c) =>
+      c.args.at(-1) === IDENTITY_SCRIPT ? { exitCode: 1, stdout: "boom" } : {}
+    );
     await expect(s.prepare()).resolves.toBeUndefined();
-    expect(s.lines.some((l) => l.startsWith("credentials: could not set the git identity"))).toBe(true);
+    expect(
+      s.lines.some((l) =>
+        l.startsWith("credentials: could not set the git identity")
+      )
+    ).toBe(true);
     expect(s.execs().some((c) => c.args.at(-1) === SSH_COMMAND_ON)).toBe(true);
   });
 });
@@ -1203,8 +1484,7 @@ describe("Credentials.prepare", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/credentials.test.ts`
-Expected: FAIL, because `../../src/server/credentials` does not exist.
+Run: `npx vitest run test/server/credentials.test.ts` Expected: FAIL, because `../../src/server/credentials` does not exist.
 
 - [ ] **Step 3: Implement**
 
@@ -1213,6 +1493,7 @@ Create `src/server/credentials.ts`:
 ```ts
 import os from "node:os";
 import path from "node:path";
+
 import { type Containers, type ExecTarget, tailLines } from "./containers";
 import type { Runner } from "./exec";
 import { AGENT_SSH_COMMAND } from "./relay/agent";
@@ -1266,7 +1547,8 @@ function sshHostOf(url: string): string | undefined {
     } catch {
       return undefined;
     }
-    if ((u.protocol !== "ssh:" && u.protocol !== "git+ssh:") || !u.hostname) return undefined;
+    if ((u.protocol !== "ssh:" && u.protocol !== "git+ssh:") || !u.hostname)
+      return undefined;
     const host = u.hostname.replace(/^\[|\]$/g, "");
     return u.port && u.port !== "22" ? `[${host}]:${u.port}` : host;
   }
@@ -1287,11 +1569,18 @@ export function sshHosts(remotes: string): string[] {
 /** How to verify a known_hosts name by hand. */
 function sshHint(host: string): { label: string; command: string } {
   const m = host.match(/^\[(.+)\]:(\d+)$/);
-  return m ? { label: `${m[1]} (port ${m[2]})`, command: `ssh -p ${m[2]} ${m[1]}` } : { label: host, command: `ssh ${host}` };
+  return m
+    ? { label: `${m[1]} (port ${m[2]})`, command: `ssh -p ${m[2]} ${m[1]}` }
+    : { label: host, command: `ssh ${host}` };
 }
 
-function failure(what: string, r: { stdout: string; stderr: string; exitCode: number }): Error {
-  return new Error(`${what} (${tailLines(`${r.stderr}\n${r.stdout}`, 1).at(-1) ?? `exit ${r.exitCode}`})`);
+function failure(
+  what: string,
+  r: { stdout: string; stderr: string; exitCode: number }
+): Error {
+  return new Error(
+    `${what} (${tailLines(`${r.stderr}\n${r.stdout}`, 1).at(-1) ?? `exit ${r.exitCode}`})`
+  );
 }
 
 export interface CredentialsDeps {
@@ -1306,7 +1595,11 @@ export class Credentials {
   constructor(private readonly deps: CredentialsDeps) {}
 
   /** Never throws: each step logs what it did, or why it couldn't. */
-  async prepare(target: ExecTarget, projectPath: string, opts: { sshAgent: boolean; onLine: (line: string) => void }): Promise<void> {
+  async prepare(
+    target: ExecTarget,
+    projectPath: string,
+    opts: { sshAgent: boolean; onLine: (line: string) => void }
+  ): Promise<void> {
     const steps = [
       () => this.identity(target, projectPath, opts.onLine),
       () => this.knownHosts(target, projectPath, opts.onLine),
@@ -1316,7 +1609,9 @@ export class Credentials {
       try {
         await step();
       } catch (err) {
-        opts.onLine(`credentials: ${err instanceof Error ? err.message : String(err)}`);
+        opts.onLine(
+          `credentials: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
   }
@@ -1324,7 +1619,11 @@ export class Credentials {
   /** user.name and user.email as git sees them in the project folder, so includeIf identities apply. */
   async hostIdentity(projectPath: string): Promise<GitIdentity> {
     const read = async (key: string) => {
-      const r = await this.deps.run("git", ["-C", projectPath, "config", "--get", key], { timeoutMs: HOST_TIMEOUT_MS });
+      const r = await this.deps.run(
+        "git",
+        ["-C", projectPath, "config", "--get", key],
+        { timeoutMs: HOST_TIMEOUT_MS }
+      );
       return r.exitCode === 0 ? r.stdout.trim() || undefined : undefined;
     };
     const name = await read("user.name");
@@ -1334,8 +1633,12 @@ export class Credentials {
 
   /** This machine's known_hosts entries for one host (hashed entries too). */
   async hostKnownHosts(host: string): Promise<string[]> {
-    const file = this.deps.knownHostsFile ?? path.join(os.homedir(), ".ssh", "known_hosts");
-    const r = await this.deps.run("ssh-keygen", ["-F", host, "-f", file], { timeoutMs: HOST_TIMEOUT_MS });
+    const file =
+      this.deps.knownHostsFile ??
+      path.join(os.homedir(), ".ssh", "known_hosts");
+    const r = await this.deps.run("ssh-keygen", ["-F", host, "-f", file], {
+      timeoutMs: HOST_TIMEOUT_MS,
+    });
     if (r.exitCode !== 0) return [];
     return r.stdout
       .split("\n")
@@ -1343,50 +1646,90 @@ export class Credentials {
       .filter((l) => l && !l.startsWith("#"));
   }
 
-  private async identity(target: ExecTarget, projectPath: string, onLine: (line: string) => void): Promise<void> {
+  private async identity(
+    target: ExecTarget,
+    projectPath: string,
+    onLine: (line: string) => void
+  ): Promise<void> {
     const id = await this.hostIdentity(projectPath);
     if (!id.name && !id.email) {
-      onLine("git: no user.name/user.email on this machine; commits in the container will fail");
+      onLine(
+        "git: no user.name/user.email on this machine; commits in the container will fail"
+      );
       return;
     }
-    const r = await this.deps.containers.exec(target, ["sh", "-c", IDENTITY_SCRIPT], {
-      env: { ODH_GIT_NAME: id.name ?? "", ODH_GIT_EMAIL: id.email ?? "" },
-      timeoutMs: CONTAINER_TIMEOUT_MS,
-    });
+    const r = await this.deps.containers.exec(
+      target,
+      ["sh", "-c", IDENTITY_SCRIPT],
+      {
+        env: { ODH_GIT_NAME: id.name ?? "", ODH_GIT_EMAIL: id.email ?? "" },
+        timeoutMs: CONTAINER_TIMEOUT_MS,
+      }
+    );
     if (r.exitCode !== 0) throw failure("could not set the git identity", r);
     if (r.stdout.includes("no-git")) onLine("git: not found in the container");
-    else if (/^set$/m.test(r.stdout)) onLine(`git: identity set (${[id.name, id.email && `<${id.email}>`].filter(Boolean).join(" ")})`);
+    else if (/^set$/m.test(r.stdout))
+      onLine(
+        `git: identity set (${[id.name, id.email && `<${id.email}>`].filter(Boolean).join(" ")})`
+      );
     else onLine("git: identity already set in the container");
   }
 
-  private async knownHosts(target: ExecTarget, projectPath: string, onLine: (line: string) => void): Promise<void> {
-    const remotes = await this.deps.run("git", ["-C", projectPath, "remote", "-v"], { timeoutMs: HOST_TIMEOUT_MS });
+  private async knownHosts(
+    target: ExecTarget,
+    projectPath: string,
+    onLine: (line: string) => void
+  ): Promise<void> {
+    const remotes = await this.deps.run(
+      "git",
+      ["-C", projectPath, "remote", "-v"],
+      { timeoutMs: HOST_TIMEOUT_MS }
+    );
     if (remotes.exitCode !== 0) return;
     const added: string[] = [];
     for (const host of sshHosts(remotes.stdout)) {
       const lines = await this.hostKnownHosts(host);
       if (lines.length === 0) {
         const hint = sshHint(host);
-        onLine(`ssh: ${hint.label} is not in known_hosts on this machine; run "${hint.command}" once to verify it`);
+        onLine(
+          `ssh: ${hint.label} is not in known_hosts on this machine; run "${hint.command}" once to verify it`
+        );
         continue;
       }
-      const r = await this.deps.containers.exec(target, ["sh", "-c", KNOWN_HOSTS_SCRIPT], {
-        env: { ODH_HOST: host, ODH_LINES: lines.join("\n") },
-        timeoutMs: CONTAINER_TIMEOUT_MS,
-      });
-      if (r.exitCode !== 0) throw failure("could not update known_hosts in the container", r);
+      const r = await this.deps.containers.exec(
+        target,
+        ["sh", "-c", KNOWN_HOSTS_SCRIPT],
+        {
+          env: { ODH_HOST: host, ODH_LINES: lines.join("\n") },
+          timeoutMs: CONTAINER_TIMEOUT_MS,
+        }
+      );
+      if (r.exitCode !== 0)
+        throw failure("could not update known_hosts in the container", r);
       if (r.stdout.includes("added")) added.push(host);
     }
-    if (added.length > 0) onLine(`ssh: added known_hosts for ${added.join(", ")}`);
+    if (added.length > 0)
+      onLine(`ssh: added known_hosts for ${added.join(", ")}`);
   }
 
-  private async sshCommand(target: ExecTarget, sshAgent: boolean, onLine: (line: string) => void): Promise<void> {
-    const r = await this.deps.containers.exec(target, ["sh", "-c", sshAgent ? SSH_COMMAND_ON : SSH_COMMAND_OFF], {
-      env: { ODH_SSH_COMMAND: AGENT_SSH_COMMAND },
-      timeoutMs: CONTAINER_TIMEOUT_MS,
-    });
+  private async sshCommand(
+    target: ExecTarget,
+    sshAgent: boolean,
+    onLine: (line: string) => void
+  ): Promise<void> {
+    const r = await this.deps.containers.exec(
+      target,
+      ["sh", "-c", sshAgent ? SSH_COMMAND_ON : SSH_COMMAND_OFF],
+      {
+        env: { ODH_SSH_COMMAND: AGENT_SSH_COMMAND },
+        timeoutMs: CONTAINER_TIMEOUT_MS,
+      }
+    );
     if (r.exitCode !== 0) throw failure("could not set git's ssh command", r);
-    if (r.stdout.includes("kept")) onLine("git: the container sets its own core.sshCommand; leaving it as is");
+    if (r.stdout.includes("kept"))
+      onLine(
+        "git: the container sets its own core.sshCommand; leaving it as is"
+      );
   }
 }
 ```
@@ -1402,8 +1745,7 @@ export const IDENTITY_HINT =
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run test/server/credentials.test.ts test/server/git.test.ts`
-Expected: PASS. `git.test.ts` compares against the exported constant, so the new wording passes.
+Run: `npx vitest run test/server/credentials.test.ts test/server/git.test.ts` Expected: PASS. `git.test.ts` compares against the exported constant, so the new wording passes.
 
 - [ ] **Step 5: Commit**
 
@@ -1417,10 +1759,12 @@ git commit -m "feat: copy the git identity and known_hosts into containers and p
 ### Task 5: opencode launches with extra environment
 
 **Files:**
+
 - Modify: `src/server/opencode/runtime.ts:77-112` (`ensureRunning` args and the launch exec)
 - Test: `test/server/opencode-runtime.test.ts`
 
 **Interfaces:**
+
 - Produces: `OpencodeRuntime.ensureRunning(target, args: { address; password?; workspaceFolder; onLine; env?: Record<string, string> })`. `env` is added to the `opencode serve` launch, and `OPENCODE_PASSWORD` always wins over it.
 
 - [ ] **Step 1: Write the failing test**
@@ -1428,19 +1772,23 @@ git commit -m "feat: copy the git identity and known_hosts into containers and p
 Add to the `describe("OpencodeRuntime.ensureRunning", …)` block in `test/server/opencode-runtime.test.ts`:
 
 ```ts
-  it("launches opencode serve with the extra environment", async () => {
-    const { runtime, calls } = runtimeWith({ stdout: "2.0.20" });
-    await runtime.ensureRunning(project, { ...args(), env: { SSH_AUTH_SOCK: "/tmp/opendevhub-ssh-agent.sock" } });
-    const launch = calls.find((c) => c.args.at(-1)?.includes(" serve --hostname"))!;
-    expect(launch.args).toContain("SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock");
-    expect(launch.args).toContain("OPENCODE_PASSWORD=pw");
+it("launches opencode serve with the extra environment", async () => {
+  const { runtime, calls } = runtimeWith({ stdout: "2.0.20" });
+  await runtime.ensureRunning(project, {
+    ...args(),
+    env: { SSH_AUTH_SOCK: "/tmp/opendevhub-ssh-agent.sock" },
   });
+  const launch = calls.find((c) =>
+    c.args.at(-1)?.includes(" serve --hostname")
+  )!;
+  expect(launch.args).toContain("SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock");
+  expect(launch.args).toContain("OPENCODE_PASSWORD=pw");
+});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run test/server/opencode-runtime.test.ts`
-Expected: FAIL. `SSH_AUTH_SOCK=…` is not among the launch args, and TypeScript in vitest doesn't block on the extra property.
+Run: `npx vitest run test/server/opencode-runtime.test.ts` Expected: FAIL. `SSH_AUTH_SOCK=…` is not among the launch args, and TypeScript in vitest doesn't block on the extra property.
 
 - [ ] **Step 3: Implement**
 
@@ -1460,13 +1808,14 @@ In `src/server/opencode/runtime.ts`, extend the `ensureRunning` args type:
 and the launch:
 
 ```ts
-    const launch = await containers.exec(target, ["sh", "-c", script], { env: { ...args.env, OPENCODE_PASSWORD: password } });
+const launch = await containers.exec(target, ["sh", "-c", script], {
+  env: { ...args.env, OPENCODE_PASSWORD: password },
+});
 ```
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run test/server/opencode-runtime.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/opencode-runtime.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1480,11 +1829,13 @@ git commit -m "feat: opencode serve can be launched with extra environment"
 ### Task 6: Orchestrator wiring
 
 **Files:**
+
 - Modify: `src/server/orchestrator.ts` (deps, a `tunnels` map, `prepareCredentials`, `stopTunnel`, the bring-up, adopt and relaunch call sites, `launchOpencode`, `closePorts`, `shutdown`)
 - Modify: `src/server/cli.ts:127-160` (wire `Credentials`)
 - Test: `test/server/orchestrator.test.ts` (the `setup()` harness plus a new describe block)
 
 **Interfaces:**
+
 - Consumes: `Credentials.prepare` (Task 4); `AgentTunnel`, `AgentTunnelOptions`, `AGENT_SOCKET` (Task 3); `EnvSettings.sshAgent`, `ProjectRuntime.sshAgent` and `sshAgentReason` (Task 1); `ensureRunning(..., { env })` (Task 5).
 - Produces: `OrchestratorDeps.credentials?: CredentialsPort`, `OrchestratorDeps.agentTunnel?: AgentTunnelFactory`, with exported types `CredentialsPort = Pick<Credentials, "prepare">`, `AgentTunnelHandle = { start(): void; stop(): void }` and `AgentTunnelFactory = (target: RelayTarget, opts: AgentTunnelOptions) => AgentTunnelHandle`.
 
@@ -1493,22 +1844,33 @@ git commit -m "feat: opencode serve can be launched with extra environment"
 In `test/server/orchestrator.test.ts` `setup()`, before `const orch = new Orchestrator({`, add:
 
 ```ts
-  const credentials = {
-    prepare: vi.fn(async (_t: ExecTarget, _path: string, _o: { sshAgent: boolean; onLine: (l: string) => void }) => {}),
-  };
-  const tunnels: Array<{ target: RelayTarget; opts: AgentTunnelOptions; start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
-  const agentTunnel = vi.fn((target: RelayTarget, opts: AgentTunnelOptions) => {
-    const t = { target, opts, start: vi.fn(), stop: vi.fn() };
-    tunnels.push(t);
-    return t;
-  });
+const credentials = {
+  prepare: vi.fn(
+    async (
+      _t: ExecTarget,
+      _path: string,
+      _o: { sshAgent: boolean; onLine: (l: string) => void }
+    ) => {}
+  ),
+};
+const tunnels: Array<{
+  target: RelayTarget;
+  opts: AgentTunnelOptions;
+  start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+}> = [];
+const agentTunnel = vi.fn((target: RelayTarget, opts: AgentTunnelOptions) => {
+  const t = { target, opts, start: vi.fn(), stop: vi.fn() };
+  tunnels.push(t);
+  return t;
+});
 ```
 
 Pass `credentials, agentTunnel,` in the `new Orchestrator({ … })` call, and add `credentials, agentTunnel, tunnels` to the returned object. Add these imports at the top:
 
 ```ts
-import type { RelayTarget } from "../../src/server/relay/client";
 import type { AgentTunnelOptions } from "../../src/server/relay/agent";
+import type { RelayTarget } from "../../src/server/relay/client";
 ```
 
 Change the `runtime.ensureRunning` mock's second parameter type to `_a: { password?: string; env?: Record<string, string> }`.
@@ -1520,16 +1882,30 @@ Add a new describe block:
 ```ts
 describe("git and ssh credentials", () => {
   it("prepares credentials and the agent tunnel after the relay and before opencode", async () => {
-    const { store, orch, relay, credentials, agentTunnel, tunnels, runtime } = setup();
+    const { store, orch, relay, credentials, agentTunnel, tunnels, runtime } =
+      setup();
     await orch.rescan();
     await orch.start(project.id);
     const token = store.runtime(project.id).relayToken!;
-    expect(credentials.prepare).toHaveBeenCalledWith(project, "/src/demo", expect.objectContaining({ sshAgent: true }));
-    expect(agentTunnel).toHaveBeenCalledWith({ host: "172.17.0.9", port: 4097, token }, expect.anything());
+    expect(credentials.prepare).toHaveBeenCalledWith(
+      project,
+      "/src/demo",
+      expect.objectContaining({ sshAgent: true })
+    );
+    expect(agentTunnel).toHaveBeenCalledWith(
+      { host: "172.17.0.9", port: 4097, token },
+      expect.anything()
+    );
     expect(tunnels[0].start).toHaveBeenCalled();
-    expect(relay.ensureRunning.mock.invocationCallOrder[0]).toBeLessThan(credentials.prepare.mock.invocationCallOrder[0]);
-    expect(credentials.prepare.mock.invocationCallOrder[0]).toBeLessThan(runtime.ensureRunning.mock.invocationCallOrder[0]);
-    expect(runtime.ensureRunning.mock.calls[0][1].env).toEqual({ SSH_AUTH_SOCK: "/tmp/opendevhub-ssh-agent.sock" });
+    expect(relay.ensureRunning.mock.invocationCallOrder[0]).toBeLessThan(
+      credentials.prepare.mock.invocationCallOrder[0]
+    );
+    expect(credentials.prepare.mock.invocationCallOrder[0]).toBeLessThan(
+      runtime.ensureRunning.mock.invocationCallOrder[0]
+    );
+    expect(runtime.ensureRunning.mock.calls[0][1].env).toEqual({
+      SSH_AUTH_SOCK: "/tmp/opendevhub-ssh-agent.sock",
+    });
   });
 
   it("shows the tunnel's status on the runtime", async () => {
@@ -1537,17 +1913,31 @@ describe("git and ssh credentials", () => {
     await orch.rescan();
     await orch.start(project.id);
     tunnels[0].opts.onStatus({ state: "forwarded" });
-    expect(store.runtime(project.id)).toMatchObject({ sshAgent: "forwarded", sshAgentReason: undefined });
-    tunnels[0].opts.onStatus({ state: "unavailable", reason: "SSH_AUTH_SOCK is not set on this machine" });
-    expect(store.runtime(project.id)).toMatchObject({ sshAgent: "unavailable", sshAgentReason: "SSH_AUTH_SOCK is not set on this machine" });
+    expect(store.runtime(project.id)).toMatchObject({
+      sshAgent: "forwarded",
+      sshAgentReason: undefined,
+    });
+    tunnels[0].opts.onStatus({
+      state: "unavailable",
+      reason: "SSH_AUTH_SOCK is not set on this machine",
+    });
+    expect(store.runtime(project.id)).toMatchObject({
+      sshAgent: "unavailable",
+      sshAgentReason: "SSH_AUTH_SOCK is not set on this machine",
+    });
   });
 
   it("leaves the agent out when the project turns it off", async () => {
-    const { store, orch, credentials, agentTunnel, runtime, projectSettings } = setup();
+    const { store, orch, credentials, agentTunnel, runtime, projectSettings } =
+      setup();
     projectSettings.mockReturnValue({ sshAgent: false });
     await orch.rescan();
     await orch.start(project.id);
-    expect(credentials.prepare).toHaveBeenCalledWith(project, "/src/demo", expect.objectContaining({ sshAgent: false }));
+    expect(credentials.prepare).toHaveBeenCalledWith(
+      project,
+      "/src/demo",
+      expect.objectContaining({ sshAgent: false })
+    );
     expect(agentTunnel).not.toHaveBeenCalled();
     expect(store.runtime(project.id).sshAgent).toBe("off");
     expect(runtime.ensureRunning.mock.calls[0][1].env).toBeUndefined();
@@ -1555,12 +1945,20 @@ describe("git and ssh credentials", () => {
 
   it("reports the agent unavailable without a relay", async () => {
     const { store, orch, relay, agentTunnel } = setup();
-    relay.ensureRunning.mockResolvedValueOnce({ status: "unavailable", reason: "no relay runtime" });
+    relay.ensureRunning.mockResolvedValueOnce({
+      status: "unavailable",
+      reason: "no relay runtime",
+    });
     await orch.rescan();
     await orch.start(project.id);
     expect(agentTunnel).not.toHaveBeenCalled();
-    expect(store.runtime(project.id)).toMatchObject({ sshAgent: "unavailable", sshAgentReason: "relay not running" });
-    expect(orch.logLines(project.id)).toContain("ssh-agent: unavailable (relay not running)");
+    expect(store.runtime(project.id)).toMatchObject({
+      sshAgent: "unavailable",
+      sshAgentReason: "relay not running",
+    });
+    expect(orch.logLines(project.id)).toContain(
+      "ssh-agent: unavailable (relay not running)"
+    );
   });
 
   it("still starts when preparing credentials fails", async () => {
@@ -1568,7 +1966,10 @@ describe("git and ssh credentials", () => {
     credentials.prepare.mockRejectedValueOnce(new Error("boom"));
     await orch.rescan();
     await orch.start(project.id);
-    expect(store.runtime(project.id)).toMatchObject({ opencode: "healthy", error: undefined });
+    expect(store.runtime(project.id)).toMatchObject({
+      opencode: "healthy",
+      error: undefined,
+    });
     expect(orch.logLines(project.id)).toContain("credentials: boom");
   });
 
@@ -1591,12 +1992,17 @@ describe("git and ssh credentials", () => {
   });
 
   it("gives an adopted running container a tunnel too", async () => {
-    const { orch, containers, agentTunnel, credentials } = setup({ projects: { [project.id]: { password: "pw", relayToken: "kept" } } });
+    const { orch, containers, agentTunnel, credentials } = setup({
+      projects: { [project.id]: { password: "pw", relayToken: "kept" } },
+    });
     containers.listManaged.mockResolvedValue([running]);
     await orch.rescan();
     await orch.adopt();
     expect(credentials.prepare).toHaveBeenCalledTimes(1);
-    expect(agentTunnel).toHaveBeenCalledWith({ host: "172.17.0.9", port: 4097, token: "kept" }, expect.anything());
+    expect(agentTunnel).toHaveBeenCalledWith(
+      { host: "172.17.0.9", port: 4097, token: "kept" },
+      expect.anything()
+    );
   });
 
   it("gives a task container its own tunnel, with its own token", async () => {
@@ -1605,7 +2011,9 @@ describe("git and ssh credentials", () => {
     const [main, task] = s.tunnels;
     expect(task.target.host).toBe("172.17.0.10");
     expect(task.target.token).not.toBe(main.target.token);
-    expect(s.credentials.prepare.mock.calls[1][0]).toMatchObject({ id: s.envId });
+    expect(s.credentials.prepare.mock.calls[1][0]).toMatchObject({
+      id: s.envId,
+    });
   });
 
   it("asks for relay recovery when the tunnel loses the relay", async () => {
@@ -1613,7 +2021,9 @@ describe("git and ssh credentials", () => {
     await orch.rescan();
     await orch.start(project.id);
     tunnels[0].opts.onRelayLost?.();
-    await vi.waitFor(() => expect(relay.ensureRunning).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(relay.ensureRunning).toHaveBeenCalledTimes(2)
+    );
   });
 });
 ```
@@ -1622,8 +2032,7 @@ describe("git and ssh credentials", () => {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/orchestrator.test.ts -t "git and ssh credentials"`
-Expected: FAIL. `credentials.prepare` is never called and `agentTunnel` is never called.
+Run: `npx vitest run test/server/orchestrator.test.ts -t "git and ssh credentials"` Expected: FAIL. `credentials.prepare` is never called and `agentTunnel` is never called.
 
 - [ ] **Step 4: Implement in the orchestrator**
 
@@ -1631,7 +2040,11 @@ Imports in `src/server/orchestrator.ts`:
 
 ```ts
 import type { Credentials } from "./credentials";
-import { AGENT_SOCKET, AgentTunnel, type AgentTunnelOptions } from "./relay/agent";
+import {
+  AGENT_SOCKET,
+  AgentTunnel,
+  type AgentTunnelOptions,
+} from "./relay/agent";
 import type { RelayTarget } from "./relay/client";
 ```
 
@@ -1643,7 +2056,10 @@ export interface AgentTunnelHandle {
   start(): void;
   stop(): void;
 }
-export type AgentTunnelFactory = (target: RelayTarget, opts: AgentTunnelOptions) => AgentTunnelHandle;
+export type AgentTunnelFactory = (
+  target: RelayTarget,
+  opts: AgentTunnelOptions
+) => AgentTunnelHandle;
 ```
 
 In `OrchestratorDeps`:
@@ -1706,30 +2122,32 @@ New private methods, placed after `startRelay`:
 Call sites. Replace each `await this.forwardPorts(env, await this.startRelay(env, info.ip, route));` (in `adoptRunning`, `bringUpTask` and `bringUp`) with:
 
 ```ts
-      const target = await this.startRelay(env, info.ip, route);
-      await this.forwardPorts(env, target);
-      await this.prepareCredentials(env, target);
+const target = await this.startRelay(env, info.ip, route);
+await this.forwardPorts(env, target);
+await this.prepareCredentials(env, target);
 ```
 
 In `relaunchOpencode`, replace `if (target.relay && !relayWasActive) await this.forwardPorts(env, target);` with:
 
 ```ts
-      if (target.relay && !relayWasActive) {
-        await this.forwardPorts(env, target);
-        await this.prepareCredentials(env, target);
-      }
+if (target.relay && !relayWasActive) {
+  await this.forwardPorts(env, target);
+  await this.prepareCredentials(env, target);
+}
 ```
 
 In `launchOpencode`, pass the environment to `runtime.ensureRunning`:
 
 ```ts
-    const result = await runtime.ensureRunning(env.target, {
-      address: route.opencode,
-      password,
-      workspaceFolder: this.envDirectory(env),
-      onLine: (l) => this.envLog(env, l),
-      ...(this.settingsOf(env.project).sshAgent ? { env: { SSH_AUTH_SOCK: AGENT_SOCKET } } : {}),
-    });
+const result = await runtime.ensureRunning(env.target, {
+  address: route.opencode,
+  password,
+  workspaceFolder: this.envDirectory(env),
+  onLine: (l) => this.envLog(env, l),
+  ...(this.settingsOf(env.project).sshAgent
+    ? { env: { SSH_AUTH_SOCK: AGENT_SOCKET } }
+    : {}),
+});
 ```
 
 `closePorts` (used by stop, rebuild, markStopped and destroyEnv):
@@ -1745,7 +2163,7 @@ In `launchOpencode`, pass the environment to `runtime.ensureRunning`:
 `shutdown`, first line:
 
 ```ts
-    for (const id of [...this.tunnels.keys()]) this.stopTunnel(id);
+for (const id of [...this.tunnels.keys()]) this.stopTunnel(id);
 ```
 
 - [ ] **Step 5: Wire it in the CLI**
@@ -1754,8 +2172,7 @@ In `src/server/cli.ts`, import `Credentials` from `./credentials` and add `crede
 
 - [ ] **Step 6: Run the whole suite and the type check**
 
-Run: `npm test && npm run typecheck`
-Expected: PASS, including the existing relay and orchestrator tests.
+Run: `npm test && npm run typecheck` Expected: PASS, including the existing relay and orchestrator tests.
 
 - [ ] **Step 7: Commit**
 
@@ -1769,11 +2186,13 @@ git commit -m "feat: every container gets the git identity, known_hosts and the 
 ### Task 7: Dashboard badge
 
 **Files:**
+
 - Modify: `src/web/derive.ts` (add `sshAgentBadge`)
 - Modify: `src/web/pages/CheckoutPage.tsx:6,23,62,90` (imports and header badge)
 - Test: `test/web/derive.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PublicRuntime.sshAgent` and `sshAgentReason` (Task 1); `checkoutRuntime(view, directory)` from `src/web/checkouts.ts`.
 - Produces: `sshAgentBadge(runtime: PublicRuntime): { label: string; warn: boolean; title: string } | undefined`.
 
@@ -1783,10 +2202,22 @@ Add `sshAgentBadge` to the import from `../../src/web/derive` in `test/web/deriv
 
 ```ts
 describe("sshAgentBadge", () => {
-  const rt = (patch: Partial<PublicRuntime>): PublicRuntime => ({ projectId: "p", containerState: "running", opencode: "healthy", ...patch });
+  const rt = (patch: Partial<PublicRuntime>): PublicRuntime => ({
+    projectId: "p",
+    containerState: "running",
+    opencode: "healthy",
+    ...patch,
+  });
   it("shows a forwarded agent quietly and an unavailable one as a warning with its reason", () => {
-    expect(sshAgentBadge(rt({ sshAgent: "forwarded" }))).toMatchObject({ label: "ssh-agent forwarded", warn: false });
-    expect(sshAgentBadge(rt({ sshAgent: "unavailable", sshAgentReason: "relay not running" }))).toEqual({
+    expect(sshAgentBadge(rt({ sshAgent: "forwarded" }))).toMatchObject({
+      label: "ssh-agent forwarded",
+      warn: false,
+    });
+    expect(
+      sshAgentBadge(
+        rt({ sshAgent: "unavailable", sshAgentReason: "relay not running" })
+      )
+    ).toEqual({
       label: "ssh-agent unavailable",
       warn: true,
       title: "relay not running",
@@ -1795,15 +2226,16 @@ describe("sshAgentBadge", () => {
   it("shows nothing when off, unknown or the container isn't running", () => {
     expect(sshAgentBadge(rt({ sshAgent: "off" }))).toBeUndefined();
     expect(sshAgentBadge(rt({}))).toBeUndefined();
-    expect(sshAgentBadge(rt({ containerState: "stopped", sshAgent: "forwarded" }))).toBeUndefined();
+    expect(
+      sshAgentBadge(rt({ containerState: "stopped", sshAgent: "forwarded" }))
+    ).toBeUndefined();
   });
 });
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run test/web/derive.test.ts`
-Expected: FAIL, because `sshAgentBadge` is not exported.
+Run: `npx vitest run test/web/derive.test.ts` Expected: FAIL, because `sshAgentBadge` is not exported.
 
 - [ ] **Step 3: Implement**
 
@@ -1811,40 +2243,56 @@ In `src/web/derive.ts` (add `PublicRuntime` to its type import from `../shared/t
 
 ```ts
 /** The ssh-agent badge for a running container; nothing when forwarding is off or not known yet. */
-export function sshAgentBadge(runtime: PublicRuntime): { label: string; warn: boolean; title: string } | undefined {
+export function sshAgentBadge(
+  runtime: PublicRuntime
+): { label: string; warn: boolean; title: string } | undefined {
   if (runtime.containerState !== "running") return undefined;
   if (runtime.sshAgent === "forwarded") {
-    return { label: "ssh-agent forwarded", warn: false, title: "Your ssh-agent is forwarded into this container while opendevhub runs" };
+    return {
+      label: "ssh-agent forwarded",
+      warn: false,
+      title:
+        "Your ssh-agent is forwarded into this container while opendevhub runs",
+    };
   }
   if (runtime.sshAgent === "unavailable") {
-    return { label: "ssh-agent unavailable", warn: true, title: runtime.sshAgentReason ?? "See the Logs tab" };
+    return {
+      label: "ssh-agent unavailable",
+      warn: true,
+      title: runtime.sshAgentReason ?? "See the Logs tab",
+    };
   }
   return undefined;
 }
 ```
 
 In `src/web/pages/CheckoutPage.tsx`:
+
 - Add `KeyRoundIcon` to the `lucide-react` import.
 - Add `sshAgentBadge` to the `../derive` import.
 - After `const env = envOfDirectory(view, checkout.directory);` add `const agent = sshAgentBadge(checkoutRuntime(view, checkout.directory));`.
 - After `{env && <EnvBadge env={env} />}` in the header description, add:
 
 ```tsx
-            {agent && (
-              <Badge
-                variant="outline"
-                className={cn("gap-1 font-normal", agent.warn ? "text-warn" : "text-muted-foreground")}
-                title={agent.title}
-              >
-                <KeyRoundIcon className="size-3" /> {agent.label}
-              </Badge>
-            )}
+{
+  agent && (
+    <Badge
+      variant="outline"
+      className={cn(
+        "gap-1 font-normal",
+        agent.warn ? "text-warn" : "text-muted-foreground"
+      )}
+      title={agent.title}
+    >
+      <KeyRoundIcon className="size-3" /> {agent.label}
+    </Badge>
+  );
+}
 ```
 
 - [ ] **Step 4: Run the tests, the type check and the build**
 
-Run: `npx vitest run test/web/derive.test.ts && npm run typecheck && npm run build`
-Expected: PASS; the build succeeds.
+Run: `npx vitest run test/web/derive.test.ts && npm run typecheck && npm run build` Expected: PASS; the build succeeds.
 
 - [ ] **Step 5: Commit**
 
@@ -1858,10 +2306,12 @@ git commit -m "feat(web): show whether the ssh-agent reaches a checkout's contai
 ### Task 8: README and e2e
 
 **Files:**
+
 - Modify: `README.md` (Requirements, a new section after "Own containers for worktrees", Known limitations)
 - Modify: `test/e2e/opendevhub.e2e.ts` (agent setup, `Credentials` dep, assertions after the relay check)
 
 **Interfaces:**
+
 - Consumes: everything above; `AGENT_SSH_COMMAND` from `src/server/relay/agent.ts`; `Credentials` from `src/server/credentials.ts`.
 
 - [ ] **Step 1: Extend the e2e test**
@@ -1872,6 +2322,7 @@ In `test/e2e/opendevhub.e2e.ts`, add imports:
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
+
 import { Credentials } from "../../src/server/credentials";
 import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
 ```
@@ -1879,17 +2330,24 @@ import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
 At the start of the `it(…)` body, before the orchestrator is built:
 
 ```ts
-    // A throwaway ssh-agent with one key stands in for the developer's.
-    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-e2e-agent-"));
-    const agentSock = path.join(agentDir, "agent.sock");
-    const sshAgent = spawn("ssh-agent", ["-D", "-a", agentSock], { stdio: "ignore" });
-    await vi.waitFor(() => expect(fs.existsSync(agentSock)).toBe(true));
-    const keyFile = path.join(agentDir, "key");
-    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", keyFile]);
-    execFileSync("ssh-add", [keyFile], { env: { ...process.env, SSH_AUTH_SOCK: agentSock }, stdio: "ignore" });
-    const fingerprint = execFileSync("ssh-keygen", ["-lf", `${keyFile}.pub`]).toString().split(" ")[1];
-    const previousSock = process.env.SSH_AUTH_SOCK;
-    process.env.SSH_AUTH_SOCK = agentSock;
+// A throwaway ssh-agent with one key stands in for the developer's.
+const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-e2e-agent-"));
+const agentSock = path.join(agentDir, "agent.sock");
+const sshAgent = spawn("ssh-agent", ["-D", "-a", agentSock], {
+  stdio: "ignore",
+});
+await vi.waitFor(() => expect(fs.existsSync(agentSock)).toBe(true));
+const keyFile = path.join(agentDir, "key");
+execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", keyFile]);
+execFileSync("ssh-add", [keyFile], {
+  env: { ...process.env, SSH_AUTH_SOCK: agentSock },
+  stdio: "ignore",
+});
+const fingerprint = execFileSync("ssh-keygen", ["-lf", `${keyFile}.pub`])
+  .toString()
+  .split(" ")[1];
+const previousSock = process.env.SSH_AUTH_SOCK;
+process.env.SSH_AUTH_SOCK = agentSock;
 ```
 
 Add `credentials: new Credentials({ run: spawnRunner, containers }),` to the `new Orchestrator({ … })` options.
@@ -1897,43 +2355,70 @@ Add `credentials: new Credentials({ run: spawnRunner, containers }),` to the `ne
 After `expect(rt.relay).toBe("active");`, add:
 
 ```ts
-    // Git and ssh: the forwarded agent, git's ssh command, opencode's environment and the identity.
-    await vi.waitFor(() => expect(store.runtime(project.id).sshAgent).toBe("forwarded"), { timeout: 15_000 });
-    const listed = await containers.exec(project, ["sh", "-c", "SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock ssh-add -l"]);
-    expect(listed.stdout).toContain(fingerprint);
-    const sshCommand = await containers.exec(project, ["git", "config", "--global", "--get", "core.sshCommand"]);
-    expect(sshCommand.stdout.trim()).toBe(AGENT_SSH_COMMAND);
-    const opencodeEnv = await containers.exec(project, [
-      "sh",
-      "-c",
-      "tr '\\0' '\\n' < /proc/$(pgrep -f 'opencode [s]erve' | head -n 1)/environ",
-    ]);
-    expect(opencodeEnv.stdout).toContain("SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock");
-    const hostEmail = spawnSync("git", ["-C", fixture, "config", "user.email"], { encoding: "utf8" }).stdout.trim();
-    if (hostEmail) {
-      const email = await containers.exec(project, ["git", "config", "--global", "--get", "user.email"]);
-      expect(email.stdout.trim()).toBe(hostEmail);
-      const commit = await containers.exec(project, ["sh", "-c", 'cd "$(mktemp -d)" && git init -q && git commit -q --allow-empty -m e2e']);
-      expect(commit.exitCode).toBe(0);
-    } else {
-      console.log("[e2e] no git identity on this machine; skipping the commit check");
-    }
+// Git and ssh: the forwarded agent, git's ssh command, opencode's environment and the identity.
+await vi.waitFor(
+  () => expect(store.runtime(project.id).sshAgent).toBe("forwarded"),
+  { timeout: 15_000 }
+);
+const listed = await containers.exec(project, [
+  "sh",
+  "-c",
+  "SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock ssh-add -l",
+]);
+expect(listed.stdout).toContain(fingerprint);
+const sshCommand = await containers.exec(project, [
+  "git",
+  "config",
+  "--global",
+  "--get",
+  "core.sshCommand",
+]);
+expect(sshCommand.stdout.trim()).toBe(AGENT_SSH_COMMAND);
+const opencodeEnv = await containers.exec(project, [
+  "sh",
+  "-c",
+  "tr '\\0' '\\n' < /proc/$(pgrep -f 'opencode [s]erve' | head -n 1)/environ",
+]);
+expect(opencodeEnv.stdout).toContain(
+  "SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock"
+);
+const hostEmail = spawnSync("git", ["-C", fixture, "config", "user.email"], {
+  encoding: "utf8",
+}).stdout.trim();
+if (hostEmail) {
+  const email = await containers.exec(project, [
+    "git",
+    "config",
+    "--global",
+    "--get",
+    "user.email",
+  ]);
+  expect(email.stdout.trim()).toBe(hostEmail);
+  const commit = await containers.exec(project, [
+    "sh",
+    "-c",
+    'cd "$(mktemp -d)" && git init -q && git commit -q --allow-empty -m e2e',
+  ]);
+  expect(commit.exitCode).toBe(0);
+} else {
+  console.log(
+    "[e2e] no git identity on this machine; skipping the commit check"
+  );
+}
 ```
 
 Before the test's final `await orch.stop(project.id)` block ends, after the existing stopped assertion, add:
 
 ```ts
-    sshAgent.kill();
-    if (previousSock === undefined) delete process.env.SSH_AUTH_SOCK;
-    else process.env.SSH_AUTH_SOCK = previousSock;
-    fs.rmSync(agentDir, { recursive: true, force: true });
+sshAgent.kill();
+if (previousSock === undefined) delete process.env.SSH_AUTH_SOCK;
+else process.env.SSH_AUTH_SOCK = previousSock;
+fs.rmSync(agentDir, { recursive: true, force: true });
 ```
 
 - [ ] **Step 2: Run the e2e, both routes**
 
-Run: `npm run test:e2e -- test/e2e/opendevhub.e2e.ts`
-Then: `OPENDEVHUB_ROUTE=gateway npm run test:e2e -- test/e2e/opendevhub.e2e.ts`
-Expected: PASS on both routes. The `[e2e]` log shows `ssh-agent: forwarded` and a `git:` line. If the fixture container was created earlier, it's reused; nothing here needs a rebuild.
+Run: `npm run test:e2e -- test/e2e/opendevhub.e2e.ts` Then: `OPENDEVHUB_ROUTE=gateway npm run test:e2e -- test/e2e/opendevhub.e2e.ts` Expected: PASS on both routes. The `[e2e]` log shows `ssh-agent: forwarded` and a `git:` line. If the fixture container was created earlier, it's reused; nothing here needs a rebuild.
 
 - [ ] **Step 3: Update the README**
 
@@ -1945,7 +2430,7 @@ In **Requirements**, replace the line `- LLM provider credentials available insi
 
 Add a section after **Own containers for worktrees**:
 
-~~~markdown
+````markdown
 ## Git and ssh in containers
 
 Every container opendevhub starts (the project's and each worktree's own) is set up for git when it starts or is reconnected:
@@ -1961,7 +2446,7 @@ The checkout page shows whether the agent is forwarded. To turn forwarding off f
 ```
 
 or, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "sshAgent": false } }`. It takes effect the next time the container starts or opendevhub restarts. An opencode server started before forwarding was set up picks up `SSH_AUTH_SOCK` after **Restart opencode**.
-~~~
+````
 
 In **Known limitations**, add:
 

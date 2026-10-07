@@ -1,7 +1,14 @@
-export type { IntegrationSettings as ForgejoSettings, IntegrationSettingsInput as ForgejoSettingsInput } from "./integrations";
+export type {
+  IntegrationSettings as ForgejoSettings,
+  IntegrationSettingsInput as ForgejoSettingsInput,
+} from "./integrations";
 
 export type ForgejoPullFilter = "all" | "open" | "closed";
-export type ForgejoInbox = "authored" | "review-requested" | "assigned" | "review";
+export type ForgejoInbox =
+  | "authored"
+  | "review-requested"
+  | "assigned"
+  | "review";
 
 export interface ForgejoPullQuery {
   state?: ForgejoPullFilter;
@@ -65,7 +72,10 @@ export interface ForgejoReview {
   commentsCount: number;
 }
 
-export interface ForgejoPage<T> { items: T[]; nextPage?: number }
+export interface ForgejoPage<T> {
+  items: T[];
+  nextPage?: number;
+}
 
 export interface ForgejoCheck {
   id: number;
@@ -75,8 +85,14 @@ export interface ForgejoCheck {
   url?: string;
 }
 
-export interface ForgejoChecks extends ForgejoPage<ForgejoCheck> { state: string; sha: string }
-export interface ForgejoConnection { username: string; version: string }
+export interface ForgejoChecks extends ForgejoPage<ForgejoCheck> {
+  state: string;
+  sha: string;
+}
+export interface ForgejoConnection {
+  username: string;
+  version: string;
+}
 
 export interface ForgejoDiff {
   pull: ForgejoPullRequest;

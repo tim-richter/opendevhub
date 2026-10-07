@@ -2,7 +2,9 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { startRelay } from "../helpers/relay";
 
 type Relay = Awaited<ReturnType<typeof startRelay>>;
@@ -17,7 +19,9 @@ beforeEach(async () => {
   relay = await startRelay("secret", { ODH_AGENT_SOCK: sock });
 });
 afterEach(async () => {
-  for (const s of sockets.splice(0)) s.destroy();
+  for (const s of sockets.splice(0)) {
+    s.destroy();
+  }
   await relay.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -39,7 +43,9 @@ function connect(header: string, port = relay.port) {
   const closed = new Promise<void>((r) => socket.on("close", () => r()));
   const line = (i: number) =>
     vi.waitFor(() => {
-      if (lines.length <= i) throw new Error(`waiting for line ${i}`);
+      if (lines.length <= i) {
+        throw new Error(`waiting for line ${i}`);
+      }
       return lines[i];
     });
   return { socket, lines, closed, line };
@@ -59,9 +65,9 @@ function agentClient() {
 describe("relay agent verbs", () => {
   it("agent-listen answers OK and creates the socket with mode 0600", async () => {
     const control = connect("secret agent-listen\n");
-    expect(await control.line(0)).toBe("OK");
+    await expect(control.line(0)).resolves.toBe("OK");
     const stat = fs.statSync(sock);
-    expect(stat.isSocket()).toBe(true);
+    expect(stat.isSocket()).toBeTruthy();
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
@@ -71,10 +77,10 @@ describe("relay agent verbs", () => {
     const client = agentClient();
     client.socket.write("request\n");
     const conn = await control.line(1);
-    expect(conn).toMatch(/^CONN \d+$/);
+    expect(conn).toMatch(/^CONN \d+$/u);
     const accept = connect(`secret agent-accept ${conn.split(" ")[1]}\n`);
-    expect(await accept.line(0)).toBe("OK");
-    expect(await accept.line(1)).toBe("request");
+    await expect(accept.line(0)).resolves.toBe("OK");
+    await expect(accept.line(1)).resolves.toBe("request");
     accept.socket.write("answer\n");
     await vi.waitFor(() => expect(client.received()).toBe("answer\n"));
   });
@@ -84,21 +90,28 @@ describe("relay agent verbs", () => {
     await control.line(0);
     const a = agentClient();
     const b = agentClient();
-    const ids = [(await control.line(1)).split(" ")[1], (await control.line(2)).split(" ")[1]];
+    const ids = [
+      (await control.line(1)).split(" ")[1],
+      (await control.line(2)).split(" ")[1],
+    ];
     expect(new Set(ids).size).toBe(2);
     for (const id of ids) {
       const accept = connect(`secret agent-accept ${id}\n`);
       await accept.line(0);
       accept.socket.write(`for-${id}\n`);
     }
-    await vi.waitFor(() => expect([a.received(), b.received()].sort()).toEqual(ids.map((id) => `for-${id}\n`).sort()));
+    await vi.waitFor(() =>
+      expect([a.received(), b.received()].sort()).toStrictEqual(
+        ids.map((id) => `for-${id}\n`).sort()
+      )
+    );
   });
 
   it("answers ERR ENOENT for an unknown id", async () => {
     const control = connect("secret agent-listen\n");
     await control.line(0);
     const accept = connect("secret agent-accept 999\n");
-    expect(await accept.line(0)).toBe("ERR ENOENT");
+    await expect(accept.line(0)).resolves.toBe("ERR ENOENT");
     await accept.closed;
   });
 
@@ -118,10 +131,10 @@ describe("relay agent verbs", () => {
     agentClient();
     await first.line(1);
     const second = connect("secret agent-listen\n");
-    expect(await second.line(0)).toBe("OK");
+    await expect(second.line(0)).resolves.toBe("OK");
     await first.closed;
-    expect(await second.line(1)).toMatch(/^CONN \d+$/);
-    expect(fs.existsSync(sock)).toBe(true);
+    await expect(second.line(1)).resolves.toMatch(/^CONN \d+$/u);
+    expect(fs.existsSync(sock)).toBeTruthy();
   });
 
   it("removes the socket and drops pending clients 2 s after the control connection goes", async () => {
@@ -130,7 +143,9 @@ describe("relay agent verbs", () => {
     const client = agentClient();
     await control.line(1);
     control.socket.destroy();
-    await vi.waitFor(() => expect(fs.existsSync(sock)).toBe(false), { timeout: 4000 });
+    await vi.waitFor(() => expect(fs.existsSync(sock)).toBeFalsy(), {
+      timeout: 4000,
+    });
     await client.closed;
   });
 
@@ -140,25 +155,28 @@ describe("relay agent verbs", () => {
     control.socket.destroy();
     await control.closed;
     const again = connect("secret agent-listen\n");
-    expect(await again.line(0)).toBe("OK");
+    await expect(again.line(0)).resolves.toBe("OK");
     await new Promise((r) => setTimeout(r, 2500));
-    expect(fs.existsSync(sock)).toBe(true);
+    expect(fs.existsSync(sock)).toBeTruthy();
   });
 
   it("closes silently on a wrong token", async () => {
     const control = connect("nope agent-listen\n");
     await control.closed;
-    expect(control.lines).toEqual([]);
-    expect(fs.existsSync(sock)).toBe(false);
+    expect(control.lines).toStrictEqual([]);
+    expect(fs.existsSync(sock)).toBeFalsy();
   });
 
   it("is refused by the gateway relay", async () => {
-    const gateway = await startRelay("secret", { ODH_AGENT_SOCK: sock, ODH_RELAY_REMOTE: "1" });
+    const gateway = await startRelay("secret", {
+      ODH_AGENT_SOCK: sock,
+      ODH_RELAY_REMOTE: "1",
+    });
     try {
       const control = connect("secret agent-listen\n", gateway.port);
       await control.closed;
-      expect(control.lines).toEqual([]);
-      expect(fs.existsSync(sock)).toBe(false);
+      expect(control.lines).toStrictEqual([]);
+      expect(fs.existsSync(sock)).toBeFalsy();
     } finally {
       await gateway.stop();
     }

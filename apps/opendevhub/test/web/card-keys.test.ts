@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ARM_DELAY_MS, cardAction, canTakeFocus } from "../../src/web/card-keys";
 
-const key = (k: string, over: Partial<Parameters<typeof cardAction>[0]> = {}) => ({
+import {
+  ARM_DELAY_MS,
+  cardAction,
+  canTakeFocus,
+} from "../../src/web/card-keys";
+
+const key = (
+  k: string,
+  over: Partial<Parameters<typeof cardAction>[0]> = {}
+) => ({
   key: k,
   repeat: false,
   onCard: true,
@@ -9,7 +17,7 @@ const key = (k: string, over: Partial<Parameters<typeof cardAction>[0]> = {}) =>
   ...over,
 });
 
-describe("cardAction", () => {
+describe(cardAction, () => {
   const armed = { mountedAt: 0, now: ARM_DELAY_MS };
 
   it("maps the card's keys once it is armed", () => {
@@ -22,28 +30,36 @@ describe("cardAction", () => {
   });
 
   it("ignores a second press that lands on a card that just appeared", () => {
-    expect(cardAction(key("Enter"), 1000, 1000 + ARM_DELAY_MS - 1)).toBeUndefined();
+    expect(
+      cardAction(key("Enter"), 1000, 1000 + ARM_DELAY_MS - 1)
+    ).toBeUndefined();
     expect(cardAction(key("a"), 1000, 1100)).toBeUndefined();
   });
 
   it("ignores auto-repeat, keys typed in the card's fields and modified keys", () => {
-    expect(cardAction(key("Enter", { repeat: true }), armed.mountedAt, armed.now)).toBeUndefined();
-    expect(cardAction(key("Enter", { onCard: false }), armed.mountedAt, armed.now)).toBeUndefined();
-    expect(cardAction(key("a", { modified: true }), armed.mountedAt, armed.now)).toBeUndefined();
+    expect(
+      cardAction(key("Enter", { repeat: true }), armed.mountedAt, armed.now)
+    ).toBeUndefined();
+    expect(
+      cardAction(key("Enter", { onCard: false }), armed.mountedAt, armed.now)
+    ).toBeUndefined();
+    expect(
+      cardAction(key("a", { modified: true }), armed.mountedAt, armed.now)
+    ).toBeUndefined();
   });
 });
 
-describe("canTakeFocus", () => {
+describe(canTakeFocus, () => {
   const body = { id: "body" };
   const inside = { id: "inside" };
   const elsewhere = { id: "elsewhere" };
   const stack = { contains: (n: unknown) => n === inside };
 
   it("only takes focus from nowhere or from its own stack", () => {
-    expect(canTakeFocus(body, body, stack)).toBe(true);
-    expect(canTakeFocus(null, body, stack)).toBe(true);
-    expect(canTakeFocus(inside, body, stack)).toBe(true);
-    expect(canTakeFocus(elsewhere, body, stack)).toBe(false);
-    expect(canTakeFocus(body, body, null)).toBe(true);
+    expect(canTakeFocus(body, body, stack)).toBeTruthy();
+    expect(canTakeFocus(null, body, stack)).toBeTruthy();
+    expect(canTakeFocus(inside, body, stack)).toBeTruthy();
+    expect(canTakeFocus(elsewhere, body, stack)).toBeFalsy();
+    expect(canTakeFocus(body, body, null)).toBeTruthy();
   });
 });

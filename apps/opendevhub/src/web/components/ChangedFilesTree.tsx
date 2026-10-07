@@ -1,5 +1,6 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { useEffect, useRef } from "react";
+
 import type { ReviewFile } from "../../shared/types";
 import { commonDirectory, statsDecoration, treeGitStatus } from "../review";
 
@@ -18,9 +19,13 @@ const TRUNCATE_FIX = `
  * share is shown once in the tree's header, and the tree holds paths relative to it: long folder chains don't fit a narrow row.
  * Import it through `LazyChangedFilesTree` so the tree loads only with the Review tab.
  */
-export default function ChangedFilesTree(props: { files: ReviewFile[]; onSelect: (file: string) => void }) {
+export default function ChangedFilesTree(props: {
+  files: ReviewFile[];
+  onSelect: (file: string) => void;
+}) {
   const root = commonDirectory(props.files.map((f) => f.file));
-  const relative = (fs: ReviewFile[]) => fs.map((f) => f.file.slice(root.length));
+  const relative = (fs: ReviewFile[]) =>
+    fs.map((f) => f.file.slice(root.length));
   // The model is created once; its callbacks read the latest files, root and handler from refs.
   const files = useRef(props.files);
   files.current = props.files;
@@ -30,21 +35,27 @@ export default function ChangedFilesTree(props: { files: ReviewFile[]; onSelect:
   onSelect.current = props.onSelect;
 
   const { model } = useFileTree({
-    paths: relative(props.files),
-    initialExpansion: "open",
-    flattenEmptyDirectories: true,
     density: "compact",
-    unsafeCSS: TRUNCATE_FIX,
+    flattenEmptyDirectories: true,
     gitStatus: treeGitStatus(props.files, root),
-    renderRowDecoration: ({ item }) => {
-      if (item.kind !== "file") return null;
-      const file = files.current.find((f) => f.file === rootRef.current + item.path);
-      return file ? statsDecoration(file) : null;
-    },
+    initialExpansion: "open",
     onSelectionChange: (paths) => {
       const path = paths.at(-1) && rootRef.current + paths.at(-1);
-      if (path && files.current.some((f) => f.file === path)) onSelect.current(path);
+      if (path && files.current.some((f) => f.file === path)) {
+        onSelect.current(path);
+      }
     },
+    paths: relative(props.files),
+    renderRowDecoration: ({ item }) => {
+      if (item.kind !== "file") {
+        return null;
+      }
+      const file = files.current.find(
+        (f) => f.file === rootRef.current + item.path
+      );
+      return file ? statsDecoration(file) : null;
+    },
+    unsafeCSS: TRUNCATE_FIX,
   });
 
   // Keep the tree in step when a refresh brings different files or statuses.
@@ -57,14 +68,20 @@ export default function ChangedFilesTree(props: { files: ReviewFile[]; onSelect:
     }
     model.resetPaths(pathsKey ? pathsKey.split("\n") : []);
   }, [model, pathsKey]);
-  useEffect(() => model.setGitStatus(treeGitStatus(props.files, root)), [model, props.files, root]);
+  useEffect(
+    () => model.setGitStatus(treeGitStatus(props.files, root)),
+    [model, props.files, root]
+  );
 
   return (
     <FileTree
       model={model}
       header={
         root ? (
-          <p className="border-b px-3 py-1.5 font-mono text-xs break-all text-muted-foreground" title={root}>
+          <p
+            className="text-muted-foreground border-b px-3 py-1.5 font-mono text-xs break-all"
+            title={root}
+          >
             {root}
           </p>
         ) : undefined

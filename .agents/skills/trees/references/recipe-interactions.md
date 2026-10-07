@@ -13,7 +13,7 @@ const tree = new FileTree({
   },
   dragAndDrop: {
     canDrop({ target }) {
-      return target.kind === 'directory';
+      return target.kind === "directory";
     },
     onDropComplete(event) {
       saveMove(event);
@@ -23,8 +23,6 @@ const tree = new FileTree({
 });
 ```
 
-Use `openSearch()` to open search from an application command. Use
-`startRenaming(path)` to start rename from a menu. Use `setGitStatus()` or
-`applyGitStatusPatch()` after repository state changes.
+Use `openSearch()` to open search from an application command. Use `startRenaming(path)` to start rename from a menu. Use `setGitStatus()` or `applyGitStatusPatch()` after repository state changes.
 
 Directory input paths end with `/`. File input paths do not end with `/`.

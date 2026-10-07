@@ -1,34 +1,75 @@
 import { describe, expect, it } from "vitest";
+
 import type { RawAgent, RawModel } from "../../src/server/opencode/client";
-import { discardMetadata, parseTaskMeta, parseTaskRequest, toModelsInfo } from "../../src/server/tasks";
+import {
+  discardMetadata,
+  parseTaskMeta,
+  parseTaskRequest,
+  toModelsInfo,
+} from "../../src/server/tasks";
 import { InvalidRequestError } from "../../src/server/worktrees";
 
-const jira = { key: "APP-12", instanceUrl: "https://jira.example.com/jira", title: "Fix login", description: "Safari login must succeed." };
+const jira = {
+  key: "APP-12",
+  instanceUrl: "https://jira.example.com/jira",
+  title: "Fix login",
+  description: "Safari login must succeed.",
+};
 
-describe("parseTaskRequest", () => {
+describe(parseTaskRequest, () => {
   it("preserves a validated ticket snapshot and strips unknown fields", () => {
-    expect(parseTaskRequest({ prompt: "Fix", jira: { ...jira, token: "secret" } }).jira).toEqual(jira);
-    for (const source of [null, { ...jira, key: "../APP-12" }, { ...jira, instanceUrl: "https://user:secret@example.com" },
-      { ...jira, description: {} }, { ...jira, description: "x".repeat(100_001) }]) {
+    expect(
+      parseTaskRequest({ prompt: "Fix", jira: { ...jira, token: "secret" } })
+        .jira
+    ).toStrictEqual(jira);
+    for (const source of [
+      null,
+      { ...jira, key: "../APP-12" },
+      { ...jira, instanceUrl: "https://user:secret@example.com" },
+      { ...jira, description: {} },
+      { ...jira, description: "x".repeat(100_001) },
+    ]) {
       expect(() => parseTaskRequest({ prompt: "Fix", jira: source })).toThrow();
     }
   });
+
   it("reads the node, leaving it out for this machine", () => {
-    expect(parseTaskRequest({ prompt: "x", environment: "isolated", node: "box" }).node).toBe("box");
-    expect(parseTaskRequest({ prompt: "x", node: "local" }).node).toBeUndefined();
+    expect(
+      parseTaskRequest({ prompt: "x", environment: "isolated", node: "box" })
+        .node
+    ).toBe("box");
+    expect(
+      parseTaskRequest({ prompt: "x", node: "local" }).node
+    ).toBeUndefined();
     expect(parseTaskRequest({ prompt: "x" }).node).toBeUndefined();
-    expect(() => parseTaskRequest({ prompt: "x", node: "Bad Node" })).toThrow(/invalid node/);
+    expect(() => parseTaskRequest({ prompt: "x", node: "Bad Node" })).toThrow(
+      /invalid node/u
+    );
   });
 
   it("accepts the environment of worktree tasks", () => {
-    expect(parseTaskRequest({ prompt: "x", environment: "isolated" }).environment).toBe("isolated");
+    expect(
+      parseTaskRequest({ prompt: "x", environment: "isolated" }).environment
+    ).toBe("isolated");
     expect(parseTaskRequest({ prompt: "x" })).not.toHaveProperty("environment");
-    expect(() => parseTaskRequest({ prompt: "x", environment: "vm" })).toThrow(/invalid environment/);
-    expect(() => parseTaskRequest({ prompt: "x", where: "workspace", environment: "isolated" })).toThrow(/new worktree/);
+    expect(() => parseTaskRequest({ prompt: "x", environment: "vm" })).toThrow(
+      /invalid environment/u
+    );
+    expect(() =>
+      parseTaskRequest({
+        prompt: "x",
+        where: "workspace",
+        environment: "isolated",
+      })
+    ).toThrow(/new worktree/u);
   });
 
   it("fills in the defaults", () => {
-    expect(parseTaskRequest({ prompt: " Fix it \n" })).toEqual({ prompt: "Fix it", where: "worktree", variants: [{}] });
+    expect(parseTaskRequest({ prompt: " Fix it \n" })).toStrictEqual({
+      prompt: "Fix it",
+      where: "worktree",
+      variants: [{}],
+    });
   });
 
   it("keeps every field it understands", () => {
@@ -38,84 +79,180 @@ describe("parseTaskRequest", () => {
         title: " Login ",
         branch: "feature/x",
         base: "main",
-        variants: [{ model: { id: "anthropic/claude-opus-5-5", providerID: "openrouter", variant: "high" }, agent: "build" }, {}],
+        variants: [
+          {
+            model: {
+              id: "anthropic/claude-opus-5-5",
+              providerID: "openrouter",
+              variant: "high",
+            },
+            agent: "build",
+          },
+          {},
+        ],
         extra: true,
-      }),
-    ).toEqual({
+      })
+    ).toStrictEqual({
       prompt: "Fix it",
       title: "Login",
       where: "worktree",
       branch: "feature/x",
       base: "main",
-      variants: [{ model: { id: "anthropic/claude-opus-5-5", providerID: "openrouter", variant: "high" }, agent: "build" }, {}],
+      variants: [
+        {
+          model: {
+            id: "anthropic/claude-opus-5-5",
+            providerID: "openrouter",
+            variant: "high",
+          },
+          agent: "build",
+        },
+        {},
+      ],
     });
   });
 
   it.each([
-    [{ prompt: "  " }, /prompt is empty/],
-    [{ prompt: "x".repeat(100_001) }, /longer than/],
-    [{ prompt: "x", title: "t".repeat(201) }, /title/],
-    [{ prompt: "x", where: "elsewhere" }, /invalid where/],
-    [{ prompt: "x", variants: [] }, /1 to 4/],
-    [{ prompt: "x", variants: [{}, {}, {}, {}, {}] }, /1 to 4/],
-    [{ prompt: "x", variants: ["gpt"] }, /variant 1 must be an object/],
-    [{ prompt: "x", variants: [{ model: { id: "m" } }] }, /variant 1: model/],
-    [{ prompt: "x", variants: [{}, { agent: "rm -rf /" }] }, /variant 2: invalid agent/],
-    [{ prompt: "x", branch: "a b" }, /invalid branch/],
-    [{ prompt: "x", base: "--upload-pack=x" }, /invalid branch/],
-    [{ prompt: "x", where: "workspace", variants: [{}, {}] }, /worktree each/],
-    [{ prompt: "x", where: "workspace", branch: "b" }, /only apply to a new worktree/],
+    [{ prompt: "  " }, /prompt is empty/u],
+    [{ prompt: "x".repeat(100_001) }, /longer than/u],
+    [{ prompt: "x", title: "t".repeat(201) }, /title/u],
+    [{ prompt: "x", where: "elsewhere" }, /invalid where/u],
+    [{ prompt: "x", variants: [] }, /1 to 4/u],
+    [{ prompt: "x", variants: [{}, {}, {}, {}, {}] }, /1 to 4/u],
+    [{ prompt: "x", variants: ["gpt"] }, /variant 1 must be an object/u],
+    [{ prompt: "x", variants: [{ model: { id: "m" } }] }, /variant 1: model/u],
+    [
+      { prompt: "x", variants: [{}, { agent: "rm -rf /" }] },
+      /variant 2: invalid agent/u,
+    ],
+    [{ prompt: "x", branch: "a b" }, /invalid branch/u],
+    [{ prompt: "x", base: "--upload-pack=x" }, /invalid branch/u],
+    [{ prompt: "x", where: "workspace", variants: [{}, {}] }, /worktree each/u],
+    [
+      { prompt: "x", where: "workspace", branch: "b" },
+      /only apply to a new worktree/u,
+    ],
   ])("rejects %j", (body, message) => {
-    expect(() => parseTaskRequest(body as Record<string, unknown>)).toThrow(InvalidRequestError);
-    expect(() => parseTaskRequest(body as Record<string, unknown>)).toThrow(message);
+    expect(() => parseTaskRequest(body as Record<string, unknown>)).toThrow(
+      InvalidRequestError
+    );
+    expect(() => parseTaskRequest(body as Record<string, unknown>)).toThrow(
+      message
+    );
   });
 });
 
 describe("task metadata", () => {
   it("round trips ticket snapshots from persisted metadata and retains them when discarding", () => {
-    const metadata = { opendevhub: { task: "tsk_1", variant: 1, of: 1, title: "Fix", jira } };
-    expect(parseTaskMeta(JSON.parse(JSON.stringify(metadata)))?.jira).toEqual(jira);
-    expect(parseTaskMeta(discardMetadata(metadata))?.jira).toEqual(jira);
-    expect(parseTaskMeta({ opendevhub: { ...metadata.opendevhub, jira: { ...jira, instanceUrl: "javascript:alert(1)" } } })?.jira).toBeUndefined();
-    expect(parseTaskMeta({ opendevhub: { ...metadata.opendevhub, jira: null } })?.task).toBe("tsk_1");
+    const metadata = {
+      opendevhub: { task: "tsk_1", variant: 1, of: 1, title: "Fix", jira },
+    };
+    expect(
+      parseTaskMeta(JSON.parse(JSON.stringify(metadata)))?.jira
+    ).toStrictEqual(jira);
+    expect(parseTaskMeta(discardMetadata(metadata))?.jira).toStrictEqual(jira);
+    expect(
+      parseTaskMeta({
+        opendevhub: {
+          ...metadata.opendevhub,
+          jira: { ...jira, instanceUrl: "javascript:alert(1)" },
+        },
+      })?.jira
+    ).toBeUndefined();
+    expect(
+      parseTaskMeta({ opendevhub: { ...metadata.opendevhub, jira: null } })
+        ?.task
+    ).toBe("tsk_1");
   });
+
   it("reads opendevhub's task metadata and ignores anything else", () => {
     const meta = { task: "tsk_1", variant: 2, of: 3, title: "Fix" };
-    expect(parseTaskMeta({ opendevhub: meta, other: 1 })).toEqual(meta);
-    expect(parseTaskMeta({ opendevhub: { ...meta, discarded: true } })).toEqual({ ...meta, discarded: true });
-    expect(parseTaskMeta({ opendevhub: { ...meta, branch: "fix-a" } })).toEqual({ ...meta, branch: "fix-a" });
-    expect(parseTaskMeta({ opendevhub: { ...meta, branch: 5 } })).toEqual(meta);
-    expect(parseTaskMeta({ opendevhub: { ...meta, title: 5 } })).toEqual({ ...meta, title: "" });
+    expect(parseTaskMeta({ opendevhub: meta, other: 1 })).toStrictEqual(meta);
+    expect(
+      parseTaskMeta({ opendevhub: { ...meta, discarded: true } })
+    ).toStrictEqual({ ...meta, discarded: true });
+    expect(
+      parseTaskMeta({ opendevhub: { ...meta, branch: "fix-a" } })
+    ).toStrictEqual({ ...meta, branch: "fix-a" });
+    expect(parseTaskMeta({ opendevhub: { ...meta, branch: 5 } })).toStrictEqual(
+      meta
+    );
+    expect(parseTaskMeta({ opendevhub: { ...meta, title: 5 } })).toStrictEqual({
+      ...meta,
+      title: "",
+    });
     expect(parseTaskMeta(undefined)).toBeUndefined();
-    expect(parseTaskMeta({ opendevhub: { task: "nope", variant: 1, of: 1 } })).toBeUndefined();
-    expect(parseTaskMeta({ opendevhub: { task: "tsk_1", variant: 4, of: 3 } })).toBeUndefined();
-    expect(parseTaskMeta({ opendevhub: { task: "tsk_1", variant: 0, of: 3 } })).toBeUndefined();
+    expect(
+      parseTaskMeta({ opendevhub: { task: "nope", variant: 1, of: 1 } })
+    ).toBeUndefined();
+    expect(
+      parseTaskMeta({ opendevhub: { task: "tsk_1", variant: 4, of: 3 } })
+    ).toBeUndefined();
+    expect(
+      parseTaskMeta({ opendevhub: { task: "tsk_1", variant: 0, of: 3 } })
+    ).toBeUndefined();
     expect(parseTaskMeta("x")).toBeUndefined();
   });
 
   it("marks a variant discarded without dropping any other metadata", () => {
-    const meta = { other: 1, opendevhub: { task: "tsk_1", variant: 2, of: 2, title: "t" } };
-    expect(discardMetadata(meta)).toEqual({ other: 1, opendevhub: { task: "tsk_1", variant: 2, of: 2, title: "t", discarded: true } });
+    const meta = {
+      other: 1,
+      opendevhub: { task: "tsk_1", variant: 2, of: 2, title: "t" },
+    };
+    expect(discardMetadata(meta)).toStrictEqual({
+      other: 1,
+      opendevhub: {
+        task: "tsk_1",
+        variant: 2,
+        of: 2,
+        title: "t",
+        discarded: true,
+      },
+    });
     expect(meta.opendevhub).not.toHaveProperty("discarded");
-    expect(discardMetadata(undefined)).toEqual({ opendevhub: { discarded: true } });
+    expect(discardMetadata(undefined)).toStrictEqual({
+      opendevhub: { discarded: true },
+    });
   });
 });
 
-describe("toModelsInfo", () => {
+describe(toModelsInfo, () => {
   it("passes on only names and ids, never provider settings", () => {
     const models = [
-      { id: "m1", providerID: "p", name: "M1", enabled: true, status: "active", variants: [{ id: "high" }], settings: { apiKey: "secret" }, headers: { authorization: "secret" } },
+      {
+        id: "m1",
+        providerID: "p",
+        name: "M1",
+        enabled: true,
+        status: "active",
+        variants: [{ id: "high" }],
+        settings: { apiKey: "secret" },
+        headers: { authorization: "secret" },
+      },
       { id: "m2", providerID: "p", name: "M2", enabled: false, variants: [] },
-      { id: "m3", providerID: "p", name: "M3", enabled: true, status: "deprecated", variants: [] },
+      {
+        id: "m3",
+        providerID: "p",
+        name: "M3",
+        enabled: true,
+        status: "deprecated",
+        variants: [],
+      },
     ] as unknown as RawModel[];
     const agents: RawAgent[] = [
-      { id: "build", name: "Build", mode: "primary", hidden: false, description: "Default" },
+      {
+        id: "build",
+        name: "Build",
+        mode: "primary",
+        hidden: false,
+        description: "Default",
+      },
       { id: "general", name: "General", mode: "subagent" },
       { id: "title", name: "Title", mode: "primary", hidden: true },
       { id: "plan", name: "Plan", mode: "all" },
     ];
     const info = toModelsInfo(models, models[0], agents);
-    expect(info).toEqual({
+    expect(info).toStrictEqual({
       models: [{ id: "m1", providerID: "p", name: "M1", variants: ["high"] }],
       default: { id: "m1", providerID: "p" },
       agents: [
@@ -124,6 +261,9 @@ describe("toModelsInfo", () => {
       ],
     });
     expect(JSON.stringify(info)).not.toContain("secret");
-    expect(toModelsInfo([], undefined, [])).toEqual({ models: [], agents: [] });
+    expect(toModelsInfo([], undefined, [])).toStrictEqual({
+      models: [],
+      agents: [],
+    });
   });
 });

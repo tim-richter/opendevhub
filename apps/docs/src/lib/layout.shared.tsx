@@ -1,17 +1,17 @@
-import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { Logo } from '@/components/logo';
-import { appName, gitConfig } from './shared';
+import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 
-export function baseOptions(): BaseLayoutProps {
-  return {
-    nav: {
-      title: (
-        <>
-          <Logo size={20} className="text-fd-primary" />
-          {appName}
-        </>
-      ),
-    },
-    githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
-  };
-}
+import { Logo } from "@/components/logo";
+
+import { appName, gitConfig } from "./shared";
+
+export const baseOptions = (): BaseLayoutProps => ({
+  githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
+  nav: {
+    title: (
+      <>
+        <Logo size={20} className="text-fd-primary" />
+        {appName}
+      </>
+    ),
+  },
+});

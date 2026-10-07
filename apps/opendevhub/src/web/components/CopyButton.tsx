@@ -1,9 +1,20 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+export const CopyButton = ({
+  text,
+  label = "Copy",
+}: {
+  text: string;
+  label?: string;
+}) => {
   const [done, setDone] = useState(false);
   return (
     <Tooltip>
@@ -26,4 +37,4 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
       <TooltipContent>{done ? "Copied" : label}</TooltipContent>
     </Tooltip>
   );
-}
+};

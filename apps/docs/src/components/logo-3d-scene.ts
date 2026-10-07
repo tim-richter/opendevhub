@@ -1,5 +1,17 @@
-import { Camera, Cylinder, Mesh, Program, Quat, Renderer, Sphere, Torus, Transform, Vec3 } from 'ogl';
-import { EXTENT, RING, STROKE } from './logo-3d-geometry';
+import {
+  Camera,
+  Cylinder,
+  Mesh,
+  Program,
+  Quat,
+  Renderer,
+  Sphere,
+  Torus,
+  Transform,
+  Vec3,
+} from "ogl";
+
+import { EXTENT, RING, STROKE } from "./logo-3d-geometry";
 
 // Seconds the cube rests in the flat logo pose, then tumbles once around itself.
 const HOLD = 1.5;
@@ -39,7 +51,9 @@ const fragment = /* glsl */ `
 const between = (from: Vec3, to: Vec3) => {
   const axis = new Vec3().cross(from, to);
   const sin = axis.len();
-  return sin < 1e-6 ? new Quat() : new Quat().fromAxisAngle(axis.normalize(), Math.atan2(sin, from.dot(to)));
+  return sin < 1e-6
+    ? new Quat()
+    : new Quat().fromAxisAngle(axis.normalize(), Math.atan2(sin, from.dot(to)));
 };
 
 /**
@@ -47,29 +61,71 @@ const between = (from: Vec3, to: Vec3) => {
  * calls `onShown` once it fully covers it. Lives in its own module so OGL is only fetched by pages that
  * show the logo, and never when reduced motion is requested. Returns a cleanup.
  */
-export function mountLogoScene(host: HTMLElement, size: number, onShown: () => void): () => void {
-  const renderer = new Renderer({ width: size, height: size, dpr: window.devicePixelRatio, alpha: true, antialias: true });
-  const gl = renderer.gl;
+export const mountLogoScene = (
+  host: HTMLElement,
+  size: number,
+  onShown: () => void
+): (() => void) => {
+  const renderer = new Renderer({
+    alpha: true,
+    antialias: true,
+    dpr: window.devicePixelRatio,
+    height: size,
+    width: size,
+  });
+  const { gl } = renderer;
   gl.clearColor(0, 0, 0, 0);
-  const canvas = gl.canvas;
-  canvas.style.position = 'absolute';
-  canvas.style.inset = '0';
-  canvas.style.cursor = 'grab';
-  canvas.style.touchAction = 'none';
+  const { canvas } = gl;
+  canvas.style.position = "absolute";
+  canvas.style.inset = "0";
+  canvas.style.cursor = "grab";
+  canvas.style.touchAction = "none";
 
-  const camera = new Camera(gl, { left: -EXTENT, right: EXTENT, bottom: -EXTENT, top: EXTENT, near: 0.1, far: 20 });
+  const camera = new Camera(gl, {
+    bottom: -EXTENT,
+    far: 20,
+    left: -EXTENT,
+    near: 0.1,
+    right: EXTENT,
+    top: EXTENT,
+  });
   camera.position.set(0, 0, 10);
 
-  const program = new Program(gl, { vertex, fragment, uniforms: { uColor: { value: [0, 0, 0] } } });
-  const joint = new Sphere(gl, { radius: STROKE, widthSegments: 16, heightSegments: 12 });
-  const edge = new Cylinder(gl, { radiusTop: STROKE, radiusBottom: STROKE, height: 2, radialSegments: 16, openEnded: true });
-  const ringGeometry = new Torus(gl, { radius: RING, tube: STROKE, radialSegments: 24, tubularSegments: 64 });
+  const program = new Program(gl, {
+    fragment,
+    uniforms: { uColor: { value: [0, 0, 0] } },
+    vertex,
+  });
+  const joint = new Sphere(gl, {
+    heightSegments: 12,
+    radius: STROKE,
+    widthSegments: 16,
+  });
+  const edge = new Cylinder(gl, {
+    height: 2,
+    openEnded: true,
+    radialSegments: 16,
+    radiusBottom: STROKE,
+    radiusTop: STROKE,
+  });
+  const ringGeometry = new Torus(gl, {
+    radialSegments: 24,
+    radius: RING,
+    tube: STROKE,
+    tubularSegments: 64,
+  });
   const geometries = [joint, edge, ringGeometry];
 
   const scene = new Transform();
   const model = new Transform();
   const corners: Vec3[] = [];
-  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) corners.push(new Vec3(x, y, z));
+  for (const x of [-1, 1]) {
+    for (const y of [-1, 1]) {
+      for (const z of [-1, 1]) {
+        corners.push(new Vec3(x, y, z));
+      }
+    }
+  }
 
   const up = new Vec3(0, 1, 0);
   for (const [i, a] of corners.entries()) {
@@ -77,7 +133,9 @@ export function mountLogoScene(host: HTMLElement, size: number, onShown: () => v
     ball.position.copy(a);
     ball.setParent(model);
     for (const b of corners.slice(i + 1)) {
-      if (a.distance(b) !== 2) continue;
+      if (a.distance(b) !== 2) {
+        continue;
+      }
       const bar = new Mesh(gl, { geometry: edge, program });
       bar.position.add(a, b).scale(0.5);
       bar.quaternion.copy(between(up, new Vec3().sub(b, a).normalize()));
@@ -88,36 +146,51 @@ export function mountLogoScene(host: HTMLElement, size: number, onShown: () => v
   // Point the cube's diagonal at the camera, then turn it so a corner sits at the top like the SVG.
   const pose = between(new Vec3(1, 1, 1).normalize(), new Vec3(0, 0, 1));
   const top = new Vec3(1, 1, -1).applyQuaternion(pose);
-  model.quaternion.multiply(new Quat().fromAxisAngle(new Vec3(0, 0, 1), Math.PI / 2 - Math.atan2(top.y, top.x)), pose);
+  model.quaternion.multiply(
+    new Quat().fromAxisAngle(
+      new Vec3(0, 0, 1),
+      Math.PI / 2 - Math.atan2(top.y, top.x)
+    ),
+    pose
+  );
 
   // The "O" stays in the camera plane of the starting pose, so it reads as the logo's circle.
   const ring = new Mesh(gl, { geometry: ringGeometry, program });
 
   const spin = new Transform();
-  spin.rotation.reorder('XYZ');
+  spin.rotation.reorder("XYZ");
   model.setParent(spin);
   ring.setParent(spin);
   spin.setParent(scene);
 
   const syncColor = () => {
     // Normalise whatever CSS colour syntax the theme uses (hsl, oklch, …) by painting one pixel.
-    const ctx = document.createElement('canvas').getContext('2d');
-    if (!ctx) return;
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) {
+      return;
+    }
     ctx.fillStyle = getComputedStyle(host).color;
     ctx.fillRect(0, 0, 1, 1);
-    program.uniforms.uColor.value = Array.from(ctx.getImageData(0, 0, 1, 1).data.subarray(0, 3), (c) => c / 255);
+    program.uniforms.uColor.value = Array.from(
+      ctx.getImageData(0, 0, 1, 1).data.subarray(0, 3),
+      (c) => c / 255
+    );
   };
   syncColor();
   const themeObserver = new MutationObserver(syncColor);
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+  themeObserver.observe(document.documentElement, {
+    attributeFilter: ["class", "style"],
+    attributes: true,
+  });
 
-  const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+  const ease = (t: number) =>
+    t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
   let elapsed = 0;
   let autoFrom = 0;
 
   // Grabbing the cube pauses the animation and dragging turns it around the screen axes. On release it
   // keeps the throw's momentum while a spring pulls it back to the logo pose, then the animation resumes.
-  let mode: 'auto' | 'drag' | 'spring' = 'auto';
+  let mode: "auto" | "drag" | "spring" = "auto";
   let last: { x: number; y: number } | null = null;
   const dragged = new Vec3(); // rotation (screen axes) dragged since the last frame
   const velocity = new Vec3(); // angular velocity, rad/s around the screen axes
@@ -131,53 +204,77 @@ export function mountLogoScene(host: HTMLElement, size: number, onShown: () => v
 
   const rotate = (rotation: Vec3) => {
     const angle = rotation.len();
-    if (angle > 0) spin.quaternion.multiply(turn.fromAxisAngle(axis.copy(rotation).scale(1 / angle), angle), spin.quaternion);
+    if (angle > 0) {
+      spin.quaternion.multiply(
+        turn.fromAxisAngle(axis.copy(rotation).scale(1 / angle), angle),
+        spin.quaternion
+      );
+    }
   };
   const onDown = (e: PointerEvent) => {
-    mode = 'drag';
+    mode = "drag";
     velocity.set(0, 0, 0);
     dragged.set(0, 0, 0);
     last = { x: e.clientX, y: e.clientY };
     canvas.setPointerCapture(e.pointerId);
-    canvas.style.cursor = 'grabbing';
+    canvas.style.cursor = "grabbing";
   };
   const onMove = (e: PointerEvent) => {
-    if (!last) return;
-    const delta = new Vec3((e.clientY - last.y) * radiansPerPixel, (e.clientX - last.x) * radiansPerPixel, 0);
+    if (!last) {
+      return;
+    }
+    const delta = new Vec3(
+      (e.clientY - last.y) * radiansPerPixel,
+      (e.clientX - last.x) * radiansPerPixel,
+      0
+    );
     last = { x: e.clientX, y: e.clientY };
     dragged.add(delta);
     rotate(delta);
   };
   const onUp = (e: PointerEvent) => {
-    if (!last) return;
+    if (!last) {
+      return;
+    }
     last = null;
-    mode = 'spring';
-    if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
-    canvas.style.cursor = 'grab';
+    mode = "spring";
+    if (canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+    canvas.style.cursor = "grab";
   };
-  canvas.addEventListener('pointerdown', onDown);
-  canvas.addEventListener('pointermove', onMove);
-  canvas.addEventListener('pointerup', onUp);
-  canvas.addEventListener('pointercancel', onUp);
+  canvas.addEventListener("pointerdown", onDown);
+  canvas.addEventListener("pointermove", onMove);
+  canvas.addEventListener("pointerup", onUp);
+  canvas.addEventListener("pointercancel", onUp);
 
   const update = (dt: number) => {
-    if (mode === 'drag') {
+    if (mode === "drag") {
       // Smoothed so the throw's speed is what the pointer did over the last few frames.
-      if (dt > 0) velocity.lerp(dragged.scale(1 / dt), 0.5);
+      if (dt > 0) {
+        velocity.lerp(dragged.scale(1 / dt), 0.5);
+      }
       dragged.set(0, 0, 0);
-    } else if (mode === 'spring') {
+    } else if (mode === "spring") {
       // How far the cube is turned away from the logo pose, as a rotation vector (shortest way round).
       const q = spin.quaternion;
-      if (q.w < 0) q.set(-q.x, -q.y, -q.z, -q.w);
+      if (q.w < 0) {
+        q.set(-q.x, -q.y, -q.z, -q.w);
+      }
       const angle = 2 * Math.acos(Math.min(q.w, 1));
       const s = Math.sqrt(1 - q.w * q.w);
-      if (s > 1e-6) offset.set(q.x, q.y, q.z).scale(angle / s);
-      else offset.set(0, 0, 0);
-      velocity.add(step.copy(offset).scale(-STIFFNESS * dt)).scale(Math.max(0, 1 - DAMPING * dt));
+      if (s > 1e-6) {
+        offset.set(q.x, q.y, q.z).scale(angle / s);
+      } else {
+        offset.set(0, 0, 0);
+      }
+      velocity
+        .add(step.copy(offset).scale(-STIFFNESS * dt))
+        .scale(Math.max(0, 1 - DAMPING * dt));
       rotate(step.copy(velocity).scale(dt));
       if (angle < 0.002 && velocity.len() < 0.02) {
         spin.quaternion.identity();
-        mode = 'auto';
+        mode = "auto";
         autoFrom = elapsed;
       }
     } else {
@@ -186,15 +283,18 @@ export function mountLogoScene(host: HTMLElement, size: number, onShown: () => v
       // One full turn on two axes brings every face past the camera and lands back in the logo pose.
       spin.rotation.set(p * Math.PI * 2, p * Math.PI * 2, 0);
     }
-    renderer.render({ scene, camera });
+    renderer.render({ camera, scene });
   };
 
   // Draw the logo pose once before the canvas goes in (this also compiles the shaders), then fade it in
   // over the matching SVG so the hand-over is seamless; the animation then holds that pose for HOLD seconds.
   update(0);
-  host.appendChild(canvas);
-  const fade = canvas.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE_MS, easing: 'ease-out' });
-  fade.finished.then(onShown, () => {});
+  host.append(canvas);
+  const fade = canvas.animate([{ opacity: 0 }, { opacity: 1 }], {
+    duration: FADE_MS,
+    easing: "ease-out",
+  });
+  fade.finished.then(onShown, () => undefined);
 
   let frame = 0;
   let then = performance.now();
@@ -211,13 +311,15 @@ export function mountLogoScene(host: HTMLElement, size: number, onShown: () => v
     fade.cancel();
     cancelAnimationFrame(frame);
     themeObserver.disconnect();
-    canvas.removeEventListener('pointerdown', onDown);
-    canvas.removeEventListener('pointermove', onMove);
-    canvas.removeEventListener('pointerup', onUp);
-    canvas.removeEventListener('pointercancel', onUp);
-    for (const g of geometries) g.remove();
+    canvas.removeEventListener("pointerdown", onDown);
+    canvas.removeEventListener("pointermove", onMove);
+    canvas.removeEventListener("pointerup", onUp);
+    canvas.removeEventListener("pointercancel", onUp);
+    for (const g of geometries) {
+      g.remove();
+    }
     program.remove();
-    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
     canvas.remove();
   };
-}
+};

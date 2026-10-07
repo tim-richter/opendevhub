@@ -2,7 +2,6 @@
   "name": "opendevhub-monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.9.1",
   "scripts": {
     "dev": "pnpm --filter opendevhub dev",
     "dev:web": "pnpm --filter opendevhub dev:web",
@@ -13,10 +12,19 @@
     "test:e2e": "pnpm --filter opendevhub test:e2e",
     "changeset": "changeset",
     "version-packages": "changeset version && pnpm install --lockfile-only",
-    "release": "pnpm --filter opendevhub build && changeset publish"
+    "release": "pnpm --filter opendevhub build && changeset publish",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
-    "@changesets/cli": "^3.0.3"
-  }
+    "@changesets/cli": "^3.0.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "ultracite": "7.12.4"
+  },
+  "packageManager": "pnpm@12.9.1"
 }

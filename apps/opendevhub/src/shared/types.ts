@@ -23,11 +23,21 @@ export interface Project {
   devcontainerPath: string;
 }
 
-export type ContainerState = "stopped" | "starting" | "running" | "stopping" | "error";
+export type ContainerState =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "error";
 export type OpencodeState = "absent" | "starting" | "healthy" | "unhealthy";
 
 export type ForwardedPort =
-  | { status: "forwarded"; containerPort: number; label?: string; hostPort: number }
+  | {
+      status: "forwarded";
+      containerPort: number;
+      label?: string;
+      hostPort: number;
+    }
   | { status: "failed"; containerPort: number; label?: string; reason: string }
   | { status: "skipped"; entry: string; reason: string };
 
@@ -96,7 +106,11 @@ export interface IsolationInfo {
   unsupported?: string;
 }
 
-export type SessionStatus = "idle" | "running" | "needs-permission" | "needs-answer";
+export type SessionStatus =
+  | "idle"
+  | "running"
+  | "needs-permission"
+  | "needs-answer";
 
 /** A field of an opencode form, passed through unchanged. `type` stays open so new field types still reach the UI. */
 export interface FormField {
@@ -255,7 +269,13 @@ export interface ChecksView extends ChecksConfig {
   current?: boolean;
 }
 
-export type ForgeKind = "github" | "gitlab" | "forgejo" | "gitea" | "bitbucket" | "unknown";
+export type ForgeKind =
+  | "github"
+  | "gitlab"
+  | "forgejo"
+  | "gitea"
+  | "bitbucket"
+  | "unknown";
 export type PublishStrategy = "branch" | "agit";
 
 export interface PublishInfo {
@@ -419,7 +439,14 @@ export interface ProjectView {
 }
 
 /** Where a starting task variant is: its worktree, its environment (image, container), then its session. */
-export type StartStep = "queued" | "pushing" | "worktree" | "image" | "container" | "session" | "failed";
+export type StartStep =
+  | "queued"
+  | "pushing"
+  | "worktree"
+  | "image"
+  | "container"
+  | "session"
+  | "failed";
 
 export interface StartingVariant {
   /** 1-based, as in TaskMeta. */
@@ -622,7 +649,11 @@ export interface SessionCleanupItem {
   why: "discarded" | "worktree-gone" | "idle";
 }
 
-export type CleanupItem = BranchCleanupItem | ContainerCleanupItem | ImageCleanupItem | SessionCleanupItem;
+export type CleanupItem =
+  | BranchCleanupItem
+  | ContainerCleanupItem
+  | ImageCleanupItem
+  | SessionCleanupItem;
 
 export interface CleanupProject {
   id: ProjectId;

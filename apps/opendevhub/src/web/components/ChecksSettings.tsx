@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
-import type { CheckDef, ChecksConfig, CheckWhere } from "../../shared/types";
-import { fetchChecks, saveChecks } from "../api";
 import { MonitorIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { useEffect, useState } from "react";
+
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+import type { CheckDef, ChecksConfig, CheckWhere } from "../../shared/types";
+import { fetchChecks, saveChecks } from "../api";
 import { Choice } from "./Choice";
 import { Chip, muted } from "./Page";
 
@@ -12,26 +14,39 @@ const DEFAULT_TIMEOUT = 900;
 
 const SOURCE_LABEL: Record<ChecksConfig["source"], string> = {
   devcontainer: "from devcontainer.json",
-  settings: "your settings for this project",
   none: "none yet",
+  settings: "your settings for this project",
 };
 
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const message = (err: unknown) =>
+  err instanceof Error ? err.message : String(err);
 
-type Row = { key: number; name: string; command: string; where: CheckWhere; timeout: string };
+interface Row {
+  key: number;
+  name: string;
+  command: string;
+  where: CheckWhere;
+  timeout: string;
+}
 
 let nextKey = 1;
-const toRow = (c: CheckDef): Row => ({ key: nextKey++, name: c.name, command: c.command, where: c.where, timeout: String(c.timeout) });
+const toRow = (c: CheckDef): Row => ({
+  command: c.command,
+  key: nextKey++,
+  name: c.name,
+  timeout: String(c.timeout),
+  where: c.where,
+});
 
 /** The project's checks, in its settings: what Review runs, and where to change it. */
-export function ChecksSettings({ projectId }: { projectId: string }) {
+export const ChecksSettings = ({ projectId }: { projectId: string }) => {
   const [config, setConfig] = useState<ChecksConfig>();
   const [error, setError] = useState<string>();
   const [rows, setRows] = useState<Row[]>();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchChecks(projectId).then(setConfig, (err: unknown) => setError(message(err)));
+    fetchChecks(projectId).then(setConfig, (err) => setError(message(err)));
   }, [projectId]);
 
   const save = (checks: CheckDef[] | null) => {
@@ -43,11 +58,12 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
           setRows(undefined);
           setError(undefined);
         },
-        (err: unknown) => setError(message(err)),
+        (err) => setError(message(err))
       )
       .finally(() => setSaving(false));
   };
-  const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs?.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const update = (key: number, patch: Partial<Row>) =>
+    setRows((rs) => rs?.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   return (
     <section className="flex flex-col gap-3">
@@ -55,11 +71,17 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
         <div className="flex min-w-0 flex-1 flex-col">
           <h3 className="font-semibold">Checks</h3>
           <p className={muted}>
-            {config ? `Run from Review before publishing · ${SOURCE_LABEL[config.source]}` : "Run from Review before publishing"}
+            {config
+              ? `Run from Review before publishing · ${SOURCE_LABEL[config.source]}`
+              : "Run from Review before publishing"}
           </p>
         </div>
         {config && !rows && (
-          <Button variant="outline" size="sm" onClick={() => setRows(config.checks.map(toRow))}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRows(config.checks.map(toRow))}
+          >
             <PencilIcon /> Edit
           </Button>
         )}
@@ -71,7 +93,7 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
           </Alert>
         )}
         {config?.errors.map((e) => (
-          <p key={e} className="text-sm text-warn">
+          <p key={e} className="text-warn text-sm">
             {e}
           </p>
         ))}
@@ -79,25 +101,41 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
 
         {config && !rows && config.checks.length === 0 && (
           <p className={muted}>
-            No checks. Add the commands a change must pass (tests, lint, a Docker build) here, or under{" "}
-            <code className="font-mono">customizations.opendevhub.checks</code> in devcontainer.json to share them with the team.
+            No checks. Add the commands a change must pass (tests, lint, a
+            Docker build) here, or under{" "}
+            <code className="font-mono">customizations.opendevhub.checks</code>{" "}
+            in devcontainer.json to share them with the team.
           </p>
         )}
         {config && !rows && config.checks.length > 0 && (
           <ul className="flex flex-col gap-1.5">
             {config.checks.map((c) => (
-              <li key={c.name} className="flex min-w-0 items-center gap-2 text-sm">
+              <li
+                key={c.name}
+                className="flex min-w-0 items-center gap-2 text-sm"
+              >
                 <span className="font-medium">{c.name}</span>
                 {c.where === "host" && (
                   <Chip className="gap-1" title="Runs on this machine">
                     <MonitorIcon className="size-3" /> host
                   </Chip>
                 )}
-                <code className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={c.command}>
+                <code
+                  className="text-muted-foreground min-w-0 truncate font-mono text-xs"
+                  title={c.command}
+                >
                   {c.command}
                 </code>
-                {c.timeout !== DEFAULT_TIMEOUT && <span className="shrink-0 text-xs text-muted-foreground">{c.timeout} s</span>}
-                {c.where === "host" && !c.approved && <span className="ml-auto shrink-0 text-xs text-warn">needs approval on first run</span>}
+                {c.timeout !== DEFAULT_TIMEOUT && (
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {c.timeout} s
+                  </span>
+                )}
+                {c.where === "host" && !c.approved && (
+                  <span className="text-warn ml-auto shrink-0 text-xs">
+                    needs approval on first run
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -108,12 +146,28 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
             className="flex flex-col gap-3"
             onSubmit={(e) => {
               e.preventDefault();
-              save(rows.map((r) => ({ name: r.name.trim(), command: r.command.trim(), where: r.where, timeout: Number(r.timeout) || DEFAULT_TIMEOUT })));
+              save(
+                rows.map((r) => ({
+                  command: r.command.trim(),
+                  name: r.name.trim(),
+                  timeout: Number(r.timeout) || DEFAULT_TIMEOUT,
+                  where: r.where,
+                }))
+              );
             }}
           >
             {rows.map((r) => (
-              <div key={r.key} className="grid grid-cols-[8rem_minmax(0,1fr)_7.5rem_5.5rem_auto] items-center gap-2 max-md:grid-cols-[minmax(0,1fr)_auto] max-md:border-b max-md:pb-3">
-                <Input aria-label="Name" placeholder="name" value={r.name} onChange={(e) => update(r.key, { name: e.target.value })} className="h-8" />
+              <div
+                key={r.key}
+                className="grid grid-cols-[8rem_minmax(0,1fr)_7.5rem_5.5rem_auto] items-center gap-2 max-md:grid-cols-[minmax(0,1fr)_auto] max-md:border-b max-md:pb-3"
+              >
+                <Input
+                  aria-label="Name"
+                  placeholder="name"
+                  value={r.name}
+                  onChange={(e) => update(r.key, { name: e.target.value })}
+                  className="h-8"
+                />
                 <Input
                   aria-label="Command"
                   placeholder="pnpm test"
@@ -126,8 +180,13 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
                   value={r.where}
                   onChange={(v) => update(r.key, { where: v as CheckWhere })}
                   options={[
-                    { value: "container", label: "Container" },
-                    { value: "host", label: "This machine", title: "For docker build / docker compose: runs in the checkout's folder on this machine" },
+                    { label: "Container", value: "container" },
+                    {
+                      label: "This machine",
+                      title:
+                        "For docker build / docker compose: runs in the checkout's folder on this machine",
+                      value: "host",
+                    },
                   ]}
                   className="max-md:row-start-3"
                 />
@@ -147,7 +206,9 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
                   size="icon-sm"
                   aria-label={`Remove ${r.name || "check"}`}
                   className="text-muted-foreground max-md:col-start-2 max-md:row-start-1"
-                  onClick={() => setRows((rs) => rs?.filter((x) => x.key !== r.key))}
+                  onClick={() =>
+                    setRows((rs) => rs?.filter((x) => x.key !== r.key))
+                  }
                 >
                   <Trash2Icon />
                 </Button>
@@ -158,7 +219,18 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setRows((rs) => [...(rs ?? []), { key: nextKey++, name: "", command: "", where: "container", timeout: String(DEFAULT_TIMEOUT) }])}
+                onClick={() =>
+                  setRows((rs) => [
+                    ...(rs ?? []),
+                    {
+                      command: "",
+                      key: nextKey++,
+                      name: "",
+                      timeout: String(DEFAULT_TIMEOUT),
+                      where: "container",
+                    },
+                  ])
+                }
               >
                 <PlusIcon /> Add check
               </Button>
@@ -169,13 +241,22 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
                   variant="ghost"
                   size="sm"
                   disabled={saving}
-                  title={config.devcontainer.length > 0 ? `Use the ${config.devcontainer.length} from devcontainer.json` : "devcontainer.json has none"}
+                  title={
+                    config.devcontainer.length > 0
+                      ? `Use the ${config.devcontainer.length} from devcontainer.json`
+                      : "devcontainer.json has none"
+                  }
                   onClick={() => save(null)}
                 >
                   Use devcontainer.json
                 </Button>
               )}
-              <Button type="button" variant="ghost" size="sm" onClick={() => setRows(undefined)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setRows(undefined)}
+              >
                 Cancel
               </Button>
               <Button type="submit" size="sm" disabled={saving}>
@@ -183,7 +264,8 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
               </Button>
             </div>
             <p className={muted}>
-              Saved in your opendevhub config for this project and used instead of devcontainer.json. Commands you save here that run on this
+              Saved in your opendevhub config for this project and used instead
+              of devcontainer.json. Commands you save here that run on this
               machine count as approved.
             </p>
           </form>
@@ -191,4 +273,4 @@ export function ChecksSettings({ projectId }: { projectId: string }) {
       </div>
     </section>
   );
-}
+};

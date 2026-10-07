@@ -1,8 +1,9 @@
-'use client';
-import type { ReactNode } from 'react';
-import { RootProvider } from 'fumadocs-ui/provider/waku';
-import SearchDialog from '@/components/search';
+"use client";
+import { RootProvider } from "fumadocs-ui/provider/waku";
+import type { ReactNode } from "react";
 
-export function Provider({ children }: { children: ReactNode }) {
-  return <RootProvider search={{ SearchDialog }}>{children}</RootProvider>;
-}
+import SearchDialog from "@/components/search";
+
+export const Provider = ({ children }: { children: ReactNode }) => (
+  <RootProvider search={{ SearchDialog }}>{children}</RootProvider>
+);

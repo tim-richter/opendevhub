@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import net from "node:net";
+
 import type { SshAgentState } from "../../shared/types";
-import { type RelayTarget, acceptAgentConnection, openAgentControl } from "./client";
+import { acceptAgentConnection, openAgentControl } from "./client";
+import type { RelayTarget } from "./client";
 
 /** Where the relay serves the forwarded agent inside the container. */
 export const AGENT_SOCKET = "/tmp/opendevhub-ssh-agent.sock";
@@ -34,21 +36,26 @@ export interface AgentTunnelOptions {
 const WARN_INTERVAL_MS = 60_000;
 
 /** Why the host's agent can't be forwarded; undefined when SSH_AUTH_SOCK is a socket. */
-export function hostAgentProblem(socketPath: string | undefined): string | undefined {
-  if (!socketPath) return "SSH_AUTH_SOCK is not set on this machine";
+export const hostAgentProblem = (
+  socketPath: string | undefined
+): string | undefined => {
+  if (!socketPath) {
+    return "SSH_AUTH_SOCK is not set on this machine";
+  }
   try {
-    return fs.statSync(socketPath).isSocket() ? undefined : `SSH_AUTH_SOCK (${socketPath}) is not a socket`;
+    return fs.statSync(socketPath).isSocket()
+      ? undefined
+      : `SSH_AUTH_SOCK (${socketPath}) is not a socket`;
   } catch {
     return `SSH_AUTH_SOCK (${socketPath}) does not exist`;
   }
-}
+};
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+const message = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
-function connectUnix(socketPath: string): Promise<net.Socket> {
-  return new Promise((resolve, reject) => {
+const connectUnix = (socketPath: string): Promise<net.Socket> =>
+  new Promise((resolve, reject) => {
     const s = net.connect(socketPath);
     s.once("error", reject);
     s.once("connect", () => {
@@ -56,7 +63,6 @@ function connectUnix(socketPath: string): Promise<net.Socket> {
       resolve(s);
     });
   });
-}
 
 /**
  * Keeps one environment's agent control connection open and pipes each container client the relay
@@ -73,7 +79,7 @@ export class AgentTunnel {
 
   constructor(
     private readonly target: RelayTarget,
-    private readonly opts: AgentTunnelOptions,
+    private readonly opts: AgentTunnelOptions
   ) {
     this.delay = opts.retryMinMs ?? 1000;
   }
@@ -81,7 +87,7 @@ export class AgentTunnel {
   start(): void {
     const problem = hostAgentProblem(this.hostSocket());
     if (problem) {
-      this.setStatus({ state: "unavailable", reason: problem });
+      this.setStatus({ reason: problem, state: "unavailable" });
       return;
     }
     void this.connect();
@@ -92,12 +98,16 @@ export class AgentTunnel {
     clearTimeout(this.timer);
     this.control?.destroy();
     this.control = undefined;
-    for (const s of this.pipes) s.destroy();
+    for (const s of this.pipes) {
+      s.destroy();
+    }
     this.pipes.clear();
   }
 
   private hostSocket(): string | undefined {
-    return (this.opts.hostSocket ?? (() => process.env.SSH_AUTH_SOCK))() || undefined;
+    return (
+      (this.opts.hostSocket ?? (() => process.env.SSH_AUTH_SOCK))() || undefined
+    );
   }
 
   private now(): number {
@@ -105,22 +115,35 @@ export class AgentTunnel {
   }
 
   private setStatus(status: AgentStatus): void {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     const key = `${status.state}:${status.reason ?? ""}`;
-    if (key === this.status) return;
+    if (key === this.status) {
+      return;
+    }
     this.status = key;
     this.opts.onStatus(status);
-    this.opts.onLog(status.state === "forwarded" ? "ssh-agent: forwarded" : `ssh-agent: unavailable (${status.reason})`);
+    this.opts.onLog(
+      status.state === "forwarded"
+        ? "ssh-agent: forwarded"
+        : `ssh-agent: unavailable (${status.reason})`
+    );
   }
 
   private async connect(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     let socket: net.Socket;
     let rest: Buffer;
     try {
       ({ socket, rest } = await openAgentControl(this.target));
-    } catch (err) {
-      this.setStatus({ state: "unavailable", reason: `relay: ${message(err)}` });
+    } catch (error) {
+      this.setStatus({
+        reason: `relay: ${message(error)}`,
+        state: "unavailable",
+      });
       this.opts.onRelayLost?.();
       this.retry();
       return;
@@ -134,29 +157,44 @@ export class AgentTunnel {
     this.setStatus({ state: "forwarded" });
     let buf = "";
     const onData = (chunk: Buffer) => {
-      buf += chunk.toString("utf8");
+      buf += chunk.toString("utf-8");
       for (let nl = buf.indexOf("\n"); nl !== -1; nl = buf.indexOf("\n")) {
-        const m = /^CONN (\d+)$/.exec(buf.slice(0, nl).trim());
+        const m = /^CONN (?<g1>\d+)$/u.exec(buf.slice(0, nl).trim());
         buf = buf.slice(nl + 1);
-        if (m) void this.accept(Number(m[1]));
+        if (m) {
+          void this.accept(Number(m[1]));
+        }
       }
-      if (buf.length > 256) socket.destroy();
+      if (buf.length > 256) {
+        socket.destroy();
+      }
     };
     socket.on("data", onData);
     socket.on("error", () => socket.destroy());
     socket.on("end", () => socket.destroy());
     socket.on("close", () => {
-      if (this.control === socket) this.control = undefined;
-      if (this.stopped) return;
-      this.setStatus({ state: "unavailable", reason: "lost the relay connection; reconnecting" });
+      if (this.control === socket) {
+        this.control = undefined;
+      }
+      if (this.stopped) {
+        return;
+      }
+      this.setStatus({
+        reason: "lost the relay connection; reconnecting",
+        state: "unavailable",
+      });
       this.retry();
     });
-    if (rest.length) onData(rest);
+    if (rest.length) {
+      onData(rest);
+    }
     socket.resume();
   }
 
   private retry(): void {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.connect(), this.delay);
     this.delay = Math.min(this.delay * 2, this.opts.retryMaxMs ?? 30_000);
@@ -167,10 +205,14 @@ export class AgentTunnel {
     let local: net.Socket;
     try {
       const socketPath = this.hostSocket();
-      if (!socketPath) throw new Error("SSH_AUTH_SOCK is not set");
+      if (!socketPath) {
+        throw new Error("SSH_AUTH_SOCK is not set");
+      }
       local = await connectUnix(socketPath);
-    } catch (err) {
-      this.warn(`ssh-agent: can't reach the agent on this machine (${message(err)})`);
+    } catch (error) {
+      this.warn(
+        `ssh-agent: can't reach the agent on this machine (${message(error)})`
+      );
       return;
     }
     let remote: net.Socket;
@@ -204,7 +246,9 @@ export class AgentTunnel {
 
   private warn(line: string): void {
     const now = this.now();
-    if (now - this.lastWarn < WARN_INTERVAL_MS) return;
+    if (now - this.lastWarn < WARN_INTERVAL_MS) {
+      return;
+    }
     this.lastWarn = now;
     this.opts.onLog(line);
   }

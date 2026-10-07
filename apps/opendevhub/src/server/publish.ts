@@ -1,60 +1,93 @@
-import type { ForgeKind, Project, PublishInfo, PublishRequest, PublishResult } from "../shared/types";
+import type {
+  ForgeKind,
+  Project,
+  PublishInfo,
+  PublishRequest,
+  PublishResult,
+} from "../shared/types";
 import type { ForgeStore } from "./config";
-import { CommandError, type Containers, tailLines } from "./containers";
+import { CommandError, tailLines } from "./containers";
+import type { Containers } from "./containers";
 import type { RunResult, Runner } from "./exec";
 import {
   agitPushArgs,
   branchPushArgs,
   compareUrl,
   defaultStrategy,
-  type Forge,
   isPrUrl,
   parseRemote,
   pushUrls,
-  type RemoteInfo,
   resolveForge,
   strategiesFor,
 } from "./forge";
+import type { Forge, RemoteInfo } from "./forge";
 import { InvalidRequestError } from "./worktrees";
 
 const PROBE_TIMEOUT_MS = 3000;
 
 /** true/false: the host answered (with / without a Forgejo-style version); undefined: it didn't answer at all. */
-async function answers(url: string, fetchImpl: typeof fetch): Promise<boolean | undefined> {
+const answers = async (
+  url: string,
+  fetchImpl: typeof fetch
+): Promise<boolean | undefined> => {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), PROBE_TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url, { signal: abort.signal, headers: { accept: "application/json" } });
-    if (!res.ok) return false;
-    const body = (await res.json().catch(() => undefined)) as { version?: unknown } | undefined;
+    const res = await fetchImpl(url, {
+      headers: { accept: "application/json" },
+      signal: abort.signal,
+    });
+    if (!res.ok) {
+      return false;
+    }
+    const body = (await res.json().catch(() => undefined)) as
+      | { version?: unknown }
+      | undefined;
     return typeof body?.version === "string";
   } catch {
     return undefined;
   } finally {
     clearTimeout(timer);
   }
-}
+};
 
 /** One unauthenticated look at a host's API: Forgejo first, then Gitea. undefined means the host was unreachable. */
-export async function probeForge(web: string, fetchImpl: typeof fetch = fetch): Promise<ForgeKind | undefined> {
-  const base = web.replace(/\/$/, "");
+export const probeForge = async (
+  web: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<ForgeKind | undefined> => {
+  const base = web.replace(/\/$/u, "");
   const forgejo = await answers(`${base}/api/forgejo/v1/version`, fetchImpl);
-  if (forgejo) return "forgejo";
+  if (forgejo) {
+    return "forgejo";
+  }
   const gitea = await answers(`${base}/api/v1/version`, fetchImpl);
-  if (gitea) return "gitea";
+  if (gitea) {
+    return "gitea";
+  }
   return forgejo === undefined || gitea === undefined ? undefined : "unknown";
-}
+};
 
 /** The forge for a remote; a host nobody configured is probed once and the answer (even "unknown") remembered; an unreachable one isn't. */
-export async function detectForge(remote: RemoteInfo | undefined, store: ForgeStore, fetchImpl: typeof fetch = fetch): Promise<Forge> {
+export const detectForge = async (
+  remote: RemoteInfo | undefined,
+  store: ForgeStore,
+  fetchImpl: typeof fetch = fetch
+): Promise<Forge> => {
   const known = resolveForge(remote, store.all());
-  if (known) return known;
-  if (!remote || !remote.host.includes(".")) return { kind: "unknown" };
+  if (known) {
+    return known;
+  }
+  if (!remote || !remote.host.includes(".")) {
+    return { kind: "unknown" };
+  }
   const kind = await probeForge(remote.web, fetchImpl);
-  if (!kind) return { kind: "unknown" };
+  if (!kind) {
+    return { kind: "unknown" };
+  }
   store.remember(remote.host, { kind });
   return resolveForge(remote, store.all()) ?? { kind: "unknown" };
-}
+};
 
 const GIT_TIMEOUT_MS = 30_000;
 const PUSH_TIMEOUT_MS = 120_000;
@@ -75,7 +108,10 @@ export interface PublisherDeps {
   env?: NodeJS.ProcessEnv;
 }
 
-type Location = { where: "host" | "container"; dir: string };
+interface Location {
+  where: "host" | "container";
+  dir: string;
+}
 
 export class Publisher {
   constructor(private readonly deps: PublisherDeps) {}
@@ -84,40 +120,98 @@ export class Publisher {
   async location(p: Project, checkout: Checkout): Promise<Location> {
     const forced = (this.deps.env ?? process.env).OPENDEVHUB_PUSH;
     if (forced === "container" || !checkout.host) {
-      if (forced === "host") throw new CommandError(`OPENDEVHUB_PUSH=host, but ${checkout.container} isn't on this machine`);
-      return { where: "container", dir: checkout.container };
+      if (forced === "host") {
+        throw new CommandError(
+          `OPENDEVHUB_PUSH=host, but ${checkout.container} isn't on this machine`
+        );
+      }
+      return { dir: checkout.container, where: "container" };
     }
-    const r = await this.deps.run("git", ["-C", checkout.host, "rev-parse", "--git-dir"], { timeoutMs: GIT_TIMEOUT_MS, env: NO_PROMPT, detached: true });
-    if (r.exitCode === 0) return { where: "host", dir: checkout.host };
-    if (forced === "host") throw new CommandError(`OPENDEVHUB_PUSH=host, but git can't use ${checkout.host} on this machine`);
-    return { where: "container", dir: checkout.container };
+    const r = await this.deps.run(
+      "git",
+      ["-C", checkout.host, "rev-parse", "--git-dir"],
+      { detached: true, env: NO_PROMPT, timeoutMs: GIT_TIMEOUT_MS }
+    );
+    if (r.exitCode === 0) {
+      return { dir: checkout.host, where: "host" };
+    }
+    if (forced === "host") {
+      throw new CommandError(
+        `OPENDEVHUB_PUSH=host, but git can't use ${checkout.host} on this machine`
+      );
+    }
+    return { dir: checkout.container, where: "container" };
   }
 
-  private exec(p: Project, loc: Location, args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<RunResult> {
+  private exec(
+    p: Project,
+    loc: Location,
+    args: string[],
+    timeoutMs = GIT_TIMEOUT_MS
+  ): Promise<RunResult> {
     return loc.where === "host"
-      ? this.deps.run("git", ["-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT, detached: true })
-      : this.deps.containers.exec(p, ["git", "-C", loc.dir, ...args], { timeoutMs, env: NO_PROMPT });
+      ? this.deps.run("git", ["-C", loc.dir, ...args], {
+          detached: true,
+          env: NO_PROMPT,
+          timeoutMs,
+        })
+      : this.deps.containers.exec(p, ["git", "-C", loc.dir, ...args], {
+          env: NO_PROMPT,
+          timeoutMs,
+        });
   }
 
-  private async config(p: Project, loc: Location, key: string): Promise<string | undefined> {
+  private async config(
+    p: Project,
+    loc: Location,
+    key: string
+  ): Promise<string | undefined> {
     const r = await this.exec(p, loc, ["config", "--get", key]);
     return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
   }
 
-  private async forge(p: Project, loc: Location, remote: string | undefined): Promise<{ remote?: RemoteInfo; forge: Forge }> {
-    if (!remote) return { forge: { kind: "unknown" } };
+  private async forge(
+    p: Project,
+    loc: Location,
+    remote: string | undefined
+  ): Promise<{ remote?: RemoteInfo; forge: Forge }> {
+    if (!remote) {
+      return { forge: { kind: "unknown" } };
+    }
     // The configured URL, before any `insteadOf` rewrite, names the forge the user means.
     const url = await this.config(p, loc, `remote.${remote}.url`);
     const info = url ? parseRemote(url) : undefined;
-    return { remote: info, forge: await detectForge(info, this.deps.forges, this.deps.fetchImpl) };
+    return {
+      forge: await detectForge(info, this.deps.forges, this.deps.fetchImpl),
+      remote: info,
+    };
   }
 
-  async info(p: Project, checkout: Checkout, branch: string | undefined, remote?: string): Promise<PublishInfo> {
+  async info(
+    p: Project,
+    checkout: Checkout,
+    branch: string | undefined,
+    remote?: string
+  ): Promise<PublishInfo> {
     const loc = await this.location(p, checkout);
-    const remotes = (await this.exec(p, loc, ["remote"])).stdout.split("\n").map((s) => s.trim()).filter(Boolean).sort();
-    const chosen = remote && remotes.includes(remote) ? remote : remotes.includes("origin") ? "origin" : remotes[0];
+    const result = await this.exec(p, loc, ["remote"]);
+    const remotes = result.stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .toSorted();
+    let chosen;
+    if (remote && remotes.includes(remote)) {
+      chosen = remote;
+    } else if (remotes.includes("origin")) {
+      chosen = "origin";
+    } else {
+      [chosen] = remotes;
+    }
     const { forge } = await this.forge(p, loc, chosen);
-    const pr = branch ? await this.config(p, loc, `branch.${branch}.opendevhubPr`) : undefined;
+    const pr = branch
+      ? await this.config(p, loc, `branch.${branch}.opendevhubPr`)
+      : undefined;
     return {
       ...(branch ? { branch } : {}),
       remotes,
@@ -131,45 +225,95 @@ export class Publisher {
   }
 
   /** Pushes the branch (or an AGit ref) and records what the forge said. Never force-pushes. */
-  async publish(p: Project, checkout: Checkout, branch: string, req: PublishRequest): Promise<PublishResult> {
+  async publish(
+    p: Project,
+    checkout: Checkout,
+    branch: string,
+    req: PublishRequest
+  ): Promise<PublishResult> {
     const loc = await this.location(p, checkout);
     const { forge } = await this.forge(p, loc, req.remote);
     if (!strategiesFor(forge.kind).includes(req.strategy)) {
-      throw new InvalidRequestError(`AGit publishing needs a Forgejo or Gitea remote; ${req.remote} is ${forge.kind}`);
+      throw new InvalidRequestError(
+        `AGit publishing needs a Forgejo or Gitea remote; ${req.remote} is ${forge.kind}`
+      );
     }
     const args =
       req.strategy === "agit"
-        ? agitPushArgs({ remote: req.remote, base: req.base, topic: branch, title: req.title, description: req.description })
-        : branchPushArgs({ remote: req.remote, branch });
+        ? agitPushArgs({
+            base: req.base,
+            description: req.description,
+            remote: req.remote,
+            title: req.title,
+            topic: branch,
+          })
+        : branchPushArgs({ branch, remote: req.remote });
     const r = await this.exec(p, loc, args, PUSH_TIMEOUT_MS);
     const output = `${r.stderr}\n${r.stdout}`;
     if (r.timedOut) {
-      throw new CommandError(`git push timed out after ${PUSH_TIMEOUT_MS / 1000} s (waiting for credentials?)`, tailLines(output, 8));
+      throw new CommandError(
+        `git push timed out after ${PUSH_TIMEOUT_MS / 1000} s (waiting for credentials?)`,
+        tailLines(output, 8)
+      );
     }
     if (r.exitCode !== 0) {
       const tail = tailLines(output, 8);
-      if (/\[rejected\]|non-fast-forward|fetch first/.test(output)) {
+      if (/\[rejected\]|non-fast-forward|fetch first/u.test(output)) {
         throw new CommandError(
           `the branch on ${req.remote} has commits this one doesn't (pushed from elsewhere, or rebased); pull them in with \`git pull ${req.remote} ${branch}\`, then publish again`,
-          tail,
+          tail
         );
       }
-      throw new CommandError(`git push failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`, tail);
+      throw new CommandError(
+        `git push failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`,
+        tail
+      );
     }
 
     const urls = pushUrls(output);
     const prUrl = urls.find(isPrUrl);
     const previous = await this.config(p, loc, `branch.${branch}.opendevhubPr`);
-    await this.exec(p, loc, ["config", `branch.${branch}.opendevhubPublished`, req.remote]);
-    if (req.strategy === "agit") await this.exec(p, loc, ["config", `branch.${branch}.opendevhubTopic`, branch]);
-    if (prUrl) await this.exec(p, loc, ["config", `branch.${branch}.opendevhubPr`, prUrl]);
-    const compare = req.strategy === "branch" ? compareUrl(forge, { base: req.base, branch, title: req.title, body: req.description }) : undefined;
+    await this.exec(p, loc, [
+      "config",
+      `branch.${branch}.opendevhubPublished`,
+      req.remote,
+    ]);
+    if (req.strategy === "agit") {
+      await this.exec(p, loc, [
+        "config",
+        `branch.${branch}.opendevhubTopic`,
+        branch,
+      ]);
+    }
+    if (prUrl) {
+      await this.exec(p, loc, [
+        "config",
+        `branch.${branch}.opendevhubPr`,
+        prUrl,
+      ]);
+    }
+    const compare =
+      req.strategy === "branch"
+        ? compareUrl(forge, {
+            base: req.base,
+            body: req.description,
+            branch,
+            title: req.title,
+          })
+        : undefined;
     return {
       strategy: req.strategy,
       pushedFrom: loc.where,
       ...(prUrl ? { prUrl } : {}),
-      ...((prUrl ?? compare ?? urls[0]) ? { openUrl: prUrl ?? compare ?? urls[0] } : {}),
-      ...(previous && prUrl && previous !== prUrl ? { notice: "The earlier pull request was closed or merged; this opened a new one." } : {}),
+      ...((prUrl ?? compare ?? urls[0])
+        ? { openUrl: prUrl ?? compare ?? urls[0] }
+        : {}),
+      ...(previous && prUrl && previous !== prUrl
+        ? {
+            notice:
+              "The earlier pull request was closed or merged; this opened a new one.",
+          }
+        : {}),
       output: tailLines(output, 12),
     };
   }

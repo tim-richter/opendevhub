@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+
 import open from "open";
+
+import { Checks } from "./checks";
+import { Cleanup } from "./cleanup";
 import {
-  type Config,
   FileForgeStore,
   FileProjectSettings,
   addNode,
@@ -18,36 +20,35 @@ import {
   saveState,
   stateDir,
 } from "./config";
+import type { Config } from "./config";
 import { Containers } from "./containers";
-import { EditorLauncher, detectEditors, pathWhich } from "./editors";
-import { Checks } from "./checks";
-import { Cleanup } from "./cleanup";
+import { Credentials } from "./credentials";
 import { createDashboardApp } from "./dashboard-api";
-import { FileForgejoSettings, Forgejo } from "./forgejo";
-import { FileJiraSettings, Jira } from "./jira";
 import { scanRoots } from "./discovery";
+import { EditorLauncher, detectEditors, pathWhich } from "./editors";
 import { EnvFiles } from "./env-files";
 import { spawnRunner } from "./exec";
-import { Credentials } from "./credentials";
+import { FileForgejoSettings, Forgejo } from "./forgejo";
 import { Gateway } from "./gateway";
 import { GitOps } from "./git";
+import { LOCAL_NODE } from "./host";
 import { Images } from "./images";
+import { FileJiraSettings, Jira } from "./jira";
 import { Network, parseRouteMode } from "./network";
 import { NodeKits, buildNodeKit } from "./node-kits";
-import { LOCAL_NODE } from "./host";
 import { Nodes } from "./nodes";
+import { startNotifier } from "./notifier";
 import { Onboarding } from "./onboarding";
 import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
 import { Orchestrator } from "./orchestrator";
 import { PortForwarder } from "./port-forwarder";
+import { preflight } from "./preflight";
+import type { ResolveTarget } from "./proxy";
 import { Publisher } from "./publish";
+import { Push } from "./push";
 import { RelayRuntime } from "./relay/runtime";
 import { startResourceSampler } from "./resources";
-import { preflight } from "./preflight";
-import { startNotifier } from "./notifier";
-import { Push } from "./push";
-import type { ResolveTarget } from "./proxy";
 import { startServer } from "./server";
 import { StateStore } from "./state";
 import { UsageStore, trackUsage } from "./usage";
@@ -76,91 +77,136 @@ export interface CliOptions {
   help: boolean;
 }
 
-export function parseCli(argv: string[]): CliOptions {
+export const parseCli = (argv: string[]): CliOptions => {
   const { values } = parseArgs({
+    allowPositionals: false,
     args: argv,
     options: {
-      root: { type: "string", short: "r", multiple: true },
-      port: { type: "string", short: "p" },
+      help: { short: "h", type: "boolean" },
       "no-open": { type: "boolean" },
-      help: { type: "boolean", short: "h" },
+      port: { short: "p", type: "string" },
+      root: { multiple: true, short: "r", type: "string" },
     },
     strict: true,
-    allowPositionals: false,
   });
   const port = values.port === undefined ? undefined : Number(values.port);
-  if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+  if (
+    port !== undefined &&
+    (!Number.isInteger(port) || port < 1 || port > 65_535)
+  ) {
     throw new Error(`invalid --port: ${values.port}`);
   }
-  return { roots: values.root ?? [process.cwd()], port, open: !values["no-open"], help: values.help === true };
-}
+  return {
+    help: values.help === true,
+    open: !values["no-open"],
+    port,
+    roots: values.root ?? [process.cwd()],
+  };
+};
 
 /** The proxy's upstream for `<envId>.localhost`: a running environment's opencode, main or task. */
-export function proxyTargets(
-  store: Pick<StateStore, "runtime">,
-  orchestrator: Pick<Orchestrator, "opencodeAddress">,
-): ResolveTarget {
-  return (envId) => {
+export const proxyTargets =
+  (
+    store: Pick<StateStore, "runtime">,
+    orchestrator: Pick<Orchestrator, "opencodeAddress">
+  ): ResolveTarget =>
+  (envId) => {
     const rt = store.runtime(envId);
     const address = orchestrator.opencodeAddress(envId);
-    if (rt.containerState !== "running" || !address || !rt.password) return undefined;
+    if (rt.containerState !== "running" || !address || !rt.password) {
+      return;
+    }
     return { ...address, password: rt.password };
   };
-}
 
 /** Saves the dashboard port while preserving the other settings. Scan roots are per-run. */
-export function loadAndSaveStartupConfig(dir: string, opts: Pick<CliOptions, "port">): Config {
+export const loadAndSaveStartupConfig = (
+  dir: string,
+  opts: Pick<CliOptions, "port">
+): Config => {
   const saved = loadConfig(dir);
   const config: Config = { ...saved, port: opts.port ?? saved.port };
   saveConfig(dir, config);
   return config;
-}
+};
 
-export function findWebDir(): string | undefined {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const candidate of [path.join(here, "web"), path.resolve(here, "../../dist/web")]) {
-    if (fs.existsSync(path.join(candidate, "index.html"))) return candidate;
+export const findWebDir = (): string | undefined => {
+  const here = import.meta.dirname;
+  for (const candidate of [
+    path.join(here, "web"),
+    path.resolve(here, "../../dist/web"),
+  ]) {
+    if (fs.existsSync(path.join(candidate, "index.html"))) {
+      return candidate;
+    }
   }
   return undefined;
-}
+};
 
-const NODES_USAGE = "usage: opendevhub nodes add <ssh-destination> [--label <name>] | nodes list | nodes remove <id>";
+const NODES_USAGE =
+  "usage: opendevhub nodes add <ssh-destination> [--label <name>] | nodes list | nodes remove <id>";
 
 /** `opendevhub nodes …`: edits config.json; a running opendevhub picks changes up on restart. */
-export function runNodesCommand(argv: string[], dir: string, out: { log(s: string): void; error(s: string): void }): number {
+export const runNodesCommand = (
+  argv: string[],
+  dir: string,
+  out: { log: (s: string) => void; error: (s: string) => void }
+): number => {
   const [sub, ...rest] = argv;
   try {
     if (sub === "list") {
       const nodes = loadConfig(dir).nodes ?? [];
-      if (nodes.length === 0) out.log("No nodes yet. Add one: opendevhub nodes add user@host");
-      for (const n of nodes) out.log([n.id, n.ssh, ...(n.label ? [n.label] : [])].join("\t"));
+      if (nodes.length === 0) {
+        out.log("No nodes yet. Add one: opendevhub nodes add user@host");
+      }
+      for (const n of nodes) {
+        out.log([n.id, n.ssh, ...(n.label ? [n.label] : [])].join("\t"));
+      }
       return 0;
     }
     if (sub === "add") {
-      const { values, positionals } = parseArgs({ args: rest, options: { label: { type: "string" } }, allowPositionals: true, strict: true });
-      if (positionals.length !== 1) throw new Error(NODES_USAGE);
-      const { config, node } = addNode(loadConfig(dir), { ssh: positionals[0], ...(values.label ? { label: values.label } : {}) });
+      const { values, positionals } = parseArgs({
+        allowPositionals: true,
+        args: rest,
+        options: { label: { type: "string" } },
+        strict: true,
+      });
+      if (positionals.length !== 1) {
+        throw new Error(NODES_USAGE);
+      }
+      const { config, node } = addNode(loadConfig(dir), {
+        ssh: positionals[0],
+        ...(values.label ? { label: values.label } : {}),
+      });
       saveConfig(dir, config);
-      out.log(`added node ${node.id} (${node.ssh}); a running opendevhub connects to it after a restart, or add it on the Nodes page instead`);
+      out.log(
+        `added node ${node.id} (${node.ssh}); a running opendevhub connects to it after a restart, or add it on the Nodes page instead`
+      );
       return 0;
     }
     if (sub === "remove" && rest.length === 1) {
       const cfg = loadConfig(dir);
-      if (!cfg.nodes?.some((n) => n.id === rest[0])) throw new Error(`no node ${rest[0]}`);
-      const environments = Object.values(loadState(dir).environments ?? {}).filter((e) => e.node === rest[0]).length;
-      if (environments > 0) throw new Error(nodeInUse(rest[0], environments));
+      if (!cfg.nodes?.some((n) => n.id === rest[0])) {
+        throw new Error(`no node ${rest[0]}`);
+      }
+      const environments = Object.values(
+        loadState(dir).environments ?? {}
+      ).filter((e) => e.node === rest[0]).length;
+      if (environments > 0) {
+        throw new Error(nodeInUse(rest[0], environments));
+      }
       saveConfig(dir, removeNode(cfg, rest[0]));
       out.log(`removed node ${rest[0]}`);
       return 0;
     }
     throw new Error(NODES_USAGE);
-  } catch (err) {
-    out.error(err instanceof Error ? err.message : String(err));
+  } catch (error) {
+    out.error(error instanceof Error ? error.message : String(error));
     return 2;
   }
-}
+};
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
+export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   if (argv[0] === "nodes") {
     process.exitCode = runNodesCommand(argv.slice(1), configDir(), console);
     return;
@@ -168,8 +214,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   let opts: CliOptions;
   try {
     opts = parseCli(argv);
-  } catch (err) {
-    console.error((err as Error).message);
+  } catch (error) {
+    console.error((error as Error).message);
     console.error(USAGE);
     process.exitCode = 2;
     return;
@@ -181,8 +227,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   let routeMode;
   try {
     routeMode = parseRouteMode(process.env.OPENDEVHUB_ROUTE);
-  } catch (err) {
-    console.error((err as Error).message);
+  } catch (error) {
+    console.error((error as Error).message);
     process.exitCode = 2;
     return;
   }
@@ -190,22 +236,34 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const dir = configDir();
   const config = loadAndSaveStartupConfig(dir, opts);
   const roots = resolveRoots(opts.roots);
-  const store = new StateStore({ port: config.port, persisted: loadState(dir), persist: (s) => saveState(dir, s) });
+  const store = new StateStore({
+    persist: (s) => saveState(dir, s),
+    persisted: loadState(dir),
+    port: config.port,
+  });
   store.setRoots(roots);
   const nodes = new Nodes({
     configDir: dir,
     controlDir: path.join(dir, "ssh"),
+    environmentsOn: (id) =>
+      store
+        .projects()
+        .flatMap((p) => store.environments(p.id))
+        .filter((e) => e.node === id).length,
+    onOffline: (id) => void orchestrator.nodeOffline(id).catch(() => undefined),
+    onOnline: (id) => void orchestrator.nodeOnline(id).catch(() => undefined),
     store,
-    environmentsOn: (id) => store.projects().flatMap((p) => store.environments(p.id)).filter((e) => e.node === id).length,
-    onOnline: (id) => void orchestrator.nodeOnline(id).catch(() => {}),
-    onOffline: (id) => void orchestrator.nodeOffline(id).catch(() => {}),
   });
   const usage = UsageStore.open(path.join(dir, "usage.db"));
   const usageTracker = usage ? trackUsage(usage, store) : undefined;
   const containers = new Containers(spawnRunner);
-  const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
-  const kits = new NodeKits({ nodes, build: (conn) => buildNodeKit(conn, { clientFor, local: spawnRunner }) });
-  const runtime = new OpencodeRuntime({ containers, clientFor });
+  const clientFor = (ep: { baseUrl: string; password: string }) =>
+    new OpencodeClient(ep);
+  const kits = new NodeKits({
+    build: (conn) => buildNodeKit(conn, { clientFor, local: spawnRunner }),
+    nodes,
+  });
+  const runtime = new OpencodeRuntime({ clientFor, containers });
   const editors = new EditorLauncher(await detectEditors(pathWhich()));
   store.setEditors(editors.list());
   const git = new GitOps({ containers });
@@ -216,41 +274,54 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     forwarder: new PortForwarder(),
     relay: new RelayRuntime({ containers }),
     network: new Network({
+      gateway: new Gateway({
+        image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined,
+        run: spawnRunner,
+      }),
       mode: routeMode,
-      gateway: new Gateway({ run: spawnRunner, image: process.env.OPENDEVHUB_GATEWAY_IMAGE || undefined }),
     }),
     git,
     nodes: kits,
-    images: new Images({ run: spawnRunner, containers, objects: (p, wt, paths) => git.headObjects(p, wt.path, paths) }),
+    images: new Images({
+      containers,
+      objects: (p, wt, paths) => git.headObjects(p, wt.path, paths),
+      run: spawnRunner,
+    }),
     envFiles: new EnvFiles(path.join(stateDir(), "envs")),
     projectSettings: (p) => loadConfig(dir).projects?.[p.path],
     worktrees: new Worktrees({
       containers,
-      run: spawnRunner,
       relativeLinks: process.env.OPENDEVHUB_RELATIVE_WORKTREES !== "0",
+      run: spawnRunner,
     }),
-    publisher: new Publisher({ containers, run: spawnRunner, forges: new FileForgeStore(dir) }),
-    credentials: new Credentials({ run: spawnRunner, containers }),
+    publisher: new Publisher({
+      containers,
+      forges: new FileForgeStore(dir),
+      run: spawnRunner,
+    }),
+    credentials: new Credentials({ containers, run: spawnRunner }),
     ...(usageTracker ? { recordUsage: usageTracker.record } : {}),
     editors,
     clientFor,
     roots: () => roots,
-    scan: (roots) => scanRoots(roots),
+    scan: (toScan) => scanRoots(toScan),
   });
-  const cleanup = new Cleanup({ store, containers, branches: orchestrator });
+  const cleanup = new Cleanup({ branches: orchestrator, containers, store });
   const checks = new Checks({
-    target: (id, directory) => orchestrator.checkTarget(id, directory),
-    project: (id) => store.project(id),
     containers,
-    run: spawnRunner,
     git,
-    settings: new FileProjectSettings(dir),
     log: (id, line) => orchestrator.note(id, line),
+    project: (id) => store.project(id),
+    run: spawnRunner,
+    settings: new FileProjectSettings(dir),
+    target: (id, directory) => orchestrator.checkTarget(id, directory),
   });
 
   store.setPreflight(await preflight(spawnRunner));
   await orchestrator.rescan();
-  if (store.preflight().errors.length === 0) await orchestrator.adopt();
+  if (store.preflight().errors.length === 0) {
+    await orchestrator.adopt();
+  }
   // After the local containers, so a node coming online adopts into a settled store.
   nodes.start();
 
@@ -270,23 +341,33 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     webDir: findWebDir(),
   });
   const server = await startServer({
-    port: config.port,
     app,
+    port: config.port,
     resolveTarget: proxyTargets(store, orchestrator),
     terminalTarget: async (id, directory) => {
       const target = await orchestrator.terminalTarget(id, directory);
-      const remote = target.node && target.node !== LOCAL_NODE ? target.node : undefined;
+      const remote =
+        target.node && target.node !== LOCAL_NODE ? target.node : undefined;
       const conn = remote ? nodes.connection(remote) : undefined;
-      if (remote && (!conn?.online || !conn.target)) throw new Error("The node is offline");
+      if (remote && (!conn?.online || !conn.target)) {
+        throw new Error("The node is offline");
+      }
       return { ...target, ssh: conn?.target };
     },
   });
-  const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);
+  const refresh = setInterval(
+    () => void orchestrator.refreshContainers().catch(() => undefined),
+    10_000
+  );
   const sampler = startResourceSampler({ run: spawnRunner, store });
 
   console.log(`opendevhub running at ${server.url}`);
-  for (const e of store.preflight().errors) console.warn(`warning: ${e}`);
-  if (opts.open) await open(server.url).catch(() => {});
+  for (const e of store.preflight().errors) {
+    console.warn(`warning: ${e}`);
+  }
+  if (opts.open) {
+    await open(server.url).catch(() => undefined);
+  }
 
   const shutdown = async () => {
     clearInterval(refresh);
@@ -301,4 +382,4 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   };
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
-}
+};

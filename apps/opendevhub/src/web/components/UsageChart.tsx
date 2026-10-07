@@ -4,6 +4,7 @@ import { scaleBand } from "@tanstack/charts/scales/band";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
 import { tooltip } from "@tanstack/charts/tooltip";
 import { useMemo } from "react";
+
 import type { UsageReport } from "../../shared/types";
 import { formatCost, formatTokens } from "../tasks";
 import { dayLabel } from "../usage";
@@ -25,11 +26,14 @@ export default function UsageChart(props: {
       defineChart({
         marks: [
           barY(days, {
+            fill: (d) =>
+              d.day === selected
+                ? "var(--primary)"
+                : "color-mix(in oklab, var(--primary) 40%, transparent)",
+            maxThickness: 24,
+            radius: { end: 4 },
             x: "day",
             y: metric,
-            fill: (d) => (d.day === selected ? "var(--primary)" : "color-mix(in oklab, var(--primary) 40%, transparent)"),
-            radius: { end: 4 },
-            maxThickness: 24,
           }),
         ],
         scales: {
@@ -38,26 +42,33 @@ export default function UsageChart(props: {
             // A label every week, ending today, so they stay evenly spaced.
             axis: {
               ticks: {
+                format: (day) =>
+                  dayLabel(day, { day: "numeric", month: "short" }),
                 size: 0,
-                values: days.filter((_, i) => (days.length - 1 - i) % 7 === 0).map((d) => d.day),
-                format: (day) => dayLabel(day, { month: "short", day: "numeric" }),
+                values: days
+                  .filter((_, i) => (days.length - 1 - i) % 7 === 0)
+                  .map((d) => d.day),
               },
             },
           },
           y: {
-            scale: scaleLinear,
-            nice: true,
+            axis: {
+              line: false,
+              ticks: { format: (v) => formatValue(v), size: 0 },
+            },
             grid: true,
-            axis: { line: false, ticks: { size: 0, format: (v) => formatValue(v) } },
+            nice: true,
+            scale: scaleLinear,
           },
         },
         tooltip: {
-          use: tooltip,
+          format: (point) =>
+            `${dayLabel(point.datum.day)}\n${formatCost(point.datum.cost)} · ${formatTokens(point.datum.tokens)} tokens`,
           sticky: false,
-          format: (point) => `${dayLabel(point.datum.day)}\n${formatCost(point.datum.cost)} · ${formatTokens(point.datum.tokens)} tokens`,
+          use: tooltip,
         },
       }),
-    [days, metric, selected, formatValue],
+    [days, metric, selected, formatValue]
   );
   return (
     <Chart
@@ -67,7 +78,9 @@ export default function UsageChart(props: {
       ariaLabel={`${metric === "cost" ? "Cost" : "Tokens"} per day`}
       ariaDescription={`${metric === "cost" ? "Cost" : "Tokens"} per day for the ${days.length} days ending today. Activate a day to show it below.`}
       onSelect={(point) => {
-        if (point) props.onSelect(point.datum.day);
+        if (point) {
+          props.onSelect(point.datum.day);
+        }
       }}
     />
   );

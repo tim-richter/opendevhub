@@ -76,16 +76,19 @@ test/e2e/opendevhub.e2e.ts, test/e2e/fixture/.devcontainer/devcontainer.json
 ### Task 1: Scaffold, shared types, project ids
 
 **Files:**
+
 - Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`
 - Create: `src/shared/types.ts`, `src/shared/urls.ts`, `src/server/ids.ts`
 - Test: `test/server/ids.test.ts`
 
 **Interfaces:**
+
 - Produces: all types in `src/shared/types.ts` (used by every later task); `projectId(absPath: string): string`; `projectUrl(id: string, port: number): string`; `sessionUrl(projectBase: string, sessionId: string): string`.
 
 - [ ] **Step 1: Create project files**
 
 `package.json`:
+
 ```json
 {
   "name": "opendevhub",
@@ -127,6 +130,7 @@ test/e2e/opendevhub.e2e.ts, test/e2e/fixture/.devcontainer/devcontainer.json
 ```
 
 `tsconfig.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -146,6 +150,7 @@ test/e2e/opendevhub.e2e.ts, test/e2e/fixture/.devcontainer/devcontainer.json
 ```
 
 `vitest.config.ts`:
+
 ```ts
 import { defineConfig } from "vitest/config";
 
@@ -159,17 +164,18 @@ export default defineConfig({
 ```
 
 `.gitignore`:
+
 ```
 node_modules
 dist
 ```
 
-Run: `npm install`
-Expected: installs without errors.
+Run: `npm install` Expected: installs without errors.
 
 - [ ] **Step 2: Write shared types and URL helpers**
 
 `src/shared/types.ts`:
+
 ```ts
 export type ProjectId = string;
 
@@ -180,7 +186,12 @@ export interface Project {
   devcontainerPath: string;
 }
 
-export type ContainerState = "stopped" | "starting" | "running" | "stopping" | "error";
+export type ContainerState =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "error";
 export type OpencodeState = "absent" | "starting" | "healthy" | "unhealthy";
 
 export interface ProjectRuntime {
@@ -197,7 +208,11 @@ export interface ProjectRuntime {
 
 export type PublicRuntime = Omit<ProjectRuntime, "password">;
 
-export type SessionStatus = "idle" | "running" | "needs-permission" | "needs-answer";
+export type SessionStatus =
+  | "idle"
+  | "running"
+  | "needs-permission"
+  | "needs-answer";
 
 export interface SessionSummary {
   id: string;
@@ -232,6 +247,7 @@ export interface LogEvent {
 ```
 
 `src/shared/urls.ts`:
+
 ```ts
 export function projectUrl(projectId: string, port: number): string {
   return `http://${projectId}.localhost:${port}/`;
@@ -249,8 +265,10 @@ export function sessionUrl(projectBase: string, _sessionId: string): string {
 - [ ] **Step 3: Write the failing test for `projectId`**
 
 `test/server/ids.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { projectId } from "../../src/server/ids";
 
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -289,12 +307,12 @@ describe("projectId", () => {
 
 - [ ] **Step 4: Run test to verify it fails**
 
-Run: `npx vitest run test/server/ids.test.ts`
-Expected: FAIL — cannot resolve `../../src/server/ids`.
+Run: `npx vitest run test/server/ids.test.ts` Expected: FAIL — cannot resolve `../../src/server/ids`.
 
 - [ ] **Step 5: Implement `projectId`**
 
 `src/server/ids.ts`:
+
 ```ts
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -317,8 +335,7 @@ export function projectId(absPath: string): string {
 
 - [ ] **Step 6: Run tests and typecheck**
 
-Run: `npx vitest run test/server/ids.test.ts && npx tsc --noEmit`
-Expected: all PASS, no type errors.
+Run: `npx vitest run test/server/ids.test.ts && npx tsc --noEmit` Expected: all PASS, no type errors.
 
 - [ ] **Step 7: Commit**
 
@@ -332,10 +349,12 @@ git commit -m "feat: scaffold project, shared types and project ids"
 ### Task 2: Config and state persistence
 
 **Files:**
+
 - Create: `src/server/config.ts`
 - Test: `test/server/config.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ProjectId` from `src/shared/types`.
 - Produces:
   - `interface Config { roots: string[]; port: number }`
@@ -350,11 +369,14 @@ git commit -m "feat: scaffold project, shared types and project ids"
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/config.test.ts`:
+
 ```ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import {
   DEFAULT_PORT,
   configDir,
@@ -376,7 +398,9 @@ describe("configDir", () => {
     expect(configDir({ XDG_CONFIG_HOME: "/xdg" })).toBe("/xdg/opendevhub");
   });
   it("falls back to ~/.config", () => {
-    expect(configDir({})).toBe(path.join(os.homedir(), ".config", "opendevhub"));
+    expect(configDir({})).toBe(
+      path.join(os.homedir(), ".config", "opendevhub")
+    );
   });
 });
 
@@ -400,9 +424,15 @@ describe("config", () => {
 
 describe("state", () => {
   it("round-trips and is written with mode 0600", () => {
-    saveState(dir, { projects: { p1: { containerId: "c", password: "s", workspaceFolder: "/w" } } });
+    saveState(dir, {
+      projects: {
+        p1: { containerId: "c", password: "s", workspaceFolder: "/w" },
+      },
+    });
     expect(loadState(dir)).toEqual({
-      projects: { p1: { containerId: "c", password: "s", workspaceFolder: "/w" } },
+      projects: {
+        p1: { containerId: "c", password: "s", workspaceFolder: "/w" },
+      },
     });
     expect(fs.statSync(path.join(dir, "state.json")).mode & 0o777).toBe(0o600);
   });
@@ -425,16 +455,17 @@ describe("mergeRoots", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run test/server/config.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/config.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/config.ts`:
+
 ```ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import type { ProjectId } from "../shared/types";
 
 export interface Config {
@@ -456,7 +487,8 @@ export const DEFAULT_PORT = 7777;
 
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   const xdg = env.XDG_CONFIG_HOME;
-  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".config");
+  const base =
+    xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".config");
   return path.join(base, "opendevhub");
 }
 
@@ -472,7 +504,9 @@ function readJson<T>(file: string, fallback: T): T {
     return JSON.parse(text) as T;
   } catch {
     fs.renameSync(file, `${file}.bak`);
-    console.warn(`opendevhub: ${file} was corrupt; moved to ${file}.bak and starting fresh`);
+    console.warn(
+      `opendevhub: ${file} was corrupt; moved to ${file}.bak and starting fresh`
+    );
     return fallback;
   }
 }
@@ -487,7 +521,9 @@ function writeJson(file: string, value: unknown, mode: number): void {
 export function loadConfig(dir: string): Config {
   const raw = readJson<Partial<Config>>(path.join(dir, "config.json"), {});
   return {
-    roots: Array.isArray(raw.roots) ? raw.roots.filter((r) => typeof r === "string") : [],
+    roots: Array.isArray(raw.roots)
+      ? raw.roots.filter((r) => typeof r === "string")
+      : [],
     port: typeof raw.port === "number" ? raw.port : DEFAULT_PORT,
   };
 }
@@ -497,8 +533,14 @@ export function saveConfig(dir: string, cfg: Config): void {
 }
 
 export function loadState(dir: string): PersistedState {
-  const raw = readJson<Partial<PersistedState>>(path.join(dir, "state.json"), {});
-  return { projects: raw.projects && typeof raw.projects === "object" ? raw.projects : {} };
+  const raw = readJson<Partial<PersistedState>>(
+    path.join(dir, "state.json"),
+    {}
+  );
+  return {
+    projects:
+      raw.projects && typeof raw.projects === "object" ? raw.projects : {},
+  };
 }
 
 export function saveState(dir: string, state: PersistedState): void {
@@ -511,7 +553,11 @@ function expandHome(p: string): string {
   return p;
 }
 
-export function mergeRoots(existing: string[], added: string[], cwd = process.cwd()): string[] {
+export function mergeRoots(
+  existing: string[],
+  added: string[],
+  cwd = process.cwd()
+): string[] {
   const out: string[] = [];
   for (const r of [...existing, ...added]) {
     const abs = path.resolve(cwd, expandHome(r));
@@ -523,8 +569,7 @@ export function mergeRoots(existing: string[], added: string[], cwd = process.cw
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/config.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/config.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -538,10 +583,12 @@ git commit -m "feat: config and state persistence"
 ### Task 3: Project discovery
 
 **Files:**
+
 - Create: `src/server/discovery.ts`
 - Test: `test/server/discovery.test.ts`
 
 **Interfaces:**
+
 - Consumes: `projectId` (Task 1), `Project` type.
 - Produces: `findDevcontainerSpec(dir: string): Promise<string | undefined>`; `scanRoots(roots: string[], maxDepth?: number, onWarn?: (msg: string) => void): Promise<Project[]>` (sorted by name, then path).
 
@@ -550,11 +597,14 @@ Rules: root = depth 0; a directory with a spec is a project and is not descended
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/discovery.test.ts`:
+
 ```ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { scanRoots } from "../../src/server/discovery";
 
 let root: string;
@@ -578,7 +628,9 @@ describe("scanRoots", () => {
     mk("org/b", ".devcontainer.json");
     const found = await scanRoots([root]);
     expect(found.map((p) => p.name)).toEqual(["a", "b"]);
-    expect(found[0].devcontainerPath).toBe(path.join(root, "a/.devcontainer/devcontainer.json"));
+    expect(found[0].devcontainerPath).toBe(
+      path.join(root, "a/.devcontainer/devcontainer.json")
+    );
     expect(found[1].path).toBe(path.join(root, "org/b"));
     expect(found[0].id).toMatch(/^a-[0-9a-f]{6}$/);
   });
@@ -632,23 +684,29 @@ describe("scanRoots", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run test/server/discovery.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/discovery.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/discovery.ts`:
+
 ```ts
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import type { Project } from "../shared/types";
 import { projectId } from "./ids";
 
-const SPEC_CANDIDATES = [path.join(".devcontainer", "devcontainer.json"), ".devcontainer.json"];
+const SPEC_CANDIDATES = [
+  path.join(".devcontainer", "devcontainer.json"),
+  ".devcontainer.json",
+];
 const SKIP_DIRS = new Set(["node_modules"]);
 
-export async function findDevcontainerSpec(dir: string): Promise<string | undefined> {
+export async function findDevcontainerSpec(
+  dir: string
+): Promise<string | undefined> {
   for (const rel of SPEC_CANDIDATES) {
     const candidate = path.join(dir, rel);
     try {
@@ -663,7 +721,7 @@ export async function findDevcontainerSpec(dir: string): Promise<string | undefi
 export async function scanRoots(
   roots: string[],
   maxDepth = 2,
-  onWarn: (msg: string) => void = (m) => console.warn(m),
+  onWarn: (msg: string) => void = (m) => console.warn(m)
 ): Promise<Project[]> {
   const found = new Map<string, Project>();
 
@@ -671,7 +729,12 @@ export async function scanRoots(
     if (found.has(dir)) return;
     const spec = await findDevcontainerSpec(dir);
     if (spec) {
-      found.set(dir, { id: projectId(dir), name: path.basename(dir), path: dir, devcontainerPath: spec });
+      found.set(dir, {
+        id: projectId(dir),
+        name: path.basename(dir),
+        path: dir,
+        devcontainerPath: spec,
+      });
       return;
     }
     if (depth >= maxDepth) return;
@@ -679,24 +742,33 @@ export async function scanRoots(
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch (err) {
-      if (depth === 0) onWarn(`opendevhub: cannot read root ${dir}: ${(err as Error).message}`);
+      if (depth === 0)
+        onWarn(
+          `opendevhub: cannot read root ${dir}: ${(err as Error).message}`
+        );
       return;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+      if (
+        !entry.isDirectory() ||
+        entry.name.startsWith(".") ||
+        SKIP_DIRS.has(entry.name)
+      )
+        continue;
       await visit(path.join(dir, entry.name), depth + 1);
     }
   }
 
   for (const root of roots) await visit(path.resolve(root), 0);
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+  return [...found.values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)
+  );
 }
 ```
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/discovery.test.ts`
-Expected: PASS. Run tests as a normal user: root ignores `chmod 000`, so the unreadable-directory case would find `locked/inner` and fail.
+Run: `npx vitest run test/server/discovery.test.ts` Expected: PASS. Run tests as a normal user: root ignores `chmod 000`, so the unreadable-directory case would find `locked/inner` and fail.
 
 - [ ] **Step 5: Commit**
 
@@ -710,10 +782,12 @@ git commit -m "feat: discover devcontainer projects under roots"
 ### Task 4: Command runner and containers adapter
 
 **Files:**
+
 - Create: `src/server/exec.ts`, `src/server/containers.ts`, `test/helpers/fake-runner.ts`
 - Test: `test/server/exec.test.ts`, `test/server/containers.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Project` type.
 - Produces:
   - `interface RunResult { exitCode: number; stdout: string; stderr: string; timedOut: boolean }`
@@ -733,15 +807,20 @@ git commit -m "feat: discover devcontainer projects under roots"
 - [ ] **Step 1: Write the failing runner tests**
 
 `test/server/exec.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { spawnRunner } from "../../src/server/exec";
 
 const node = process.execPath;
 
 describe("spawnRunner", () => {
   it("captures stdout, stderr and exit code", async () => {
-    const r = await spawnRunner(node, ["-e", "console.log('out'); console.error('err'); process.exit(3)"]);
+    const r = await spawnRunner(node, [
+      "-e",
+      "console.log('out'); console.error('err'); process.exit(3)",
+    ]);
     expect(r).toMatchObject({ exitCode: 3, timedOut: false });
     expect(r.stdout.trim()).toBe("out");
     expect(r.stderr.trim()).toBe("err");
@@ -751,8 +830,11 @@ describe("spawnRunner", () => {
     const lines: string[] = [];
     await spawnRunner(
       node,
-      ["-e", "process.stdout.write('a\\nb'); setTimeout(() => process.stdout.write('c\\n'), 20)"],
-      { onLine: (l) => lines.push(l) },
+      [
+        "-e",
+        "process.stdout.write('a\\nb'); setTimeout(() => process.stdout.write('c\\n'), 20)",
+      ],
+      { onLine: (l) => lines.push(l) }
     );
     expect(lines).toEqual(["a", "bc"]);
   });
@@ -763,13 +845,19 @@ describe("spawnRunner", () => {
   });
 
   it("kills the process on timeout", async () => {
-    const r = await spawnRunner(node, ["-e", "setTimeout(() => {}, 10000)"], { timeoutMs: 200 });
+    const r = await spawnRunner(node, ["-e", "setTimeout(() => {}, 10000)"], {
+      timeoutMs: 200,
+    });
     expect(r.timedOut).toBe(true);
     expect(r.exitCode).not.toBe(0);
   });
 
   it("passes extra env vars", async () => {
-    const r = await spawnRunner(node, ["-e", "console.log(process.env.ODH_FOO)"], { env: { ODH_FOO: "bar" } });
+    const r = await spawnRunner(
+      node,
+      ["-e", "console.log(process.env.ODH_FOO)"],
+      { env: { ODH_FOO: "bar" } }
+    );
     expect(r.stdout.trim()).toBe("bar");
   });
 });
@@ -777,12 +865,12 @@ describe("spawnRunner", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/exec.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/exec.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement the runner**
 
 `src/server/exec.ts`:
+
 ```ts
 import { spawn } from "node:child_process";
 
@@ -799,7 +887,11 @@ export interface RunOptions {
   onLine?: (line: string) => void;
 }
 
-export type Runner = (cmd: string, args: string[], opts?: RunOptions) => Promise<RunResult>;
+export type Runner = (
+  cmd: string,
+  args: string[],
+  opts?: RunOptions
+) => Promise<RunResult>;
 
 export const spawnRunner: Runner = (cmd, args, opts = {}) =>
   new Promise((resolve) => {
@@ -808,7 +900,10 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     let timedOut = false;
     let settled = false;
     const carry = { out: "", err: "" };
-    const child = spawn(cmd, args, { env: { ...process.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, {
+      env: { ...process.env, ...opts.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     const feed = (key: "out" | "err", chunk: Buffer) => {
       const text = chunk.toString("utf8");
@@ -834,7 +929,9 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (opts.onLine) for (const rest of [carry.out, carry.err]) if (rest.trim()) opts.onLine(rest);
+      if (opts.onLine)
+        for (const rest of [carry.out, carry.err])
+          if (rest.trim()) opts.onLine(rest);
       resolve({ exitCode, stdout, stderr, timedOut });
     };
     child.on("error", (err) => {
@@ -847,12 +944,12 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
 
 - [ ] **Step 4: Run runner tests**
 
-Run: `npx vitest run test/server/exec.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/exec.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Write the fake runner helper and failing containers tests**
 
 `test/helpers/fake-runner.ts`:
+
 ```ts
 import type { RunOptions, RunResult, Runner } from "../../src/server/exec";
 
@@ -862,7 +959,11 @@ export interface Call {
   opts?: RunOptions;
 }
 
-export function fakeRunner(handler: (call: Call) => Partial<RunResult> | Promise<Partial<RunResult>> = () => ({})) {
+export function fakeRunner(
+  handler: (
+    call: Call
+  ) => Partial<RunResult> | Promise<Partial<RunResult>> = () => ({})
+) {
   const calls: Call[] = [];
   const run: Runner = async (cmd, args, opts) => {
     const call = { cmd, args, opts };
@@ -875,9 +976,16 @@ export function fakeRunner(handler: (call: Call) => Partial<RunResult> | Promise
 ```
 
 `test/server/containers.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
-import { CommandError, Containers, LABEL, parseUpOutput } from "../../src/server/containers";
+
+import {
+  CommandError,
+  Containers,
+  LABEL,
+  parseUpOutput,
+} from "../../src/server/containers";
 import type { Project } from "../../src/shared/types";
 import { fakeRunner } from "../helpers/fake-runner";
 
@@ -906,9 +1014,13 @@ describe("parseUpOutput", () => {
     });
   });
   it("throws the devcontainer error message with stderr tail", () => {
-    const stdout = '{"outcome":"error","message":"Command failed: docker build","description":"An error occurred"}';
+    const stdout =
+      '{"outcome":"error","message":"Command failed: docker build","description":"An error occurred"}';
     try {
-      parseUpOutput({ ...base, exitCode: 1, stdout, stderr: "step 1\nboom" }, "/f");
+      parseUpOutput(
+        { ...base, exitCode: 1, stdout, stderr: "step 1\nboom" },
+        "/f"
+      );
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(CommandError);
@@ -917,16 +1029,24 @@ describe("parseUpOutput", () => {
     }
   });
   it("reports timeouts", () => {
-    expect(() => parseUpOutput({ ...base, exitCode: 1, stdout: "", timedOut: true }, "/f")).toThrow(/timed out/);
+    expect(() =>
+      parseUpOutput({ ...base, exitCode: 1, stdout: "", timedOut: true }, "/f")
+    ).toThrow(/timed out/);
   });
   it("reports missing result JSON with exit code", () => {
-    expect(() => parseUpOutput({ ...base, exitCode: 1, stdout: "noise only", stderr: "x" }, "/f")).toThrow(
-      /exited with code 1/,
-    );
+    expect(() =>
+      parseUpOutput(
+        { ...base, exitCode: 1, stdout: "noise only", stderr: "x" },
+        "/f"
+      )
+    ).toThrow(/exited with code 1/);
   });
   it("falls back when remoteWorkspaceFolder is absent", () => {
     const stdout = '{"outcome":"success","containerId":"c"}';
-    expect(parseUpOutput({ ...base, stdout }, "/workspaces/demo").remoteWorkspaceFolder).toBe("/workspaces/demo");
+    expect(
+      parseUpOutput({ ...base, stdout }, "/workspaces/demo")
+        .remoteWorkspaceFolder
+    ).toBe("/workspaces/demo");
   });
 });
 
@@ -934,10 +1054,19 @@ describe("Containers", () => {
   it("up passes workspace folder and id label, streams lines", async () => {
     const { run, calls } = fakeRunner(() => ({ stdout: okUp }));
     const lines: string[] = [];
-    const res = await new Containers(run).up(project, { rebuild: false, onLine: (l) => lines.push(l) });
+    const res = await new Containers(run).up(project, {
+      rebuild: false,
+      onLine: (l) => lines.push(l),
+    });
     expect(res.containerId).toBe("abc123");
     expect(calls[0].cmd).toBe("devcontainer");
-    expect(calls[0].args).toEqual(["up", "--workspace-folder", "/src/demo", "--id-label", `${LABEL}=demo-1a2b3c`]);
+    expect(calls[0].args).toEqual([
+      "up",
+      "--workspace-folder",
+      "/src/demo",
+      "--id-label",
+      `${LABEL}=demo-1a2b3c`,
+    ]);
     calls[0].opts?.onLine?.("hello");
     expect(lines).toEqual(["hello"]);
   });
@@ -956,25 +1085,41 @@ describe("Containers", () => {
       ip: "172.17.0.5",
       projectId: "demo-1a2b3c",
     });
-    const missing = fakeRunner(() => ({ exitCode: 1, stderr: "No such container" }));
+    const missing = fakeRunner(() => ({
+      exitCode: 1,
+      stderr: "No such container",
+    }));
     expect(await new Containers(missing.run).inspect("nope")).toBeUndefined();
   });
 
   it("listManaged filters by label and inspects each id", async () => {
-    const { run, calls } = fakeRunner((c) => (c.args[0] === "ps" ? { stdout: "abc123\n" } : { stdout: inspectJson }));
+    const { run, calls } = fakeRunner((c) =>
+      c.args[0] === "ps" ? { stdout: "abc123\n" } : { stdout: inspectJson }
+    );
     const list = await new Containers(run).listManaged();
-    expect(calls[0].args).toEqual(["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{.ID}}"]);
+    expect(calls[0].args).toEqual([
+      "ps",
+      "-a",
+      "--filter",
+      `label=${LABEL}`,
+      "--format",
+      "{{.ID}}",
+    ]);
     expect(list.map((c) => c.id)).toEqual(["abc123"]);
   });
 
   it("stop throws CommandError on failure", async () => {
     const { run } = fakeRunner(() => ({ exitCode: 1, stderr: "daemon down" }));
-    await expect(new Containers(run).stop("abc")).rejects.toBeInstanceOf(CommandError);
+    await expect(new Containers(run).stop("abc")).rejects.toBeInstanceOf(
+      CommandError
+    );
   });
 
   it("exec forwards env as --remote-env before the command", async () => {
     const { run, calls } = fakeRunner();
-    await new Containers(run).exec(project, ["opencode", "--version"], { env: { A: "1" } });
+    await new Containers(run).exec(project, ["opencode", "--version"], {
+      env: { A: "1" },
+    });
     expect(calls[0].args).toEqual([
       "exec",
       "--workspace-folder",
@@ -993,14 +1138,15 @@ describe("Containers", () => {
 
 - [ ] **Step 6: Run to verify failure**
 
-Run: `npx vitest run test/server/containers.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/containers.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 7: Implement the containers adapter**
 
 `src/server/containers.ts`:
+
 ```ts
 import path from "node:path";
+
 import type { Project } from "../shared/types";
 import type { RunResult, Runner } from "./exec";
 
@@ -1012,7 +1158,7 @@ const DOCKER_TIMEOUT_MS = 15_000;
 export class CommandError extends Error {
   constructor(
     message: string,
-    readonly tail: string[] = [],
+    readonly tail: string[] = []
   ) {
     super(message);
     this.name = "CommandError";
@@ -1031,7 +1177,10 @@ export interface UpResult {
   remoteWorkspaceFolder: string;
 }
 
-export function parseUpOutput(result: RunResult, fallbackFolder: string): UpResult {
+export function parseUpOutput(
+  result: RunResult,
+  fallbackFolder: string
+): UpResult {
   const candidates = result.stdout
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -1043,22 +1192,34 @@ export function parseUpOutput(result: RunResult, fallbackFolder: string): UpResu
     } catch {
       continue;
     }
-    if (parsed.outcome === "success" && typeof parsed.containerId === "string") {
+    if (
+      parsed.outcome === "success" &&
+      typeof parsed.containerId === "string"
+    ) {
       return {
         containerId: parsed.containerId,
         remoteWorkspaceFolder:
-          typeof parsed.remoteWorkspaceFolder === "string" ? parsed.remoteWorkspaceFolder : fallbackFolder,
+          typeof parsed.remoteWorkspaceFolder === "string"
+            ? parsed.remoteWorkspaceFolder
+            : fallbackFolder,
       };
     }
     if (typeof parsed.outcome === "string") {
       const reason = parsed.message ?? parsed.description ?? "unknown error";
-      throw new CommandError(`devcontainer up failed: ${String(reason)}`, tailLines(result.stderr));
+      throw new CommandError(
+        `devcontainer up failed: ${String(reason)}`,
+        tailLines(result.stderr)
+      );
     }
   }
-  if (result.timedOut) throw new CommandError("devcontainer up timed out after 15 minutes", tailLines(result.stderr));
+  if (result.timedOut)
+    throw new CommandError(
+      "devcontainer up timed out after 15 minutes",
+      tailLines(result.stderr)
+    );
   throw new CommandError(
     `devcontainer up exited with code ${result.exitCode} without a result`,
-    tailLines(`${result.stderr}\n${result.stdout}`),
+    tailLines(`${result.stderr}\n${result.stdout}`)
   );
 }
 
@@ -1079,62 +1240,98 @@ export function parseInspect(json: string): ContainerInfo {
   const ip = Object.values(c.NetworkSettings?.Networks ?? {})
     .map((n) => n.IPAddress)
     .find((a): a is string => !!a);
-  return { id: c.Id, running: c.State?.Running === true, ip, projectId: c.Config?.Labels?.[LABEL] };
+  return {
+    id: c.Id,
+    running: c.State?.Running === true,
+    ip,
+    projectId: c.Config?.Labels?.[LABEL],
+  };
 }
 
 export class Containers {
   constructor(private readonly run: Runner) {}
 
   private idArgs(project: Project): string[] {
-    return ["--workspace-folder", project.path, "--id-label", `${LABEL}=${project.id}`];
+    return [
+      "--workspace-folder",
+      project.path,
+      "--id-label",
+      `${LABEL}=${project.id}`,
+    ];
   }
 
-  async up(project: Project, opts: { rebuild: boolean; onLine: (line: string) => void }): Promise<UpResult> {
+  async up(
+    project: Project,
+    opts: { rebuild: boolean; onLine: (line: string) => void }
+  ): Promise<UpResult> {
     const args = ["up", ...this.idArgs(project)];
     if (opts.rebuild) args.push("--remove-existing-container");
-    const result = await this.run("devcontainer", args, { timeoutMs: UP_TIMEOUT_MS, onLine: opts.onLine });
+    const result = await this.run("devcontainer", args, {
+      timeoutMs: UP_TIMEOUT_MS,
+      onLine: opts.onLine,
+    });
     return parseUpOutput(result, `/workspaces/${path.basename(project.path)}`);
   }
 
   async inspect(containerId: string): Promise<ContainerInfo | undefined> {
-    const r = await this.run("docker", ["inspect", "--type", "container", "--format", "{{json .}}", containerId], {
-      timeoutMs: DOCKER_TIMEOUT_MS,
-    });
+    const r = await this.run(
+      "docker",
+      ["inspect", "--type", "container", "--format", "{{json .}}", containerId],
+      {
+        timeoutMs: DOCKER_TIMEOUT_MS,
+      }
+    );
     if (r.exitCode !== 0) return undefined;
     return parseInspect(r.stdout.trim());
   }
 
   async listManaged(): Promise<ContainerInfo[]> {
-    const r = await this.run("docker", ["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{.ID}}"], {
-      timeoutMs: DOCKER_TIMEOUT_MS,
-    });
-    if (r.exitCode !== 0) throw new CommandError(`docker ps failed: ${r.stderr.trim()}`, tailLines(r.stderr));
+    const r = await this.run(
+      "docker",
+      ["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{.ID}}"],
+      {
+        timeoutMs: DOCKER_TIMEOUT_MS,
+      }
+    );
+    if (r.exitCode !== 0)
+      throw new CommandError(
+        `docker ps failed: ${r.stderr.trim()}`,
+        tailLines(r.stderr)
+      );
     const ids = r.stdout.split(/\s+/).filter(Boolean);
     const infos = await Promise.all(ids.map((id) => this.inspect(id)));
     return infos.filter((i): i is ContainerInfo => i !== undefined);
   }
 
   async stop(containerId: string): Promise<void> {
-    const r = await this.run("docker", ["stop", "-t", "10", containerId], { timeoutMs: 30_000 });
-    if (r.exitCode !== 0) throw new CommandError(`docker stop failed: ${r.stderr.trim()}`, tailLines(r.stderr));
+    const r = await this.run("docker", ["stop", "-t", "10", containerId], {
+      timeoutMs: 30_000,
+    });
+    if (r.exitCode !== 0)
+      throw new CommandError(
+        `docker stop failed: ${r.stderr.trim()}`,
+        tailLines(r.stderr)
+      );
   }
 
   exec(
     project: Project,
     command: string[],
-    opts: { env?: Record<string, string>; timeoutMs?: number } = {},
+    opts: { env?: Record<string, string>; timeoutMs?: number } = {}
   ): Promise<RunResult> {
     const args = ["exec", ...this.idArgs(project)];
-    for (const [k, v] of Object.entries(opts.env ?? {})) args.push("--remote-env", `${k}=${v}`);
-    return this.run("devcontainer", [...args, ...command], { timeoutMs: opts.timeoutMs ?? EXEC_TIMEOUT_MS });
+    for (const [k, v] of Object.entries(opts.env ?? {}))
+      args.push("--remote-env", `${k}=${v}`);
+    return this.run("devcontainer", [...args, ...command], {
+      timeoutMs: opts.timeoutMs ?? EXEC_TIMEOUT_MS,
+    });
   }
 }
 ```
 
 - [ ] **Step 8: Run tests**
 
-Run: `npx vitest run test/server/exec.test.ts test/server/containers.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/exec.test.ts test/server/containers.test.ts` Expected: PASS.
 
 - [ ] **Step 9: Commit**
 
@@ -1148,10 +1345,12 @@ git commit -m "feat: command runner and devcontainer/docker adapter"
 ### Task 5: opencode v2 client and fake server
 
 **Files:**
+
 - Create: `src/server/opencode/client.ts`, `test/helpers/fake-opencode.ts`
 - Test: `test/server/opencode-client.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `interface OpencodeEndpoint { baseUrl: string; password: string }`
   - `interface RawSession { id: string; title?: string; parentID?: string; time: { created: number; updated: number; archived?: number }; location: { directory: string } }`
@@ -1168,10 +1367,16 @@ Verified against opencode 2.0.20: `/api/session` returns `{ data: Session[], cur
 - [ ] **Step 1: Write the fake opencode server**
 
 `test/helpers/fake-opencode.ts`:
+
 ```ts
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import type { RawForm, RawPermissionRequest, RawSession } from "../../src/server/opencode/client";
+
+import type {
+  RawForm,
+  RawPermissionRequest,
+  RawSession,
+} from "../../src/server/opencode/client";
 
 export interface FakeState {
   version: string;
@@ -1183,7 +1388,10 @@ export interface FakeState {
   fail: boolean;
 }
 
-export async function startFakeOpencode(password = "pw", init: Partial<FakeState> = {}) {
+export async function startFakeOpencode(
+  password = "pw",
+  init: Partial<FakeState> = {}
+) {
   const state: FakeState = {
     version: "2.0.20",
     cwd: "/workspaces/demo",
@@ -1196,12 +1404,16 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
   };
   const sseClients = new Set<http.ServerResponse>();
   const requests: string[] = [];
-  const expected = "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
+  const expected =
+    "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
 
   const server = http.createServer((req, res) => {
     requests.push(`${req.method} ${req.url}`);
     if (req.headers.authorization !== expected) {
-      res.writeHead(401, { "content-type": "application/json", "www-authenticate": 'Basic realm="Secure Area"' });
+      res.writeHead(401, {
+        "content-type": "application/json",
+        "www-authenticate": 'Basic realm="Secure Area"',
+      });
       res.end('{"_tag":"UnauthorizedError"}');
       return;
     }
@@ -1211,7 +1423,8 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
       return;
     }
     const url = new URL(req.url ?? "/", "http://fake");
-    const dir = (req.headers["x-opencode-directory"] as string | undefined) ?? state.cwd;
+    const dir =
+      (req.headers["x-opencode-directory"] as string | undefined) ?? state.cwd;
     const json = (body: unknown) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
@@ -1222,14 +1435,29 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
       case "/api/session":
         return json({ data: state.sessions, cursor: {} });
       case "/api/session/active":
-        return json({ data: Object.fromEntries(state.active.map((id) => [id, { type: "running" }])) });
+        return json({
+          data: Object.fromEntries(
+            state.active.map((id) => [id, { type: "running" }])
+          ),
+        });
       case "/api/permission/request":
-        return json({ location: { directory: dir }, data: state.permissions[dir] ?? [] });
+        return json({
+          location: { directory: dir },
+          data: state.permissions[dir] ?? [],
+        });
       case "/api/form":
-        return json({ location: { directory: dir }, data: state.forms[dir] ?? [] });
+        return json({
+          location: { directory: dir },
+          data: state.forms[dir] ?? [],
+        });
       case "/api/event":
-        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-        res.write(`data: ${JSON.stringify({ type: "server.connected", data: {} })}\n\n`);
+        res.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+        });
+        res.write(
+          `data: ${JSON.stringify({ type: "server.connected", data: {} })}\n\n`
+        );
         res.write(": heartbeat\n\n");
         sseClients.add(res);
         req.on("close", () => sseClients.delete(res));
@@ -1266,7 +1494,10 @@ export async function startFakeOpencode(password = "pw", init: Partial<FakeState
 
 export type FakeOpencode = Awaited<ReturnType<typeof startFakeOpencode>>;
 
-export function rawSession(id: string, over: Partial<RawSession> = {}): RawSession {
+export function rawSession(
+  id: string,
+  over: Partial<RawSession> = {}
+): RawSession {
   return {
     id,
     title: `Session ${id}`,
@@ -1280,10 +1511,20 @@ export function rawSession(id: string, over: Partial<RawSession> = {}): RawSessi
 - [ ] **Step 2: Write the failing client tests**
 
 `test/server/opencode-client.test.ts`:
+
 ```ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OpencodeClient, OpencodeHttpError, type OpencodeEvent } from "../../src/server/opencode/client";
-import { type FakeOpencode, rawSession, startFakeOpencode } from "../helpers/fake-opencode";
+
+import {
+  OpencodeClient,
+  OpencodeHttpError,
+  type OpencodeEvent,
+} from "../../src/server/opencode/client";
+import {
+  type FakeOpencode,
+  rawSession,
+  startFakeOpencode,
+} from "../helpers/fake-opencode";
 
 let fake: FakeOpencode;
 let client: OpencodeClient;
@@ -1312,39 +1553,53 @@ describe("OpencodeClient", () => {
   });
 
   it("scopes permission requests and forms by directory header", async () => {
-    fake.state.permissions["/w/other"] = [{ id: "per_1", sessionID: "ses_1", action: "bash" }];
-    fake.state.forms["/w/other"] = [{ id: "frm_1", sessionID: "ses_2", title: "Q" }];
+    fake.state.permissions["/w/other"] = [
+      { id: "per_1", sessionID: "ses_1", action: "bash" },
+    ];
+    fake.state.forms["/w/other"] = [
+      { id: "frm_1", sessionID: "ses_2", title: "Q" },
+    ];
     expect(await client.permissionRequests("/workspaces/demo")).toEqual([]);
-    expect((await client.permissionRequests("/w/other")).map((p) => p.id)).toEqual(["per_1"]);
-    expect((await client.forms("/w/other")).map((f) => f.id)).toEqual(["frm_1"]);
+    expect(
+      (await client.permissionRequests("/w/other")).map((p) => p.id)
+    ).toEqual(["per_1"]);
+    expect((await client.forms("/w/other")).map((f) => f.id)).toEqual([
+      "frm_1",
+    ]);
   });
 
   it("streams parsed SSE events, skipping comments, until aborted", async () => {
     const events: OpencodeEvent[] = [];
     const ac = new AbortController();
-    const done = client.subscribe((e) => events.push(e), ac.signal).catch(() => {});
+    const done = client
+      .subscribe((e) => events.push(e), ac.signal)
+      .catch(() => {});
     await expect.poll(() => fake.sseClientCount()).toBe(1);
     fake.emit({ type: "session.created", data: { sessionID: "ses_9" } });
-    await expect.poll(() => events.map((e) => e.type)).toEqual(["server.connected", "session.created"]);
+    await expect
+      .poll(() => events.map((e) => e.type))
+      .toEqual(["server.connected", "session.created"]);
     ac.abort();
     await done;
   });
 
   it("subscribe rejects on auth failure", async () => {
     const bad = new OpencodeClient({ baseUrl: fake.baseUrl, password: "nope" });
-    await expect(bad.subscribe(() => {}, new AbortController().signal)).rejects.toMatchObject({ status: 401 });
+    await expect(
+      bad.subscribe(() => {}, new AbortController().signal)
+    ).rejects.toMatchObject({ status: 401 });
   });
 });
 ```
 
 - [ ] **Step 3: Run to verify failure**
 
-Run: `npx vitest run test/server/opencode-client.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/opencode-client.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 4: Implement the client**
 
 `src/server/opencode/client.ts`:
+
 ```ts
 export interface OpencodeEndpoint {
   baseUrl: string;
@@ -1380,7 +1635,7 @@ export interface OpencodeEvent {
 export class OpencodeHttpError extends Error {
   constructor(
     readonly status: number,
-    path: string,
+    path: string
   ) {
     super(`opencode ${path} responded ${status}`);
     this.name = "OpencodeHttpError";
@@ -1396,11 +1651,14 @@ const REQUEST_TIMEOUT_MS = 5000;
 export class OpencodeClient {
   constructor(
     private readonly ep: OpencodeEndpoint,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = fetch
   ) {}
 
   private async get<T>(path: string, directory?: string): Promise<T> {
-    const headers: Record<string, string> = { authorization: basicAuth(this.ep.password), accept: "application/json" };
+    const headers: Record<string, string> = {
+      authorization: basicAuth(this.ep.password),
+      accept: "application/json",
+    };
     if (directory) headers["x-opencode-directory"] = directory;
     const res = await this.fetchImpl(this.ep.baseUrl + path, {
       headers,
@@ -1419,12 +1677,19 @@ export class OpencodeClient {
   }
 
   async active(): Promise<Set<string>> {
-    const r = await this.get<{ data: Record<string, unknown> }>("/api/session/active");
+    const r = await this.get<{ data: Record<string, unknown> }>(
+      "/api/session/active"
+    );
     return new Set(Object.keys(r.data));
   }
 
   async permissionRequests(directory: string): Promise<RawPermissionRequest[]> {
-    return (await this.get<{ data: RawPermissionRequest[] }>("/api/permission/request", directory)).data;
+    return (
+      await this.get<{ data: RawPermissionRequest[] }>(
+        "/api/permission/request",
+        directory
+      )
+    ).data;
   }
 
   async forms(directory: string): Promise<RawForm[]> {
@@ -1432,12 +1697,19 @@ export class OpencodeClient {
   }
 
   /** Resolves when the stream ends; rejects on HTTP or network errors (including abort). */
-  async subscribe(onEvent: (event: OpencodeEvent) => void, signal: AbortSignal): Promise<void> {
+  async subscribe(
+    onEvent: (event: OpencodeEvent) => void,
+    signal: AbortSignal
+  ): Promise<void> {
     const res = await this.fetchImpl(this.ep.baseUrl + "/api/event", {
-      headers: { authorization: basicAuth(this.ep.password), accept: "text/event-stream" },
+      headers: {
+        authorization: basicAuth(this.ep.password),
+        accept: "text/event-stream",
+      },
       signal,
     });
-    if (!res.ok || !res.body) throw new OpencodeHttpError(res.status, "/api/event");
+    if (!res.ok || !res.body)
+      throw new OpencodeHttpError(res.status, "/api/event");
     const decoder = new TextDecoder();
     let buf = "";
     for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
@@ -1465,8 +1737,7 @@ export class OpencodeClient {
 
 - [ ] **Step 5: Run tests**
 
-Run: `npx vitest run test/server/opencode-client.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/opencode-client.test.ts` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1480,10 +1751,12 @@ git commit -m "feat: opencode v2 HTTP/SSE client with fake server"
 ### Task 6: Session status derivation
 
 **Files:**
+
 - Create: `src/server/status.ts`
 - Test: `test/server/status.test.ts`
 
 **Interfaces:**
+
 - Consumes: `RawSession`, `RawPermissionRequest`, `RawForm` (Task 5); `SessionSummary`, `SessionStatus` types.
 - Produces:
   - `interface StatusInput { sessions: RawSession[]; active: Set<string>; permissions: RawPermissionRequest[]; forms: RawForm[] }`
@@ -1493,8 +1766,10 @@ git commit -m "feat: opencode v2 HTTP/SSE client with fake server"
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/status.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { deriveSessions } from "../../src/server/status";
 import { rawSession } from "../helpers/fake-opencode";
 
@@ -1502,9 +1777,19 @@ const base = { active: new Set<string>(), permissions: [], forms: [] };
 
 describe("deriveSessions", () => {
   it("maps sessions to idle summaries with titles and directories", () => {
-    const out = deriveSessions("p", { ...base, sessions: [rawSession("ses_1", { title: "  " })] });
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [rawSession("ses_1", { title: "  " })],
+    });
     expect(out).toEqual([
-      { id: "ses_1", projectId: "p", title: "Untitled session", directory: "/workspaces/demo", updatedAt: 1, status: "idle" },
+      {
+        id: "ses_1",
+        projectId: "p",
+        title: "Untitled session",
+        directory: "/workspaces/demo",
+        updatedAt: 1,
+        status: "idle",
+      },
     ]);
   });
 
@@ -1528,23 +1813,37 @@ describe("deriveSessions", () => {
   it("rolls child (subagent) sessions up into their root parent and hides them", () => {
     const out = deriveSessions("p", {
       ...base,
-      sessions: [rawSession("root"), rawSession("child", { parentID: "root" }), rawSession("grand", { parentID: "child" })],
+      sessions: [
+        rawSession("root"),
+        rawSession("child", { parentID: "root" }),
+        rawSession("grand", { parentID: "child" }),
+      ],
       permissions: [{ id: "p1", sessionID: "grand", action: "edit" }],
     });
-    expect(out.map((s) => [s.id, s.status])).toEqual([["root", "needs-permission"]]);
+    expect(out.map((s) => [s.id, s.status])).toEqual([
+      ["root", "needs-permission"],
+    ]);
   });
 
   it("survives parent cycles", () => {
     const out = deriveSessions("p", {
       ...base,
-      sessions: [rawSession("x", { parentID: "y" }), rawSession("y", { parentID: "x" })],
+      sessions: [
+        rawSession("x", { parentID: "y" }),
+        rawSession("y", { parentID: "x" }),
+      ],
       active: new Set(["x"]),
     });
     expect(out).toEqual([]);
   });
 
   it("hides archived sessions", () => {
-    const out = deriveSessions("p", { ...base, sessions: [rawSession("a", { time: { created: 1, updated: 1, archived: 2 } })] });
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [
+        rawSession("a", { time: { created: 1, updated: 1, archived: 2 } }),
+      ],
+    });
     expect(out).toEqual([]);
   });
 
@@ -1565,15 +1864,19 @@ describe("deriveSessions", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/status.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/status.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/status.ts`:
+
 ```ts
 import type { SessionStatus, SessionSummary } from "../shared/types";
-import type { RawForm, RawPermissionRequest, RawSession } from "./opencode/client";
+import type {
+  RawForm,
+  RawPermissionRequest,
+  RawSession,
+} from "./opencode/client";
 
 export interface StatusInput {
   sessions: RawSession[];
@@ -1582,7 +1885,12 @@ export interface StatusInput {
   forms: RawForm[];
 }
 
-const RANK: Record<SessionStatus, number> = { "needs-permission": 0, "needs-answer": 1, running: 2, idle: 3 };
+const RANK: Record<SessionStatus, number> = {
+  "needs-permission": 0,
+  "needs-answer": 1,
+  running: 2,
+  idle: 3,
+};
 
 export function compareSessions(a: SessionSummary, b: SessionSummary): number {
   return RANK[a.status] - RANK[b.status] || b.updatedAt - a.updatedAt;
@@ -1600,7 +1908,10 @@ function rootOf(id: string, parents: Map<string, string | undefined>): string {
   return current;
 }
 
-export function deriveSessions(projectId: string, input: StatusInput): SessionSummary[] {
+export function deriveSessions(
+  projectId: string,
+  input: StatusInput
+): SessionSummary[] {
   const parents = new Map(input.sessions.map((s) => [s.id, s.parentID]));
   const flags = new Map<string, SessionStatus>();
   const raise = (sessionId: string, status: SessionStatus) => {
@@ -1628,8 +1939,7 @@ export function deriveSessions(projectId: string, input: StatusInput): SessionSu
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/status.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/status.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1643,10 +1953,12 @@ git commit -m "feat: derive session status with subagent roll-up"
 ### Task 7: State store
 
 **Files:**
+
 - Create: `src/server/state.ts`
 - Test: `test/server/state.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PersistedState` (Task 2), `projectUrl` (Task 1), shared types.
 - Produces:
   - `interface StoreOptions { port: number; persisted: PersistedState; persist: (s: PersistedState) => void }`
@@ -1656,27 +1968,57 @@ git commit -m "feat: derive session status with subagent roll-up"
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/state.test.ts`:
+
 ```ts
 import { describe, expect, it, vi } from "vitest";
+
 import type { PersistedState } from "../../src/server/config";
 import { StateStore } from "../../src/server/state";
 import type { Project, SessionSummary } from "../../src/shared/types";
 
-const p = (id: string): Project => ({ id, name: id, path: `/src/${id}`, devcontainerPath: `/src/${id}/.devcontainer.json` });
-const session: SessionSummary = { id: "s1", projectId: "a", title: "t", directory: "/w", updatedAt: 1, status: "idle" };
+const p = (id: string): Project => ({
+  id,
+  name: id,
+  path: `/src/${id}`,
+  devcontainerPath: `/src/${id}/.devcontainer.json`,
+});
+const session: SessionSummary = {
+  id: "s1",
+  projectId: "a",
+  title: "t",
+  directory: "/w",
+  updatedAt: 1,
+  status: "idle",
+};
 
 function make(persisted: PersistedState = { projects: {} }) {
   const saved: PersistedState[] = [];
-  const store = new StateStore({ port: 7777, persisted, persist: (s) => saved.push(structuredClone(s)) });
+  const store = new StateStore({
+    port: 7777,
+    persisted,
+    persist: (s) => saved.push(structuredClone(s)),
+  });
   return { store, saved };
 }
 
 describe("StateStore", () => {
   it("gives new projects a stopped runtime and restores persisted fields", () => {
-    const { store } = make({ projects: { b: { containerId: "c9", password: "pw", workspaceFolder: "/w" } } });
+    const { store } = make({
+      projects: {
+        b: { containerId: "c9", password: "pw", workspaceFolder: "/w" },
+      },
+    });
     store.setProjects([p("a"), p("b")]);
-    expect(store.runtime("a")).toEqual({ projectId: "a", containerState: "stopped", opencode: "absent" });
-    expect(store.runtime("b")).toMatchObject({ containerId: "c9", password: "pw", workspaceFolder: "/w" });
+    expect(store.runtime("a")).toEqual({
+      projectId: "a",
+      containerState: "stopped",
+      opencode: "absent",
+    });
+    expect(store.runtime("b")).toMatchObject({
+      containerId: "c9",
+      password: "pw",
+      workspaceFolder: "/w",
+    });
   });
 
   it("persists only durable fields, and only when they change", () => {
@@ -1685,7 +2027,11 @@ describe("StateStore", () => {
     store.updateRuntime("a", { containerState: "starting" });
     expect(saved).toHaveLength(0);
     store.updateRuntime("a", { containerId: "c1", password: "pw" });
-    expect(saved.at(-1)).toEqual({ projects: { a: { containerId: "c1", password: "pw", workspaceFolder: undefined } } });
+    expect(saved.at(-1)).toEqual({
+      projects: {
+        a: { containerId: "c1", password: "pw", workspaceFolder: undefined },
+      },
+    });
   });
 
   it("notifies subscribers on change but not on no-op updates", () => {
@@ -1715,7 +2061,13 @@ describe("StateStore", () => {
     expect(snap).toMatchObject({
       roots: ["/src"],
       preflight: { errors: ["no docker"] },
-      projects: [{ project: { id: "a" }, openUrl: "http://a.localhost:7777/", sessions: [] }],
+      projects: [
+        {
+          project: { id: "a" },
+          openUrl: "http://a.localhost:7777/",
+          sessions: [],
+        },
+      ],
     });
   });
 
@@ -1730,12 +2082,12 @@ describe("StateStore", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/state.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/state.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/state.ts`:
+
 ```ts
 import type {
   DashboardSnapshot,
@@ -1776,7 +2128,9 @@ export class StateStore {
 
   setProjects(list: Project[]): void {
     this.projectsById = new Map(list.map((p) => [p.id, p]));
-    for (const p of list) if (!this.runtimes.has(p.id)) this.runtimes.set(p.id, defaultRuntime(p.id));
+    for (const p of list)
+      if (!this.runtimes.has(p.id))
+        this.runtimes.set(p.id, defaultRuntime(p.id));
     this.emit();
   }
 
@@ -1794,10 +2148,13 @@ export class StateStore {
 
   updateRuntime(id: ProjectId, patch: Partial<ProjectRuntime>): void {
     const current = this.runtime(id);
-    const changed = (Object.keys(patch) as (keyof ProjectRuntime)[]).filter((k) => current[k] !== patch[k]);
+    const changed = (Object.keys(patch) as (keyof ProjectRuntime)[]).filter(
+      (k) => current[k] !== patch[k]
+    );
     if (changed.length === 0) return;
     this.runtimes.set(id, { ...current, ...patch });
-    if (changed.some((k) => (DURABLE_KEYS as readonly string[]).includes(k))) this.save();
+    if (changed.some((k) => (DURABLE_KEYS as readonly string[]).includes(k)))
+      this.save();
     this.emit();
   }
 
@@ -1847,7 +2204,11 @@ export class StateStore {
     const projects: Record<ProjectId, PersistedRuntime> = {};
     for (const [id, r] of this.runtimes) {
       if (r.containerId || r.password || r.workspaceFolder) {
-        projects[id] = { containerId: r.containerId, password: r.password, workspaceFolder: r.workspaceFolder };
+        projects[id] = {
+          containerId: r.containerId,
+          password: r.password,
+          workspaceFolder: r.workspaceFolder,
+        };
       }
     }
     this.opts.persist({ projects });
@@ -1861,8 +2222,7 @@ export class StateStore {
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/state.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/state.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1876,10 +2236,12 @@ git commit -m "feat: state store with change notifications and persistence"
 ### Task 8: Monitor
 
 **Files:**
+
 - Create: `src/server/monitor.ts`
 - Test: `test/server/monitor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `OpencodeClient` (Task 5), `deriveSessions` (Task 6).
 - Produces:
   - `interface MonitorOptions { client: OpencodeClient; projectId: string; directory: string; onSessions: (s: SessionSummary[]) => void; onHealth: (healthy: boolean) => void; pollMs?: number; debounceMs?: number; minBackoffMs?: number; maxBackoffMs?: number }`
@@ -1889,12 +2251,18 @@ git commit -m "feat: state store with change notifications and persistence"
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/monitor.test.ts`:
+
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { Monitor, type MonitorOptions } from "../../src/server/monitor";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import type { SessionSummary } from "../../src/shared/types";
-import { type FakeOpencode, rawSession, startFakeOpencode } from "../helpers/fake-opencode";
+import {
+  type FakeOpencode,
+  rawSession,
+  startFakeOpencode,
+} from "../helpers/fake-opencode";
 
 let fake: FakeOpencode;
 let monitor: Monitor | undefined;
@@ -1932,7 +2300,9 @@ describe("Monitor", () => {
     fake.state.sessions = [rawSession("ses_1")];
     fake.state.active = ["ses_1"];
     start();
-    await vi.waitFor(() => expect(latest?.map((s) => s.status)).toEqual(["running"]));
+    await vi.waitFor(() =>
+      expect(latest?.map((s) => s.status)).toEqual(["running"])
+    );
     expect(health).toContain(true);
   });
 
@@ -1941,9 +2311,14 @@ describe("Monitor", () => {
     start();
     await vi.waitFor(() => expect(latest?.[0].status).toBe("idle"));
     await vi.waitFor(() => expect(fake.sseClientCount()).toBe(1));
-    fake.state.permissions["/workspaces/demo"] = [{ id: "per_1", sessionID: "ses_1", action: "bash" }];
+    fake.state.permissions["/workspaces/demo"] = [
+      { id: "per_1", sessionID: "ses_1", action: "bash" },
+    ];
     fake.emit({ type: "permission.asked", data: { sessionID: "ses_1" } });
-    await vi.waitFor(() => expect(latest?.[0].status).toBe("needs-permission"), { timeout: 2000 });
+    await vi.waitFor(
+      () => expect(latest?.[0].status).toBe("needs-permission"),
+      { timeout: 2000 }
+    );
   });
 
   it("ignores irrelevant events", async () => {
@@ -1961,14 +2336,18 @@ describe("Monitor", () => {
     await vi.waitFor(() => expect(fake.sseClientCount()).toBe(1));
     fake.dropStreams();
     expect(fake.sseClientCount()).toBe(0);
-    await vi.waitFor(() => expect(fake.sseClientCount()).toBe(1), { timeout: 2000 });
+    await vi.waitFor(() => expect(fake.sseClientCount()).toBe(1), {
+      timeout: 2000,
+    });
   });
 
   it("polls as a safety net and reports unhealthy after 3 failures", async () => {
     start({ pollMs: 30 });
     await vi.waitFor(() => expect(health).toContain(true));
     fake.state.fail = true;
-    await vi.waitFor(() => expect(health.at(-1)).toBe(false), { timeout: 2000 });
+    await vi.waitFor(() => expect(health.at(-1)).toBe(false), {
+      timeout: 2000,
+    });
     fake.state.fail = false;
     await vi.waitFor(() => expect(health.at(-1)).toBe(true), { timeout: 2000 });
   });
@@ -1987,12 +2366,12 @@ describe("Monitor", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/monitor.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/monitor.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/monitor.ts`:
+
 ```ts
 import type { SessionSummary } from "../shared/types";
 import type { OpencodeClient } from "./opencode/client";
@@ -2022,7 +2401,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
         clearTimeout(timer);
         resolve();
       },
-      { once: true },
+      { once: true }
     );
   });
 }
@@ -2040,7 +2419,10 @@ export class Monitor {
 
   start(): void {
     void this.reconcile();
-    this.pollTimer = setInterval(() => void this.reconcile(), this.opts.pollMs ?? 5000);
+    this.pollTimer = setInterval(
+      () => void this.reconcile(),
+      this.opts.pollMs ?? 5000
+    );
     void this.streamLoop();
   }
 
@@ -2079,7 +2461,9 @@ export class Monitor {
       if (this.stopped) return;
       this.failures = 0;
       this.opts.onHealth(true);
-      this.opts.onSessions(deriveSessions(projectId, { sessions, active, permissions, forms }));
+      this.opts.onSessions(
+        deriveSessions(projectId, { sessions, active, permissions, forms })
+      );
     } catch {
       if (this.stopped) return;
       this.failures += 1;
@@ -2089,7 +2473,10 @@ export class Monitor {
 
   private schedule(): void {
     clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => void this.reconcile(), this.opts.debounceMs ?? 250);
+    this.debounceTimer = setTimeout(
+      () => void this.reconcile(),
+      this.opts.debounceMs ?? 250
+    );
   }
 
   private async streamLoop(): Promise<void> {
@@ -2115,8 +2502,7 @@ export class Monitor {
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/monitor.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/monitor.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -2130,10 +2516,12 @@ git commit -m "feat: per-project monitor with SSE + polling"
 ### Task 9: opencode runtime (version check, launch, health)
 
 **Files:**
+
 - Create: `src/server/opencode/runtime.ts`
 - Test: `test/server/opencode-runtime.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Containers`, `CommandError`, `tailLines` (Task 4); `OpencodeClient`, `OpencodeEndpoint` (Task 5).
 - Produces:
   - `OPENCODE_PORT = 4096`
@@ -2146,16 +2534,26 @@ Behaviour: if a password is given and the server already answers `/api/info` wit
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/opencode-runtime.test.ts`:
+
 ```ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { Containers } from "../../src/server/containers";
 import { OpencodeClient } from "../../src/server/opencode/client";
-import { OpencodeRuntime, parseOpencodeVersion } from "../../src/server/opencode/runtime";
+import {
+  OpencodeRuntime,
+  parseOpencodeVersion,
+} from "../../src/server/opencode/runtime";
 import type { Project } from "../../src/shared/types";
-import { type Call, fakeRunner } from "../helpers/fake-runner";
 import { type FakeOpencode, startFakeOpencode } from "../helpers/fake-opencode";
+import { type Call, fakeRunner } from "../helpers/fake-runner";
 
-const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/src/demo/.devcontainer.json" };
+const project: Project = {
+  id: "demo-abc123",
+  name: "demo",
+  path: "/src/demo",
+  devcontainerPath: "/src/demo/.devcontainer.json",
+};
 let fake: FakeOpencode;
 beforeEach(async () => {
   fake = await startFakeOpencode("pw");
@@ -2163,7 +2561,9 @@ beforeEach(async () => {
 afterEach(() => fake.close());
 
 function runtimeWith(versionOutput: { exitCode?: number; stdout?: string }) {
-  const { run, calls } = fakeRunner((c: Call) => (c.args.includes("--version") ? versionOutput : {}));
+  const { run, calls } = fakeRunner((c: Call) =>
+    c.args.includes("--version") ? versionOutput : {}
+  );
   const runtime = new OpencodeRuntime({
     containers: new Containers(run),
     clientFor: (ep) => new OpencodeClient(ep),
@@ -2174,14 +2574,20 @@ function runtimeWith(versionOutput: { exitCode?: number; stdout?: string }) {
   });
   return { runtime, calls };
 }
-const args = { ip: "127.0.0.1", workspaceFolder: "/workspaces/demo", onLine: () => {} };
+const args = {
+  ip: "127.0.0.1",
+  workspaceFolder: "/workspaces/demo",
+  onLine: () => {},
+};
 
 describe("parseOpencodeVersion", () => {
   it.each([
     ["opencode v2.0.20", "2.0.20"],
     ["1.18.31\n", "1.18.31"],
     ["garbage", undefined],
-  ])("%s -> %s", (input, expected) => expect(parseOpencodeVersion(input)).toBe(expected));
+  ])("%s -> %s", (input, expected) =>
+    expect(parseOpencodeVersion(input)).toBe(expected)
+  );
 });
 
 describe("OpencodeRuntime.ensureRunning", () => {
@@ -2189,32 +2595,52 @@ describe("OpencodeRuntime.ensureRunning", () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20\n" });
     const res = await runtime.ensureRunning(project, args);
     expect(res).toEqual({ password: "pw", version: "2.0.20" });
-    const launch = calls.find((c) => c.args.at(-1)?.includes("opencode serve --hostname 0.0.0.0"));
-    expect(launch?.args).toEqual(expect.arrayContaining(["--remote-env", "OPENCODE_PASSWORD=pw", "sh", "-c"]));
+    const launch = calls.find((c) =>
+      c.args.at(-1)?.includes("opencode serve --hostname 0.0.0.0")
+    );
+    expect(launch?.args).toEqual(
+      expect.arrayContaining([
+        "--remote-env",
+        "OPENCODE_PASSWORD=pw",
+        "sh",
+        "-c",
+      ])
+    );
     expect(launch?.args.at(-1)).toContain(`--port ${fake.port}`);
     expect(launch?.args.at(-1)).toContain("cd '/workspaces/demo'");
-    expect(calls.some((c) => c.args.at(-1)?.includes("pkill -f 'opencode [s]erve'"))).toBe(true);
+    expect(
+      calls.some((c) => c.args.at(-1)?.includes("pkill -f 'opencode [s]erve'"))
+    ).toBe(true);
   });
 
   it("is idempotent when the server already answers with the given password", async () => {
     const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
-    const res = await runtime.ensureRunning(project, { ...args, password: "pw" });
+    const res = await runtime.ensureRunning(project, {
+      ...args,
+      password: "pw",
+    });
     expect(res).toEqual({ password: "pw", version: "2.0.20" });
     expect(calls).toHaveLength(0);
   });
 
   it("fails clearly when opencode is missing", async () => {
     const { runtime } = runtimeWith({ exitCode: 127, stdout: "" });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/not installed/);
+    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(
+      /not installed/
+    );
   });
 
   it("rejects opencode v1", async () => {
     const { runtime } = runtimeWith({ stdout: "1.18.31" });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/requires opencode v2/);
+    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(
+      /requires opencode v2/
+    );
   });
 
   it("times out when the server never becomes healthy", async () => {
-    const { run } = fakeRunner((c) => (c.args.includes("--version") ? { stdout: "2.0.20" } : {}));
+    const { run } = fakeRunner((c) =>
+      c.args.includes("--version") ? { stdout: "2.0.20" } : {}
+    );
     const runtime = new OpencodeRuntime({
       containers: new Containers(run),
       clientFor: (ep) => new OpencodeClient(ep),
@@ -2223,21 +2649,24 @@ describe("OpencodeRuntime.ensureRunning", () => {
       healthIntervalMs: 20,
       generatePassword: () => "wrong-password",
     });
-    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(/did not become healthy/);
+    await expect(runtime.ensureRunning(project, args)).rejects.toThrow(
+      /did not become healthy/
+    );
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/opencode-runtime.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/opencode-runtime.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/opencode/runtime.ts`:
+
 ```ts
 import { randomBytes } from "node:crypto";
+
 import type { Project } from "../../shared/types";
 import { CommandError, type Containers, tailLines } from "../containers";
 import type { OpencodeClient, OpencodeEndpoint } from "./client";
@@ -2267,7 +2696,10 @@ export class OpencodeRuntime {
   constructor(private readonly deps: RuntimeDeps) {}
 
   endpoint(ip: string, password: string): OpencodeEndpoint {
-    return { baseUrl: `http://${ip}:${this.deps.port ?? OPENCODE_PORT}`, password };
+    return {
+      baseUrl: `http://${ip}:${this.deps.port ?? OPENCODE_PORT}`,
+      password,
+    };
   }
 
   async isHealthy(ep: OpencodeEndpoint): Promise<boolean> {
@@ -2281,11 +2713,18 @@ export class OpencodeRuntime {
 
   async ensureRunning(
     project: Project,
-    args: { ip: string; password?: string; workspaceFolder: string; onLine: (line: string) => void },
+    args: {
+      ip: string;
+      password?: string;
+      workspaceFolder: string;
+      onLine: (line: string) => void;
+    }
   ): Promise<{ password: string; version: string }> {
     if (args.password) {
       try {
-        const info = await this.deps.clientFor(this.endpoint(args.ip, args.password)).info();
+        const info = await this.deps
+          .clientFor(this.endpoint(args.ip, args.password))
+          .info();
         return { password: args.password, version: info.version };
       } catch {
         // not running or different password: relaunch below
@@ -2293,28 +2732,39 @@ export class OpencodeRuntime {
     }
 
     const { containers } = this.deps;
-    const versionRun = await containers.exec(project, ["opencode", "--version"]);
+    const versionRun = await containers.exec(project, [
+      "opencode",
+      "--version",
+    ]);
     if (versionRun.exitCode !== 0) {
       throw new CommandError(
         "opencode is not installed in the devcontainer (expected opencode v2 on PATH)",
-        tailLines(versionRun.stderr + versionRun.stdout),
+        tailLines(versionRun.stderr + versionRun.stdout)
       );
     }
     const version = parseOpencodeVersion(versionRun.stdout);
     if (!version || Number(version.split(".")[0]) < 2) {
-      throw new CommandError(`opencode ${version ?? "(unknown version)"} found, but opendevhub requires opencode v2`);
+      throw new CommandError(
+        `opencode ${version ?? "(unknown version)"} found, but opendevhub requires opencode v2`
+      );
     }
     args.onLine(`opencode ${version} found in container`);
 
-    const password = this.deps.generatePassword?.() ?? randomBytes(32).toString("base64url");
+    const password =
+      this.deps.generatePassword?.() ?? randomBytes(32).toString("base64url");
     const port = this.deps.port ?? OPENCODE_PORT;
     await containers.exec(project, ["sh", "-c", KILL_SERVER]);
     const script =
       `cd ${shellQuote(args.workspaceFolder)} && ` +
       `nohup opencode serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
-    const launch = await containers.exec(project, ["sh", "-c", script], { env: { OPENCODE_PASSWORD: password } });
+    const launch = await containers.exec(project, ["sh", "-c", script], {
+      env: { OPENCODE_PASSWORD: password },
+    });
     if (launch.exitCode !== 0) {
-      throw new CommandError("failed to launch opencode serve", tailLines(launch.stderr + launch.stdout));
+      throw new CommandError(
+        "failed to launch opencode serve",
+        tailLines(launch.stderr + launch.stdout)
+      );
     }
     args.onLine(`launched opencode serve on port ${port}; waiting for health`);
 
@@ -2322,10 +2772,19 @@ export class OpencodeRuntime {
     const deadline = Date.now() + (this.deps.healthTimeoutMs ?? 30_000);
     while (Date.now() < deadline) {
       if (await this.isHealthy(ep)) return { password, version };
-      await new Promise((r) => setTimeout(r, this.deps.healthIntervalMs ?? 500));
+      await new Promise((r) =>
+        setTimeout(r, this.deps.healthIntervalMs ?? 500)
+      );
     }
-    const log = await containers.exec(project, ["sh", "-c", `tail -n 20 ${LOG_FILE} 2>/dev/null`]);
-    throw new CommandError("opencode did not become healthy within 30 s", tailLines(log.stdout));
+    const log = await containers.exec(project, [
+      "sh",
+      "-c",
+      `tail -n 20 ${LOG_FILE} 2>/dev/null`,
+    ]);
+    throw new CommandError(
+      "opencode did not become healthy within 30 s",
+      tailLines(log.stdout)
+    );
   }
 
   async stopServer(project: Project): Promise<void> {
@@ -2336,8 +2795,7 @@ export class OpencodeRuntime {
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/opencode-runtime.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/opencode-runtime.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -2351,10 +2809,12 @@ git commit -m "feat: launch and health-check opencode v2 inside the container"
 ### Task 10: Orchestrator and log buffer
 
 **Files:**
+
 - Create: `src/server/log-buffer.ts`, `src/server/orchestrator.ts`
 - Test: `test/server/orchestrator.test.ts`
 
 **Interfaces:**
+
 - Consumes: `StateStore` (Task 7), `Containers`/`CommandError`/`ContainerInfo` (Task 4), `OpencodeRuntime` (Task 9), `Monitor`/`MonitorOptions` (Task 8), `OpencodeClient`/`OpencodeEndpoint` (Task 5).
 - Produces:
   - `class LogBuffer { constructor(max?: number); push(line: string): void; lines(): string[] }`
@@ -2369,13 +2829,19 @@ git commit -m "feat: launch and health-check opencode v2 inside the container"
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/orchestrator.test.ts`:
+
 ```ts
 import { describe, expect, it, vi } from "vitest";
+
 import type { PersistedState } from "../../src/server/config";
 import { CommandError, type ContainerInfo } from "../../src/server/containers";
 import type { MonitorOptions } from "../../src/server/monitor";
 import type { OpencodeClient } from "../../src/server/opencode/client";
-import { BusyError, NotFoundError, Orchestrator } from "../../src/server/orchestrator";
+import {
+  BusyError,
+  NotFoundError,
+  Orchestrator,
+} from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
 import type { Project } from "../../src/shared/types";
 
@@ -2385,23 +2851,43 @@ const project: Project = {
   path: "/src/demo",
   devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
 };
-const running: ContainerInfo = { id: "c1", running: true, ip: "172.17.0.9", projectId: project.id };
+const running: ContainerInfo = {
+  id: "c1",
+  running: true,
+  ip: "172.17.0.9",
+  projectId: project.id,
+};
 
 function setup(persisted: PersistedState = { projects: {} }) {
   const store = new StateStore({ port: 7777, persisted, persist: () => {} });
-  const monitors: Array<{ opts: MonitorOptions; started: boolean; stopped: boolean }> = [];
+  const monitors: Array<{
+    opts: MonitorOptions;
+    started: boolean;
+    stopped: boolean;
+  }> = [];
   const containers = {
-    up: vi.fn(async (_p: Project, o: { rebuild: boolean; onLine: (l: string) => void }) => {
-      o.onLine("building image");
-      return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo" };
-    }),
+    up: vi.fn(
+      async (
+        _p: Project,
+        o: { rebuild: boolean; onLine: (l: string) => void }
+      ) => {
+        o.onLine("building image");
+        return { containerId: "c1", remoteWorkspaceFolder: "/workspaces/demo" };
+      }
+    ),
     inspect: vi.fn(async (): Promise<ContainerInfo | undefined> => running),
     listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
     stop: vi.fn(async () => {}),
   };
   const runtime = {
-    endpoint: (ip: string, password: string) => ({ baseUrl: `http://${ip}:4096`, password }),
-    ensureRunning: vi.fn(async (_p: Project, _a: { password?: string }) => ({ password: "pw", version: "2.0.20" })),
+    endpoint: (ip: string, password: string) => ({
+      baseUrl: `http://${ip}:4096`,
+      password,
+    }),
+    ensureRunning: vi.fn(async (_p: Project, _a: { password?: string }) => ({
+      password: "pw",
+      version: "2.0.20",
+    })),
     stopServer: vi.fn(async () => {}),
     isHealthy: vi.fn(async () => true),
   };
@@ -2413,7 +2899,17 @@ function setup(persisted: PersistedState = { projects: {} }) {
     roots: () => ["/src"],
     scan: async () => [project],
     monitorFactory: (opts) => {
-      const m = { opts, started: false, stopped: false, start() { m.started = true; }, stop() { m.stopped = true; } };
+      const m = {
+        opts,
+        started: false,
+        stopped: false,
+        start() {
+          m.started = true;
+        },
+        stop() {
+          m.stopped = true;
+        },
+      };
       monitors.push(m);
       return m;
     },
@@ -2427,7 +2923,10 @@ describe("Orchestrator", () => {
     await orch.rescan();
     await orch.start(project.id);
     expect(containers.up.mock.calls[0][1].rebuild).toBe(false);
-    expect(runtime.ensureRunning.mock.calls[0][1]).toMatchObject({ ip: "172.17.0.9", workspaceFolder: "/workspaces/demo" });
+    expect(runtime.ensureRunning.mock.calls[0][1]).toMatchObject({
+      ip: "172.17.0.9",
+      workspaceFolder: "/workspaces/demo",
+    });
     expect(store.runtime(project.id)).toMatchObject({
       containerState: "running",
       opencode: "healthy",
@@ -2453,16 +2952,25 @@ describe("Orchestrator", () => {
 
   it("records devcontainer failures as error state with log tail", async () => {
     const { store, containers, orch } = setup();
-    containers.up.mockRejectedValueOnce(new CommandError("devcontainer up failed: boom", ["tail line"]));
+    containers.up.mockRejectedValueOnce(
+      new CommandError("devcontainer up failed: boom", ["tail line"])
+    );
     await orch.rescan();
     await orch.start(project.id);
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "error", error: "devcontainer up failed: boom" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "error",
+      error: "devcontainer up failed: boom",
+    });
     expect(orch.logLines(project.id)).toContain("tail line");
   });
 
   it("rejects containers without a bridge IP", async () => {
     const { store, containers, orch } = setup();
-    containers.inspect.mockResolvedValueOnce({ id: "c1", running: true, projectId: project.id });
+    containers.inspect.mockResolvedValueOnce({
+      id: "c1",
+      running: true,
+      projectId: project.id,
+    });
     await orch.rescan();
     await orch.start(project.id);
     expect(store.runtime(project.id).error).toMatch(/host networking/);
@@ -2470,15 +2978,24 @@ describe("Orchestrator", () => {
 
   it("keeps the container running but marks opencode unhealthy when launch fails", async () => {
     const { store, runtime, orch } = setup();
-    runtime.ensureRunning.mockRejectedValueOnce(new CommandError("opencode 1.18.31 found, but opendevhub requires opencode v2"));
+    runtime.ensureRunning.mockRejectedValueOnce(
+      new CommandError(
+        "opencode 1.18.31 found, but opendevhub requires opencode v2"
+      )
+    );
     await orch.rescan();
     await orch.start(project.id);
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "unhealthy" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "running",
+      opencode: "unhealthy",
+    });
     expect(store.runtime(project.id).error).toMatch(/requires opencode v2/);
   });
 
   it("rebuild forces a new container and a new password", async () => {
-    const { containers, runtime, orch } = setup({ projects: { [project.id]: { password: "old" } } });
+    const { containers, runtime, orch } = setup({
+      projects: { [project.id]: { password: "old" } },
+    });
     await orch.rescan();
     await orch.rebuild(project.id);
     expect(containers.up.mock.calls[0][1].rebuild).toBe(true);
@@ -2486,7 +3003,9 @@ describe("Orchestrator", () => {
   });
 
   it("start reuses a persisted password", async () => {
-    const { runtime, orch } = setup({ projects: { [project.id]: { password: "old" } } });
+    const { runtime, orch } = setup({
+      projects: { [project.id]: { password: "old" } },
+    });
     await orch.rescan();
     await orch.start(project.id);
     expect(runtime.ensureRunning.mock.calls[0][1].password).toBe("old");
@@ -2496,12 +3015,24 @@ describe("Orchestrator", () => {
     const { store, containers, runtime, orch, monitors } = setup();
     await orch.rescan();
     await orch.start(project.id);
-    store.setSessions(project.id, [{ id: "s", projectId: project.id, title: "t", directory: "/w", updatedAt: 1, status: "idle" }]);
+    store.setSessions(project.id, [
+      {
+        id: "s",
+        projectId: project.id,
+        title: "t",
+        directory: "/w",
+        updatedAt: 1,
+        status: "idle",
+      },
+    ]);
     await orch.stop(project.id);
     expect(monitors[0].stopped).toBe(true);
     expect(runtime.stopServer).toHaveBeenCalled();
     expect(containers.stop).toHaveBeenCalledWith("c1");
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "stopped", opencode: "absent" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "stopped",
+      opencode: "absent",
+    });
     expect(store.snapshot().projects[0].sessions).toEqual([]);
   });
 
@@ -2516,22 +3047,33 @@ describe("Orchestrator", () => {
 
   it("adopts running containers with a working persisted password", async () => {
     const { store, containers, orch, monitors } = setup({
-      projects: { [project.id]: { password: "pw", workspaceFolder: "/workspaces/demo" } },
+      projects: {
+        [project.id]: { password: "pw", workspaceFolder: "/workspaces/demo" },
+      },
     });
     containers.listManaged.mockResolvedValueOnce([running]);
     await orch.rescan();
     await orch.adopt();
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "healthy", containerId: "c1" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "running",
+      opencode: "healthy",
+      containerId: "c1",
+    });
     expect(monitors).toHaveLength(1);
   });
 
   it("adopts a running container whose opencode is gone as unhealthy", async () => {
-    const { store, containers, runtime, orch, monitors } = setup({ projects: { [project.id]: { password: "pw" } } });
+    const { store, containers, runtime, orch, monitors } = setup({
+      projects: { [project.id]: { password: "pw" } },
+    });
     containers.listManaged.mockResolvedValueOnce([running]);
     runtime.isHealthy.mockResolvedValueOnce(false);
     await orch.rescan();
     await orch.adopt();
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "unhealthy" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "running",
+      opencode: "unhealthy",
+    });
     expect(store.runtime(project.id).error).toMatch(/Restart opencode/);
     expect(monitors).toHaveLength(0);
   });
@@ -2544,7 +3086,10 @@ describe("Orchestrator", () => {
     ]);
     await orch.rescan();
     await orch.adopt();
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "stopped", containerId: "c1" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "stopped",
+      containerId: "c1",
+    });
   });
 
   it("refreshContainers notices containers stopped outside opendevhub", async () => {
@@ -2553,7 +3098,10 @@ describe("Orchestrator", () => {
     await orch.start(project.id);
     containers.inspect.mockResolvedValueOnce({ ...running, running: false });
     await orch.refreshContainers();
-    expect(store.runtime(project.id)).toMatchObject({ containerState: "stopped", opencode: "absent" });
+    expect(store.runtime(project.id)).toMatchObject({
+      containerState: "stopped",
+      opencode: "absent",
+    });
     expect(monitors[0].stopped).toBe(true);
   });
 
@@ -2563,7 +3111,16 @@ describe("Orchestrator", () => {
     await orch.start(project.id);
     monitors[0].opts.onHealth(false);
     expect(store.runtime(project.id).opencode).toBe("unhealthy");
-    monitors[0].opts.onSessions([{ id: "s", projectId: project.id, title: "t", directory: "/w", updatedAt: 1, status: "running" }]);
+    monitors[0].opts.onSessions([
+      {
+        id: "s",
+        projectId: project.id,
+        title: "t",
+        directory: "/w",
+        updatedAt: 1,
+        status: "running",
+      },
+    ]);
     expect(store.snapshot().projects[0].sessions).toHaveLength(1);
   });
 
@@ -2586,12 +3143,12 @@ describe("Orchestrator", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/orchestrator.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/orchestrator.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement the log buffer**
 
 `src/server/log-buffer.ts`:
+
 ```ts
 export class LogBuffer {
   private buffer: string[] = [];
@@ -2600,7 +3157,8 @@ export class LogBuffer {
 
   push(line: string): void {
     this.buffer.push(line);
-    if (this.buffer.length > this.max) this.buffer.splice(0, this.buffer.length - this.max);
+    if (this.buffer.length > this.max)
+      this.buffer.splice(0, this.buffer.length - this.max);
   }
 
   lines(): string[] {
@@ -2612,10 +3170,16 @@ export class LogBuffer {
 - [ ] **Step 4: Implement the orchestrator**
 
 `src/server/orchestrator.ts`:
+
 ```ts
 import path from "node:path";
+
 import type { Project, ProjectId } from "../shared/types";
-import { CommandError, type ContainerInfo, type Containers } from "./containers";
+import {
+  CommandError,
+  type ContainerInfo,
+  type Containers,
+} from "./containers";
 import { LogBuffer } from "./log-buffer";
 import { Monitor, type MonitorOptions } from "./monitor";
 import type { OpencodeClient, OpencodeEndpoint } from "./opencode/client";
@@ -2636,8 +3200,14 @@ export class NotFoundError extends Error {
   }
 }
 
-export type ContainersPort = Pick<Containers, "up" | "inspect" | "listManaged" | "stop">;
-export type RuntimePort = Pick<OpencodeRuntime, "ensureRunning" | "stopServer" | "isHealthy" | "endpoint">;
+export type ContainersPort = Pick<
+  Containers,
+  "up" | "inspect" | "listManaged" | "stop"
+>;
+export type RuntimePort = Pick<
+  OpencodeRuntime,
+  "ensureRunning" | "stopServer" | "isHealthy" | "endpoint"
+>;
 export interface MonitorHandle {
   start(): void;
   stop(): void;
@@ -2657,7 +3227,9 @@ export class Orchestrator {
   private readonly busy = new Set<ProjectId>();
   private readonly monitors = new Map<ProjectId, MonitorHandle>();
   private readonly logs = new Map<ProjectId, LogBuffer>();
-  private readonly logListeners = new Set<(projectId: ProjectId, line: string) => void>();
+  private readonly logListeners = new Set<
+    (projectId: ProjectId, line: string) => void
+  >();
 
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -2689,11 +3261,17 @@ export class Orchestrator {
     return this.exclusive(id, async (p) => {
       const rt = this.deps.store.runtime(p.id);
       if (rt.containerState !== "running" || !rt.containerIp) {
-        this.fail(p.id, new Error("container is not running — start the project first"));
+        this.fail(
+          p.id,
+          new Error("container is not running — start the project first")
+        );
         return;
       }
       this.stopMonitor(p.id);
-      this.deps.store.updateRuntime(p.id, { opencode: "starting", error: undefined });
+      this.deps.store.updateRuntime(p.id, {
+        opencode: "starting",
+        error: undefined,
+      });
       try {
         await this.launchOpencode(p, undefined);
       } catch (err) {
@@ -2707,11 +3285,19 @@ export class Orchestrator {
       const { store, runtime, containers } = this.deps;
       this.stopMonitor(p.id);
       const rt = store.runtime(p.id);
-      store.updateRuntime(p.id, { containerState: "stopping", error: undefined });
+      store.updateRuntime(p.id, {
+        containerState: "stopping",
+        error: undefined,
+      });
       try {
-        if (rt.containerState === "running") await runtime.stopServer(p).catch(() => {});
+        if (rt.containerState === "running")
+          await runtime.stopServer(p).catch(() => {});
         if (rt.containerId) await containers.stop(rt.containerId);
-        store.updateRuntime(p.id, { containerState: "stopped", opencode: "absent", containerIp: undefined });
+        store.updateRuntime(p.id, {
+          containerState: "stopped",
+          opencode: "absent",
+          containerIp: undefined,
+        });
         store.setSessions(p.id, []);
       } catch (err) {
         this.fail(p.id, err);
@@ -2731,16 +3317,31 @@ export class Orchestrator {
       const id = info.projectId;
       if (!id || !store.project(id)) continue;
       if (!info.running) {
-        store.updateRuntime(id, { containerId: info.id, containerState: "stopped", opencode: "absent" });
+        store.updateRuntime(id, {
+          containerId: info.id,
+          containerState: "stopped",
+          opencode: "absent",
+        });
         continue;
       }
-      store.updateRuntime(id, { containerId: info.id, containerIp: info.ip, containerState: "running" });
+      store.updateRuntime(id, {
+        containerId: info.id,
+        containerIp: info.ip,
+        containerState: "running",
+      });
       const rt = store.runtime(id);
-      if (info.ip && rt.password && (await runtime.isHealthy(runtime.endpoint(info.ip, rt.password)))) {
+      if (
+        info.ip &&
+        rt.password &&
+        (await runtime.isHealthy(runtime.endpoint(info.ip, rt.password)))
+      ) {
         store.updateRuntime(id, { opencode: "healthy", error: undefined });
         this.startMonitor(id);
       } else {
-        store.updateRuntime(id, { opencode: "unhealthy", error: "opencode is not running — use Restart opencode" });
+        store.updateRuntime(id, {
+          opencode: "unhealthy",
+          error: "opencode is not running — use Restart opencode",
+        });
       }
     }
   }
@@ -2749,11 +3350,20 @@ export class Orchestrator {
     const { store, containers } = this.deps;
     for (const p of store.projects()) {
       const rt = store.runtime(p.id);
-      if (this.busy.has(p.id) || rt.containerState !== "running" || !rt.containerId) continue;
+      if (
+        this.busy.has(p.id) ||
+        rt.containerState !== "running" ||
+        !rt.containerId
+      )
+        continue;
       const info = await containers.inspect(rt.containerId);
       if (info?.running) continue;
       this.stopMonitor(p.id);
-      store.updateRuntime(p.id, { containerState: "stopped", opencode: "absent", containerIp: undefined });
+      store.updateRuntime(p.id, {
+        containerState: "stopped",
+        opencode: "absent",
+        containerIp: undefined,
+      });
       store.setSessions(p.id, []);
     }
   }
@@ -2762,7 +3372,10 @@ export class Orchestrator {
     for (const id of [...this.monitors.keys()]) this.stopMonitor(id);
   }
 
-  private exclusive(id: ProjectId, fn: (project: Project) => Promise<void>): Promise<void> {
+  private exclusive(
+    id: ProjectId,
+    fn: (project: Project) => Promise<void>
+  ): Promise<void> {
     const project = this.deps.store.project(id);
     if (!project) throw new NotFoundError(id);
     if (this.busy.has(id)) throw new BusyError(id);
@@ -2772,13 +3385,25 @@ export class Orchestrator {
 
   private async bringUp(project: Project, rebuild: boolean): Promise<void> {
     const { store, containers } = this.deps;
-    store.updateRuntime(project.id, { containerState: "starting", opencode: "absent", error: undefined });
+    store.updateRuntime(project.id, {
+      containerState: "starting",
+      opencode: "absent",
+      error: undefined,
+    });
     try {
-      const up = await containers.up(project, { rebuild, onLine: (l) => this.log(project.id, l) });
+      const up = await containers.up(project, {
+        rebuild,
+        onLine: (l) => this.log(project.id, l),
+      });
       const info = await containers.inspect(up.containerId);
-      if (!info?.running) throw new CommandError("container is not running after devcontainer up");
+      if (!info?.running)
+        throw new CommandError(
+          "container is not running after devcontainer up"
+        );
       if (!info.ip) {
-        throw new CommandError("container has no bridge network IP (host networking is not supported)");
+        throw new CommandError(
+          "container has no bridge network IP (host networking is not supported)"
+        );
       }
       store.updateRuntime(project.id, {
         containerId: up.containerId,
@@ -2787,13 +3412,19 @@ export class Orchestrator {
         containerState: "running",
         opencode: "starting",
       });
-      await this.launchOpencode(project, rebuild ? undefined : store.runtime(project.id).password);
+      await this.launchOpencode(
+        project,
+        rebuild ? undefined : store.runtime(project.id).password
+      );
     } catch (err) {
       this.fail(project.id, err);
     }
   }
 
-  private async launchOpencode(project: Project, password: string | undefined): Promise<void> {
+  private async launchOpencode(
+    project: Project,
+    password: string | undefined
+  ): Promise<void> {
     const { store, runtime } = this.deps;
     const rt = store.runtime(project.id);
     const result = await runtime.ensureRunning(project, {
@@ -2812,7 +3443,10 @@ export class Orchestrator {
   }
 
   private workspaceFolder(project: Project): string {
-    return this.deps.store.runtime(project.id).workspaceFolder ?? `/workspaces/${path.basename(project.path)}`;
+    return (
+      this.deps.store.runtime(project.id).workspaceFolder ??
+      `/workspaces/${path.basename(project.path)}`
+    );
   }
 
   private startMonitor(id: ProjectId): void {
@@ -2820,7 +3454,8 @@ export class Orchestrator {
     const { store, runtime, clientFor } = this.deps;
     const project = store.project(id)!;
     const rt = store.runtime(id);
-    const factory = this.deps.monitorFactory ?? ((opts: MonitorOptions) => new Monitor(opts));
+    const factory =
+      this.deps.monitorFactory ?? ((opts: MonitorOptions) => new Monitor(opts));
     const monitor = factory({
       client: clientFor(runtime.endpoint(rt.containerIp!, rt.password!)),
       projectId: id,
@@ -2828,7 +3463,9 @@ export class Orchestrator {
       onSessions: (sessions) => store.setSessions(id, sessions),
       onHealth: (healthy) => {
         if (store.runtime(id).opencode === "starting") return;
-        store.updateRuntime(id, { opencode: healthy ? "healthy" : "unhealthy" });
+        store.updateRuntime(id, {
+          opencode: healthy ? "healthy" : "unhealthy",
+        });
       },
     });
     this.monitors.set(id, monitor);
@@ -2852,9 +3489,11 @@ export class Orchestrator {
 
   private fail(id: ProjectId, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof CommandError) for (const line of err.tail) this.log(id, line);
+    if (err instanceof CommandError)
+      for (const line of err.tail) this.log(id, line);
     this.log(id, `error: ${message}`);
-    const containerUp = this.deps.store.runtime(id).containerState === "running";
+    const containerUp =
+      this.deps.store.runtime(id).containerState === "running";
     this.deps.store.updateRuntime(id, {
       containerState: containerUp ? "running" : "error",
       opencode: containerUp ? "unhealthy" : "absent",
@@ -2866,8 +3505,7 @@ export class Orchestrator {
 
 - [ ] **Step 5: Run tests and typecheck**
 
-Run: `npx vitest run test/server/orchestrator.test.ts && npx tsc --noEmit`
-Expected: PASS, no type errors.
+Run: `npx vitest run test/server/orchestrator.test.ts && npx tsc --noEmit` Expected: PASS, no type errors.
 
 - [ ] **Step 6: Commit**
 
@@ -2881,10 +3519,12 @@ git commit -m "feat: orchestrator for project lifecycle, adoption and monitoring
 ### Task 11: Host routing and reverse proxy
 
 **Files:**
+
 - Create: `src/server/hosts.ts`, `src/server/proxy.ts`
 - Test: `test/server/hosts.test.ts`, `test/server/proxy.test.ts`
 
 **Interfaces:**
+
 - Consumes: `basicAuth` (Task 5).
 - Produces:
   - `type HostRoute = { kind: "dashboard" } | { kind: "project"; projectId: string } | { kind: "reject" }`
@@ -2897,8 +3537,10 @@ git commit -m "feat: orchestrator for project lifecycle, adoption and monitoring
 - [ ] **Step 1: Write the failing host tests**
 
 `test/server/hosts.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { classifyHost } from "../../src/server/hosts";
 
 describe("classifyHost", () => {
@@ -2906,8 +3548,14 @@ describe("classifyHost", () => {
     ["localhost:7777", { kind: "dashboard" }],
     ["127.0.0.1:7777", { kind: "dashboard" }],
     ["LOCALHOST:7777", { kind: "dashboard" }],
-    ["demo-abc123.localhost:7777", { kind: "project", projectId: "demo-abc123" }],
-    ["Demo-ABC123.Localhost:7777", { kind: "project", projectId: "demo-abc123" }],
+    [
+      "demo-abc123.localhost:7777",
+      { kind: "project", projectId: "demo-abc123" },
+    ],
+    [
+      "Demo-ABC123.Localhost:7777",
+      { kind: "project", projectId: "demo-abc123" },
+    ],
     ["localhost:8888", { kind: "reject" }],
     ["localhost", { kind: "reject" }],
     ["evil.com:7777", { kind: "reject" }],
@@ -2924,15 +3572,23 @@ describe("classifyHost", () => {
 - [ ] **Step 2: Implement `classifyHost` and run**
 
 `src/server/hosts.ts`:
+
 ```ts
-export type HostRoute = { kind: "dashboard" } | { kind: "project"; projectId: string } | { kind: "reject" };
+export type HostRoute =
+  | { kind: "dashboard" }
+  | { kind: "project"; projectId: string }
+  | { kind: "reject" };
 
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
-export function classifyHost(host: string | undefined, port: number): HostRoute {
+export function classifyHost(
+  host: string | undefined,
+  port: number
+): HostRoute {
   if (!host) return { kind: "reject" };
   const h = host.toLowerCase();
-  if (h === `localhost:${port}` || h === `127.0.0.1:${port}`) return { kind: "dashboard" };
+  if (h === `localhost:${port}` || h === `127.0.0.1:${port}`)
+    return { kind: "dashboard" };
   const suffix = `.localhost:${port}`;
   if (h.endsWith(suffix)) {
     const label = h.slice(0, -suffix.length);
@@ -2942,19 +3598,25 @@ export function classifyHost(host: string | undefined, port: number): HostRoute 
 }
 ```
 
-Run: `npx vitest run test/server/hosts.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/hosts.test.ts` Expected: PASS.
 
 - [ ] **Step 3: Write the failing proxy tests**
 
 `test/server/proxy.test.ts`:
+
 ```ts
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
+
 import { basicAuth } from "../../src/server/opencode/client";
-import { type ProxyTarget, proxyRequest, proxyUpgrade } from "../../src/server/proxy";
+import {
+  type ProxyTarget,
+  proxyRequest,
+  proxyUpgrade,
+} from "../../src/server/proxy";
 
 let upstream: http.Server;
 let proxy: http.Server;
@@ -2963,13 +3625,21 @@ let proxyUrl: string;
 let sseRes: http.ServerResponse | undefined;
 
 const listen = (s: http.Server) =>
-  new Promise<number>((resolve) => s.listen(0, "127.0.0.1", () => resolve((s.address() as AddressInfo).port)));
+  new Promise<number>((resolve) =>
+    s.listen(0, "127.0.0.1", () => resolve((s.address() as AddressInfo).port))
+  );
 
 beforeEach(async () => {
   upstream = http.createServer((req, res) => {
     if (req.url === "/echo") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ host: req.headers.host, authorization: req.headers.authorization, origin: req.headers.origin }));
+      res.end(
+        JSON.stringify({
+          host: req.headers.host,
+          authorization: req.headers.authorization,
+          origin: req.headers.origin,
+        })
+      );
     } else if (req.url === "/challenge") {
       res.writeHead(401, { "www-authenticate": 'Basic realm="Secure Area"' });
       res.end("nope");
@@ -2994,8 +3664,12 @@ beforeEach(async () => {
   const upstreamPort = await listen(upstream);
   target = { host: "127.0.0.1", port: upstreamPort, password: "pw" };
   const resolve = () => target;
-  proxy = http.createServer((req, res) => proxyRequest(req, res, "demo", resolve, "http://localhost:7777/"));
-  proxy.on("upgrade", (req, socket, head) => proxyUpgrade(req, socket, head, "demo", resolve));
+  proxy = http.createServer((req, res) =>
+    proxyRequest(req, res, "demo", resolve, "http://localhost:7777/")
+  );
+  proxy.on("upgrade", (req, socket, head) =>
+    proxyUpgrade(req, socket, head, "demo", resolve)
+  );
   proxyUrl = `http://127.0.0.1:${await listen(proxy)}`;
 });
 
@@ -3010,7 +3684,12 @@ afterEach(async () => {
 
 describe("proxyRequest", () => {
   it("injects basic auth and rewrites host and origin", async () => {
-    const res = await fetch(`${proxyUrl}/echo`, { headers: { authorization: "Bearer user-token", origin: "http://demo.localhost:7777" } });
+    const res = await fetch(`${proxyUrl}/echo`, {
+      headers: {
+        authorization: "Bearer user-token",
+        origin: "http://demo.localhost:7777",
+      },
+    });
     const body = await res.json();
     expect(body).toEqual({
       host: `127.0.0.1:${target!.port}`,
@@ -3030,14 +3709,19 @@ describe("proxyRequest", () => {
     const reader = res.body!.getReader();
     const { value } = await Promise.race([
       reader.read(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("SSE was buffered")), 1000)),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("SSE was buffered")), 1000)
+      ),
     ]);
     expect(new TextDecoder().decode(value)).toContain("data: first");
     await reader.cancel();
   });
 
   it("streams request bodies", async () => {
-    const res = await fetch(`${proxyUrl}/upload`, { method: "POST", body: "x".repeat(100_000) });
+    const res = await fetch(`${proxyUrl}/upload`, {
+      method: "POST",
+      body: "x".repeat(100_000),
+    });
     expect(await res.text()).toBe("100000");
   });
 
@@ -3062,7 +3746,9 @@ describe("proxyUpgrade", () => {
     ws.on("message", (m) => messages.push(m.toString()));
     await new Promise((r) => ws.once("open", r));
     ws.send("hi");
-    await expect.poll(() => messages).toEqual([`auth:${basicAuth("pw")}`, "echo:hi"]);
+    await expect
+      .poll(() => messages)
+      .toEqual([`auth:${basicAuth("pw")}`, "echo:hi"]);
     ws.close();
   });
 });
@@ -3070,15 +3756,20 @@ describe("proxyUpgrade", () => {
 
 - [ ] **Step 4: Run to verify failure**
 
-Run: `npx vitest run test/server/proxy.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/proxy.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 5: Implement the proxy**
 
 `src/server/proxy.ts`:
+
 ```ts
-import http, { type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
+import http, {
+  type IncomingMessage,
+  type OutgoingHttpHeaders,
+  type ServerResponse,
+} from "node:http";
 import type { Duplex } from "node:stream";
+
 import { basicAuth } from "./opencode/client";
 
 export interface ProxyTarget {
@@ -3089,13 +3780,23 @@ export interface ProxyTarget {
 
 export type ResolveTarget = (projectId: string) => ProxyTarget | undefined;
 
-const DROPPED_RESPONSE_HEADERS = new Set(["www-authenticate", "connection", "keep-alive"]);
+const DROPPED_RESPONSE_HEADERS = new Set([
+  "www-authenticate",
+  "connection",
+  "keep-alive",
+]);
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-function sendPage(res: ServerResponse, status: number, title: string, message: string, dashboardUrl: string): void {
+function sendPage(
+  res: ServerResponse,
+  status: number,
+  title: string,
+  message: string,
+  dashboardUrl: string
+): void {
   const html =
     `<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title>` +
     `<body style="font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem">` +
@@ -3105,7 +3806,10 @@ function sendPage(res: ServerResponse, status: number, title: string, message: s
   res.end(html);
 }
 
-function upstreamHeaders(req: IncomingMessage, target: ProxyTarget): OutgoingHttpHeaders {
+function upstreamHeaders(
+  req: IncomingMessage,
+  target: ProxyTarget
+): OutgoingHttpHeaders {
   const origin = `http://${target.host}:${target.port}`;
   const headers: OutgoingHttpHeaders = { ...req.headers };
   headers.host = `${target.host}:${target.port}`;
@@ -3119,15 +3823,27 @@ export function proxyRequest(
   res: ServerResponse,
   projectId: string,
   resolve: ResolveTarget,
-  dashboardUrl: string,
+  dashboardUrl: string
 ): void {
   const target = resolve(projectId);
   if (!target) {
-    sendPage(res, 503, "Project not running", "Start it from the dashboard, then reload this page.", dashboardUrl);
+    sendPage(
+      res,
+      503,
+      "Project not running",
+      "Start it from the dashboard, then reload this page.",
+      dashboardUrl
+    );
     return;
   }
   const upstream = http.request(
-    { host: target.host, port: target.port, method: req.method, path: req.url, headers: upstreamHeaders(req, target) },
+    {
+      host: target.host,
+      port: target.port,
+      method: req.method,
+      path: req.url,
+      headers: upstreamHeaders(req, target),
+    },
     (upRes) => {
       const headers: OutgoingHttpHeaders = {};
       for (const [k, v] of Object.entries(upRes.headers)) {
@@ -3136,10 +3852,11 @@ export function proxyRequest(
       res.writeHead(upRes.statusCode ?? 502, headers);
       res.flushHeaders();
       upRes.pipe(res);
-    },
+    }
   );
   upstream.on("error", (err) => {
-    if (!res.headersSent) sendPage(res, 502, "opencode unreachable", err.message, dashboardUrl);
+    if (!res.headersSent)
+      sendPage(res, 502, "opencode unreachable", err.message, dashboardUrl);
     else res.destroy();
   });
   res.on("close", () => upstream.destroy());
@@ -3151,7 +3868,7 @@ export function proxyUpgrade(
   socket: Duplex,
   head: Buffer,
   projectId: string,
-  resolve: ResolveTarget,
+  resolve: ResolveTarget
 ): void {
   const target = resolve(projectId);
   if (!target) {
@@ -3167,7 +3884,8 @@ export function proxyUpgrade(
   });
   upstream.on("upgrade", (upRes, upSocket, upHead) => {
     const lines = ["HTTP/1.1 101 Switching Protocols"];
-    for (let i = 0; i < upRes.rawHeaders.length; i += 2) lines.push(`${upRes.rawHeaders[i]}: ${upRes.rawHeaders[i + 1]}`);
+    for (let i = 0; i < upRes.rawHeaders.length; i += 2)
+      lines.push(`${upRes.rawHeaders[i]}: ${upRes.rawHeaders[i + 1]}`);
     socket.write(lines.join("\r\n") + "\r\n\r\n");
     if (upHead.length) socket.write(upHead);
     if (head.length) upSocket.write(head);
@@ -3186,8 +3904,7 @@ export function proxyUpgrade(
 
 - [ ] **Step 6: Run tests**
 
-Run: `npx vitest run test/server/hosts.test.ts test/server/proxy.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/hosts.test.ts test/server/proxy.test.ts` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -3201,10 +3918,12 @@ git commit -m "feat: host routing and authenticated reverse proxy (HTTP, SSE, WS
 ### Task 12: Dashboard API
 
 **Files:**
+
 - Create: `src/server/dashboard-api.ts`
 - Test: `test/server/dashboard-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: `StateStore` (Task 7); `Orchestrator`, `BusyError`, `NotFoundError` (Task 10).
 - Produces:
   - `type DashboardOrchestrator = Pick<Orchestrator, "start" | "stop" | "rebuild" | "restartOpencode" | "rescan" | "logLines" | "onLog">`
@@ -3214,20 +3933,35 @@ git commit -m "feat: host routing and authenticated reverse proxy (HTTP, SSE, WS
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/dashboard-api.test.ts`:
+
 ```ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
-import { createDashboardApp, type DashboardOrchestrator } from "../../src/server/dashboard-api";
+
+import {
+  createDashboardApp,
+  type DashboardOrchestrator,
+} from "../../src/server/dashboard-api";
 import { BusyError, NotFoundError } from "../../src/server/orchestrator";
 import { StateStore } from "../../src/server/state";
 import type { Project } from "../../src/shared/types";
 
-const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
+const project: Project = {
+  id: "demo-abc123",
+  name: "demo",
+  path: "/src/demo",
+  devcontainerPath: "/x",
+};
 
 function setup(webDir?: string) {
-  const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
+  const store = new StateStore({
+    port: 7777,
+    persisted: { projects: {} },
+    persist: () => {},
+  });
   store.setProjects([project]);
   store.updateRuntime(project.id, { password: "secret" });
   const orchestrator = {
@@ -3239,7 +3973,11 @@ function setup(webDir?: string) {
     logLines: vi.fn(() => ["a", "b"]),
     onLog: vi.fn(() => () => {}),
   } satisfies DashboardOrchestrator;
-  return { store, orchestrator, app: createDashboardApp({ store, orchestrator, webDir }) };
+  return {
+    store,
+    orchestrator,
+    app: createDashboardApp({ store, orchestrator, webDir }),
+  };
 }
 
 describe("dashboard API", () => {
@@ -3259,7 +3997,9 @@ describe("dashboard API", () => {
     ["restart-opencode", "restartOpencode"],
   ] as const)("POST %s triggers orchestrator.%s", async (route, method) => {
     const { app, orchestrator } = setup();
-    const res = await app.request(`/api/projects/${project.id}/${route}`, { method: "POST" });
+    const res = await app.request(`/api/projects/${project.id}/${route}`, {
+      method: "POST",
+    });
     expect(res.status).toBe(202);
     expect(orchestrator[method]).toHaveBeenCalledWith(project.id);
   });
@@ -3269,17 +4009,27 @@ describe("dashboard API", () => {
     orchestrator.start.mockImplementationOnce(() => {
       throw new BusyError(project.id);
     });
-    expect((await app.request(`/api/projects/${project.id}/start`, { method: "POST" })).status).toBe(409);
+    expect(
+      (
+        await app.request(`/api/projects/${project.id}/start`, {
+          method: "POST",
+        })
+      ).status
+    ).toBe(409);
     orchestrator.start.mockImplementationOnce(() => {
       throw new NotFoundError("x");
     });
-    expect((await app.request(`/api/projects/x/start`, { method: "POST" })).status).toBe(404);
+    expect(
+      (await app.request(`/api/projects/x/start`, { method: "POST" })).status
+    ).toBe(404);
   });
 
   it("refuses actions while preflight has errors", async () => {
     const { app, store, orchestrator } = setup();
     store.setPreflight({ errors: ["Docker daemon is not reachable"] });
-    const res = await app.request(`/api/projects/${project.id}/start`, { method: "POST" });
+    const res = await app.request(`/api/projects/${project.id}/start`, {
+      method: "POST",
+    });
     expect(res.status).toBe(412);
     expect(orchestrator.start).not.toHaveBeenCalled();
   });
@@ -3293,7 +4043,9 @@ describe("dashboard API", () => {
 
   it("GET logs returns buffered lines", async () => {
     const { app } = setup();
-    expect(await (await app.request(`/api/projects/${project.id}/logs`)).json()).toEqual({ lines: ["a", "b"] });
+    expect(
+      await (await app.request(`/api/projects/${project.id}/logs`)).json()
+    ).toEqual({ lines: ["a", "b"] });
   });
 
   it("GET /api/events starts with a snapshot event", async () => {
@@ -3331,24 +4083,32 @@ describe("dashboard API", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/dashboard-api.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/server/dashboard-api.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 `src/server/dashboard-api.ts`:
+
 ```ts
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+
 import type { LogEvent } from "../shared/types";
 import { BusyError, NotFoundError, type Orchestrator } from "./orchestrator";
 import type { StateStore } from "./state";
 
 export type DashboardOrchestrator = Pick<
   Orchestrator,
-  "start" | "stop" | "rebuild" | "restartOpencode" | "rescan" | "logLines" | "onLog"
+  | "start"
+  | "stop"
+  | "rebuild"
+  | "restartOpencode"
+  | "rescan"
+  | "logLines"
+  | "onLog"
 >;
 
 export interface DashboardDeps {
@@ -3395,18 +4155,26 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
         run(c.req.param("id")).catch(() => {});
         return c.json({ accepted: true }, 202);
       } catch (err) {
-        if (err instanceof BusyError) return c.json({ error: err.message }, 409);
-        if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+        if (err instanceof BusyError)
+          return c.json({ error: err.message }, 409);
+        if (err instanceof NotFoundError)
+          return c.json({ error: err.message }, 404);
         throw err;
       }
     });
   }
 
-  app.get("/api/projects/:id/logs", (c) => c.json({ lines: orchestrator.logLines(c.req.param("id")) }));
+  app.get("/api/projects/:id/logs", (c) =>
+    c.json({ lines: orchestrator.logLines(c.req.param("id")) })
+  );
 
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
-      const sendSnapshot = () => stream.writeSSE({ event: "snapshot", data: JSON.stringify(store.snapshot()) });
+      const sendSnapshot = () =>
+        stream.writeSSE({
+          event: "snapshot",
+          data: JSON.stringify(store.snapshot()),
+        });
       await sendSnapshot();
       let pending: ReturnType<typeof setTimeout> | undefined;
       const unsubscribe = store.subscribe(() => {
@@ -3420,19 +4188,25 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
         const event: LogEvent = { projectId, line };
         void stream.writeSSE({ event: "log", data: JSON.stringify(event) });
       });
-      const heartbeat = setInterval(() => void stream.writeSSE({ event: "ping", data: "" }), 15_000);
+      const heartbeat = setInterval(
+        () => void stream.writeSSE({ event: "ping", data: "" }),
+        15_000
+      );
       await new Promise<void>((resolve) => stream.onAbort(resolve));
       clearInterval(heartbeat);
       clearTimeout(pending);
       unsubscribe();
       unlisten();
-    }),
+    })
   );
 
   const webDir = deps.webDir;
   if (!webDir) {
     app.get("*", (c) =>
-      c.text("opendevhub UI is not built. Run `npm run build`, or `npm run dev:web` during development.", 503),
+      c.text(
+        "opendevhub UI is not built. Run `npm run build`, or `npm run dev:web` during development.",
+        503
+      )
     );
     return app;
   }
@@ -3440,12 +4214,14 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
   app.get("*", async (c) => {
     const rel = decodeURIComponent(new URL(c.req.url).pathname);
     let file = path.join(webDir, path.normalize(rel));
-    if (file !== webDir && !file.startsWith(webDir + path.sep)) return c.notFound();
+    if (file !== webDir && !file.startsWith(webDir + path.sep))
+      return c.notFound();
     const stat = await fs.stat(file).catch(() => undefined);
     if (!stat?.isFile()) file = path.join(webDir, "index.html");
     const body = await fs.readFile(file);
     return c.body(new Uint8Array(body), 200, {
-      "content-type": CONTENT_TYPES[path.extname(file)] ?? "application/octet-stream",
+      "content-type":
+        CONTENT_TYPES[path.extname(file)] ?? "application/octet-stream",
     });
   });
 
@@ -3455,8 +4231,7 @@ export function createDashboardApp(deps: DashboardDeps): Hono {
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run test/server/dashboard-api.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/dashboard-api.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -3470,10 +4245,12 @@ git commit -m "feat: dashboard REST + SSE API and static SPA serving"
 ### Task 13: Server assembly, preflight and CLI
 
 **Files:**
+
 - Create: `src/server/server.ts`, `src/server/preflight.ts`, `src/server/cli.ts`, `src/server/bin.ts`, `tsup.config.ts`
 - Test: `test/server/server.test.ts`, `test/server/preflight.test.ts`, `test/server/cli.test.ts`
 
 **Interfaces:**
+
 - Consumes: everything above.
 - Produces:
   - `startServer(opts: { port: number; app: FetchApp; resolveTarget: ResolveTarget }): Promise<{ url: string; port: number; close(): Promise<void> }>` — binds `127.0.0.1`; `port: 0` picks a free port.
@@ -3485,11 +4262,14 @@ git commit -m "feat: dashboard REST + SSE API and static SPA serving"
 - [ ] **Step 1: Write the failing tests**
 
 `test/server/server.test.ts`:
+
 ```ts
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import type { ProxyTarget } from "../../src/server/proxy";
 import { startServer } from "../../src/server/server";
 
@@ -3498,25 +4278,40 @@ let upstreamPort: number;
 let server: Awaited<ReturnType<typeof startServer>>;
 let targets: Record<string, ProxyTarget>;
 
-function get(port: number, host: string, path: string): Promise<{ status: number; body: string }> {
+function get(
+  port: number,
+  host: string,
+  path: string
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port, path, headers: { host } }, (res) => {
-      let body = "";
-      res.on("data", (c) => (body += c));
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
-    });
+    const req = http.request(
+      { host: "127.0.0.1", port, path, headers: { host } },
+      (res) => {
+        let body = "";
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      }
+    );
     req.on("error", reject);
     req.end();
   });
 }
 
 beforeEach(async () => {
-  upstream = http.createServer((req, res) => res.end(`upstream ${req.headers.authorization}`));
+  upstream = http.createServer((req, res) =>
+    res.end(`upstream ${req.headers.authorization}`)
+  );
   await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
   upstreamPort = (upstream.address() as AddressInfo).port;
-  targets = { "demo-abc123": { host: "127.0.0.1", port: upstreamPort, password: "pw" } };
+  targets = {
+    "demo-abc123": { host: "127.0.0.1", port: upstreamPort, password: "pw" },
+  };
   const app = new Hono().get("/api/ping", (c) => c.text("pong"));
-  server = await startServer({ port: 0, app, resolveTarget: (id) => targets[id] });
+  server = await startServer({
+    port: 0,
+    app,
+    resolveTarget: (id) => targets[id],
+  });
 });
 afterEach(async () => {
   await server.close();
@@ -3526,28 +4321,44 @@ afterEach(async () => {
 
 describe("startServer", () => {
   it("routes the dashboard host to the Hono app", async () => {
-    expect(await get(server.port, `localhost:${server.port}`, "/api/ping")).toEqual({ status: 200, body: "pong" });
+    expect(
+      await get(server.port, `localhost:${server.port}`, "/api/ping")
+    ).toEqual({ status: 200, body: "pong" });
     expect(server.url).toBe(`http://localhost:${server.port}/`);
   });
 
   it("proxies project subdomains with injected auth", async () => {
-    const res = await get(server.port, `Demo-ABC123.localhost:${server.port}`, "/");
-    expect(res.body).toBe(`upstream Basic ${Buffer.from("opencode:pw").toString("base64")}`);
+    const res = await get(
+      server.port,
+      `Demo-ABC123.localhost:${server.port}`,
+      "/"
+    );
+    expect(res.body).toBe(
+      `upstream Basic ${Buffer.from("opencode:pw").toString("base64")}`
+    );
   });
 
   it("returns 503 for unknown or stopped projects", async () => {
-    expect((await get(server.port, `other-000000.localhost:${server.port}`, "/")).status).toBe(503);
+    expect(
+      (await get(server.port, `other-000000.localhost:${server.port}`, "/"))
+        .status
+    ).toBe(503);
   });
 
   it("rejects foreign hosts with 421 (DNS rebinding)", async () => {
-    expect((await get(server.port, `evil.example:${server.port}`, "/api/ping")).status).toBe(421);
+    expect(
+      (await get(server.port, `evil.example:${server.port}`, "/api/ping"))
+        .status
+    ).toBe(421);
   });
 });
 ```
 
 `test/server/preflight.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { preflight } from "../../src/server/preflight";
 import { fakeRunner } from "../helpers/fake-runner";
 
@@ -3562,19 +4373,33 @@ describe("preflight", () => {
       "devcontainer CLI not found on PATH — install it with `npm i -g @devcontainers/cli`",
     ]);
     const down = fakeRunner((c) => (c.cmd === "docker" ? { exitCode: 1 } : {}));
-    expect((await preflight(down.run)).errors).toEqual(["Docker daemon is not reachable — is Docker running?"]);
+    expect((await preflight(down.run)).errors).toEqual([
+      "Docker daemon is not reachable — is Docker running?",
+    ]);
   });
 });
 ```
 
 `test/server/cli.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { parseCli } from "../../src/server/cli";
 
 describe("parseCli", () => {
   it("parses repeated roots, port and --no-open", () => {
-    expect(parseCli(["--root", "~/code", "-r", "/work", "--port", "9000", "--no-open"])).toEqual({
+    expect(
+      parseCli([
+        "--root",
+        "~/code",
+        "-r",
+        "/work",
+        "--port",
+        "9000",
+        "--no-open",
+      ])
+    ).toEqual({
       roots: ["~/code", "/work"],
       port: 9000,
       open: false,
@@ -3582,26 +4407,36 @@ describe("parseCli", () => {
     });
   });
   it("defaults", () => {
-    expect(parseCli([])).toEqual({ roots: [], port: undefined, open: true, help: false });
+    expect(parseCli([])).toEqual({
+      roots: [],
+      port: undefined,
+      open: true,
+      help: false,
+    });
   });
-  it.each([["--port", "abc"], ["--port", "70000"], ["--bogus"]])("rejects %s", (...argv) => {
-    expect(() => parseCli(argv)).toThrow();
-  });
+  it.each([["--port", "abc"], ["--port", "70000"], ["--bogus"]])(
+    "rejects %s",
+    (...argv) => {
+      expect(() => parseCli(argv)).toThrow();
+    }
+  );
 });
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/server/server.test.ts test/server/preflight.test.ts test/server/cli.test.ts`
-Expected: FAIL — modules not found.
+Run: `npx vitest run test/server/server.test.ts test/server/preflight.test.ts test/server/cli.test.ts` Expected: FAIL — modules not found.
 
 - [ ] **Step 3: Implement server and preflight**
 
 `src/server/server.ts`:
+
 ```ts
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+
 import { getRequestListener } from "@hono/node-server";
+
 import { classifyHost } from "./hosts";
 import { type ResolveTarget, proxyRequest, proxyUpgrade } from "./proxy";
 
@@ -3615,7 +4450,11 @@ export interface FetchApp {
   fetch: (request: Request) => Response | Promise<Response>;
 }
 
-export async function startServer(opts: { port: number; app: FetchApp; resolveTarget: ResolveTarget }): Promise<ServerHandle> {
+export async function startServer(opts: {
+  port: number;
+  app: FetchApp;
+  resolveTarget: ResolveTarget;
+}): Promise<ServerHandle> {
   const dashboard = getRequestListener(opts.app.fetch);
   let port = opts.port;
   const dashboardUrl = () => `http://localhost:${port}/`;
@@ -3623,19 +4462,37 @@ export async function startServer(opts: { port: number; app: FetchApp; resolveTa
   const server = http.createServer((req, res) => {
     const route = classifyHost(req.headers.host, port);
     if (route.kind === "dashboard") return void dashboard(req, res);
-    if (route.kind === "project") return proxyRequest(req, res, route.projectId, opts.resolveTarget, dashboardUrl());
+    if (route.kind === "project")
+      return proxyRequest(
+        req,
+        res,
+        route.projectId,
+        opts.resolveTarget,
+        dashboardUrl()
+      );
     res.writeHead(421, { "content-type": "text/plain" });
     res.end("Misdirected Request");
   });
   server.on("upgrade", (req, socket, head) => {
     const route = classifyHost(req.headers.host, port);
-    if (route.kind === "project") return proxyUpgrade(req, socket, head, route.projectId, opts.resolveTarget);
+    if (route.kind === "project")
+      return proxyUpgrade(
+        req,
+        socket,
+        head,
+        route.projectId,
+        opts.resolveTarget
+      );
     socket.end("HTTP/1.1 421 Misdirected Request\r\n\r\n");
   });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", (err: NodeJS.ErrnoException) =>
-      reject(err.code === "EADDRINUSE" ? new Error(`port ${opts.port} is already in use — pass --port <n>`) : err),
+      reject(
+        err.code === "EADDRINUSE"
+          ? new Error(`port ${opts.port} is already in use — pass --port <n>`)
+          : err
+      )
     );
     server.listen(opts.port, "127.0.0.1", resolve);
   });
@@ -3654,18 +4511,28 @@ export async function startServer(opts: { port: number; app: FetchApp; resolveTa
 ```
 
 `src/server/preflight.ts`:
+
 ```ts
 import type { Preflight } from "../shared/types";
 import type { Runner } from "./exec";
 
 export async function preflight(run: Runner): Promise<Preflight> {
   const errors: string[] = [];
-  const docker = await run("docker", ["info", "--format", "{{.ServerVersion}}"], { timeoutMs: 15_000 });
+  const docker = await run(
+    "docker",
+    ["info", "--format", "{{.ServerVersion}}"],
+    { timeoutMs: 15_000 }
+  );
   if (docker.exitCode === 127) errors.push("docker CLI not found on PATH");
-  else if (docker.exitCode !== 0) errors.push("Docker daemon is not reachable — is Docker running?");
-  const devcontainer = await run("devcontainer", ["--version"], { timeoutMs: 15_000 });
+  else if (docker.exitCode !== 0)
+    errors.push("Docker daemon is not reachable — is Docker running?");
+  const devcontainer = await run("devcontainer", ["--version"], {
+    timeoutMs: 15_000,
+  });
   if (devcontainer.exitCode !== 0) {
-    errors.push("devcontainer CLI not found on PATH — install it with `npm i -g @devcontainers/cli`");
+    errors.push(
+      "devcontainer CLI not found on PATH — install it with `npm i -g @devcontainers/cli`"
+    );
   }
   return { errors };
 }
@@ -3674,13 +4541,23 @@ export async function preflight(run: Runner): Promise<Preflight> {
 - [ ] **Step 4: Implement the CLI**
 
 `src/server/cli.ts`:
+
 ```ts
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+
 import open from "open";
-import { configDir, loadConfig, loadState, mergeRoots, saveConfig, saveState } from "./config";
+
+import {
+  configDir,
+  loadConfig,
+  loadState,
+  mergeRoots,
+  saveConfig,
+  saveState,
+} from "./config";
 import { Containers } from "./containers";
 import { createDashboardApp } from "./dashboard-api";
 import { scanRoots } from "./discovery";
@@ -3719,15 +4596,26 @@ export function parseCli(argv: string[]): CliOptions {
     allowPositionals: false,
   });
   const port = values.port === undefined ? undefined : Number(values.port);
-  if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+  if (
+    port !== undefined &&
+    (!Number.isInteger(port) || port < 1 || port > 65535)
+  ) {
     throw new Error(`invalid --port: ${values.port}`);
   }
-  return { roots: values.root ?? [], port, open: !values["no-open"], help: values.help === true };
+  return {
+    roots: values.root ?? [],
+    port,
+    open: !values["no-open"],
+    help: values.help === true,
+  };
 }
 
 export function findWebDir(): string | undefined {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const candidate of [path.join(here, "web"), path.resolve(here, "../../dist/web")]) {
+  for (const candidate of [
+    path.join(here, "web"),
+    path.resolve(here, "../../dist/web"),
+  ]) {
     if (fs.existsSync(path.join(candidate, "index.html"))) return candidate;
   }
   return undefined;
@@ -3750,18 +4638,28 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const dir = configDir();
   const saved = loadConfig(dir);
-  const config = { roots: mergeRoots(saved.roots, opts.roots), port: opts.port ?? saved.port };
+  const config = {
+    roots: mergeRoots(saved.roots, opts.roots),
+    port: opts.port ?? saved.port,
+  };
   saveConfig(dir, config);
   if (config.roots.length === 0) {
-    console.error("No project roots configured yet. Run: opendevhub --root ~/code");
+    console.error(
+      "No project roots configured yet. Run: opendevhub --root ~/code"
+    );
     process.exitCode = 2;
     return;
   }
 
-  const store = new StateStore({ port: config.port, persisted: loadState(dir), persist: (s) => saveState(dir, s) });
+  const store = new StateStore({
+    port: config.port,
+    persisted: loadState(dir),
+    persist: (s) => saveState(dir, s),
+  });
   store.setRoots(config.roots);
   const containers = new Containers(spawnRunner);
-  const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
+  const clientFor = (ep: { baseUrl: string; password: string }) =>
+    new OpencodeClient(ep);
   const runtime = new OpencodeRuntime({ containers, clientFor });
   const orchestrator = new Orchestrator({
     store,
@@ -3782,11 +4680,19 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     app,
     resolveTarget: (id) => {
       const rt = store.runtime(id);
-      if (rt.containerState !== "running" || !rt.containerIp || !rt.password) return undefined;
-      return { host: rt.containerIp, port: OPENCODE_PORT, password: rt.password };
+      if (rt.containerState !== "running" || !rt.containerIp || !rt.password)
+        return undefined;
+      return {
+        host: rt.containerIp,
+        port: OPENCODE_PORT,
+        password: rt.password,
+      };
     },
   });
-  const refresh = setInterval(() => void orchestrator.refreshContainers(), 10_000);
+  const refresh = setInterval(
+    () => void orchestrator.refreshContainers(),
+    10_000
+  );
 
   console.log(`opendevhub running at ${server.url}`);
   for (const e of store.preflight().errors) console.warn(`warning: ${e}`);
@@ -3804,6 +4710,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 ```
 
 `src/server/bin.ts`:
+
 ```ts
 import { main } from "./cli";
 
@@ -3814,6 +4721,7 @@ main().catch((err: unknown) => {
 ```
 
 `tsup.config.ts`:
+
 ```ts
 import { defineConfig } from "tsup";
 
@@ -3830,13 +4738,11 @@ export default defineConfig({
 
 - [ ] **Step 5: Run tests and typecheck**
 
-Run: `npx vitest run && npx tsc --noEmit`
-Expected: all PASS.
+Run: `npx vitest run && npx tsc --noEmit` Expected: all PASS.
 
 - [ ] **Step 6: Smoke-run the CLI without a UI build**
 
-Run: `XDG_CONFIG_HOME=$(mktemp -d) npx tsx src/server/bin.ts --root . --port 7788 --no-open` (in a second terminal: `curl -s -H 'Host: localhost:7788' http://127.0.0.1:7788/api/projects`), then Ctrl-C.
-Expected: prints `opendevhub running at http://localhost:7788/`; curl returns JSON with `"projects":[]` (this repo has no devcontainer) and preflight errors only if Docker/devcontainer are missing.
+Run: `XDG_CONFIG_HOME=$(mktemp -d) npx tsx src/server/bin.ts --root . --port 7788 --no-open` (in a second terminal: `curl -s -H 'Host: localhost:7788' http://127.0.0.1:7788/api/projects`), then Ctrl-C. Expected: prints `opendevhub running at http://localhost:7788/`; curl returns JSON with `"projects":[]` (this repo has no devcontainer) and preflight errors only if Docker/devcontainer are missing.
 
 - [ ] **Step 7: Commit**
 
@@ -3850,10 +4756,12 @@ git commit -m "feat: host-routed server, preflight checks and CLI entry"
 ### Task 14: Web dashboard
 
 **Files:**
+
 - Create: `vite.config.ts`, `src/web/index.html`, `src/web/main.tsx`, `src/web/App.tsx`, `src/web/api.ts`, `src/web/useDashboard.ts`, `src/web/derive.ts`, `src/web/styles.css`, `src/web/components/ProjectCard.tsx`, `src/web/components/SessionRow.tsx`, `src/web/components/LogPanel.tsx`
 - Test: `test/web/derive.test.ts`
 
 **Interfaces:**
+
 - Consumes: shared types, `sessionUrl` (Task 1); dashboard API routes and SSE events (Task 12).
 - Produces (in `derive.ts`):
   - `interface Notice { key: string; title: string; body: string; projectId: string; sessionId: string }`
@@ -3864,10 +4772,16 @@ git commit -m "feat: host-routed server, preflight checks and CLI entry"
 - [ ] **Step 1: Write the failing tests**
 
 `test/web/derive.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import type { DashboardSnapshot, SessionStatus } from "../../src/shared/types";
-import { attentionCounts, diffForNotifications, relativeTime } from "../../src/web/derive";
+import {
+  attentionCounts,
+  diffForNotifications,
+  relativeTime,
+} from "../../src/web/derive";
 
 function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
   return {
@@ -3875,8 +4789,17 @@ function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
     preflight: { errors: [] },
     projects: [
       {
-        project: { id: "p", name: "demo", path: "/p", devcontainerPath: "/p/x" },
-        runtime: { projectId: "p", containerState: "running", opencode: "healthy" },
+        project: {
+          id: "p",
+          name: "demo",
+          path: "/p",
+          devcontainerPath: "/p/x",
+        },
+        runtime: {
+          projectId: "p",
+          containerState: "running",
+          opencode: "healthy",
+        },
         openUrl: "http://p.localhost:7777/",
         sessions: Object.entries(statuses).map(([id, status]) => ({
           id,
@@ -3893,13 +4816,18 @@ function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
 
 describe("diffForNotifications", () => {
   it("never notifies on the first snapshot, even if sessions need attention", () => {
-    expect(diffForNotifications(undefined, snap({ a: "needs-permission", b: "needs-answer" }))).toEqual([]);
+    expect(
+      diffForNotifications(
+        undefined,
+        snap({ a: "needs-permission", b: "needs-answer" })
+      )
+    ).toEqual([]);
   });
 
   it("notifies on entering needs-permission / needs-answer and on running -> idle", () => {
     const notices = diffForNotifications(
       snap({ a: "running", b: "running", c: "running", d: "idle" }),
-      snap({ a: "needs-permission", b: "needs-answer", c: "idle", d: "idle" }),
+      snap({ a: "needs-permission", b: "needs-answer", c: "idle", d: "idle" })
     );
     expect(notices.map((n) => [n.sessionId, n.title])).toEqual([
       ["a", "demo: permission needed"],
@@ -3910,13 +4838,27 @@ describe("diffForNotifications", () => {
   });
 
   it("does not repeat while the state is unchanged, and ignores new idle sessions", () => {
-    expect(diffForNotifications(snap({ a: "needs-permission" }), snap({ a: "needs-permission", z: "idle" }))).toEqual([]);
+    expect(
+      diffForNotifications(
+        snap({ a: "needs-permission" }),
+        snap({ a: "needs-permission", z: "idle" })
+      )
+    ).toEqual([]);
   });
 });
 
 describe("attentionCounts", () => {
   it("counts sessions needing attention and running", () => {
-    expect(attentionCounts(snap({ a: "needs-permission", b: "needs-answer", c: "running", d: "idle" }))).toEqual({
+    expect(
+      attentionCounts(
+        snap({
+          a: "needs-permission",
+          b: "needs-answer",
+          c: "running",
+          d: "idle",
+        })
+      )
+    ).toEqual({
       attention: 2,
       running: 1,
     });
@@ -3937,14 +4879,18 @@ describe("relativeTime", () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run test/web/derive.test.ts`
-Expected: FAIL — module not found.
+Run: `npx vitest run test/web/derive.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `derive.ts`**
 
 `src/web/derive.ts`:
+
 ```ts
-import type { DashboardSnapshot, SessionStatus, SessionSummary } from "../shared/types";
+import type {
+  DashboardSnapshot,
+  SessionStatus,
+  SessionSummary,
+} from "../shared/types";
 
 export interface Notice {
   key: string;
@@ -3959,10 +4905,14 @@ const MESSAGES: Partial<Record<SessionStatus, string>> = {
   "needs-answer": "question waiting",
 };
 
-export function diffForNotifications(prev: DashboardSnapshot | undefined, next: DashboardSnapshot): Notice[] {
+export function diffForNotifications(
+  prev: DashboardSnapshot | undefined,
+  next: DashboardSnapshot
+): Notice[] {
   if (!prev) return [];
   const before = new Map<string, SessionSummary>();
-  for (const view of prev.projects) for (const s of view.sessions) before.set(s.id, s);
+  for (const view of prev.projects)
+    for (const s of view.sessions) before.set(s.id, s);
 
   const notices: Notice[] = [];
   for (const view of next.projects) {
@@ -3984,12 +4934,16 @@ export function diffForNotifications(prev: DashboardSnapshot | undefined, next: 
   return notices;
 }
 
-export function attentionCounts(snapshot: DashboardSnapshot): { attention: number; running: number } {
+export function attentionCounts(snapshot: DashboardSnapshot): {
+  attention: number;
+  running: number;
+} {
   let attention = 0;
   let running = 0;
   for (const view of snapshot.projects) {
     for (const s of view.sessions) {
-      if (s.status === "needs-permission" || s.status === "needs-answer") attention++;
+      if (s.status === "needs-permission" || s.status === "needs-answer")
+        attention++;
       else if (s.status === "running") running++;
     }
   }
@@ -4007,12 +4961,12 @@ export function relativeTime(ts: number, now = Date.now()): string {
 }
 ```
 
-Run: `npx vitest run test/web/derive.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/web/derive.test.ts` Expected: PASS.
 
 - [ ] **Step 4: Add Vite config, HTML entry, API client and hook**
 
 `vite.config.ts`:
+
 ```ts
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -4028,6 +4982,7 @@ export default defineConfig({
 ```
 
 `src/web/index.html`:
+
 ```html
 <!doctype html>
 <html lang="en">
@@ -4044,20 +4999,24 @@ export default defineConfig({
 ```
 
 `src/web/main.tsx`:
+
 ```tsx
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+
 import { App } from "./App";
+
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
-  </StrictMode>,
+  </StrictMode>
 );
 ```
 
 `src/web/api.ts`:
+
 ```ts
 import type { DashboardSnapshot, LogEvent } from "../shared/types";
 
@@ -4068,8 +5027,14 @@ async function failure(res: Response, what: string): Promise<Error> {
   return new Error(body.error ?? `${what} failed (${res.status})`);
 }
 
-export async function postAction(projectId: string, action: Action): Promise<void> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/${action}`, { method: "POST" });
+export async function postAction(
+  projectId: string,
+  action: Action
+): Promise<void> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/${action}`,
+    { method: "POST" }
+  );
   if (!res.ok) throw await failure(res, action);
 }
 
@@ -4080,7 +5045,9 @@ export async function rescan(): Promise<DashboardSnapshot> {
 }
 
 export async function fetchLogs(projectId: string): Promise<string[]> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/logs`);
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/logs`
+  );
   if (!res.ok) throw await failure(res, "logs");
   return ((await res.json()) as { lines: string[] }).lines;
 }
@@ -4091,8 +5058,12 @@ export function subscribe(handlers: {
   onConnection: (connected: boolean) => void;
 }): () => void {
   const source = new EventSource("/api/events");
-  source.addEventListener("snapshot", (e) => handlers.onSnapshot(JSON.parse((e as MessageEvent<string>).data)));
-  source.addEventListener("log", (e) => handlers.onLog(JSON.parse((e as MessageEvent<string>).data)));
+  source.addEventListener("snapshot", (e) =>
+    handlers.onSnapshot(JSON.parse((e as MessageEvent<string>).data))
+  );
+  source.addEventListener("log", (e) =>
+    handlers.onLog(JSON.parse((e as MessageEvent<string>).data))
+  );
   source.onopen = () => handlers.onConnection(true);
   source.onerror = () => handlers.onConnection(false);
   return () => source.close();
@@ -4100,15 +5071,24 @@ export function subscribe(handlers: {
 ```
 
 `src/web/useDashboard.ts`:
+
 ```ts
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import type { DashboardSnapshot } from "../shared/types";
 import { fetchLogs, subscribe } from "./api";
 import { type Notice, diffForNotifications } from "./derive";
 
 function showNotification(notice: Notice, onClick: () => void): void {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  const n = new Notification(notice.title, { body: notice.body, tag: notice.key });
+  if (
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  )
+    return;
+  const n = new Notification(notice.title, {
+    body: notice.body,
+    tag: notice.key,
+  });
   n.onclick = () => {
     window.focus();
     onClick();
@@ -4134,10 +5114,13 @@ export function useDashboard() {
           setSnapshot(next);
         },
         onLog: ({ projectId, line }) =>
-          setLogs((all) => ({ ...all, [projectId]: [...(all[projectId] ?? []), line].slice(-500) })),
+          setLogs((all) => ({
+            ...all,
+            [projectId]: [...(all[projectId] ?? []), line].slice(-500),
+          })),
         onConnection: setConnected,
       }),
-    [],
+    []
   );
 
   const loadLogs = useCallback(async (projectId: string) => {
@@ -4152,6 +5135,7 @@ export function useDashboard() {
 - [ ] **Step 5: Add components, App and styles**
 
 `src/web/components/LogPanel.tsx`:
+
 ```tsx
 import { useEffect, useRef } from "react";
 
@@ -4169,6 +5153,7 @@ export function LogPanel({ lines }: { lines: string[] }) {
 ```
 
 `src/web/components/SessionRow.tsx`:
+
 ```tsx
 import type { SessionStatus, SessionSummary } from "../../shared/types";
 import { relativeTime } from "../derive";
@@ -4180,11 +5165,17 @@ const BADGE: Record<SessionStatus, string> = {
   idle: "Idle",
 };
 
-export function SessionRow(props: { session: SessionSummary; openUrl: string; highlighted: boolean }) {
+export function SessionRow(props: {
+  session: SessionSummary;
+  openUrl: string;
+  highlighted: boolean;
+}) {
   const { session, openUrl, highlighted } = props;
   return (
     <li className={`session${highlighted ? " highlight" : ""}`}>
-      <span className={`badge status-${session.status}`}>{BADGE[session.status]}</span>
+      <span className={`badge status-${session.status}`}>
+        {BADGE[session.status]}
+      </span>
       <span className="session-title">{session.title}</span>
       <span className="muted">{relativeTime(session.updatedAt)}</span>
       <a href={openUrl} target="_blank" rel="noreferrer">
@@ -4196,8 +5187,10 @@ export function SessionRow(props: { session: SessionSummary; openUrl: string; hi
 ```
 
 `src/web/components/ProjectCard.tsx`:
+
 ```tsx
 import { useState } from "react";
+
 import type { ContainerState, ProjectView } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import type { Action } from "../api";
@@ -4225,7 +5218,9 @@ export function ProjectCard(props: {
   const [showLogs, setShowLogs] = useState(false);
   const running = runtime.containerState === "running";
   const transitioning =
-    runtime.containerState === "starting" || runtime.containerState === "stopping" || runtime.opencode === "starting";
+    runtime.containerState === "starting" ||
+    runtime.containerState === "stopping" ||
+    runtime.opencode === "starting";
   const canOpen = running && runtime.opencode === "healthy";
   const locked = disabled || transitioning;
 
@@ -4237,7 +5232,9 @@ export function ProjectCard(props: {
           <p className="muted path">{project.path}</p>
         </div>
         <div className="pills">
-          <span className={`pill state-${runtime.containerState}`}>{STATE_LABEL[runtime.containerState]}</span>
+          <span className={`pill state-${runtime.containerState}`}>
+            {STATE_LABEL[runtime.containerState]}
+          </span>
           {running && (
             <span className={`pill oc-${runtime.opencode}`}>
               opencode {runtime.opencode}
@@ -4249,13 +5246,24 @@ export function ProjectCard(props: {
 
       <div className="actions">
         {running ? (
-          <button disabled={locked} onClick={() => onAction("stop")}>Stop</button>
+          <button disabled={locked} onClick={() => onAction("stop")}>
+            Stop
+          </button>
         ) : (
-          <button disabled={locked} onClick={() => onAction("start")}>Start</button>
+          <button disabled={locked} onClick={() => onAction("start")}>
+            Start
+          </button>
         )}
-        <button disabled={locked} onClick={() => onAction("rebuild")}>Rebuild</button>
+        <button disabled={locked} onClick={() => onAction("rebuild")}>
+          Rebuild
+        </button>
         {running && runtime.opencode === "unhealthy" && (
-          <button disabled={locked} onClick={() => onAction("restart-opencode")}>Restart opencode</button>
+          <button
+            disabled={locked}
+            onClick={() => onAction("restart-opencode")}
+          >
+            Restart opencode
+          </button>
         )}
         <a
           className={`button primary${canOpen ? "" : " disabled"}`}
@@ -4282,11 +5290,18 @@ export function ProjectCard(props: {
       {sessions.length > 0 && (
         <ul className="sessions">
           {sessions.map((s) => (
-            <SessionRow key={s.id} session={s} openUrl={sessionUrl(openUrl, s.id)} highlighted={s.id === highlight} />
+            <SessionRow
+              key={s.id}
+              session={s}
+              openUrl={sessionUrl(openUrl, s.id)}
+              highlighted={s.id === highlight}
+            />
           ))}
         </ul>
       )}
-      {canOpen && sessions.length === 0 && <p className="muted">No sessions yet — open opencode to start one.</p>}
+      {canOpen && sessions.length === 0 && (
+        <p className="muted">No sessions yet — open opencode to start one.</p>
+      )}
       {showLogs && <LogPanel lines={logs ?? []} />}
     </li>
   );
@@ -4294,8 +5309,10 @@ export function ProjectCard(props: {
 ```
 
 `src/web/App.tsx`:
+
 ```tsx
 import { useState } from "react";
+
 import { type Action, postAction, rescan } from "./api";
 import { ProjectCard } from "./components/ProjectCard";
 import { attentionCounts } from "./derive";
@@ -4308,13 +5325,17 @@ export function App() {
   const [actionError, setActionError] = useState<string>();
   const [scanning, setScanning] = useState(false);
   const [permission, setPermission] = useState<Permission>(() =>
-    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+    typeof Notification === "undefined"
+      ? "unsupported"
+      : Notification.permission
   );
 
   if (!snapshot) {
     return (
       <main className="app">
-        <p className="muted">{connected ? "Loading…" : "Connecting to opendevhub…"}</p>
+        <p className="muted">
+          {connected ? "Loading…" : "Connecting to opendevhub…"}
+        </p>
       </main>
     );
   }
@@ -4324,7 +5345,7 @@ export function App() {
   const act = (projectId: string, action: Action) =>
     postAction(projectId, action).then(
       () => setActionError(undefined),
-      (err: Error) => setActionError(err.message),
+      (err: Error) => setActionError(err.message)
     );
   const doRescan = () => {
     setScanning(true);
@@ -4345,7 +5366,11 @@ export function App() {
             {counts.attention} need attention · {counts.running} running
           </span>
           {permission === "default" && (
-            <button onClick={() => void Notification.requestPermission().then(setPermission)}>
+            <button
+              onClick={() =>
+                void Notification.requestPermission().then(setPermission)
+              }
+            >
               Enable notifications
             </button>
           )}
@@ -4355,14 +5380,22 @@ export function App() {
         </div>
       </header>
 
-      {!connected && <div className="banner warn">Lost connection to opendevhub — retrying…</div>}
+      {!connected && (
+        <div className="banner warn">
+          Lost connection to opendevhub — retrying…
+        </div>
+      )}
       {snapshot.preflight.errors.map((e) => (
-        <div key={e} className="banner error">{e}</div>
+        <div key={e} className="banner error">
+          {e}
+        </div>
       ))}
       {actionError && <div className="banner error">{actionError}</div>}
 
       {snapshot.projects.length === 0 ? (
-        <p className="muted">No projects with a devcontainer found under the configured roots.</p>
+        <p className="muted">
+          No projects with a devcontainer found under the configured roots.
+        </p>
       ) : (
         <ul className="projects">
           {snapshot.projects.map((view) => (
@@ -4384,6 +5417,7 @@ export function App() {
 ```
 
 `src/web/styles.css`:
+
 ```css
 :root {
   --bg: #f6f7f9;
@@ -4412,61 +5446,231 @@ export function App() {
     --attention: #ff8a4c;
   }
 }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
-.app { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
-h1 { font-size: 1.4rem; margin: 0; }
-h2 { font-size: 1.05rem; margin: 0; }
-.muted { color: var(--muted); margin: 0; }
-.path { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
-.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.top-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-.summary { color: var(--muted); }
-.summary.hot { color: var(--attention); font-weight: 600; }
-button, .button {
-  font: inherit; padding: 0.35rem 0.8rem; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--text); cursor: pointer; text-decoration: none; display: inline-block;
+* {
+  box-sizing: border-box;
 }
-button:disabled, .button.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
-.button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.link { border: none; background: none; color: var(--accent); padding-inline: 0.3rem; }
-.banner { padding: 0.6rem 0.8rem; border-radius: 6px; margin-bottom: 0.75rem; border: 1px solid; }
-.banner.error { border-color: var(--danger); color: var(--danger); }
-.banner.warn { border-color: var(--warn); color: var(--warn); }
-.projects, .sessions { list-style: none; margin: 0; padding: 0; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem; }
-.card-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-.pills { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: flex-start; }
-.pill { font-size: 12px; padding: 0.1rem 0.55rem; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
-.state-running, .oc-healthy { color: var(--ok); border-color: var(--ok); }
-.state-starting, .state-stopping, .oc-starting { color: var(--warn); border-color: var(--warn); }
-.state-error, .oc-unhealthy { color: var(--danger); border-color: var(--danger); }
-.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; align-items: center; }
-.error-text { color: var(--danger); margin: 0.6rem 0 0; }
-.sessions { margin-top: 0.75rem; border-top: 1px solid var(--border); }
-.session { display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.75rem; align-items: center; padding: 0.45rem 0; border-bottom: 1px solid var(--border); }
-.session.highlight { background: color-mix(in srgb, var(--attention) 12%, transparent); }
-.session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session a { color: var(--accent); text-decoration: none; }
-.badge { font-size: 12px; padding: 0.1rem 0.5rem; border-radius: 4px; white-space: nowrap; border: 1px solid var(--border); }
-.status-needs-permission, .status-needs-answer { background: var(--attention); border-color: var(--attention); color: #fff; }
-.status-running { color: var(--accent); border-color: var(--accent); }
-.status-idle { color: var(--muted); }
-.logs { margin: 0.75rem 0 0; max-height: 18rem; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem; font-size: 12px; white-space: pre-wrap; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+}
+.app {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+h1 {
+  font-size: 1.4rem;
+  margin: 0;
+}
+h2 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+.muted {
+  color: var(--muted);
+  margin: 0;
+}
+.path {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.top-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.summary {
+  color: var(--muted);
+}
+.summary.hot {
+  color: var(--attention);
+  font-weight: 600;
+}
+button,
+.button {
+  font: inherit;
+  padding: 0.35rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button:disabled,
+.button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  padding-inline: 0.3rem;
+}
+.banner {
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  border: 1px solid;
+}
+.banner.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.banner.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.projects,
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.pills {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.pill {
+  font-size: 12px;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.state-running,
+.oc-healthy {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.state-starting,
+.state-stopping,
+.oc-starting {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.state-error,
+.oc-unhealthy {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+  align-items: center;
+}
+.error-text {
+  color: var(--danger);
+  margin: 0.6rem 0 0;
+}
+.sessions {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.session {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.session.highlight {
+  background: color-mix(in srgb, var(--attention) 12%, transparent);
+}
+.session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.badge {
+  font-size: 12px;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+}
+.status-needs-permission,
+.status-needs-answer {
+  background: var(--attention);
+  border-color: var(--attention);
+  color: #fff;
+}
+.status-running {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.status-idle {
+  color: var(--muted);
+}
+.logs {
+  margin: 0.75rem 0 0;
+  max-height: 18rem;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
 @media (max-width: 36rem) {
-  .session { grid-template-columns: auto 1fr; }
+  .session {
+    grid-template-columns: auto 1fr;
+  }
 }
 ```
 
 - [ ] **Step 6: Typecheck, test and build**
 
-Run: `npx tsc --noEmit && npx vitest run && npm run build`
-Expected: no type errors; all tests PASS; `dist/web/index.html` and `dist/bin.js` exist.
+Run: `npx tsc --noEmit && npx vitest run && npm run build` Expected: no type errors; all tests PASS; `dist/web/index.html` and `dist/bin.js` exist.
 
 - [ ] **Step 7: Manual UI check**
 
-Run: `XDG_CONFIG_HOME=$(mktemp -d) node dist/bin.js --root <a dir containing at least one devcontainer project> --port 7788`
-Expected: the browser opens `http://localhost:7788/`; the project list renders; with Docker stopped a red preflight banner appears and the buttons are disabled; "Logs" toggles an empty log panel; the layout has no horizontal scroll at 375px width; dark mode follows the OS setting.
+Run: `XDG_CONFIG_HOME=$(mktemp -d) node dist/bin.js --root <a dir containing at least one devcontainer project> --port 7788` Expected: the browser opens `http://localhost:7788/`; the project list renders; with Docker stopped a red preflight banner appears and the buttons are disabled; "Logs" toggles an empty log panel; the layout has no horizontal scroll at 375px width; dark mode follows the OS setting.
 
 - [ ] **Step 8: Commit**
 
@@ -4480,15 +5684,18 @@ git commit -m "feat: React dashboard with live status, actions and notifications
 ### Task 15: End-to-end test, open-item verification, README
 
 **Files:**
+
 - Create: `vitest.e2e.config.ts`, `test/e2e/fixture/.devcontainer/devcontainer.json`, `test/e2e/opendevhub.e2e.ts`, `README.md`
 - Modify (conditionally, Step 5): `src/shared/urls.ts`, plus a new `test/shared/urls.test.ts`
 
 **Interfaces:**
+
 - Consumes: all server modules.
 
 - [ ] **Step 1: Add the E2E fixture and config**
 
 `test/e2e/fixture/.devcontainer/devcontainer.json`:
+
 ```json
 {
   "name": "opendevhub-e2e",
@@ -4498,6 +5705,7 @@ git commit -m "feat: React dashboard with live status, actions and notifications
 ```
 
 `vitest.e2e.config.ts`:
+
 ```ts
 import { defineConfig } from "vitest/config";
 
@@ -4514,16 +5722,22 @@ export default defineConfig({
 - [ ] **Step 2: Write the E2E test**
 
 `test/e2e/opendevhub.e2e.ts`:
+
 ```ts
 import http from "node:http";
 import path from "node:path";
+
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
+
 import { Containers } from "../../src/server/containers";
 import { spawnRunner } from "../../src/server/exec";
 import { projectId } from "../../src/server/ids";
 import { OpencodeClient, basicAuth } from "../../src/server/opencode/client";
-import { OPENCODE_PORT, OpencodeRuntime } from "../../src/server/opencode/runtime";
+import {
+  OPENCODE_PORT,
+  OpencodeRuntime,
+} from "../../src/server/opencode/runtime";
 import { Orchestrator } from "../../src/server/orchestrator";
 import { startServer } from "../../src/server/server";
 import { StateStore } from "../../src/server/state";
@@ -4531,105 +5745,160 @@ import type { Project } from "../../src/shared/types";
 
 const fixture = path.resolve("test/e2e/fixture");
 
-function getViaHost(port: number, host: string, urlPath: string): Promise<string> {
+function getViaHost(
+  port: number,
+  host: string,
+  urlPath: string
+): Promise<string> {
   return new Promise((resolve, reject) => {
     http
-      .get({ host: "127.0.0.1", port, path: urlPath, headers: { host } }, (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => resolve(body));
-      })
+      .get(
+        { host: "127.0.0.1", port, path: urlPath, headers: { host } },
+        (res) => {
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () => resolve(body));
+        }
+      )
       .on("error", reject);
   });
 }
 
-describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode v2", () => {
-  it("starts, reports sessions, proxies and stops", async () => {
-    const project: Project = {
-      id: projectId(fixture),
-      name: "fixture",
-      path: fixture,
-      devcontainerPath: path.join(fixture, ".devcontainer/devcontainer.json"),
-    };
-    const store = new StateStore({ port: 0, persisted: { projects: {} }, persist: () => {} });
-    const containers = new Containers(spawnRunner);
-    const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
-    const runtime = new OpencodeRuntime({ containers, clientFor });
-    const orch = new Orchestrator({ store, containers, runtime, clientFor, roots: () => [], scan: async () => [project] });
-    orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
+describe.skipIf(!process.env.OPENDEVHUB_E2E)(
+  "e2e: real devcontainer + opencode v2",
+  () => {
+    it("starts, reports sessions, proxies and stops", async () => {
+      const project: Project = {
+        id: projectId(fixture),
+        name: "fixture",
+        path: fixture,
+        devcontainerPath: path.join(fixture, ".devcontainer/devcontainer.json"),
+      };
+      const store = new StateStore({
+        port: 0,
+        persisted: { projects: {} },
+        persist: () => {},
+      });
+      const containers = new Containers(spawnRunner);
+      const clientFor = (ep: { baseUrl: string; password: string }) =>
+        new OpencodeClient(ep);
+      const runtime = new OpencodeRuntime({ containers, clientFor });
+      const orch = new Orchestrator({
+        store,
+        containers,
+        runtime,
+        clientFor,
+        roots: () => [],
+        scan: async () => [project],
+      });
+      orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
-    await orch.rescan();
-    await orch.start(project.id);
-    const rt = store.runtime(project.id);
-    expect(rt.error).toBeUndefined();
-    expect(rt).toMatchObject({ containerState: "running", opencode: "healthy" });
+      await orch.rescan();
+      await orch.start(project.id);
+      const rt = store.runtime(project.id);
+      expect(rt.error).toBeUndefined();
+      expect(rt).toMatchObject({
+        containerState: "running",
+        opencode: "healthy",
+      });
 
-    const ep = runtime.endpoint(rt.containerIp!, rt.password!);
-    const created = await fetch(`${ep.baseUrl}/api/session`, {
-      method: "POST",
-      headers: { authorization: basicAuth(ep.password), "content-type": "application/json" },
-      body: JSON.stringify({ title: "e2e session", location: { directory: rt.workspaceFolder } }),
+      const ep = runtime.endpoint(rt.containerIp!, rt.password!);
+      const created = await fetch(`${ep.baseUrl}/api/session`, {
+        method: "POST",
+        headers: {
+          authorization: basicAuth(ep.password),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          title: "e2e session",
+          location: { directory: rt.workspaceFolder },
+        }),
+      });
+      expect(created.ok).toBe(true);
+      await vi.waitFor(
+        () =>
+          expect(
+            store.snapshot().projects[0].sessions.map((s) => s.title)
+          ).toContain("e2e session"),
+        { timeout: 15_000 }
+      );
+
+      const server = await startServer({
+        port: 0,
+        app: new Hono(),
+        resolveTarget: () => ({
+          host: rt.containerIp!,
+          port: OPENCODE_PORT,
+          password: rt.password!,
+        }),
+      });
+      const info = await getViaHost(
+        server.port,
+        `${project.id}.localhost:${server.port}`,
+        "/api/info"
+      );
+      expect(JSON.parse(info).version).toMatch(/^2\./);
+      const html = await getViaHost(
+        server.port,
+        `${project.id}.localhost:${server.port}`,
+        "/"
+      );
+      expect(html).toContain("<html");
+      await server.close();
+
+      await orch.stop(project.id);
+      expect(store.runtime(project.id).containerState).toBe("stopped");
+      orch.shutdown();
     });
-    expect(created.ok).toBe(true);
-    await vi.waitFor(
-      () => expect(store.snapshot().projects[0].sessions.map((s) => s.title)).toContain("e2e session"),
-      { timeout: 15_000 },
-    );
-
-    const server = await startServer({
-      port: 0,
-      app: new Hono(),
-      resolveTarget: () => ({ host: rt.containerIp!, port: OPENCODE_PORT, password: rt.password! }),
-    });
-    const info = await getViaHost(server.port, `${project.id}.localhost:${server.port}`, "/api/info");
-    expect(JSON.parse(info).version).toMatch(/^2\./);
-    const html = await getViaHost(server.port, `${project.id}.localhost:${server.port}`, "/");
-    expect(html).toContain("<html");
-    await server.close();
-
-    await orch.stop(project.id);
-    expect(store.runtime(project.id).containerState).toBe("stopped");
-    orch.shutdown();
-  });
-});
+  }
+);
 ```
 
 - [ ] **Step 3: Run the E2E test**
 
-Run: `npm run test:e2e`
-Expected: PASS (first run pulls the image and installs `@opencode/cli@2`; allow several minutes). If `opencode serve` dies once `devcontainer exec` returns (health times out; the log tail shows nothing), change the launch script in `src/server/opencode/runtime.ts` to prefix `setsid ` before `nohup`, re-run the unit tests (`npx vitest run test/server/opencode-runtime.test.ts`) and this E2E test.
+Run: `npm run test:e2e` Expected: PASS (first run pulls the image and installs `@opencode/cli@2`; allow several minutes). If `opencode serve` dies once `devcontainer exec` returns (health times out; the log tail shows nothing), change the launch script in `src/server/opencode/runtime.ts` to prefix `setsid ` before `nohup`, re-run the unit tests (`npx vitest run test/server/opencode-runtime.test.ts`) and this E2E test.
 
 - [ ] **Step 4: Verify the proxied opencode UI manually**
 
-Run: `npm run build && XDG_CONFIG_HOME=$(mktemp -d) node dist/bin.js --root test/e2e --port 7788`
-In the dashboard: click Start on `fixture`, wait for "opencode healthy", click "Open in opencode ↗".
-Expected: `http://fixture-xxxxxx.localhost:7788/` loads opencode's web UI with **no** login prompt or pairing screen, and the terminal/PTY panel connects (WebSocket through the proxy). If the UI instead shows a pairing/login screen, stop and report back before continuing: the proxy then needs to redeem a pairing code (`POST /api/pair` → `/auth/connect/<code>`) on the first page load, which is a design change.
+Run: `npm run build && XDG_CONFIG_HOME=$(mktemp -d) node dist/bin.js --root test/e2e --port 7788` In the dashboard: click Start on `fixture`, wait for "opencode healthy", click "Open in opencode ↗". Expected: `http://fixture-xxxxxx.localhost:7788/` loads opencode's web UI with **no** login prompt or pairing screen, and the terminal/PTY panel connects (WebSocket through the proxy). If the UI instead shows a pairing/login screen, stop and report back before continuing: the proxy then needs to redeem a pairing code (`POST /api/pair` → `/auth/connect/<code>`) on the first page load, which is a design change.
 
 - [ ] **Step 5: Resolve the session deep link (spec §9 item 1)**
 
 In the proxied opencode UI, open a session and copy the URL path. It has the form `/server/<key>/session/<id>`. In a Node REPL, compare `<key>` against `Buffer.from("http://fixture-xxxxxx.localhost:7788").toString("base64url")` (use the exact origin from the address bar).
 
 If they match, replace `sessionUrl` in `src/shared/urls.ts`:
+
 ```ts
 export function sessionUrl(projectBase: string, sessionId: string): string {
   const origin = projectBase.replace(/\/$/, "");
-  const key = btoa(origin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const key = btoa(origin)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
   return `${origin}/server/${key}/session/${sessionId}`;
 }
 ```
+
 and add `test/shared/urls.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { sessionUrl } from "../../src/shared/urls";
 
 describe("sessionUrl", () => {
   it("builds opencode's per-session route for the project origin", () => {
     const base = "http://demo-abc123.localhost:7777/";
-    const key = Buffer.from("http://demo-abc123.localhost:7777").toString("base64url");
-    expect(sessionUrl(base, "ses_1")).toBe(`http://demo-abc123.localhost:7777/server/${key}/session/ses_1`);
+    const key = Buffer.from("http://demo-abc123.localhost:7777").toString(
+      "base64url"
+    );
+    expect(sessionUrl(base, "ses_1")).toBe(
+      `http://demo-abc123.localhost:7777/server/${key}/session/ses_1`
+    );
   });
 });
 ```
+
 Run: `npx vitest run test/shared/urls.test.ts` → PASS; then click a session's "Open ↗" in the dashboard and confirm that exact session opens.
 
 If they do not match, leave `sessionUrl` returning the project root and record the observed key format in the README's "Known limitations" section.
@@ -4637,6 +5906,7 @@ If they do not match, leave `sessionUrl` returning the project root and record t
 - [ ] **Step 6: Write the README**
 
 `README.md`:
+
 ````markdown
 # opendevhub
 
@@ -4685,8 +5955,7 @@ npm run build           # dist/bin.js + dist/web
 
 - [ ] **Step 7: Final verification and commit**
 
-Run: `npx tsc --noEmit && npx vitest run && npm run build`
-Expected: all green.
+Run: `npx tsc --noEmit && npx vitest run && npm run build` Expected: all green.
 
 ```bash
 git add vitest.e2e.config.ts test/e2e README.md src/shared/urls.ts test/shared

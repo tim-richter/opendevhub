@@ -1,21 +1,46 @@
-import { jiraTaskPrompt } from "../../shared/jira";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
-import { branchSlug, deriveTitle, MAX_VARIANTS, taskBranches } from "../../shared/tasks";
-import type { Isolation, ModelsInfo, TaskVariantSpec, TaskWhere } from "../../shared/types";
-import { createTask, fetchModels } from "../api";
-import { useDash, type NewTaskDraft } from "../DashboardContext";
-import { nodeChoices } from "../nodes";
-import { modelFromKey, modelKey, taskPath } from "../tasks";
 import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { useNavigate } from "react-router";
+
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+
+import { jiraTaskPrompt } from "../../shared/jira";
+import {
+  branchSlug,
+  deriveTitle,
+  MAX_VARIANTS,
+  taskBranches,
+} from "../../shared/tasks";
+import type {
+  Isolation,
+  ModelsInfo,
+  TaskVariantSpec,
+  TaskWhere,
+} from "../../shared/types";
+import { createTask, fetchModels } from "../api";
+import { useDash } from "../DashboardContext";
+import type { NewTaskDraft } from "../DashboardContext";
+import { nodeChoices } from "../nodes";
+import { modelFromKey, modelKey, taskPath } from "../tasks";
 import { Choice } from "./Choice";
 import { projectFlags } from "./ProjectActions";
 
@@ -24,32 +49,57 @@ interface Row {
   variant: string;
   agent: string;
 }
-const EMPTY_ROW: Row = { model: "", variant: "", agent: "" };
+const EMPTY_ROW: Row = { agent: "", model: "", variant: "" };
 
-export function NewTaskDialog() {
+export const NewTaskDialog = () => {
   const { snapshot, newTaskFor, closeNewTask } = useDash();
-  if (!snapshot || !newTaskFor) return null;
+  if (!snapshot || !newTaskFor) {
+    return null;
+  }
   // Mounted per opening, with integration context prefilled when provided.
-  return <TaskForm initialProject={newTaskFor.projectId} draft={newTaskFor} onClose={closeNewTask} />;
-}
+  return (
+    <TaskForm
+      initialProject={newTaskFor.projectId}
+      draft={newTaskFor}
+      onClose={closeNewTask}
+    />
+  );
+};
 
-function TaskForm({ initialProject, draft, onClose }: { initialProject?: string; draft?: NewTaskDraft; onClose: () => void }) {
+const TaskForm = ({
+  initialProject,
+  draft,
+  onClose,
+}: {
+  initialProject?: string;
+  draft?: NewTaskDraft;
+  onClose: () => void;
+}) => {
   const { snapshot, act } = useDash();
   const jira = draft?.jira;
   const navigate = useNavigate();
   const projects = useMemo(
-    () => [...(snapshot?.projects ?? [])].sort((a, b) => a.project.name.localeCompare(b.project.name)),
-    [snapshot],
+    () =>
+      [...(snapshot?.projects ?? [])].toSorted((a, b) =>
+        a.project.name.localeCompare(b.project.name)
+      ),
+    [snapshot]
   );
   const [projectId, setProjectId] = useState(
     () =>
       initialProject ??
-      projects.find((v) => v.runtime.containerState === "running")?.project.id ??
+      projects.find((v) => v.runtime.containerState === "running")?.project
+        .id ??
       projects[0]?.project.id ??
-      "",
+      ""
   );
-  const [prompt, setPrompt] = useState(() => draft?.prompt ?? (jira ? jiraTaskPrompt(jira) : ""));
-  const [title, setTitle] = useState(() => draft?.title ?? (jira ? `${jira.key}: ${jira.title}`.slice(0, 200) : ""));
+  const [prompt, setPrompt] = useState(
+    () => draft?.prompt ?? (jira ? jiraTaskPrompt(jira) : "")
+  );
+  const [title, setTitle] = useState(
+    () =>
+      draft?.title ?? (jira ? `${jira.key}: ${jira.title}`.slice(0, 200) : "")
+  );
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState(draft?.base ?? "");
   const [where, setWhere] = useState<TaskWhere>("worktree");
@@ -64,22 +114,41 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
   const view = projects.find((v) => v.project.id === projectId);
   const nodes = snapshot?.nodes ?? [];
   const remote = node !== "local";
-  const flags = view ? projectFlags(view, (snapshot?.preflight.errors.length ?? 0) > 0) : undefined;
+  const flags = view
+    ? projectFlags(view, (snapshot?.preflight.errors.length ?? 0) > 0)
+    : undefined;
   const canOpen = flags?.canOpen ?? false;
   const worktreesReady = view?.runtime.worktreeRoot?.mounted === true;
-  const effectiveWhere: TaskWhere = remote ? "worktree" : worktreesReady ? where : "workspace";
+  let effectiveWhere: TaskWhere;
+  if (remote) {
+    effectiveWhere = "worktree";
+  } else if (worktreesReady) {
+    effectiveWhere = where;
+  } else {
+    effectiveWhere = "workspace";
+  }
   const isolation = view?.isolation;
-  const chosenEnv: Isolation = remote ? "isolated" : isolation?.unsupported ? "shared" : (environment ?? isolation?.default ?? "shared");
+  let chosenEnv: Isolation;
+  if (remote) {
+    chosenEnv = "isolated";
+  } else if (isolation?.unsupported) {
+    chosenEnv = "shared";
+  } else {
+    chosenEnv = environment ?? isolation?.default ?? "shared";
+  }
   const shownRows = effectiveWhere === "worktree" ? rows : rows.slice(0, 1);
-  const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+  const isMac =
+    typeof navigator !== "undefined" && /mac/iu.test(navigator.platform);
 
   useEffect(() => {
     setModels(undefined);
-    if (!canOpen || !projectId) return;
+    if (!canOpen || !projectId) {
+      return;
+    }
     let live = true;
     fetchModels(projectId).then(
       (m) => live && setModels(m),
-      () => live && setModels({ models: [], agents: [] }),
+      () => live && setModels({ agents: [], models: [] })
     );
     return () => {
       live = false;
@@ -93,22 +162,36 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
     const variant = chosen?.variants.includes(r.variant) ? r.variant : "";
     const agent = models?.agents.some((a) => a.id === r.agent) ? r.agent : "";
     return {
-      ...(model ? { model: { ...model, ...(variant ? { variant } : {}) } } : {}),
+      ...(model
+        ? { model: { ...model, ...(variant ? { variant } : {}) } }
+        : {}),
       ...(agent ? { agent } : {}),
     };
   });
   const shownTitle = title.trim() || deriveTitle(prompt);
   const preview =
-    effectiveWhere === "worktree" && shownTitle ? taskBranches({ branch: branch.trim() || undefined, title: shownTitle, variants }) : [];
+    effectiveWhere === "worktree" && shownTitle
+      ? taskBranches({
+          branch: branch.trim() || undefined,
+          title: shownTitle,
+          variants,
+        })
+      : [];
   const defaultModel = models?.default;
   const defaultName = defaultModel
-    ? (models?.models.find((m) => m.id === defaultModel.id && m.providerID === defaultModel.providerID)?.name ?? defaultModel.id)
+    ? (models?.models.find(
+        (m) =>
+          m.id === defaultModel.id && m.providerID === defaultModel.providerID
+      )?.name ?? defaultModel.id)
     : undefined;
-  const setRow = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const setRow = (i: number, patch: Partial<Row>) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (!view || !prompt.trim() || !canOpen || busy) return;
+    if (!view || !prompt.trim() || !canOpen || busy) {
+      return;
+    }
     setBusy(true);
     setError(undefined);
     const worktree = effectiveWhere === "worktree";
@@ -129,7 +212,7 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
           onClose();
           void navigate(taskPath(view.project.id, result.task));
         },
-        (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+        (err) => setError(err instanceof Error ? err.message : String(err))
       )
       .finally(() => setBusy(false));
   };
@@ -145,8 +228,12 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
         }}
       >
         <DialogHeader>
-          <DialogTitle>{jira ? `New task from ${jira.key}` : "New task"}</DialogTitle>
-          <DialogDescription className="sr-only">Start an agent on a prompt in one of your projects.</DialogDescription>
+          <DialogTitle>
+            {jira ? `New task from ${jira.key}` : "New task"}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Start an agent on a prompt in one of your projects.
+          </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4" onSubmit={submit}>
           <div className="grid gap-2">
@@ -156,7 +243,10 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
               size="default"
               className="w-full"
               value={projectId}
-              options={projects.map((v) => ({ value: v.project.id, label: v.project.name }))}
+              options={projects.map((v) => ({
+                label: v.project.name,
+                value: v.project.id,
+              }))}
               onChange={(id) => {
                 setProjectId(id);
                 setRows([EMPTY_ROW]);
@@ -168,16 +258,18 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
 
           {view && !canOpen && (
             <Alert className="border-warn/40 bg-warn/10 text-warn">
-              <AlertDescription className="flex items-center justify-between gap-2 text-warn">
+              <AlertDescription className="text-warn flex items-center justify-between gap-2">
                 <span>
-                  {flags?.transitioning
-                    ? "Starting the project…"
-                    : flags?.unhealthy
-                      ? "opencode is not responding. Restart it from the project's menu."
-                      : "The project isn't running. Start it to run a task."}
+                  {notRunningMessage(flags?.transitioning, flags?.unhealthy)}
                 </span>
                 {!flags?.transitioning && !flags?.unhealthy && (
-                  <Button type="button" variant="outline" size="sm" disabled={flags?.locked} onClick={() => act(view.project.id, "start")}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={flags?.locked}
+                    onClick={() => act(view.project.id, "start")}
+                  >
                     <PlayIcon className="size-3" /> Start project
                   </Button>
                 )}
@@ -206,13 +298,22 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
 
           {nodes.length > 1 && (
             <div className="flex flex-wrap items-center gap-4 text-sm">
-              <Label htmlFor="task-node" className="font-normal text-muted-foreground">
+              <Label
+                htmlFor="task-node"
+                className="text-muted-foreground font-normal"
+              >
                 Node
               </Label>
-              <Choice id="task-node" value={node} options={nodeChoices(nodes)} onChange={setNode} />
+              <Choice
+                id="task-node"
+                value={node}
+                options={nodeChoices(nodes)}
+                onChange={setNode}
+              />
               {remote && (
                 <span className="text-muted-foreground">
-                  {isolation?.unsupported ?? "Runs in a new worktree with its own container, from the base pushed to that node."}
+                  {isolation?.unsupported ??
+                    "Runs in a new worktree with its own container, from the base pushed to that node."}
                 </span>
               )}
             </div>
@@ -227,13 +328,22 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
               aria-label="Where"
             >
               <Label className="font-normal">
-                <RadioGroupItem value="worktree" disabled={remote || !worktreesReady} /> New worktree
+                <RadioGroupItem
+                  value="worktree"
+                  disabled={remote || !worktreesReady}
+                />{" "}
+                New worktree
               </Label>
               <Label className="font-normal">
-                <RadioGroupItem value="workspace" disabled={remote} /> Main checkout
+                <RadioGroupItem value="workspace" disabled={remote} /> Main
+                checkout
               </Label>
             </RadioGroup>
-            {view && canOpen && !worktreesReady && <span className="text-muted-foreground">Rebuild the container to enable worktrees.</span>}
+            {view && canOpen && !worktreesReady && (
+              <span className="text-muted-foreground">
+                Rebuild the container to enable worktrees.
+              </span>
+            )}
           </div>
 
           {effectiveWhere === "worktree" && (
@@ -246,19 +356,30 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                 aria-label="Environment"
               >
                 <Label className="font-normal">
-                  <RadioGroupItem value="shared" disabled={remote} /> Shared container
+                  <RadioGroupItem value="shared" disabled={remote} /> Shared
+                  container
                 </Label>
                 <Label className="font-normal" title={isolation?.unsupported}>
-                  <RadioGroupItem value="isolated" disabled={remote || !!isolation?.unsupported} /> Own container
+                  <RadioGroupItem
+                    value="isolated"
+                    disabled={remote || !!isolation?.unsupported}
+                  />{" "}
+                  Own container
                 </Label>
               </RadioGroup>
-              {isolation?.unsupported && <span className="text-muted-foreground">{isolation.unsupported}</span>}
+              {isolation?.unsupported && (
+                <span className="text-muted-foreground">
+                  {isolation.unsupported}
+                </span>
+              )}
             </div>
           )}
 
           <div className="flex flex-col items-start gap-2">
             {shownRows.map((row, i) => {
-              const chosen = models?.models.find((m) => modelKey(m) === row.model);
+              const chosen = models?.models.find(
+                (m) => modelKey(m) === row.model
+              );
               return (
                 <div className="flex flex-wrap items-center gap-2" key={i}>
                   <Choice
@@ -266,8 +387,16 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                     value={row.model}
                     onChange={(model) => setRow(i, { model, variant: "" })}
                     options={[
-                      { value: "", label: defaultName ? `Default (${defaultName})` : "Default model" },
-                      ...(models?.models.map((m) => ({ value: modelKey(m), label: m.name })) ?? []),
+                      {
+                        label: defaultName
+                          ? `Default (${defaultName})`
+                          : "Default model",
+                        value: "",
+                      },
+                      ...(models?.models.map((m) => ({
+                        label: m.name,
+                        value: modelKey(m),
+                      })) ?? []),
                     ]}
                   />
                   {chosen && chosen.variants.length > 0 && (
@@ -275,7 +404,10 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                       label={`Reasoning ${i + 1}`}
                       value={row.variant}
                       onChange={(variant) => setRow(i, { variant })}
-                      options={[{ value: "", label: "Default effort" }, ...chosen.variants.map((v) => ({ value: v, label: v }))]}
+                      options={[
+                        { label: "Default effort", value: "" },
+                        ...chosen.variants.map((v) => ({ label: v, value: v })),
+                      ]}
                     />
                   )}
                   {models && models.agents.length > 1 && (
@@ -284,8 +416,12 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                       value={row.agent}
                       onChange={(agent) => setRow(i, { agent })}
                       options={[
-                        { value: "", label: "Default agent" },
-                        ...models.agents.map((a) => ({ value: a.id, label: a.name, title: a.description })),
+                        { label: "Default agent", value: "" },
+                        ...models.agents.map((a) => ({
+                          label: a.name,
+                          title: a.description,
+                          value: a.id,
+                        })),
                       ]}
                     />
                   )}
@@ -296,7 +432,9 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                       size="icon-sm"
                       className="text-muted-foreground"
                       aria-label={`Remove model ${i + 1}`}
-                      onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                      onClick={() =>
+                        setRows((rs) => rs.filter((_, j) => j !== i))
+                      }
                     >
                       <XIcon />
                     </Button>
@@ -305,15 +443,22 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
               );
             })}
             {effectiveWhere === "worktree" && rows.length < MAX_VARIANTS && (
-              <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setRows((rs) => [...rs, EMPTY_ROW])}>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="px-0"
+                onClick={() => setRows((rs) => [...rs, EMPTY_ROW])}
+              >
                 <PlusIcon /> Compare with another model
               </Button>
             )}
           </div>
 
           <Collapsible className="group/options flex flex-col gap-3">
-            <CollapsibleTrigger className="flex items-center gap-1 self-start text-sm text-muted-foreground hover:text-foreground">
-              <ChevronRightIcon className="size-4 transition-transform group-data-[state=open]/options:rotate-90" /> Options
+            <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-sm">
+              <ChevronRightIcon className="size-4 transition-transform group-data-[state=open]/options:rotate-90" />{" "}
+              Options
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col gap-3">
               <div className="grid gap-2">
@@ -322,7 +467,9 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                   id="task-title"
                   value={title}
                   maxLength={200}
-                  placeholder={deriveTitle(prompt) || "First line of the prompt"}
+                  placeholder={
+                    deriveTitle(prompt) || "First line of the prompt"
+                  }
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </div>
@@ -330,11 +477,21 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
                 <>
                   <div className="grid gap-2">
                     <Label htmlFor="task-branch">Branch</Label>
-                    <Input id="task-branch" value={branch} placeholder={branchSlug(shownTitle)} onChange={(e) => setBranch(e.target.value)} />
+                    <Input
+                      id="task-branch"
+                      value={branch}
+                      placeholder={branchSlug(shownTitle)}
+                      onChange={(e) => setBranch(e.target.value)}
+                    />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="task-base">Base</Label>
-                    <Input id="task-base" value={base} placeholder="the main checkout's current branch" onChange={(e) => setBase(e.target.value)} />
+                    <Input
+                      id="task-base"
+                      value={base}
+                      placeholder="the main checkout's current branch"
+                      onChange={(e) => setBase(e.target.value)}
+                    />
                   </div>
                 </>
               )}
@@ -342,9 +499,12 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
           </Collapsible>
 
           {preview.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {preview.length === 1 ? "Branch" : "Branches"}: <code className="font-mono">{preview.join(", ")}</code>
-              {!branch.trim() || preview.length > 1 ? " — a number is added when one is taken" : ""}
+            <p className="text-muted-foreground text-xs">
+              {preview.length === 1 ? "Branch" : "Branches"}:{" "}
+              <code className="font-mono">{preview.join(", ")}</code>
+              {!branch.trim() || preview.length > 1
+                ? " — a number is added when one is taken"
+                : ""}
             </p>
           )}
 
@@ -355,16 +515,45 @@ function TaskForm({ initialProject, draft, onClose }: { initialProject?: string;
           )}
 
           <DialogFooter className="items-center">
-            <span className="mr-auto text-xs text-muted-foreground">{isMac ? "⌘" : "Ctrl"}+Enter to start</span>
-            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+            <span className="text-muted-foreground mr-auto text-xs">
+              {isMac ? "⌘" : "Ctrl"}+Enter to start
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={onClose}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={!view || !prompt.trim() || !canOpen || busy}>
-              {busy ? "Starting…" : variants.length > 1 ? `Start ${variants.length} variants` : "Start task"}
+            <Button
+              type="submit"
+              disabled={!view || !prompt.trim() || !canOpen || busy}
+            >
+              {startLabel(busy, variants.length)}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   );
-}
+};
+
+const notRunningMessage = (
+  transitioning: boolean | undefined,
+  unhealthy: boolean | undefined
+): string => {
+  if (transitioning) {
+    return "Starting the project…";
+  }
+  return unhealthy
+    ? "opencode is not responding. Restart it from the project's menu."
+    : "The project isn't running. Start it to run a task.";
+};
+
+const startLabel = (busy: boolean, variants: number): string => {
+  if (busy) {
+    return "Starting…";
+  }
+  return variants > 1 ? `Start ${variants} variants` : "Start task";
+};

@@ -3,14 +3,14 @@
 Pass annotation data and a renderer to the surface:
 
 ```tsx
-import type { DiffLineAnnotation } from '@pierre/diffs/react';
-import { MultiFileDiff } from '@pierre/diffs/react';
+import type { DiffLineAnnotation } from "@pierre/diffs/react";
+import { MultiFileDiff } from "@pierre/diffs/react";
 
 const annotations: DiffLineAnnotation<{ message: string }>[] = [
   {
-    side: 'additions',
+    side: "additions",
     lineNumber: 8,
-    metadata: { message: 'Review this line.' },
+    metadata: { message: "Review this line." },
   },
 ];
 
@@ -28,5 +28,4 @@ const annotations: DiffLineAnnotation<{ message: string }>[] = [
 />;
 ```
 
-Use `LineAnnotation` for a single file. Use `DiffLineAnnotation` for a diff.
-Control the active selection with the `selectedLines` prop.
+Use `LineAnnotation` for a single file. Use `DiffLineAnnotation` for a diff. Control the active selection with the `selectedLines` prop.

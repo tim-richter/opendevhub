@@ -1,5 +1,6 @@
 import net from "node:net";
 import type { Duplex } from "node:stream";
+
 import type { Host } from "./host";
 import { OPENCODE_PORT } from "./opencode/runtime";
 import { RELAY_PORT } from "./relay/runtime";
@@ -23,7 +24,7 @@ export interface Route {
   relay: HostPort;
   /** Set on the gateway and ssh routes; the direct route connects to the container IP itself. */
   dial?: Dial;
-  close(): Promise<void>;
+  close: () => Promise<void>;
 }
 
 export interface RouteContainer {
@@ -34,26 +35,33 @@ export interface RouteContainer {
 }
 
 export interface GatewayPort {
-  attach(container: RouteContainer, onLog: (line: string) => void): Promise<void>;
-  connect(ip: string, port: number): Promise<net.Socket>;
+  attach: (
+    container: RouteContainer,
+    onLog: (line: string) => void
+  ) => Promise<void>;
+  connect: (ip: string, port: number) => Promise<net.Socket>;
 }
 
 export type RouteMode = "auto" | "direct" | "gateway";
 
-export function parseRouteMode(value: string | undefined): RouteMode {
-  if (value === undefined || value === "" || value === "auto") return "auto";
-  if (value === "direct" || value === "gateway") return value;
-  throw new Error(`invalid OPENDEVHUB_ROUTE: ${value} (expected auto, direct or gateway)`);
-}
+export const parseRouteMode = (value: string | undefined): RouteMode => {
+  if (value === undefined || value === "" || value === "auto") {
+    return "auto";
+  }
+  if (value === "direct" || value === "gateway") {
+    return value;
+  }
+  throw new Error(
+    `invalid OPENDEVHUB_ROUTE: ${value} (expected auto, direct or gateway)`
+  );
+};
 
-export function directRoute(ip: string): Route {
-  return {
-    kind: "direct",
-    opencode: { host: ip, port: OPENCODE_PORT },
-    relay: { host: ip, port: RELAY_PORT },
-    close: async () => {},
-  };
-}
+export const directRoute = (ip: string): Route => ({
+  close: () => Promise.resolve(),
+  kind: "direct",
+  opencode: { host: ip, port: OPENCODE_PORT },
+  relay: { host: ip, port: RELAY_PORT },
+});
 
 /**
  * True when `ip` is routable from this machine. Nothing may listen on `port` yet, so on Linux a
@@ -61,13 +69,13 @@ export function directRoute(ip: string): Route {
  * IP sits behind a VM and a refusal more likely comes from a firewall or VPN, so only an accepted
  * connection counts (OrbStack users can set OPENDEVHUB_ROUTE=direct).
  */
-export function probeReachable(
+export const probeReachable = (
   ip: string,
   port: number,
   timeoutMs = 500,
-  refusedIsReachable = process.platform === "linux",
-): Promise<boolean> {
-  return new Promise((resolve) => {
+  refusedIsReachable = process.platform === "linux"
+): Promise<boolean> =>
+  new Promise((resolve) => {
     const socket = net.connect({ host: ip, port });
     const done = (reachable: boolean) => {
       clearTimeout(timer);
@@ -76,17 +84,20 @@ export function probeReachable(
     };
     const timer = setTimeout(() => done(false), timeoutMs);
     socket.once("connect", () => done(true));
-    socket.once("error", (err: NodeJS.ErrnoException) => done(refusedIsReachable && err.code === "ECONNREFUSED"));
+    socket.once("error", (err: NodeJS.ErrnoException) =>
+      done(refusedIsReachable && err.code === "ECONNREFUSED")
+    );
   });
-}
 
 export interface Tunnel {
   address: HostPort;
-  close(): Promise<void>;
+  close: () => Promise<void>;
 }
 
 /** Listens on a free 127.0.0.1 port and pipes each connection to a socket from `dial`. */
-export async function openTunnel(dial: () => Promise<Duplex>): Promise<Tunnel> {
+export const openTunnel = async (
+  dial: () => Promise<Duplex>
+): Promise<Tunnel> => {
   const sockets = new Set<Duplex>();
   const server = net.createServer({ allowHalfOpen: true }, (client) => {
     client.pause();
@@ -111,10 +122,10 @@ export async function openTunnel(dial: () => Promise<Duplex>): Promise<Tunnel> {
         client.pipe(upstream);
         upstream.pipe(client);
       },
-      () => client.destroy(),
+      () => client.destroy()
     );
   });
-  server.on("error", () => {});
+  server.on("error", () => undefined);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
@@ -127,34 +138,42 @@ export async function openTunnel(dial: () => Promise<Duplex>): Promise<Tunnel> {
     address: { host: "127.0.0.1", port },
     close: () =>
       new Promise<void>((resolve) => {
-        for (const s of sockets) s.destroy();
+        for (const s of sockets) {
+          s.destroy();
+        }
         server.close(() => resolve());
       }),
   };
-}
+};
 
 /** Loopback tunnels for opencode and the relay, each connection through `dial`. */
-export async function tunnelRoute(kind: "gateway" | "ssh", dial: Dial): Promise<Route> {
+export const tunnelRoute = async (
+  kind: "gateway" | "ssh",
+  dial: Dial
+): Promise<Route> => {
   const opencode = await openTunnel(() => dial(OPENCODE_PORT));
-  const relay = await openTunnel(() => dial(RELAY_PORT)).catch(async (err: unknown) => {
-    await opencode.close();
-    throw err;
-  });
+  const relay = await openTunnel(() => dial(RELAY_PORT)).catch(
+    async (error: unknown) => {
+      await opencode.close();
+      throw error;
+    }
+  );
   return {
-    kind,
-    opencode: opencode.address,
-    relay: relay.address,
-    dial,
     close: async () => {
       await Promise.all([opencode.close(), relay.close()]);
     },
+    dial,
+    kind,
+    opencode: opencode.address,
+    relay: relay.address,
   };
-}
+};
 
 /** A container on another node: every connection is an ssh channel opened from that node. */
-export function sshRoute(host: Pick<Host, "dial">, ip: string): Promise<Route> {
-  return tunnelRoute("ssh", (port) => host.dial(ip, port));
-}
+export const sshRoute = (
+  host: Pick<Host, "dial">,
+  ip: string
+): Promise<Route> => tunnelRoute("ssh", (port) => host.dial(ip, port));
 
 export interface NetworkDeps {
   gateway: GatewayPort;
@@ -165,15 +184,26 @@ export interface NetworkDeps {
 export class Network {
   constructor(private readonly deps: NetworkDeps) {}
 
-  async route(container: RouteContainer, onLog: (line: string) => void): Promise<Route> {
+  async route(
+    container: RouteContainer,
+    onLog: (line: string) => void
+  ): Promise<Route> {
     const mode = this.deps.mode ?? "auto";
-    if (mode === "direct") return directRoute(container.ip);
+    if (mode === "direct") {
+      return directRoute(container.ip);
+    }
     if (mode === "auto") {
-      if (await (this.deps.probe ?? probeReachable)(container.ip, RELAY_PORT)) return directRoute(container.ip);
-      onLog(`network: container IP ${container.ip} is not reachable from this machine, using the gateway container`);
+      if (await (this.deps.probe ?? probeReachable)(container.ip, RELAY_PORT)) {
+        return directRoute(container.ip);
+      }
+      onLog(
+        `network: container IP ${container.ip} is not reachable from this machine, using the gateway container`
+      );
     }
     const { gateway } = this.deps;
     await gateway.attach(container, onLog);
-    return tunnelRoute("gateway", (port) => gateway.connect(container.ip, port));
+    return tunnelRoute("gateway", (port) =>
+      gateway.connect(container.ip, port)
+    );
   }
 }

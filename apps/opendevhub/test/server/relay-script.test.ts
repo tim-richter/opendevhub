@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import net from "node:net";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { RELAY_SCRIPT } from "../../src/server/relay/script";
 import { freePort, startRelay } from "../helpers/relay";
 
@@ -13,7 +15,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await relay.stop();
-  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  await Promise.all(
+    servers.splice(0).map((s) => new Promise((r) => s.close(r)))
+  );
 });
 
 async function echoOn(host: string): Promise<number> {
@@ -27,7 +31,9 @@ async function echoOn(host: string): Promise<number> {
 /** Sends `header` (+ optional payload), collects everything the relay sends until it closes or `until` matches. */
 function talk(header: string, payload = "", until?: RegExp): Promise<string> {
   return new Promise((resolve) => {
-    const socket = net.connect(relay.port, "127.0.0.1", () => socket.write(header + payload));
+    const socket = net.connect(relay.port, "127.0.0.1", () =>
+      socket.write(header + payload)
+    );
     let got = "";
     socket.on("data", (d) => {
       got += d.toString();
@@ -41,30 +47,34 @@ function talk(header: string, payload = "", until?: RegExp): Promise<string> {
   });
 }
 
-describe("RELAY_SCRIPT", () => {
+describe(RELAY_SCRIPT, () => {
   it("is CommonJS, single-quote free and carries the kill marker", () => {
-    expect(RELAY_SCRIPT.startsWith("/*odh-relay*/")).toBe(true);
+    expect(RELAY_SCRIPT.startsWith("/*odh-relay*/")).toBeTruthy();
     expect(RELAY_SCRIPT).not.toContain("'");
     expect(RELAY_SCRIPT).toContain('require("node:net")');
   });
 
   it("answers ping with PONG and the protocol version", async () => {
-    expect(await talk("secret ping\n")).toBe("PONG 2\n");
+    await expect(talk("secret ping\n")).resolves.toBe("PONG 2\n");
   });
 
   it("pipes to a 127.0.0.1 target, forwarding bytes sent together with the header", async () => {
     const port = await echoOn("127.0.0.1");
-    expect(await talk(`secret ${port}\n`, "hi", /echo:hi/)).toBe("OK\necho:hi");
+    await expect(talk(`secret ${port}\n`, "hi", /echo:hi/u)).resolves.toBe(
+      "OK\necho:hi"
+    );
   });
 
   it("falls back to ::1 when nothing listens on 127.0.0.1", async () => {
     const port = await echoOn("::1");
-    expect(await talk(`secret ${port}\n`, "v6", /echo:v6/)).toBe("OK\necho:v6");
+    await expect(talk(`secret ${port}\n`, "v6", /echo:v6/u)).resolves.toBe(
+      "OK\necho:v6"
+    );
   });
 
   it("reports ECONNREFUSED when nothing listens", async () => {
     const port = await freePort();
-    expect(await talk(`secret ${port}\n`)).toBe("ERR ECONNREFUSED\n");
+    await expect(talk(`secret ${port}\n`)).resolves.toBe("ERR ECONNREFUSED\n");
   });
 
   it.each([
@@ -74,18 +84,18 @@ describe("RELAY_SCRIPT", () => {
     ["non-numeric port", "secret abc\n"],
     ["oversized header", "x".repeat(300)],
   ])("closes silently on %s", async (_name, header) => {
-    expect(await talk(header)).toBe("");
+    await expect(talk(header)).resolves.toBe("");
   });
 
   it("closes silently after 5 s without a complete header", async () => {
     const started = Date.now();
-    expect(await talk("secret 80")).toBe("");
+    await expect(talk("secret 80")).resolves.toBe("");
     expect(Date.now() - started).toBeGreaterThanOrEqual(4900);
   }, 10_000);
 
   it("rejects the gateway form `<token> <ip> <port>` unless started in remote mode", async () => {
     const port = await echoOn("127.0.0.1");
-    expect(await talk(`secret 127.0.0.1 ${port}\n`, "hi")).toBe("");
+    await expect(talk(`secret 127.0.0.1 ${port}\n`, "hi")).resolves.toBe("");
   });
 
   describe("in remote (gateway) mode", () => {
@@ -95,9 +105,15 @@ describe("RELAY_SCRIPT", () => {
     });
     afterEach(() => gateway.stop());
 
-    function talkGateway(header: string, payload = "", until?: RegExp): Promise<string> {
+    function talkGateway(
+      header: string,
+      payload = "",
+      until?: RegExp
+    ): Promise<string> {
       return new Promise((resolve) => {
-        const socket = net.connect(gateway.port, "127.0.0.1", () => socket.write(header + payload));
+        const socket = net.connect(gateway.port, "127.0.0.1", () =>
+          socket.write(header + payload)
+        );
         let got = "";
         socket.on("data", (d) => {
           got += d.toString();
@@ -113,18 +129,24 @@ describe("RELAY_SCRIPT", () => {
 
     it("pipes to the named IP", async () => {
       const port = await echoOn("127.0.0.1");
-      expect(await talkGateway(`secret 127.0.0.1 ${port}\n`, "hi", /echo:hi/)).toBe("OK\necho:hi");
+      await expect(
+        talkGateway(`secret 127.0.0.1 ${port}\n`, "hi", /echo:hi/u)
+      ).resolves.toBe("OK\necho:hi");
     });
 
     it("still answers ping and the loopback form", async () => {
       const port = await echoOn("127.0.0.1");
-      expect(await talkGateway("secret ping\n")).toBe("PONG 2\n");
-      expect(await talkGateway(`secret ${port}\n`, "lo", /echo:lo/)).toBe("OK\necho:lo");
+      await expect(talkGateway("secret ping\n")).resolves.toBe("PONG 2\n");
+      await expect(
+        talkGateway(`secret ${port}\n`, "lo", /echo:lo/u)
+      ).resolves.toBe("OK\necho:lo");
     });
 
     it("reports ECONNREFUSED for the named IP", async () => {
       const port = await freePort();
-      expect(await talkGateway(`secret 127.0.0.1 ${port}\n`)).toBe("ERR ECONNREFUSED\n");
+      await expect(talkGateway(`secret 127.0.0.1 ${port}\n`)).resolves.toBe(
+        "ERR ECONNREFUSED\n"
+      );
     });
 
     it.each([
@@ -133,14 +155,14 @@ describe("RELAY_SCRIPT", () => {
       ["bad port", "secret 127.0.0.1 0\n"],
       ["extra fields", "secret 127.0.0.1 80 x\n"],
     ])("closes silently on %s", async (_name, header) => {
-      expect(await talkGateway(header)).toBe("");
+      await expect(talkGateway(header)).resolves.toBe("");
     });
   });
 
   it("exits with an error when the token is missing", () => {
     const r = spawnSync(process.execPath, ["-e", RELAY_SCRIPT], {
       env: { ...process.env, ODH_RELAY_TOKEN: "", ODH_RELAY_PORT: "0" },
-      encoding: "utf8",
+      encoding: "utf-8",
     });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("ODH_RELAY_TOKEN");

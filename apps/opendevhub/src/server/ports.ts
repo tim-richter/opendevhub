@@ -9,36 +9,42 @@ export interface SkippedPort {
 }
 
 const INVALID_NUMBER = "not a valid port number (1–65535)";
-const LOCAL_ENTRY = /^(?:(?:localhost|127\.0\.0\.1):)?(\d+)$/i;
-const SERVICE_ENTRY = /^[^:\s]+:\d+$/;
+const LOCAL_ENTRY = /^(?:(?:localhost|127\.0\.0\.1):)?(?<g1>\d+)$/iu;
+const SERVICE_ENTRY = /^[^:\s]+:\d+$/u;
 
-function describe(entry: unknown): string {
-  return typeof entry === "string" ? entry : JSON.stringify(entry) ?? String(entry);
-}
+const describe = (entry: unknown): string =>
+  typeof entry === "string" ? entry : (JSON.stringify(entry) ?? String(entry));
 
-function isPort(n: number): boolean {
-  return Number.isInteger(n) && n >= 1 && n <= 65535;
-}
+const isPort = (n: number): boolean =>
+  Number.isInteger(n) && n >= 1 && n <= 65_535;
 
-function toPort(entry: unknown): number | string {
-  if (typeof entry === "number") return isPort(entry) ? entry : INVALID_NUMBER;
-  if (typeof entry !== "string") return "not a valid port entry";
+const toPort = (entry: unknown): number | string => {
+  if (typeof entry === "number") {
+    return isPort(entry) ? entry : INVALID_NUMBER;
+  }
+  if (typeof entry !== "string") {
+    return "not a valid port entry";
+  }
   const text = entry.trim();
   const local = text.match(LOCAL_ENTRY);
   if (local) {
     const n = Number(local[1]);
     return isPort(n) ? n : INVALID_NUMBER;
   }
-  if (SERVICE_ENTRY.test(text)) return "service hosts are not supported yet";
+  if (SERVICE_ENTRY.test(text)) {
+    return "service hosts are not supported yet";
+  }
   return "not a valid port entry";
-}
+};
 
-export function parseForwardPorts(
+export const parseForwardPorts = (
   forwardPorts: unknown,
-  portsAttributes: unknown,
-): { ports: PortSpec[]; skipped: SkippedPort[] } {
+  portsAttributes: unknown
+): { ports: PortSpec[]; skipped: SkippedPort[] } => {
   const attrs =
-    portsAttributes && typeof portsAttributes === "object" ? (portsAttributes as Record<string, unknown>) : {};
+    portsAttributes && typeof portsAttributes === "object"
+      ? (portsAttributes as Record<string, unknown>)
+      : {};
   const ports: PortSpec[] = [];
   const skipped: SkippedPort[] = [];
   const seen = new Set<number>();
@@ -48,10 +54,17 @@ export function parseForwardPorts(
       skipped.push({ entry: describe(entry), reason: port });
       continue;
     }
-    if (seen.has(port)) continue;
+    if (seen.has(port)) {
+      continue;
+    }
     seen.add(port);
-    const label = (attrs[String(port)] as { label?: unknown } | undefined)?.label;
-    ports.push(typeof label === "string" ? { containerPort: port, label } : { containerPort: port });
+    const label = (attrs[String(port)] as { label?: unknown } | undefined)
+      ?.label;
+    ports.push(
+      typeof label === "string"
+        ? { containerPort: port, label }
+        : { containerPort: port }
+    );
   }
   return { ports, skipped };
-}
+};

@@ -1,9 +1,13 @@
 import http from "node:http";
-import net, { type AddressInfo } from "node:net";
+import net from "node:net";
+import type { AddressInfo } from "node:net";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
+
 import { basicAuth } from "../../src/server/opencode/client";
-import { type ProxyTarget, proxyRequest, proxyUpgrade } from "../../src/server/proxy";
+import { proxyRequest, proxyUpgrade } from "../../src/server/proxy";
+import type { ProxyTarget } from "../../src/server/proxy";
 
 let upstream: http.Server;
 let proxy: http.Server;
@@ -12,13 +16,21 @@ let proxyUrl: string;
 let sseRes: http.ServerResponse | undefined;
 
 const listen = (s: http.Server) =>
-  new Promise<number>((resolve) => s.listen(0, "127.0.0.1", () => resolve((s.address() as AddressInfo).port)));
+  new Promise<number>((resolve) =>
+    s.listen(0, "127.0.0.1", () => resolve((s.address() as AddressInfo).port))
+  );
 
 beforeEach(async () => {
   upstream = http.createServer((req, res) => {
     if (req.url === "/echo") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ host: req.headers.host, authorization: req.headers.authorization, origin: req.headers.origin }));
+      res.end(
+        JSON.stringify({
+          host: req.headers.host,
+          authorization: req.headers.authorization,
+          origin: req.headers.origin,
+        })
+      );
     } else if (req.url === "/challenge") {
       res.writeHead(401, { "www-authenticate": 'Basic realm="Secure Area"' });
       res.end("nope");
@@ -31,7 +43,9 @@ beforeEach(async () => {
       req.on("data", (c: Buffer) => (n += c.length));
       req.on("end", () => res.end(String(n)));
     } else if (req.url === "/xfo") {
-      res.writeHead(200, { "x-frame-options": "ALLOW-FROM http://evil.example" });
+      res.writeHead(200, {
+        "x-frame-options": "ALLOW-FROM http://evil.example",
+      });
       res.end("ok");
     } else {
       res.writeHead(404);
@@ -46,8 +60,12 @@ beforeEach(async () => {
   const upstreamPort = await listen(upstream);
   target = { host: "127.0.0.1", port: upstreamPort, password: "pw" };
   const resolve = () => target;
-  proxy = http.createServer((req, res) => proxyRequest(req, res, "demo", resolve, "http://localhost:7777/"));
-  proxy.on("upgrade", (req, socket, head) => proxyUpgrade(req, socket, head, "demo", resolve));
+  proxy = http.createServer((req, res) =>
+    proxyRequest(req, res, "demo", resolve, "http://localhost:7777/")
+  );
+  proxy.on("upgrade", (req, socket, head) =>
+    proxyUpgrade(req, socket, head, "demo", resolve)
+  );
   proxyUrl = `http://127.0.0.1:${await listen(proxy)}`;
 });
 
@@ -60,11 +78,13 @@ afterEach(async () => {
   }
 });
 
-describe("proxyRequest", () => {
+describe(proxyRequest, () => {
   it("injects basic auth and rewrites host and origin", async () => {
-    const res = await fetch(`${proxyUrl}/echo`, { headers: { authorization: "Bearer user-token", origin: proxyUrl } });
+    const res = await fetch(`${proxyUrl}/echo`, {
+      headers: { authorization: "Bearer user-token", origin: proxyUrl },
+    });
     const body = await res.json();
-    expect(body).toEqual({
+    expect(body).toStrictEqual({
       host: `127.0.0.1:${target!.port}`,
       authorization: basicAuth("pw"),
       origin: `http://127.0.0.1:${target!.port}`,
@@ -72,18 +92,27 @@ describe("proxyRequest", () => {
   });
 
   it("allows same-origin POST requests (Origin matches Host)", async () => {
-    const res = await fetch(`${proxyUrl}/upload`, { method: "POST", headers: { origin: proxyUrl }, body: "hi" });
+    const res = await fetch(`${proxyUrl}/upload`, {
+      method: "POST",
+      headers: { origin: proxyUrl },
+      body: "hi",
+    });
     expect(res.status).toBe(200);
   });
 
   it("rejects cross-site POST requests with a mismatched Origin", async () => {
-    const res = await fetch(`${proxyUrl}/echo`, { method: "POST", headers: { origin: "http://evil.example" } });
+    const res = await fetch(`${proxyUrl}/echo`, {
+      method: "POST",
+      headers: { origin: "http://evil.example" },
+    });
     expect(res.status).toBe(403);
     expect(res.headers.get("content-type")).toContain("text/plain");
   });
 
   it("sets X-Frame-Options: SAMEORIGIN on proxied responses, overriding the upstream's own value", async () => {
-    const res = await fetch(`${proxyUrl}/xfo`, { headers: { origin: proxyUrl } });
+    const res = await fetch(`${proxyUrl}/xfo`, {
+      headers: { origin: proxyUrl },
+    });
     expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
   });
 
@@ -98,22 +127,27 @@ describe("proxyRequest", () => {
     const reader = res.body!.getReader();
     const { value } = await Promise.race([
       reader.read(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("SSE was buffered")), 1000)),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("SSE was buffered")), 1000)
+      ),
     ]);
     expect(new TextDecoder().decode(value)).toContain("data: first");
     await reader.cancel();
   });
 
   it("streams request bodies", async () => {
-    const res = await fetch(`${proxyUrl}/upload`, { method: "POST", body: "x".repeat(100_000) });
-    expect(await res.text()).toBe("100000");
+    const res = await fetch(`${proxyUrl}/upload`, {
+      method: "POST",
+      body: "x".repeat(100_000),
+    });
+    await expect(res.text()).resolves.toBe("100000");
   });
 
   it("returns a 503 page when the project is not running", async () => {
     target = undefined;
     const res = await fetch(`${proxyUrl}/`);
     expect(res.status).toBe(503);
-    expect(await res.text()).toContain("http://localhost:7777/");
+    await expect(res.text()).resolves.toContain("http://localhost:7777/");
   });
 
   it("returns a 502 page when the upstream is unreachable", async () => {
@@ -123,25 +157,31 @@ describe("proxyRequest", () => {
   });
 });
 
-describe("proxyUpgrade", () => {
+describe(proxyUpgrade, () => {
   it("tunnels websockets with injected auth", async () => {
     const ws = new WebSocket(`${proxyUrl.replace("http", "ws")}/pty`);
     const messages: string[] = [];
     ws.on("message", (m) => messages.push(m.toString()));
     await new Promise((r) => ws.once("open", r));
     ws.send("hi");
-    await expect.poll(() => messages).toEqual([`auth:${basicAuth("pw")}`, "echo:hi"]);
+    await expect
+      .poll(() => messages)
+      .toStrictEqual([`auth:${basicAuth("pw")}`, "echo:hi"]);
     ws.close();
   });
 
   it("rejects cross-site websocket upgrades with a mismatched Origin", async () => {
-    const ws = new WebSocket(`${proxyUrl.replace("http", "ws")}/pty`, { headers: { origin: "http://evil.example" } });
+    const ws = new WebSocket(`${proxyUrl.replace("http", "ws")}/pty`, {
+      headers: { origin: "http://evil.example" },
+    });
     const status = await new Promise<number>((resolve, reject) => {
       ws.on("unexpected-response", (_req, res) => {
         resolve(res.statusCode ?? 0);
         ws.terminate();
       });
-      ws.on("open", () => reject(new Error("connection should have been rejected")));
+      ws.on("open", () =>
+        reject(new Error("connection should have been rejected"))
+      );
       ws.on("error", () => {});
     });
     expect(status).toBe(403);
@@ -153,7 +193,9 @@ describe("proxyUpgrade", () => {
       // accept the TCP connection but never write an HTTP response
     });
     const blackholePort = await new Promise<number>((resolve) => {
-      blackhole.listen(0, "127.0.0.1", () => resolve((blackhole.address() as AddressInfo).port));
+      blackhole.listen(0, "127.0.0.1", () =>
+        resolve((blackhole.address() as AddressInfo).port)
+      );
     });
     target = { host: "127.0.0.1", port: blackholePort, password: "pw" };
 
@@ -165,14 +207,16 @@ describe("proxyUpgrade", () => {
     });
     client.write(
       `GET /pty HTTP/1.1\r\nHost: 127.0.0.1:${proxyPort}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n` +
-        `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+        `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`
     );
     await new Promise((r) => setTimeout(r, 200));
     client.resetAndDestroy();
     await new Promise((r) => setTimeout(r, 200));
 
     target = realTarget;
-    const res = await fetch(`${proxyUrl}/echo`, { headers: { origin: proxyUrl } });
+    const res = await fetch(`${proxyUrl}/echo`, {
+      headers: { origin: proxyUrl },
+    });
     expect(res.status).toBe(200);
 
     blackhole.close();

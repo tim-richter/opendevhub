@@ -1,5 +1,12 @@
-import { type DiffLineAnnotation, type FileDiffOptions, MultiFileDiff, PatchDiff, type SelectedLineRange } from "@pierre/diffs/react";
-import { type ReactNode, useMemo, useState } from "react";
+import { MultiFileDiff, PatchDiff } from "@pierre/diffs/react";
+import type {
+  DiffLineAnnotation,
+  FileDiffOptions,
+  SelectedLineRange,
+} from "@pierre/diffs/react";
+import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
+
 import { fileVersions } from "../review";
 
 /** Diffs with syntax highlighting that follow the system's light or dark scheme, like the rest of the UI. */
@@ -41,36 +48,47 @@ export default function PatchView<A = undefined>(props: {
   const options = useMemo<FileDiffOptions<A, undefined>>(
     () => ({
       ...BASE_OPTIONS,
-      diffStyle: split ? "split" : "unified",
-      expandUnchanged: !!fullFile,
       collapsed,
+      diffStyle: split ? "split" : "unified",
       disableFileHeader: disableHeader,
+      expandUnchanged: !!fullFile,
       ...(onComment
         ? {
             enableGutterUtility: true,
             onGutterUtilityClick: onComment,
-            onLineSelectionStart: setDragged,
             onLineSelectionChange: setDragged,
             onLineSelectionEnd: () => setDragged(null),
+            onLineSelectionStart: setDragged,
           }
         : {}),
     }),
-    [collapsed, disableHeader, onComment, split, fullFile],
+    [collapsed, disableHeader, onComment, split, fullFile]
   );
   const files = useMemo(() => {
-    if (name === undefined) return undefined;
+    if (name === undefined) {
+      return;
+    }
     const versions = fileVersions(props.patch);
-    return versions && { oldFile: { name, contents: versions.old }, newFile: { name, contents: versions.new } };
+    return (
+      versions && {
+        newFile: { contents: versions.new, name },
+        oldFile: { contents: versions.old, name },
+      }
+    );
   }, [name, props.patch]);
   const shared = {
-    options,
     lineAnnotations: props.annotations,
-    selectedLines: dragged ?? props.selectedLines,
+    options,
     renderAnnotation: props.renderAnnotation,
     renderHeaderPrefix: props.renderHeaderPrefix,
+    selectedLines: dragged ?? props.selectedLines,
   };
   return files ? (
-    <MultiFileDiff<A, undefined> oldFile={files.oldFile} newFile={files.newFile} {...shared} />
+    <MultiFileDiff<A, undefined>
+      oldFile={files.oldFile}
+      newFile={files.newFile}
+      {...shared}
+    />
   ) : (
     <PatchDiff<A, undefined> patch={props.patch} {...shared} />
   );

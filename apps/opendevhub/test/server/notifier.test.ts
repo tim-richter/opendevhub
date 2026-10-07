@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+
 import { startNotifier } from "../../src/server/notifier";
 import { StateStore } from "../../src/server/state";
 import type { Notice } from "../../src/shared/notices";
 import type { Project, SessionSummary } from "../../src/shared/types";
 
-const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
+const project: Project = {
+  id: "demo-abc123",
+  name: "demo",
+  path: "/src/demo",
+  devcontainerPath: "/x",
+};
 const session = (over: Partial<SessionSummary>): SessionSummary => ({
   id: "ses_1",
   projectId: project.id,
@@ -17,17 +23,29 @@ const session = (over: Partial<SessionSummary>): SessionSummary => ({
 const asking = (ids: string[]) =>
   session({
     status: "needs-permission",
-    pending: { permissions: ids.map((id) => ({ id, sessionId: "ses_1", action: "bash", resources: ["ls"] })), forms: [] },
+    pending: {
+      permissions: ids.map((id) => ({
+        id,
+        sessionId: "ses_1",
+        action: "bash",
+        resources: ["ls"],
+      })),
+      forms: [],
+    },
   });
 
 function setup() {
-  const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
+  const store = new StateStore({
+    port: 7777,
+    persisted: { projects: {} },
+    persist: () => {},
+  });
   store.setProjects([project]);
   const send = vi.fn(async (_notice: Notice) => 1);
   return { store, send };
 }
 
-describe("startNotifier", () => {
+describe(startNotifier, () => {
   it("does not notify what was already waiting when it started", () => {
     const { store, send } = setup();
     store.setSessions(project.id, [asking(["r1"])]);
@@ -43,7 +61,7 @@ describe("startNotifier", () => {
     store.setSessions(project.id, [asking(["r1"])]);
     store.setSessions(project.id, [asking(["r1", "r2"])]);
     store.setSessions(project.id, [asking(["r1", "r2"])]);
-    expect(send.mock.calls.map(([n]) => [n.tag, n.permission])).toEqual([
+    expect(send.mock.calls.map(([n]) => [n.tag, n.permission])).toStrictEqual([
       ["perm:r1", { requestId: "r1" }],
       ["perm:r2", { requestId: "r2" }],
     ]);

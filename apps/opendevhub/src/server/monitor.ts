@@ -22,17 +22,17 @@ export interface MonitorOptions {
   now?: () => number;
 }
 
-const RELEVANT_EVENT = /^(session|permission|form)\./;
+const RELEVANT_EVENT = /^(?<g1>session|permission|form)\./u;
 const FAILURES_BEFORE_UNHEALTHY = 3;
 const MAX_SESSION_LOOKUPS = 20;
 const MAX_DIRECTORIES = 16;
 
-function uniqueById<T extends { id: string }>(items: T[]): T[] {
-  return [...new Map(items.map((i) => [i.id, i])).values()];
-}
+const uniqueById = <T extends { id: string }>(items: T[]): T[] => [
+  ...new Map(items.map((i) => [i.id, i])).values(),
+];
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
     if (signal.aborted) {
       resolve();
       return;
@@ -47,7 +47,6 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     }, ms);
     signal.addEventListener("abort", onAbort, { once: true });
   });
-}
 
 export class Monitor {
   private readonly abort = new AbortController();
@@ -63,7 +62,10 @@ export class Monitor {
 
   start(): void {
     void this.reconcile();
-    this.pollTimer = setInterval(() => void this.reconcile(), this.opts.pollMs ?? 5000);
+    this.pollTimer = setInterval(
+      () => void this.reconcile(),
+      this.opts.pollMs ?? 5000
+    );
     void this.streamLoop();
   }
 
@@ -75,7 +77,9 @@ export class Monitor {
   }
 
   reconcile(): Promise<void> {
-    if (this.stopped) return Promise.resolve();
+    if (this.stopped) {
+      return Promise.resolve();
+    }
     if (this.inFlight) {
       this.rerun = true;
       return this.inFlight;
@@ -93,30 +97,53 @@ export class Monitor {
   private async fetchAndDerive(): Promise<void> {
     const { client, projectId } = this.opts;
     try {
-      const [sessions, active] = await Promise.all([client.sessions(), client.active()]);
+      const [sessions, active] = await Promise.all([
+        client.sessions(),
+        client.active(),
+      ]);
       // Per-directory lookups are best effort: opencode answers 500 for a directory missing in the
       // container (e.g. a stale worktree), and that must not mark the whole server unhealthy.
       const perDirectory = await Promise.all(
         this.directories(sessions).map((d) =>
-          Promise.all([client.permissionRequests(d).catch(() => []), client.forms(d).catch(() => [])]),
-        ),
+          Promise.all([
+            client.permissionRequests(d).catch(() => []),
+            client.forms(d).catch(() => []),
+          ])
+        )
       );
       const permissions = uniqueById(perDirectory.flatMap(([p]) => p));
       const forms = uniqueById(perDirectory.flatMap(([, f]) => f));
       this.stamp([...permissions, ...forms].map((i) => i.id));
-      const flagged = [...active, ...permissions.map((p) => p.sessionID), ...forms.map((f) => f.sessionID)];
+      const flagged = [
+        ...active,
+        ...permissions.map((p) => p.sessionID),
+        ...forms.map((f) => f.sessionID),
+      ];
       const all = await this.withMissing(sessions, flagged);
-      if (this.stopped) return;
+      if (this.stopped) {
+        return;
+      }
       this.failures = 0;
       this.opts.onHealth(true);
       this.opts.onRawSessions?.(all);
       this.opts.onSessions(
-        deriveSessions(projectId, { envId: this.opts.envId, sessions: all, active, permissions, forms, firstSeen: this.firstSeen }),
+        deriveSessions(projectId, {
+          active,
+          envId: this.opts.envId,
+          firstSeen: this.firstSeen,
+          forms,
+          permissions,
+          sessions: all,
+        })
       );
     } catch {
-      if (this.stopped) return;
+      if (this.stopped) {
+        return;
+      }
       this.failures += 1;
-      if (this.failures >= FAILURES_BEFORE_UNHEALTHY) this.opts.onHealth(false);
+      if (this.failures >= FAILURES_BEFORE_UNHEALTHY) {
+        this.opts.onHealth(false);
+      }
     }
   }
 
@@ -124,8 +151,16 @@ export class Monitor {
   private stamp(ids: string[]): void {
     const now = (this.opts.now ?? Date.now)();
     const current = new Set(ids);
-    for (const id of this.firstSeen.keys()) if (!current.has(id)) this.firstSeen.delete(id);
-    for (const id of current) if (!this.firstSeen.has(id)) this.firstSeen.set(id, now);
+    for (const id of this.firstSeen.keys()) {
+      if (!current.has(id)) {
+        this.firstSeen.delete(id);
+      }
+    }
+    for (const id of current) {
+      if (!this.firstSeen.has(id)) {
+        this.firstSeen.set(id, now);
+      }
+    }
   }
 
   /**
@@ -134,12 +169,17 @@ export class Monitor {
    * directories of the most recently updated sessions.
    */
   private directories(sessions: RawSession[]): string[] {
-    const dirs = new Set([this.opts.directory, ...(this.opts.extraDirectories?.() ?? [])]);
+    const dirs = new Set([
+      this.opts.directory,
+      ...(this.opts.extraDirectories?.() ?? []),
+    ]);
     const recent = sessions
       .filter((s) => s.time.archived === undefined)
-      .sort((a, b) => b.time.updated - a.time.updated);
+      .toSorted((a, b) => b.time.updated - a.time.updated);
     for (const s of recent) {
-      if (dirs.size >= MAX_DIRECTORIES) break;
+      if (dirs.size >= MAX_DIRECTORIES) {
+        break;
+      }
       dirs.add(s.location.directory);
     }
     return [...dirs].slice(0, MAX_DIRECTORIES);
@@ -149,7 +189,10 @@ export class Monitor {
    * `/api/session` returns only the newest 50 sessions, subagents included, so a session waiting on
    * input (or its root) can fall outside it. Fetch those individually so their status isn't dropped.
    */
-  private async withMissing(sessions: RawSession[], flagged: string[]): Promise<RawSession[]> {
+  private async withMissing(
+    sessions: RawSession[],
+    flagged: string[]
+  ): Promise<RawSession[]> {
     const known = new Map(sessions.map((s) => [s.id, s]));
     let lookups = 0;
     for (const start of new Set(flagged)) {
@@ -159,9 +202,13 @@ export class Monitor {
         seen.add(id);
         let session = known.get(id);
         if (!session) {
-          if (lookups++ >= MAX_SESSION_LOOKUPS) break;
+          if (lookups++ >= MAX_SESSION_LOOKUPS) {
+            break;
+          }
           session = await this.opts.client.session(id).catch(() => undefined);
-          if (!session) break;
+          if (!session) {
+            break;
+          }
           known.set(id, session);
         }
         id = session.parentID;
@@ -172,7 +219,10 @@ export class Monitor {
 
   private schedule(): void {
     clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => void this.reconcile(), this.opts.debounceMs ?? 250);
+    this.debounceTimer = setTimeout(
+      () => void this.reconcile(),
+      this.opts.debounceMs ?? 250
+    );
   }
 
   private async streamLoop(): Promise<void> {
@@ -183,12 +233,16 @@ export class Monitor {
       try {
         await this.opts.client.subscribe((event) => {
           backoff = min;
-          if (RELEVANT_EVENT.test(event.type)) this.schedule();
+          if (RELEVANT_EVENT.test(event.type)) {
+            this.schedule();
+          }
         }, this.abort.signal);
       } catch {
         // connection failed or dropped; retry below
       }
-      if (this.stopped) return;
+      if (this.stopped) {
+        return;
+      }
       await sleep(backoff, this.abort.signal);
       backoff = Math.min(backoff * 2, max);
     }

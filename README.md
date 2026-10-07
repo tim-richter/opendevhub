@@ -137,6 +137,7 @@ A worktree can run in its own devcontainer, with its own opencode, processes, po
   ```
 
   or, for a repo you don't own, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "isolation": "isolated" } }`.
+
 - Git commands (review, commit, merge, worktree add and remove) still run in the project's container, which has to be running.
 - Removing a worktree's container deletes the sessions that ran in it; the worktree and its files stay.
 
@@ -172,107 +173,46 @@ Notifications are enabled per browser and address: opening the dashboard on anot
 
 ## Forgejo pull requests
 
-Open **Settings** in the sidebar, enable **Forgejo**, and save your instance URL and access token.
-Forgejo is optional and disabled by default. Use a token with `read:user`, `read:repository`, and `read:issue`
-scopes, with access to the private repositories you want to see. The URL must use HTTPS;
-HTTP is supported for local instances at `localhost`, `127.0.0.1`, or `::1`.
+Open **Settings** in the sidebar, enable **Forgejo**, and save your instance URL and access token. Forgejo is optional and disabled by default. Use a token with `read:user`, `read:repository`, and `read:issue` scopes, with access to the private repositories you want to see. The URL must use HTTPS; HTTP is supported for local instances at `localhost`, `127.0.0.1`, or `::1`.
 
-Use **Test connection** to verify the entered or saved credentials without changing settings.
-The **Forgejo** sidebar link opens an inbox for PRs **Authored by me**, **Review requested**, or
-**Assigned to me**, across repositories accessible to the token, even without a local project.
-Filter by state, search text, or exact `owner/name` repository. Pages load incrementally; the view,
-filters, and diff layout are remembered.
+Use **Test connection** to verify the entered or saved credentials without changing settings. The **Forgejo** sidebar link opens an inbox for PRs **Authored by me**, **Review requested**, or **Assigned to me**, across repositories accessible to the token, even without a local project. Filter by state, search text, or exact `owner/name` repository. Pages load incrementally; the view, filters, and diff layout are remembered.
 
-Open a PR to see its description, labels, reviews, inline comments, and CI checks for the head commit.
-Its syntax-highlighted diff supports unified/side-by-side layout and a changed-files navigator.
-Sections load independently, and **Open in Forgejo** stays available when the diff fails.
-Select feedback or checks and choose **Continue with agent** to review an editable prompt and
-send it to a local checkout/session, or open a prefilled New task form. Matching projects and
-worktrees are suggested from remotes and recorded PR URLs. The prompt asks the agent to verify
-the PR commit before editing; the dashboard does not switch or reset checkouts automatically.
+Open a PR to see its description, labels, reviews, inline comments, and CI checks for the head commit. Its syntax-highlighted diff supports unified/side-by-side layout and a changed-files navigator. Sections load independently, and **Open in Forgejo** stays available when the diff fails. Select feedback or checks and choose **Continue with agent** to review an editable prompt and send it to a local checkout/session, or open a prefilled New task form. Matching projects and worktrees are suggested from remotes and recorded PR URLs. The prompt asks the agent to verify the PR commit before editing; the dashboard does not switch or reset checkouts automatically.
 
-TanStack Query caches PR data in memory, retains content during refresh, and refreshes stale data
-on window focus or reconnect. Requests propagate cancellation to Forgejo, and changing saved
-connection settings clears the cache. Only UI preferences are saved in browser storage.
+TanStack Query caches PR data in memory, retains content during refresh, and refreshes stale data on window focus or reconnect. Requests propagate cancellation to Forgejo, and changing saved connection settings clears the cache. Only UI preferences are saved in browser storage.
 
-Settings survive restarts in `$XDG_CONFIG_HOME/opendevhub/integrations/forgejo.json`
-(default `~/.config/opendevhub/integrations/forgejo.json`). This separate file has mode `0600`
-inside a `0700` directory. It contains the URL, enabled state, and an opaque credential reference.
-The token is stored in your OS credential store: macOS Keychain, Windows Credential Manager,
-or Secret Service on Linux (such as GNOME Keyring or KWallet). Linux needs an unlocked,
-persistent Secret Service in your desktop session. An unavailable or locked credential store
-produces an error; there is no plaintext or volatile-keyring fallback.
+Settings survive restarts in `$XDG_CONFIG_HOME/opendevhub/integrations/forgejo.json` (default `~/.config/opendevhub/integrations/forgejo.json`). This separate file has mode `0600` inside a `0700` directory. It contains the URL, enabled state, and an opaque credential reference. The token is stored in your OS credential store: macOS Keychain, Windows Credential Manager, or Secret Service on Linux (such as GNOME Keyring or KWallet). Linux needs an unlocked, persistent Secret Service in your desktop session. An unavailable or locked credential store produces an error; there is no plaintext or volatile-keyring fallback.
 
-Existing plaintext tokens are migrated into the credential store before use and removed from
-the settings file only after credential storage succeeds. The saved token is never returned by
-the API, put in browser storage, or injected into task containers. Changing the instance URL
-requires a new token. Disabling keeps the credential for later; **Remove token and disable**
-deletes it from the OS store.
+Existing plaintext tokens are migrated into the credential store before use and removed from the settings file only after credential storage succeeds. The saved token is never returned by the API, put in browser storage, or injected into task containers. Changing the instance URL requires a new token. Disabling keeps the credential for later; **Remove token and disable** deletes it from the OS store.
 
-**Write review** preserves inline review submission (with `write:repository` and `write:issue`
-scopes) and creating a PR worktree from its verified head commit. Read scopes suffice for browsing
-and agent handoff. Merging remains on Forgejo. Agent
-handoff uses the existing task/session APIs without exposing the token to containers. It uses the
-Forgejo REST API independently of the existing git-based Publish action. Responses larger than
-20 MiB show an error and can be opened on Forgejo instead.
+**Write review** preserves inline review submission (with `write:repository` and `write:issue` scopes) and creating a PR worktree from its verified head commit. Read scopes suffice for browsing and agent handoff. Merging remains on Forgejo. Agent handoff uses the existing task/session APIs without exposing the token to containers. It uses the Forgejo REST API independently of the existing git-based Publish action. Responses larger than 20 MiB show an error and can be opened on Forgejo instead.
 
 ## Jira tickets
 
-Jira is optional and disabled by default. In **Settings**, enable **Jira** and save your
-self-hosted Jira URL and personal access token. This uses the Jira Server / Data Center
-REST v2 API with Bearer authentication; only a URL and token are needed. Include any
-instance path prefix, and use HTTPS (loopback HTTP is supported for local instances).
+Jira is optional and disabled by default. In **Settings**, enable **Jira** and save your self-hosted Jira URL and personal access token. This uses the Jira Server / Data Center REST v2 API with Bearer authentication; only a URL and token are needed. Include any instance path prefix, and use HTTPS (loopback HTTP is supported for local instances).
 
-The **Jira** sidebar link opens tickets assigned to you, most recently updated first.
-Search by an exact ticket key or a phrase across accessible projects, including tickets
-assigned to others. Select a ticket to view its description and details. **Create task**
-opens the task dialog with the ticket title and description filled in, where you choose
-the project, worktree, environment, and agent. The prompt can be edited before starting.
+The **Jira** sidebar link opens tickets assigned to you, most recently updated first. Search by an exact ticket key or a phrase across accessible projects, including tickets assigned to others. Select a ticket to view its description and details. **Create task** opens the task dialog with the ticket title and description filled in, where you choose the project, worktree, environment, and agent. The prompt can be edited before starting.
 
-Each variant remembers the Jira instance, key, title, and original description in its
-opencode session metadata, surviving restarts with the session. Task and checkout review
-pages show the ticket link and original requirements, even when Jira is unavailable.
-The ticket page links to its tasks among the dashboard's listed sessions.
+Each variant remembers the Jira instance, key, title, and original description in its opencode session metadata, surviving restarts with the session. Task and checkout review pages show the ticket link and original requirements, even when Jira is unavailable. The ticket page links to its tasks among the dashboard's listed sessions.
 
-Credentials use the same protection as Forgejo, with a separate OS credential-store
-service. `$XDG_CONFIG_HOME/opendevhub/integrations/jira.json` contains only the enabled
-state, URL, and opaque credential reference. The token never reaches the browser or task
-containers. Leave the token blank to keep it; changing the URL requires a new token.
-**Remove token and disable** deletes the stored credential. Jira access is read-only.
-See the [Jira documentation](apps/docs/content/docs/jira.mdx) for details.
+Credentials use the same protection as Forgejo, with a separate OS credential-store service. `$XDG_CONFIG_HOME/opendevhub/integrations/jira.json` contains only the enabled state, URL, and opaque credential reference. The token never reaches the browser or task containers. Leave the token blank to keep it; changing the URL requires a new token. **Remove token and disable** deletes the stored credential. Jira access is read-only. See the [Jira documentation](apps/docs/content/docs/jira.mdx) for details.
 
 ## Remote nodes (preview)
 
-Other machines can run task environments, reached over ssh. Add one on the Nodes page, or with
-`opendevhub nodes add tim@workstation --label Workstation` (then restart opendevhub). The Nodes
-page shows whether each node is reachable and ready, and how much CPU and memory it has free.
+Other machines can run task environments, reached over ssh. Add one on the Nodes page, or with `opendevhub nodes add tim@workstation --label Workstation` (then restart opendevhub). The Nodes page shows whether each node is reachable and ready, and how much CPU and memory it has free.
 
-To run a task there, pick the node in the New task form. It gets a new worktree with its own
-container on that node: opendevhub pushes the base branch (the one you choose, or the main
-checkout's current branch) into a repository it keeps under `~/.opendevhub/repos` on the node,
-creates the worktree there, and starts the container with the node's Docker. Uncommitted changes
-in your main checkout stay behind.
+To run a task there, pick the node in the New task form. It gets a new worktree with its own container on that node: opendevhub pushes the base branch (the one you choose, or the main checkout's current branch) into a repository it keeps under `~/.opendevhub/repos` on the node, creates the worktree there, and starts the container with the node's Docker. Uncommitted changes in your main checkout stay behind.
 
-Sessions, permissions, forwarded ports, review, commit and Update from base work as for local
-tasks. **Bring home** (in the review's Git menu) fetches the branch into this machine's repository;
-Merge into base and Publish do that first. Removing the task deletes its worktree and branch on the
-node, so bring the branch home first to keep its commits. Checks and Open in editor aren't
-available for tasks on other nodes yet.
+Sessions, permissions, forwarded ports, review, commit and Update from base work as for local tasks. **Bring home** (in the review's Git menu) fetches the branch into this machine's repository; Merge into base and Publish do that first. Removing the task deletes its worktree and branch on the node, so bring the branch home first to keep its commits. Checks and Open in editor aren't available for tasks on other nodes yet.
 
 A node needs:
 
-- Docker, the devcontainer CLI and git 2.48 or newer, on the PATH of a **non-interactive** ssh
-  shell. Tools installed through nvm or a login profile often aren't: check with
-  `ssh tim@workstation 'devcontainer --version'`, and if it fails, link the binary into
-  `/usr/local/bin` or set PATH in `~/.ssh/environment` (with `PermitUserEnvironment yes`).
+- Docker, the devcontainer CLI and git 2.48 or newer, on the PATH of a **non-interactive** ssh shell. Tools installed through nvm or a login profile often aren't: check with `ssh tim@workstation 'devcontainer --version'`, and if it fails, link the binary into `/usr/local/bin` or set PATH in `~/.ssh/environment` (with `PermitUserEnvironment yes`).
 - An ssh key that logs in without a prompt, and a known host key: run `ssh tim@workstation` once.
 - `AllowTcpForwarding yes` in its sshd config (the default).
 - A Linux Docker engine: containers are reached at their IP from the node itself.
 
-opendevhub keeps one ssh connection per node (a ControlMaster under
-`~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Meanwhile its tasks show
-as offline. Containers keep running there and are picked up again when the node is back. Nothing is
-installed on the node and nothing listens there besides sshd.
+opendevhub keeps one ssh connection per node (a ControlMaster under `~/.config/opendevhub/ssh/`) and reconnects by itself when a node drops. Meanwhile its tasks show as offline. Containers keep running there and are picked up again when the node is back. Nothing is installed on the node and nothing listens there besides sshd.
 
 ## Development
 

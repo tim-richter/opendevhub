@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+
 import { describe, expect, it } from "vitest";
+
 import { spawnRunner } from "../../src/server/exec";
 import {
   SshHost,
-  type Spawn,
   clientArgs,
   describeSshFailure,
   masterArgs,
@@ -12,11 +13,12 @@ import {
   remoteCommand,
   shellQuote,
 } from "../../src/server/ssh";
+import type { Spawn } from "../../src/server/ssh";
 import { fakeRunner } from "../helpers/fake-runner";
 
 const target = { dest: "tim@box", control: "/tmp/odh/box.sock" };
 
-describe("shellQuote", () => {
+describe(shellQuote, () => {
   it.each([
     ["plain", "plain"],
     ["/a/b-c_d.json", "/a/b-c_d.json"],
@@ -30,28 +32,55 @@ describe("shellQuote", () => {
   });
 
   it("survives a real shell unchanged", async () => {
-    const args = ["a b", "it's", "$HOME", "", "back\\slash", "semi;colon", "{{json .}}"];
-    const r = await spawnRunner("sh", ["-c", remoteCommand("printf", ["%s|", ...args])]);
+    const args = [
+      "a b",
+      "it's",
+      "$HOME",
+      "",
+      "back\\slash",
+      "semi;colon",
+      "{{json .}}",
+    ];
+    const r = await spawnRunner("sh", [
+      "-c",
+      remoteCommand("printf", ["%s|", ...args]),
+    ]);
     expect(r.stdout).toBe(args.map((a) => `${a}|`).join(""));
   });
 });
 
-describe("remoteCommand", () => {
+describe(remoteCommand, () => {
   it("prefixes env assignments with env", () => {
-    expect(remoteCommand("docker", ["ps"], { A: "1", B: "x y" })).toBe("env A=1 'B=x y' docker ps");
+    expect(remoteCommand("docker", ["ps"], { A: "1", B: "x y" })).toBe(
+      "env A=1 'B=x y' docker ps"
+    );
   });
 });
 
 describe("ssh arguments", () => {
   it("never prompts and reuses the master", () => {
-    expect(clientArgs(target)).toEqual(["-S", "/tmp/odh/box.sock", "-o", "BatchMode=yes"]);
+    expect(clientArgs(target)).toStrictEqual([
+      "-S",
+      "/tmp/odh/box.sock",
+      "-o",
+      "BatchMode=yes",
+    ]);
   });
 
   it("runs the master in the foreground with keepalives", () => {
-    expect(masterArgs(target)).toEqual([
-      "-M", "-N", "-S", "/tmp/odh/box.sock",
-      "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-      "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+    expect(masterArgs(target)).toStrictEqual([
+      "-M",
+      "-N",
+      "-S",
+      "/tmp/odh/box.sock",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=3",
       "tim@box",
     ]);
     expect(masterArgs(target)).not.toContain("-f");
@@ -63,17 +92,26 @@ describe("ssh arguments", () => {
   });
 });
 
-describe("describeSshFailure", () => {
+describe(describeSshFailure, () => {
   it("asks for a host key and ssh key on auth problems", () => {
-    expect(describeSshFailure("tim@box", "Host key verification failed.\n")).toBe(
-      "add the host key and an ssh key for tim@box first (run `ssh tim@box` once)",
+    expect(
+      describeSshFailure("tim@box", "Host key verification failed.\n")
+    ).toBe(
+      "add the host key and an ssh key for tim@box first (run `ssh tim@box` once)"
     );
-    expect(describeSshFailure("tim@box", "tim@box: Permission denied (publickey).\n")).toContain("add the host key");
+    expect(
+      describeSshFailure("tim@box", "tim@box: Permission denied (publickey).\n")
+    ).toContain("add the host key");
   });
 
   it("quotes ssh's last line otherwise", () => {
-    expect(describeSshFailure("tim@box", "debug\nssh: connect to host box port 22: No route to host\n")).toBe(
-      "ssh to tim@box failed: ssh: connect to host box port 22: No route to host",
+    expect(
+      describeSshFailure(
+        "tim@box",
+        "debug\nssh: connect to host box port 22: No route to host\n"
+      )
+    ).toBe(
+      "ssh to tim@box failed: ssh: connect to host box port 22: No route to host"
     );
     expect(describeSshFailure("tim@box", "")).toBe("ssh to tim@box exited");
   });
@@ -84,11 +122,22 @@ describe("SshHost.run", () => {
     const fake = fakeRunner();
     const host = new SshHost("box", target, fake.run);
     const onLine = () => {};
-    await host.run("docker", ["ps", "--filter", "label=a b"], { env: { X: "1" }, timeoutMs: 5, onLine });
-    expect(fake.calls).toEqual([
+    await host.run("docker", ["ps", "--filter", "label=a b"], {
+      env: { X: "1" },
+      timeoutMs: 5,
+      onLine,
+    });
+    expect(fake.calls).toStrictEqual([
       {
         cmd: "ssh",
-        args: ["-S", "/tmp/odh/box.sock", "-o", "BatchMode=yes", "tim@box", "env X=1 docker ps --filter 'label=a b'"],
+        args: [
+          "-S",
+          "/tmp/odh/box.sock",
+          "-o",
+          "BatchMode=yes",
+          "tim@box",
+          "env X=1 docker ps --filter 'label=a b'",
+        ],
         opts: { timeoutMs: 5, onLine },
       },
     ]);
@@ -98,17 +147,29 @@ describe("SshHost.run", () => {
 describe("SshHost files", () => {
   it("reads with cat and reports failures with ssh's stderr", async () => {
     const ok = fakeRunner(() => ({ stdout: "{}\n" }));
-    expect(await new SshHost("box", target, ok.run).readFile("/x/a b.json")).toBe("{}\n");
+    await expect(
+      new SshHost("box", target, ok.run).readFile("/x/a b.json")
+    ).resolves.toBe("{}\n");
     expect(ok.calls[0].args.at(-1)).toBe("cat '/x/a b.json'");
 
-    const missing = fakeRunner(() => ({ exitCode: 1, stderr: "cat: /x: No such file or directory\n" }));
-    await expect(new SshHost("box", target, missing.run).readFile("/x")).rejects.toThrow(/reading \/x on box failed: .*No such file/);
+    const missing = fakeRunner(() => ({
+      exitCode: 1,
+      stderr: "cat: /x: No such file or directory\n",
+    }));
+    await expect(
+      new SshHost("box", target, missing.run).readFile("/x")
+    ).rejects.toThrow(/reading \/x on box failed: .*No such file/u);
   });
 
   it("writes through stdin, creating the folder", async () => {
     const fake = fakeRunner();
-    await new SshHost("box", target, fake.run).writeFile("/x/y.json", "content");
-    expect(fake.calls[0].args.at(-1)).toBe(`sh -c 'mkdir -p "$(dirname "$1")" && cat > "$1"' sh /x/y.json`);
+    await new SshHost("box", target, fake.run).writeFile(
+      "/x/y.json",
+      "content"
+    );
+    expect(fake.calls[0].args.at(-1)).toBe(
+      `sh -c 'mkdir -p "$(dirname "$1")" && cat > "$1"' sh /x/y.json`
+    );
     expect(fake.calls[0].opts?.input).toBe("content");
   });
 });
@@ -119,15 +180,31 @@ describe("SshHost.dial", () => {
     const calls: string[][] = [];
     const fake: Spawn = (cmd, args) => {
       calls.push([cmd, ...args]);
-      return spawn(process.execPath, ["-e", script], { stdio: ["pipe", "pipe", "pipe"] });
+      return spawn(process.execPath, ["-e", script], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
     };
     return { fake, calls };
   }
 
   it("opens a channel with -W through the master", async () => {
     const { fake, calls } = scripted("process.stdin.pipe(process.stdout)");
-    const stream = await new SshHost("box", target, fakeRunner().run, fake).dial("172.17.0.5", 4096);
-    expect(calls[0]).toEqual(["ssh", "-S", "/tmp/odh/box.sock", "-o", "BatchMode=yes", "-W", "172.17.0.5:4096", "tim@box"]);
+    const stream = await new SshHost(
+      "box",
+      target,
+      fakeRunner().run,
+      fake
+    ).dial("172.17.0.5", 4096);
+    expect(calls[0]).toStrictEqual([
+      "ssh",
+      "-S",
+      "/tmp/odh/box.sock",
+      "-o",
+      "BatchMode=yes",
+      "-W",
+      "172.17.0.5:4096",
+      "tim@box",
+    ]);
     stream.write("ping");
     const [data] = (await once(stream, "data")) as [Buffer];
     expect(data.toString()).toBe("ping");
@@ -136,19 +213,29 @@ describe("SshHost.dial", () => {
 
   it("closes quietly when destroyed, like a socket, and stops ssh", async () => {
     const { fake } = scripted("process.stdin.pipe(process.stdout)");
-    const stream = await new SshHost("box", target, fakeRunner().run, fake).dial("172.17.0.5", 4096);
+    const stream = await new SshHost(
+      "box",
+      target,
+      fakeRunner().run,
+      fake
+    ).dial("172.17.0.5", 4096);
     const errors: Error[] = [];
     stream.on("error", (e) => errors.push(e));
     stream.destroy();
     await once(stream, "close");
-    expect(errors).toEqual([]);
+    expect(errors).toStrictEqual([]);
   });
 
   it("fails the stream with ssh's message when the channel can't open", async () => {
     const { fake } = scripted(
-      "process.stderr.write('channel 0: open failed: connect failed: Connection refused\\nstdio forwarding failed\\n'); process.exit(255)",
+      "process.stderr.write('channel 0: open failed: connect failed: Connection refused\\nstdio forwarding failed\\n'); process.exit(255)"
     );
-    const stream = await new SshHost("box", target, fakeRunner().run, fake).dial("172.17.0.5", 9);
+    const stream = await new SshHost(
+      "box",
+      target,
+      fakeRunner().run,
+      fake
+    ).dial("172.17.0.5", 9);
     const [err] = (await once(stream, "error")) as [Error];
     expect(err.message).toContain("Connection refused");
   });

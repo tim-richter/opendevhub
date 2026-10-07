@@ -1,7 +1,16 @@
 import type { NodeId, NodeStats, NodeView } from "../shared/types";
-import { InvalidNodeError, type NodeConfig, addNode, loadConfig, nodeInUse, removeNode, saveConfig } from "./config";
+import {
+  InvalidNodeError,
+  addNode,
+  loadConfig,
+  nodeInUse,
+  removeNode,
+  saveConfig,
+} from "./config";
+import type { NodeConfig } from "./config";
 import type { Runner } from "./exec";
-import { type Host, LOCAL_NODE, localHost } from "./host";
+import { LOCAL_NODE, localHost } from "./host";
+import type { Host } from "./host";
 import { NodeConnection } from "./node-connection";
 import { nodeStats } from "./node-preflight";
 import { NotFoundError } from "./orchestrator";
@@ -14,9 +23,9 @@ export interface NodeConnectionPort {
   readonly online: boolean;
   /** The ssh destination and ControlMaster socket; absent on fakes that don't need them. */
   readonly target?: SshTarget;
-  view(): NodeView;
-  start(): void;
-  close(): Promise<void>;
+  view: () => NodeView;
+  start: () => void;
+  close: () => Promise<void>;
 }
 
 export interface NodesOptions {
@@ -50,7 +59,9 @@ export class Nodes {
   }
 
   start(): void {
-    for (const node of loadConfig(this.opts.configDir).nodes ?? []) this.open(node);
+    for (const node of loadConfig(this.opts.configDir).nodes ?? []) {
+      this.open(node);
+    }
     this.publish();
     void this.sample();
   }
@@ -73,13 +84,18 @@ export class Nodes {
 
   /** The local host always; a node's host only while it's online. */
   host(id: NodeId): Host | undefined {
-    if (id === LOCAL_NODE) return this.local;
+    if (id === LOCAL_NODE) {
+      return this.local;
+    }
     const conn = this.connections.get(id);
     return conn?.online ? conn.host : undefined;
   }
 
+  // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
   async add(input: { ssh?: unknown; label?: unknown }): Promise<NodeView> {
-    if (typeof input.ssh !== "string") throw new InvalidNodeError("an ssh destination is required");
+    if (typeof input.ssh !== "string") {
+      throw new InvalidNodeError("an ssh destination is required");
+    }
     // Re-read so settings saved meanwhile (forges, projects) aren't lost.
     const { config, node } = addNode(loadConfig(this.opts.configDir), {
       ssh: input.ssh,
@@ -88,18 +104,31 @@ export class Nodes {
     saveConfig(this.opts.configDir, config);
     this.open(node);
     this.publish();
-    return this.list().find((n) => n.id === node.id)!;
+    const added = this.list().find((n) => n.id === node.id);
+    if (!added) {
+      throw new Error(`node ${node.id} was not added`);
+    }
+    return added;
   }
 
   async remove(id: NodeId): Promise<void> {
     const conn = this.connections.get(id);
-    if (!conn) throw new NotFoundError(`no node ${id}`);
+    if (!conn) {
+      throw new NotFoundError(`no node ${id}`);
+    }
     const environments = this.opts.environmentsOn?.(id) ?? 0;
-    if (environments > 0) throw new InvalidNodeError(nodeInUse(id, environments));
-    saveConfig(this.opts.configDir, removeNode(loadConfig(this.opts.configDir), id));
+    if (environments > 0) {
+      throw new InvalidNodeError(nodeInUse(id, environments));
+    }
+    saveConfig(
+      this.opts.configDir,
+      removeNode(loadConfig(this.opts.configDir), id)
+    );
     this.connections.delete(id);
     this.stats.delete(id);
-    if (this.wasOnline.delete(id)) this.opts.onOffline?.(id);
+    if (this.wasOnline.delete(id)) {
+      this.opts.onOffline?.(id);
+    }
     await conn.close();
     this.publish();
   }
@@ -114,14 +143,20 @@ export class Nodes {
     const connect =
       this.opts.connect ??
       ((n: NodeConfig, onChange: () => void) =>
-        new NodeConnection({ node: n, controlDir: this.opts.controlDir, onChange }));
+        new NodeConnection({
+          controlDir: this.opts.controlDir,
+          node: n,
+          onChange,
+        }));
     const conn = connect(node, () => this.publish());
     this.connections.set(node.id, conn);
     conn.start();
   }
 
   private publish(): void {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     for (const [id, conn] of this.connections) {
       if (conn.online && !this.wasOnline.has(id)) {
         this.wasOnline.add(id);
@@ -136,21 +171,32 @@ export class Nodes {
   /** Samples local and online nodes, then again `statsIntervalMs` after the round ends. */
   private async sample(): Promise<void> {
     const read = this.opts.stats ?? nodeStats;
-    const targets: Array<[NodeId, Host]> = [[LOCAL_NODE, this.local]];
+    const targets: [NodeId, Host][] = [[LOCAL_NODE, this.local]];
     for (const [id, conn] of this.connections) {
-      if (conn.online) targets.push([id, conn.host]);
-      else this.stats.delete(id);
+      if (conn.online) {
+        targets.push([id, conn.host]);
+      } else {
+        this.stats.delete(id);
+      }
     }
     await Promise.all(
       targets.map(async ([id, host]) => {
         const stats = await read(host.run).catch(() => undefined);
-        if (stats) this.stats.set(id, stats);
-        else this.stats.delete(id);
-      }),
+        if (stats) {
+          this.stats.set(id, stats);
+        } else {
+          this.stats.delete(id);
+        }
+      })
     );
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     this.publish();
-    this.timer = setTimeout(() => void this.sample(), this.opts.statsIntervalMs ?? 10_000);
+    this.timer = setTimeout(
+      () => void this.sample(),
+      this.opts.statsIntervalMs ?? 10_000
+    );
     this.timer.unref?.();
   }
 }

@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
+
 import type { Containers, ExecTarget } from "../containers";
 import type { HostPort } from "../network";
-import { type RelayTarget, pingRelay } from "./client";
+import { pingRelay } from "./client";
+import type { RelayTarget } from "./client";
 import { RELAY_SCRIPT } from "./script";
 
 export const RELAY_PORT = 4097;
@@ -19,13 +21,11 @@ export type RelayStatus =
   | { status: "active"; via: "existing" | "bun" | "node" }
   | { status: "unavailable"; reason: string };
 
-export function generateRelayToken(): string {
-  return randomBytes(32).toString("base64url");
-}
+export const generateRelayToken = (): string =>
+  randomBytes(32).toString("base64url");
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+const shellQuote = (value: string): string =>
+  `'${value.replaceAll("'", `'\\''`)}'`;
 
 export interface RelayRuntimeDeps {
   containers: Pick<Containers, "exec">;
@@ -38,11 +38,17 @@ export interface RelayRuntimeDeps {
 export class RelayRuntime {
   constructor(private readonly deps: RelayRuntimeDeps) {}
 
-  async ensureRunning(execTarget: ExecTarget, args: RelayArgs): Promise<RelayStatus> {
+  async ensureRunning(
+    execTarget: ExecTarget,
+    args: RelayArgs
+  ): Promise<RelayStatus> {
     try {
       return await this.start(execTarget, args);
-    } catch (err) {
-      return { status: "unavailable", reason: err instanceof Error ? err.message : String(err) };
+    } catch (error) {
+      return {
+        reason: error instanceof Error ? error.message : String(error),
+        status: "unavailable",
+      };
     }
   }
 
@@ -50,20 +56,40 @@ export class RelayRuntime {
     await this.deps.containers.exec(execTarget, ["sh", "-c", KILL_RELAY]);
   }
 
-  private async start(execTarget: ExecTarget, args: RelayArgs): Promise<RelayStatus> {
+  private async start(
+    execTarget: ExecTarget,
+    args: RelayArgs
+  ): Promise<RelayStatus> {
     const { containers } = this.deps;
     const port = this.deps.relayPort ?? RELAY_PORT;
     // `port` is where the relay listens in the container; `address` is where the host reaches it.
     const target: RelayTarget = { ...args.address, token: args.token };
-    if (await this.ping(target)) return { status: "active", via: "existing" };
+    if (await this.ping(target)) {
+      return { status: "active", via: "existing" };
+    }
 
     await containers.exec(execTarget, ["sh", "-c", KILL_RELAY]);
-    const candidates: Array<{ via: "bun" | "node"; command: string }> = [];
-    if (args.binary) candidates.push({ via: "bun", command: `BUN_BE_BUN=1 ${shellQuote(args.binary)}` });
-    const hasNode = await containers.exec(execTarget, ["sh", "-c", "command -v node >/dev/null 2>&1"]);
-    if (hasNode.exitCode === 0) candidates.push({ via: "node", command: "node" });
+    const candidates: { via: "bun" | "node"; command: string }[] = [];
+    if (args.binary) {
+      candidates.push({
+        command: `BUN_BE_BUN=1 ${shellQuote(args.binary)}`,
+        via: "bun",
+      });
+    }
+    const hasNode = await containers.exec(execTarget, [
+      "sh",
+      "-c",
+      "command -v node >/dev/null 2>&1",
+    ]);
+    if (hasNode.exitCode === 0) {
+      candidates.push({ command: "node", via: "node" });
+    }
     if (candidates.length === 0) {
-      return { status: "unavailable", reason: "no relay runtime: opencode Bun mode unavailable and node not found" };
+      return {
+        reason:
+          "no relay runtime: opencode Bun mode unavailable and node not found",
+        status: "unavailable",
+      };
     }
 
     let reason = "";
@@ -72,14 +98,20 @@ export class RelayRuntime {
         `nohup env ${candidate.command} -e ${shellQuote(RELAY_SCRIPT)} odh-relay ` +
         `< /dev/null > ${RELAY_LOG} 2>&1 &`;
       await containers.exec(execTarget, ["sh", "-c", launch], {
-        env: { ODH_RELAY_TOKEN: args.token, ODH_RELAY_PORT: String(port) },
+        env: { ODH_RELAY_PORT: String(port), ODH_RELAY_TOKEN: args.token },
       });
-      if (await this.waitReady(target)) return { status: "active", via: candidate.via };
-      const log = await containers.exec(execTarget, ["sh", "-c", `tail -n 1 ${RELAY_LOG} 2>/dev/null`]);
+      if (await this.waitReady(target)) {
+        return { status: "active", via: candidate.via };
+      }
+      const log = await containers.exec(execTarget, [
+        "sh",
+        "-c",
+        `tail -n 1 ${RELAY_LOG} 2>/dev/null`,
+      ]);
       reason = `${candidate.via}: ${log.stdout.trim() || "did not answer"}`;
       await containers.exec(execTarget, ["sh", "-c", KILL_RELAY]);
     }
-    return { status: "unavailable", reason };
+    return { reason, status: "unavailable" };
   }
 
   private ping(target: RelayTarget): Promise<boolean> {
@@ -89,8 +121,12 @@ export class RelayRuntime {
   private async waitReady(target: RelayTarget): Promise<boolean> {
     const deadline = Date.now() + (this.deps.readyTimeoutMs ?? 5000);
     while (Date.now() < deadline) {
-      if (await this.ping(target)) return true;
-      await new Promise((r) => setTimeout(r, this.deps.readyIntervalMs ?? 200));
+      if (await this.ping(target)) {
+        return true;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, this.deps.readyIntervalMs ?? 200);
+      });
     }
     return false;
   }

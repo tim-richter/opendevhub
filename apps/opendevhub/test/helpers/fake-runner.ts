@@ -6,7 +6,11 @@ export interface Call {
   opts?: RunOptions;
 }
 
-export function fakeRunner(handler: (call: Call) => Partial<RunResult> | Promise<Partial<RunResult>> = () => ({})) {
+export function fakeRunner(
+  handler: (
+    call: Call
+  ) => Partial<RunResult> | Promise<Partial<RunResult>> = () => ({})
+) {
   const calls: Call[] = [];
   const run: Runner = async (cmd, args, opts) => {
     const call = { cmd, args, opts };

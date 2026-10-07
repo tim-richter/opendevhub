@@ -1,13 +1,18 @@
-'use client';
-import { useEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/cn';
-import { EXTENT, HEX_RADIUS, RING, STROKE } from './logo-3d-geometry';
+"use client";
+import { useEffect, useRef, useState } from "react";
 
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+import { cn } from "@/lib/cn";
+
+import { EXTENT, HEX_RADIUS, RING, STROKE } from "./logo-3d-geometry";
+
+const reducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // Start fetching three.js as soon as this module runs in the browser, rather than after hydration.
 const scene =
-  typeof window !== 'undefined' && !reducedMotion() ? import('./logo-3d-scene').catch(() => null) : null;
+  typeof window !== "undefined" && !reducedMotion()
+    ? import("./logo-3d-scene").catch(() => null)
+    : null;
 
 // Cube corners in the logo pose, as seen by the 3D camera (y up): one at the top, then every 60°.
 const CORNERS = Array.from({ length: 6 }, (_, i) => {
@@ -22,18 +27,28 @@ const CORNERS = Array.from({ length: 6 }, (_, i) => {
  * Until three.js has loaded (and when reduced motion is requested) it shows an SVG of that first frame,
  * drawn in the same coordinates as the 3D camera so the canvas fades in exactly on top of it.
  */
-export function Logo3D({ size = 160, className }: { size?: number; className?: string }) {
+export const Logo3D = ({
+  size = 160,
+  className,
+}: {
+  size?: number;
+  className?: string;
+}) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !scene) return;
+    if (!host || !scene) {
+      return;
+    }
     let disposed = false;
-    let cleanup = () => {};
+    let cleanup: () => void = () => undefined;
 
     void scene.then((mod) => {
-      if (disposed || !mod) return;
+      if (disposed || !mod) {
+        return;
+      }
       cleanup = mod.mountLogoScene(host, size, () => setReady(true));
     });
 
@@ -47,8 +62,8 @@ export function Logo3D({ size = 160, className }: { size?: number; className?: s
   return (
     <div
       ref={hostRef}
-      className={cn('relative shrink-0', className)}
-      style={{ width: size, height: size }}
+      className={cn("relative shrink-0", className)}
+      style={{ height: size, width: size }}
     >
       {!ready && (
         <svg
@@ -59,8 +74,14 @@ export function Logo3D({ size = 160, className }: { size?: number; className?: s
           aria-hidden="true"
           focusable="false"
         >
-          <g stroke="currentColor" strokeWidth={2 * STROKE} fill="none" strokeLinejoin="round" strokeLinecap="round">
-            <polygon points={CORNERS.map(([x, y]) => `${x},${y}`).join(' ')} />
+          <g
+            stroke="currentColor"
+            strokeWidth={2 * STROKE}
+            fill="none"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          >
+            <polygon points={CORNERS.map(([x, y]) => `${x},${y}`).join(" ")} />
             <circle r={RING} />
             {CORNERS.map(([x, y]) => (
               <line key={`${x},${y}`} x1={x} y1={y} x2={0} y2={0} />
@@ -70,4 +91,4 @@ export function Logo3D({ size = 160, className }: { size?: number; className?: s
       )}
     </div>
   );
-}
+};

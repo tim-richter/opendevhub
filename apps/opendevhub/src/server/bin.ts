@@ -1,6 +1,6 @@
 import { main } from "./cli";
 
-main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : err);
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });

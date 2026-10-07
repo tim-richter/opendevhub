@@ -1,11 +1,8 @@
-import { docsLlms } from '@/lib/source';
+import { docsLlms } from "@/lib/source";
 
-export async function GET() {
-  return new Response(await docsLlms.full());
-}
+export const GET = async () => new Response(await docsLlms.full());
 
-export async function getConfig() {
-  return {
-    render: 'static' as const,
-  } as const;
-}
+export const getConfig = async () =>
+  ({
+    render: "static" as const,
+  }) as const;

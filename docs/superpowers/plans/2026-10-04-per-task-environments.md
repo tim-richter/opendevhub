@@ -4,7 +4,7 @@
 
 **Goal:** Let a worktree run in its own devcontainer ("Own container"), started from a reused base image, with its own opencode, relay, route, port forwards and monitor, while the project's main container stays exactly as it is today.
 
-**Architecture:** An *environment* is one container plus its opencode, relay, route, forwards and monitor. Part A refactors the orchestrator so all of that is keyed by `EnvId`; the main environment's id is the project id, so nothing visible changes. Part B adds task environments: a pure module generates an override `devcontainer.json` (image pinned, worktree mounted, `.git` mounted), an `Images` service builds one base image per project and image key, and the orchestrator starts, stops, adopts and removes task containers and routes opencode calls to the environment that owns a checkout.
+**Architecture:** An _environment_ is one container plus its opencode, relay, route, forwards and monitor. Part A refactors the orchestrator so all of that is keyed by `EnvId`; the main environment's id is the project id, so nothing visible changes. Part B adds task environments: a pure module generates an override `devcontainer.json` (image pinned, worktree mounted, `.git` mounted), an `Images` service builds one base image per project and image key, and the orchestrator starts, stops, adopts and removes task containers and routes opencode calls to the environment that owns a checkout.
 
 **Tech Stack:** TypeScript (strict), Node ≥ 20, Hono, React 19, vitest, devcontainer CLI 0.89, Docker.
 
@@ -24,7 +24,7 @@
 
 ## Deviations from the spec (verified against devcontainer CLI 0.89.0 while planning)
 
-1. **Labels.** The CLI's `findDevContainer` lists containers matching *all* id labels and takes the first. A task container also carrying `opendevhub.project=<id>` could be picked by the main environment's `up` and `exec`. So task containers use the two `opendevhub.env*` labels only.
+1. **Labels.** The CLI's `findDevContainer` lists containers matching _all_ id labels and takes the first. A task container also carrying `opendevhub.project=<id>` could be picked by the main environment's `up` and `exec`. So task containers use the two `opendevhub.env*` labels only.
 2. **Git stays in the main container.** Review status, commit, update, merge, worktree add/remove and the image-key `rev-parse` keep running there; task containers mount the same worktree at the same path. Calls to opencode (sessions, diff, generate, replies) go to the task environment's opencode.
 3. **`vsc-<dir>-<hash>-uid` images.** `up` with a pinned image still builds the remote-user UID image, named after the worktree folder. Removing an environment removes that image (best effort).
 4. **`${containerWorkspaceFolder}`.** `read-configuration` substitutes it with `/workspaces/<worktree dir>`. The override config rewrites that path to the worktree's real container path. Lifecycle commands come from the image label and can't be rewritten, so a config whose lifecycle commands contain the guessed path is refused for isolation.
@@ -66,28 +66,29 @@
 ### Task 1: Shared types and an empty `environments` list in the snapshot
 
 **Files:**
+
 - Modify: `src/shared/types.ts`
 - Modify: `src/server/state.ts` (the `snapshot()` method)
 - Modify: every `ProjectView` literal in tests (found by `pnpm typecheck` in Step 5)
 - Test: `test/server/state.test.ts`
 
 **Interfaces:**
+
 - Produces: `EnvId`, `Isolation`, `EnvWorktree`, `EnvironmentView`, `IsolationInfo`; `ProjectView.environments: EnvironmentView[]`, `ProjectView.isolation?: IsolationInfo`; `SessionSummary.envId?: EnvId`; `TaskRequest.environment?: Isolation`; `TaskVariantResult.envId?: EnvId`, `TaskVariantResult.notice?: string`.
 
 - [ ] **Step 1: Write the failing test** — add to the `describe` in `test/server/state.test.ts` that holds the snapshot test:
 
 ```ts
-  it("lists no task environments for a project that has none", () => {
-    const { store } = make();
-    store.setProjects([p("a")]);
-    expect(store.snapshot().projects[0].environments).toEqual([]);
-  });
+it("lists no task environments for a project that has none", () => {
+  const { store } = make();
+  store.setProjects([p("a")]);
+  expect(store.snapshot().projects[0].environments).toEqual([]);
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pnpm vitest run test/server/state.test.ts`
-Expected: FAIL — `expected undefined to deeply equal []`.
+Run: `pnpm vitest run test/server/state.test.ts` Expected: FAIL — `expected undefined to deeply equal []`.
 
 - [ ] **Step 3: Add the types** — in `src/shared/types.ts`, after `export type ProjectId = string;`:
 
@@ -164,13 +165,11 @@ In `ProjectView`, after `openUrl: string;`:
 
 - [ ] **Step 5: Fix test fixtures**
 
-Run: `pnpm typecheck`
-Expected: errors `Property 'environments' is missing` in test files that build a `ProjectView` literal (at least `test/web/derive.test.ts`, `test/web/tasks.test.ts`, `test/web/review.test.ts`, `test/server/publish.test.ts`). Add `environments: [],` next to each literal's `openUrl:` until `pnpm typecheck` passes.
+Run: `pnpm typecheck` Expected: errors `Property 'environments' is missing` in test files that build a `ProjectView` literal (at least `test/web/derive.test.ts`, `test/web/tasks.test.ts`, `test/web/review.test.ts`, `test/server/publish.test.ts`). Add `environments: [],` next to each literal's `openUrl:` until `pnpm typecheck` passes.
 
 - [ ] **Step 6: Run the tests**
 
-Run: `pnpm test`
-Expected: PASS.
+Run: `pnpm test` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -182,11 +181,13 @@ git commit -m "feat: types for task environments; the snapshot lists them"
 ### Task 2: `ExecTarget` — address a container by labels and an override config
 
 **Files:**
+
 - Modify: `src/server/containers.ts`
 - Modify: `src/server/opencode/runtime.ts`, `src/server/relay/runtime.ts`
 - Test: `test/server/containers.test.ts`
 
 **Interfaces:**
+
 - Produces: `interface ExecTarget { id: string; path: string; idLabels?: string[]; overrideConfig?: string }`. `Containers.up(target: ExecTarget, opts)`, `readConfiguration(target)`, `workspaceFolder(target)`, `exec(target, command, opts)`. `OpencodeRuntime.resolveBinary/ensureRunning/stopServer(target: ExecTarget, …)`, `RelayRuntime.ensureRunning/stop(target: ExecTarget, …)`. A `Project` is an `ExecTarget` (structurally), so existing callers compile unchanged.
 
 - [ ] **Step 1: Write the failing tests** — add to `test/server/containers.test.ts`:
@@ -196,7 +197,14 @@ describe("exec targets", () => {
   it("keeps addressing a project's container by its project label", async () => {
     const { run, calls } = fakeRunner();
     await new Containers(run).exec(project, ["pwd"]);
-    expect(calls[0].args).toEqual(["exec", "--workspace-folder", "/src/demo", "--id-label", `${LABEL}=demo-1a2b3c`, "pwd"]);
+    expect(calls[0].args).toEqual([
+      "exec",
+      "--workspace-folder",
+      "/src/demo",
+      "--id-label",
+      `${LABEL}=demo-1a2b3c`,
+      "pwd",
+    ]);
   });
 
   it("addresses a task environment by its own labels and generated config", async () => {
@@ -204,16 +212,23 @@ describe("exec targets", () => {
     const target = {
       id: "demo-1a2b3c-feat-0a1b",
       path: "/src/demo.worktrees/feat",
-      idLabels: ["opendevhub.env=demo-1a2b3c-feat-0a1b", "opendevhub.env-project=demo-1a2b3c"],
+      idLabels: [
+        "opendevhub.env=demo-1a2b3c-feat-0a1b",
+        "opendevhub.env-project=demo-1a2b3c",
+      ],
       overrideConfig: "/state/envs/demo-1a2b3c-feat-0a1b/devcontainer.json",
     };
     await new Containers(run).exec(target, ["pwd"]);
     expect(calls[0].args).toEqual([
       "exec",
-      "--workspace-folder", "/src/demo.worktrees/feat",
-      "--id-label", "opendevhub.env=demo-1a2b3c-feat-0a1b",
-      "--id-label", "opendevhub.env-project=demo-1a2b3c",
-      "--override-config", "/state/envs/demo-1a2b3c-feat-0a1b/devcontainer.json",
+      "--workspace-folder",
+      "/src/demo.worktrees/feat",
+      "--id-label",
+      "opendevhub.env=demo-1a2b3c-feat-0a1b",
+      "--id-label",
+      "opendevhub.env-project=demo-1a2b3c",
+      "--override-config",
+      "/state/envs/demo-1a2b3c-feat-0a1b/devcontainer.json",
       "pwd",
     ]);
   });
@@ -222,8 +237,7 @@ describe("exec targets", () => {
 
 - [ ] **Step 2: Run them to verify the second fails**
 
-Run: `pnpm vitest run test/server/containers.test.ts`
-Expected: the task-environment test FAILS (the args contain `opendevhub.project=demo-1a2b3c-feat-0a1b`).
+Run: `pnpm vitest run test/server/containers.test.ts` Expected: the task-environment test FAILS (the args contain `opendevhub.project=demo-1a2b3c-feat-0a1b`).
 
 - [ ] **Step 3: Implement** — in `src/server/containers.ts`, add after `LABEL`:
 
@@ -262,8 +276,7 @@ In `src/server/relay/runtime.ts`: the same for `ensureRunning`, `stop` and the p
 
 - [ ] **Step 4: Run the tests**
 
-Run: `pnpm vitest run test/server && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/server && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -275,26 +288,31 @@ git commit -m "refactor: devcontainer calls address an ExecTarget (labels and an
 ### Task 3: Sessions carry the environment that runs them
 
 **Files:**
+
 - Modify: `src/server/status.ts`, `src/server/monitor.ts`
 - Test: `test/server/status.test.ts`
 
 **Interfaces:**
+
 - Produces: `StatusInput.envId?: string`; `MonitorOptions.envId?: string`. `deriveSessions` sets `envId` on every session only when `input.envId` is given.
 
 - [ ] **Step 1: Write the failing test** — add to `test/server/status.test.ts` (it already has `base` and `rawSession`):
 
 ```ts
-  it("tags sessions with the environment they run in, when given", () => {
-    const sessions = [rawSession("ses_1")];
-    expect(deriveSessions("p", { ...base, envId: "p-feat-0a1b", sessions })[0].envId).toBe("p-feat-0a1b");
-    expect(deriveSessions("p", { ...base, sessions })[0]).not.toHaveProperty("envId");
-  });
+it("tags sessions with the environment they run in, when given", () => {
+  const sessions = [rawSession("ses_1")];
+  expect(
+    deriveSessions("p", { ...base, envId: "p-feat-0a1b", sessions })[0].envId
+  ).toBe("p-feat-0a1b");
+  expect(deriveSessions("p", { ...base, sessions })[0]).not.toHaveProperty(
+    "envId"
+  );
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pnpm vitest run test/server/status.test.ts`
-Expected: FAIL — `expected undefined to be 'p-feat-0a1b'`.
+Run: `pnpm vitest run test/server/status.test.ts` Expected: FAIL — `expected undefined to be 'p-feat-0a1b'`.
 
 - [ ] **Step 3: Implement** — in `src/server/status.ts`, add to `StatusInput`:
 
@@ -320,8 +338,7 @@ and in `fetchAndDerive` pass it: `deriveSessions(projectId, { envId: this.opts.e
 
 - [ ] **Step 4: Run the tests**
 
-Run: `pnpm vitest run test/server/status.test.ts test/server/monitor.test.ts`
-Expected: PASS.
+Run: `pnpm vitest run test/server/status.test.ts test/server/monitor.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -333,28 +350,33 @@ git commit -m "feat: sessions carry the environment that runs them"
 ### Task 4: The orchestrator's lifecycle is keyed by environment
 
 **Files:**
+
 - Modify: `src/server/orchestrator.ts`
 - Test: `test/server/orchestrator.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ExecTarget` (Task 2), `MonitorOptions.envId` (Task 3).
 - Produces (private, used by Tasks 10–11): `interface Env { id: EnvId; project: Project; target: ExecTarget; worktree?: EnvWorktree }`; `mainEnv(project)`, `envOf(id)`, `exclusiveEnv(env, fn)`, `envDirectory(env)`, `envLog(env, line)`, `openRoute(env, c)`, `startRelay(env, ip, route)`, `forwardPorts(env, target)`, `launchOpencode(env, pw)`, `relaunchOpencode(env)`, `startMonitor(env)`, `stopContainer(env)`, `adoptRunning(env, info)`, `markStopped(env)`, `allEnvs()`, `sharedWorktrees(projectId)`, `fail(env, err)`. Maps `busy`, `monitors`, `routes`, `relayRecoveries` are keyed by `EnvId`. Public behaviour is unchanged.
 
 - [ ] **Step 1: Write the failing test** — add to `describe("Orchestrator")`:
 
 ```ts
-  it("runs the main container as the project's main environment", async () => {
-    const { orch, monitors } = setup();
-    await orch.rescan();
-    await orch.start(project.id);
-    expect(monitors[0].opts).toMatchObject({ projectId: project.id, envId: project.id, directory: "/workspaces/demo" });
+it("runs the main container as the project's main environment", async () => {
+  const { orch, monitors } = setup();
+  await orch.rescan();
+  await orch.start(project.id);
+  expect(monitors[0].opts).toMatchObject({
+    projectId: project.id,
+    envId: project.id,
+    directory: "/workspaces/demo",
   });
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pnpm vitest run test/server/orchestrator.test.ts -t "main environment"`
-Expected: FAIL — `envId` is missing.
+Run: `pnpm vitest run test/server/orchestrator.test.ts -t "main environment"` Expected: FAIL — `envId` is missing.
 
 - [ ] **Step 3: Add the `Env` type and helpers** — in `src/server/orchestrator.ts`, add `EnvId` and `EnvWorktree` to the `../shared/types` import, and `type ExecTarget` to the `./containers` import. Before `export class Orchestrator`, add:
 
@@ -732,8 +754,7 @@ Change the parameter types of `closeRoute`, `closePorts`, `stopMonitor` and `ope
 
 - [ ] **Step 7: Run the tests**
 
-Run: `pnpm vitest run test/server/orchestrator.test.ts && pnpm typecheck`
-Expected: PASS — all existing orchestrator tests plus the new one.
+Run: `pnpm vitest run test/server/orchestrator.test.ts && pnpm typecheck` Expected: PASS — all existing orchestrator tests plus the new one.
 
 - [ ] **Step 8: Commit**
 
@@ -743,15 +764,18 @@ git commit -m "refactor: key container lifecycle by environment, with the main e
 ```
 
 ---
+
 # Part B — Isolated task environments (`warmStart: "image"`)
 
 ### Task 5: `env-config` — env ids, settings, isolation blockers and the override config
 
 **Files:**
+
 - Create: `src/server/env-config.ts`
 - Test: `test/server/env-config.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `envIdFor(projectId: ProjectId, worktreePath: string, branch: string): EnvId`
   - `interface EnvSettings { isolation: Isolation; keyFiles: string[] }`, `resolveEnvSettings(custom: unknown, override: unknown): EnvSettings`
@@ -762,13 +786,25 @@ git commit -m "refactor: key container lifecycle by environment, with the main e
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { buildOverrideConfig, envIdFor, isolationBlocker, resolveEnvSettings } from "../../src/server/env-config";
+
+import {
+  buildOverrideConfig,
+  envIdFor,
+  isolationBlocker,
+  resolveEnvSettings,
+} from "../../src/server/env-config";
 
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 describe("envIdFor", () => {
   it("is the project id, a branch slug and a short hash", () => {
-    expect(envIdFor("demo-abc123", "/workspaces/demo.worktrees/feature-login", "feature/login")).toMatch(/^demo-abc123-feature-login-[0-9a-f]{4}$/);
+    expect(
+      envIdFor(
+        "demo-abc123",
+        "/workspaces/demo.worktrees/feature-login",
+        "feature/login"
+      )
+    ).toMatch(/^demo-abc123-feature-login-[0-9a-f]{4}$/);
   });
   it("differs per worktree and is stable", () => {
     const a = envIdFor("demo-abc123", "/w/demo.worktrees/a", "x");
@@ -776,26 +812,53 @@ describe("envIdFor", () => {
     expect(envIdFor("demo-abc123", "/w/demo.worktrees/b", "x")).not.toBe(a);
   });
   it("fits a DNS label even for long names", () => {
-    const id = envIdFor(`${"a".repeat(50)}-abc123`, "/w/x", "a-very-long-branch-name-that-goes-on");
+    const id = envIdFor(
+      `${"a".repeat(50)}-abc123`,
+      "/w/x",
+      "a-very-long-branch-name-that-goes-on"
+    );
     expect(id.length).toBeLessThanOrEqual(63);
     expect(id).toMatch(LABEL);
   });
   it("names a branch with no usable characters 'worktree'", () => {
-    expect(envIdFor("demo-abc123", "/w/x", "___")).toMatch(/^demo-abc123-worktree-[0-9a-f]{4}$/);
+    expect(envIdFor("demo-abc123", "/w/x", "___")).toMatch(
+      /^demo-abc123-worktree-[0-9a-f]{4}$/
+    );
   });
 });
 
 describe("resolveEnvSettings", () => {
   it("defaults to shared with no key files", () => {
-    expect(resolveEnvSettings(undefined, undefined)).toEqual({ isolation: "shared", keyFiles: [] });
+    expect(resolveEnvSettings(undefined, undefined)).toEqual({
+      isolation: "shared",
+      keyFiles: [],
+    });
   });
   it("reads the devcontainer customization, and the config.json override wins", () => {
-    expect(resolveEnvSettings({ isolation: "isolated", keyFiles: ["package-lock.json"] }, undefined)).toEqual({ isolation: "isolated", keyFiles: ["package-lock.json"] });
-    expect(resolveEnvSettings({ isolation: "isolated" }, { isolation: "shared" }).isolation).toBe("shared");
-    expect(resolveEnvSettings({ keyFiles: ["a"] }, { keyFiles: ["b"] }).keyFiles).toEqual(["b"]);
+    expect(
+      resolveEnvSettings(
+        { isolation: "isolated", keyFiles: ["package-lock.json"] },
+        undefined
+      )
+    ).toEqual({ isolation: "isolated", keyFiles: ["package-lock.json"] });
+    expect(
+      resolveEnvSettings({ isolation: "isolated" }, { isolation: "shared" })
+        .isolation
+    ).toBe("shared");
+    expect(
+      resolveEnvSettings({ keyFiles: ["a"] }, { keyFiles: ["b"] }).keyFiles
+    ).toEqual(["b"]);
   });
   it("ignores invalid values and unsafe key files", () => {
-    expect(resolveEnvSettings({ isolation: "yes", keyFiles: ["ok.lock", "/etc/passwd", "../x", "-x", 3, "a b"] }, null)).toEqual({ isolation: "shared", keyFiles: ["ok.lock"] });
+    expect(
+      resolveEnvSettings(
+        {
+          isolation: "yes",
+          keyFiles: ["ok.lock", "/etc/passwd", "../x", "-x", 3, "a b"],
+        },
+        null
+      )
+    ).toEqual({ isolation: "shared", keyFiles: ["ok.lock"] });
   });
 });
 
@@ -813,11 +876,26 @@ describe("isolationBlocker", () => {
     expect(isolationBlocker(config)).toMatch(reason);
   });
   it("accepts ordinary configs", () => {
-    expect(isolationBlocker({ image: "node", runArgs: ["--privileged", "--cap-add=SYS_PTRACE"] })).toBeUndefined();
+    expect(
+      isolationBlocker({
+        image: "node",
+        runArgs: ["--privileged", "--cap-add=SYS_PTRACE"],
+      })
+    ).toBeUndefined();
   });
   it("refuses lifecycle commands that use the workspace folder the CLI guessed", () => {
-    expect(isolationBlocker({ postCreateCommand: "cd /workspaces/feat && npm ci" }, "/workspaces/feat")).toMatch(/containerWorkspaceFolder/);
-    expect(isolationBlocker({ postCreateCommand: "cd /workspaces/feature && npm ci" }, "/workspaces/feat")).toBeUndefined();
+    expect(
+      isolationBlocker(
+        { postCreateCommand: "cd /workspaces/feat && npm ci" },
+        "/workspaces/feat"
+      )
+    ).toMatch(/containerWorkspaceFolder/);
+    expect(
+      isolationBlocker(
+        { postCreateCommand: "cd /workspaces/feature && npm ci" },
+        "/workspaces/feat"
+      )
+    ).toBeUndefined();
   });
 });
 
@@ -825,7 +903,10 @@ describe("buildOverrideConfig", () => {
   const base = {
     guessedFolder: "/workspaces/feat",
     image: "opendevhub/demo-abc123:0123456789ab-base",
-    worktree: { hostPath: "/src/demo.worktrees/feat", path: "/workspaces/demo.worktrees/feat" },
+    worktree: {
+      hostPath: "/src/demo.worktrees/feat",
+      path: "/workspaces/demo.worktrees/feat",
+    },
     gitDir: { host: "/src/demo/.git", container: "/workspaces/demo/.git" },
   };
 
@@ -851,42 +932,68 @@ describe("buildOverrideConfig", () => {
       initializeCommand: "echo host",
       forwardPorts: [3000],
       image: base.image,
-      workspaceMount: "type=bind,source=/src/demo.worktrees/feat,target=/workspaces/demo.worktrees/feat",
+      workspaceMount:
+        "type=bind,source=/src/demo.worktrees/feat,target=/workspaces/demo.worktrees/feat",
       workspaceFolder: "/workspaces/demo.worktrees/feat",
       mounts: ["type=bind,source=/src/demo/.git,target=/workspaces/demo/.git"],
     });
   });
 
   it("keeps the original mounts and adds .git", () => {
-    const { config } = buildOverrideConfig({ ...base, config: { image: "node", mounts: ["type=volume,source=c,target=/cache"] } });
-    expect(config.mounts).toEqual(["type=volume,source=c,target=/cache", "type=bind,source=/src/demo/.git,target=/workspaces/demo/.git"]);
+    const { config } = buildOverrideConfig({
+      ...base,
+      config: { image: "node", mounts: ["type=volume,source=c,target=/cache"] },
+    });
+    expect(config.mounts).toEqual([
+      "type=volume,source=c,target=/cache",
+      "type=bind,source=/src/demo/.git,target=/workspaces/demo/.git",
+    ]);
   });
 
   it("removes --name from runArgs and says so", () => {
-    const { config, notes } = buildOverrideConfig({ ...base, config: { image: "node", runArgs: ["--name", "demo", "--init", "--name=x"] } });
+    const { config, notes } = buildOverrideConfig({
+      ...base,
+      config: {
+        image: "node",
+        runArgs: ["--name", "demo", "--init", "--name=x"],
+      },
+    });
     expect(config.runArgs).toEqual(["--init"]);
-    expect(notes).toEqual(["removed --name from runArgs: every task container needs its own name"]);
+    expect(notes).toEqual([
+      "removed --name from runArgs: every task container needs its own name",
+    ]);
   });
 
   it("points paths the CLI guessed at the worktree", () => {
     const { config } = buildOverrideConfig({
       ...base,
-      config: { image: "node", containerEnv: { BIN: "/workspaces/feat/bin", OTHER: "/workspaces/feature", ROOT: "/workspaces/feat" } },
+      config: {
+        image: "node",
+        containerEnv: {
+          BIN: "/workspaces/feat/bin",
+          OTHER: "/workspaces/feature",
+          ROOT: "/workspaces/feat",
+        },
+      },
     });
-    expect(config.containerEnv).toEqual({ BIN: "/workspaces/demo.worktrees/feat/bin", OTHER: "/workspaces/feature", ROOT: "/workspaces/demo.worktrees/feat" });
+    expect(config.containerEnv).toEqual({
+      BIN: "/workspaces/demo.worktrees/feat/bin",
+      OTHER: "/workspaces/feature",
+      ROOT: "/workspaces/demo.worktrees/feat",
+    });
   });
 });
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/env-config.test.ts`
-Expected: FAIL — cannot find module `../../src/server/env-config`.
+Run: `pnpm vitest run test/server/env-config.test.ts` Expected: FAIL — cannot find module `../../src/server/env-config`.
 
 - [ ] **Step 3: Implement** — `src/server/env-config.ts`:
 
 ```ts
 import { createHash } from "node:crypto";
+
 import { slugify } from "../shared/tasks";
 import type { EnvId, Isolation, ProjectId } from "../shared/types";
 
@@ -894,8 +1001,15 @@ const MAX_LABEL = 63;
 const BRANCH_SLUG_MAX = 20;
 
 /** `<projectId>-<branch slug>-<hash4>`, at most 63 characters so it works as a hostname label. */
-export function envIdFor(projectId: ProjectId, worktreePath: string, branch: string): EnvId {
-  const hash = createHash("sha256").update(`${projectId}\0${worktreePath}`).digest("hex").slice(0, 4);
+export function envIdFor(
+  projectId: ProjectId,
+  worktreePath: string,
+  branch: string
+): EnvId {
+  const hash = createHash("sha256")
+    .update(`${projectId}\0${worktreePath}`)
+    .digest("hex")
+    .slice(0, 4);
   const tail = `-${slugify(branch, BRANCH_SLUG_MAX) || "worktree"}-${hash}`;
   return projectId.slice(0, MAX_LABEL - tail.length).replace(/-+$/, "") + tail;
 }
@@ -909,18 +1023,35 @@ export interface EnvSettings {
 const KEY_FILE = /^[\w.@+][\w.@+/-]*$/;
 
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 /** `customizations.opendevhub` from devcontainer.json, with the project's `config.json` entry taking precedence. */
-export function resolveEnvSettings(custom: unknown, override: unknown): EnvSettings {
+export function resolveEnvSettings(
+  custom: unknown,
+  override: unknown
+): EnvSettings {
   const c = record(custom);
   const o = record(override);
-  const isolation = [o.isolation, c.isolation].find((v): v is Isolation => v === "shared" || v === "isolated") ?? "shared";
-  const files = Array.isArray(o.keyFiles) ? o.keyFiles : Array.isArray(c.keyFiles) ? c.keyFiles : [];
+  const isolation =
+    [o.isolation, c.isolation].find(
+      (v): v is Isolation => v === "shared" || v === "isolated"
+    ) ?? "shared";
+  const files = Array.isArray(o.keyFiles)
+    ? o.keyFiles
+    : Array.isArray(c.keyFiles)
+      ? c.keyFiles
+      : [];
   return {
     isolation,
-    keyFiles: files.filter((f): f is string => typeof f === "string" && KEY_FILE.test(f) && !f.split("/").includes("..")),
+    keyFiles: files.filter(
+      (f): f is string =>
+        typeof f === "string" &&
+        KEY_FILE.test(f) &&
+        !f.split("/").includes("..")
+    ),
   };
 }
 
@@ -933,7 +1064,17 @@ export const LIFECYCLE_KEYS = [
 ] as const;
 
 /** Keys that describe how to build the image; the pinned image already carries their result in its label. */
-const IMAGE_KEYS = ["image", "build", "dockerFile", "context", "dockerComposeFile", "service", "runServices", "features", "overrideFeatureInstallOrder"];
+const IMAGE_KEYS = [
+  "image",
+  "build",
+  "dockerFile",
+  "context",
+  "dockerComposeFile",
+  "service",
+  "runServices",
+  "features",
+  "overrideFeatureInstallOrder",
+];
 
 const PUBLISH = /^(-p|-P$|--publish(-all)?(=|$))/;
 
@@ -947,15 +1088,36 @@ function folderPattern(folder: string): RegExp {
 }
 
 /** Why this config can't run one container per worktree; undefined when it can. */
-export function isolationBlocker(config: Record<string, unknown>, guessedFolder?: string): string | undefined {
-  if (config.dockerComposeFile !== undefined) return "Docker Compose configurations can't run in their own container yet";
-  if (config.appPort !== undefined) return "appPort publishes host ports, which several containers can't share";
-  const args = Array.isArray(config.runArgs) ? config.runArgs.filter((a): a is string => typeof a === "string") : [];
-  if (args.some((a) => PUBLISH.test(a))) return "runArgs publish host ports (-p/--publish), which several containers can't share";
-  if (args.some((a, i) => /^--net(work)?=host$/.test(a) || (/^--net(work)?$/.test(a) && args[i + 1] === "host"))) {
+export function isolationBlocker(
+  config: Record<string, unknown>,
+  guessedFolder?: string
+): string | undefined {
+  if (config.dockerComposeFile !== undefined)
+    return "Docker Compose configurations can't run in their own container yet";
+  if (config.appPort !== undefined)
+    return "appPort publishes host ports, which several containers can't share";
+  const args = Array.isArray(config.runArgs)
+    ? config.runArgs.filter((a): a is string => typeof a === "string")
+    : [];
+  if (args.some((a) => PUBLISH.test(a)))
+    return "runArgs publish host ports (-p/--publish), which several containers can't share";
+  if (
+    args.some(
+      (a, i) =>
+        /^--net(work)?=host$/.test(a) ||
+        (/^--net(work)?$/.test(a) && args[i + 1] === "host")
+    )
+  ) {
     return "host networking is not supported";
   }
-  if (guessedFolder && LIFECYCLE_KEYS.some((k) => config[k] !== undefined && folderPattern(guessedFolder).test(JSON.stringify(config[k])))) {
+  if (
+    guessedFolder &&
+    LIFECYCLE_KEYS.some(
+      (k) =>
+        config[k] !== undefined &&
+        folderPattern(guessedFolder).test(JSON.stringify(config[k]))
+    )
+  ) {
     return "a lifecycle command uses ${containerWorkspaceFolder}, which can't point at each task's worktree yet";
   }
   return undefined;
@@ -965,7 +1127,9 @@ function replaceFolder(value: unknown, from: string, to: string): unknown {
   if (typeof value === "string") return value.replace(folderPattern(from), to);
   if (Array.isArray(value)) return value.map((v) => replaceFolder(v, from, to));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replaceFolder(v, from, to)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, replaceFolder(v, from, to)])
+    );
   }
   return value;
 }
@@ -974,7 +1138,11 @@ function withoutName(args: unknown[]): unknown[] {
   const out: unknown[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--name") i++;
-    else if (typeof args[i] === "string" && (args[i] as string).startsWith("--name=")) continue;
+    else if (
+      typeof args[i] === "string" &&
+      (args[i] as string).startsWith("--name=")
+    )
+      continue;
     else out.push(args[i]);
   }
   return out;
@@ -996,12 +1164,22 @@ export interface OverrideInput {
  * worktree mounted where the main container sees it, and the repository's .git next to it, so git links
  * resolve the same way in both containers.
  */
-export function buildOverrideConfig(input: OverrideInput): { config: Record<string, unknown>; notes: string[] } {
+export function buildOverrideConfig(input: OverrideInput): {
+  config: Record<string, unknown>;
+  notes: string[];
+} {
   const notes: string[] = [];
   const config: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.config)) {
-    if (key === "configFilePath" || IMAGE_KEYS.includes(key) || (LIFECYCLE_KEYS as readonly string[]).includes(key)) continue;
-    config[key] = input.guessedFolder ? replaceFolder(value, input.guessedFolder, input.worktree.path) : value;
+    if (
+      key === "configFilePath" ||
+      IMAGE_KEYS.includes(key) ||
+      (LIFECYCLE_KEYS as readonly string[]).includes(key)
+    )
+      continue;
+    config[key] = input.guessedFolder
+      ? replaceFolder(value, input.guessedFolder, input.worktree.path)
+      : value;
   }
   config.image = input.image;
   config.workspaceMount = `type=bind,source=${input.worktree.hostPath},target=${input.worktree.path}`;
@@ -1012,7 +1190,10 @@ export function buildOverrideConfig(input: OverrideInput): { config: Record<stri
   ];
   if (Array.isArray(config.runArgs)) {
     const kept = withoutName(config.runArgs);
-    if (kept.length !== config.runArgs.length) notes.push("removed --name from runArgs: every task container needs its own name");
+    if (kept.length !== config.runArgs.length)
+      notes.push(
+        "removed --name from runArgs: every task container needs its own name"
+      );
     config.runArgs = kept;
   }
   return { config, notes };
@@ -1021,8 +1202,7 @@ export function buildOverrideConfig(input: OverrideInput): { config: Record<stri
 
 - [ ] **Step 4: Run the tests**
 
-Run: `pnpm vitest run test/server/env-config.test.ts`
-Expected: PASS.
+Run: `pnpm vitest run test/server/env-config.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1034,11 +1214,13 @@ git commit -m "feat: env ids, isolation settings and the task container's overri
 ### Task 6: Per-project overrides, the state folder and override config files
 
 **Files:**
+
 - Modify: `src/server/config.ts`
 - Create: `src/server/env-files.ts`
 - Test: `test/server/config.test.ts`, `test/server/env-files.test.ts`
 
 **Interfaces:**
+
 - Produces: `Config.projects?: Record<string, unknown>` (keyed by project path); `stateDir(env?): string`; `PersistedEnv`, `PersistedState.environments?` (used in Task 9); `class EnvFiles { path(envId): string; write(envId, config): Promise<string>; remove(envId): Promise<void> }`.
 
 - [ ] **Step 1: Write the failing tests** — add to `test/server/config.test.ts` (import `stateDir` too):
@@ -1046,16 +1228,28 @@ git commit -m "feat: env ids, isolation settings and the task container's overri
 ```ts
 describe("config projects", () => {
   it("keeps per-project settings through the CLI's load and save", () => {
-    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ roots: [], port: 1, projects: { "/src/demo": { isolation: "isolated" } } }));
+    fs.writeFileSync(
+      path.join(dir, "config.json"),
+      JSON.stringify({
+        roots: [],
+        port: 1,
+        projects: { "/src/demo": { isolation: "isolated" } },
+      })
+    );
     saveConfig(dir, loadConfig(dir));
-    expect(JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8")).projects).toEqual({ "/src/demo": { isolation: "isolated" } });
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"))
+        .projects
+    ).toEqual({ "/src/demo": { isolation: "isolated" } });
   });
 });
 
 describe("stateDir", () => {
   it("uses XDG_STATE_HOME when absolute, else ~/.local/state", () => {
     expect(stateDir({ XDG_STATE_HOME: "/xdg" })).toBe("/xdg/opendevhub");
-    expect(stateDir({ XDG_STATE_HOME: "rel" })).toBe(path.join(os.homedir(), ".local", "state", "opendevhub"));
+    expect(stateDir({ XDG_STATE_HOME: "rel" })).toBe(
+      path.join(os.homedir(), ".local", "state", "opendevhub")
+    );
   });
 });
 
@@ -1063,7 +1257,17 @@ describe("persisted environments", () => {
   it("round-trips task environments in state.json", () => {
     const state = {
       projects: {},
-      environments: { "demo-feat-0a1b": { projectId: "demo", worktree: { path: "/w/demo.worktrees/feat", hostPath: "/src/demo.worktrees/feat", branch: "feat" }, containerId: "c2" } },
+      environments: {
+        "demo-feat-0a1b": {
+          projectId: "demo",
+          worktree: {
+            path: "/w/demo.worktrees/feat",
+            hostPath: "/src/demo.worktrees/feat",
+            branch: "feat",
+          },
+          containerId: "c2",
+        },
+      },
     };
     saveState(dir, state);
     expect(loadState(dir)).toEqual(state);
@@ -1077,7 +1281,9 @@ describe("persisted environments", () => {
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { EnvFiles } from "../../src/server/env-files";
 
 let dir: string;
@@ -1097,15 +1303,16 @@ describe("EnvFiles", () => {
     expect(fs.existsSync(path.join(dir, "demo-feat-0a1b"))).toBe(false);
   });
   it("refuses ids that aren't env ids", () => {
-    expect(() => new EnvFiles(dir).path("../x")).toThrow(/invalid environment id/);
+    expect(() => new EnvFiles(dir).path("../x")).toThrow(
+      /invalid environment id/
+    );
   });
 });
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/config.test.ts test/server/env-files.test.ts`
-Expected: FAIL — `projects` is dropped, `stateDir` and `EnvFiles` don't exist.
+Run: `pnpm vitest run test/server/config.test.ts test/server/env-files.test.ts` Expected: FAIL — `projects` is dropped, `stateDir` and `EnvFiles` don't exist.
 
 - [ ] **Step 3: Implement `config.ts`** — add `EnvId` and `EnvWorktree` to the shared-types import. Add to `Config`:
 
@@ -1137,9 +1344,19 @@ Replace `loadState`:
 
 ```ts
 export function loadState(dir: string): PersistedState {
-  const raw = readJson<Partial<PersistedState>>(path.join(dir, "state.json"), {});
-  const environments = raw.environments && typeof raw.environments === "object" ? raw.environments : undefined;
-  return { projects: raw.projects && typeof raw.projects === "object" ? raw.projects : {}, ...(environments ? { environments } : {}) };
+  const raw = readJson<Partial<PersistedState>>(
+    path.join(dir, "state.json"),
+    {}
+  );
+  const environments =
+    raw.environments && typeof raw.environments === "object"
+      ? raw.environments
+      : undefined;
+  return {
+    projects:
+      raw.projects && typeof raw.projects === "object" ? raw.projects : {},
+    ...(environments ? { environments } : {}),
+  };
 }
 ```
 
@@ -1149,7 +1366,10 @@ Add after `configDir`:
 /** Where opendevhub keeps generated files: `$XDG_STATE_HOME/opendevhub`, default `~/.local/state/opendevhub`. */
 export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
   const xdg = env.XDG_STATE_HOME;
-  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".local", "state");
+  const base =
+    xdg && path.isAbsolute(xdg)
+      ? xdg
+      : path.join(os.homedir(), ".local", "state");
   return path.join(base, "opendevhub");
 }
 ```
@@ -1159,6 +1379,7 @@ export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
 ```ts
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import type { EnvId } from "../shared/types";
 
 const ENV_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -1191,8 +1412,7 @@ export class EnvFiles {
 
 - [ ] **Step 5: Run the tests**
 
-Run: `pnpm vitest run test/server/config.test.ts test/server/env-files.test.ts test/server/cli.test.ts`
-Expected: PASS.
+Run: `pnpm vitest run test/server/config.test.ts test/server/env-files.test.ts test/server/cli.test.ts` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1204,10 +1424,12 @@ git commit -m "feat: per-project settings in config.json, the state folder and o
 ### Task 7: Containers and git for task environments
 
 **Files:**
+
 - Modify: `src/server/containers.ts`, `src/server/git.ts`
 - Test: `test/server/containers.test.ts`, `test/server/git.test.ts`
 
 **Interfaces:**
+
 - Produces: `ENV_LABEL = "opendevhub.env"`, `ENV_PROJECT_LABEL = "opendevhub.env-project"`, `envLabels(envId, projectId): string[]`; `ContainerInfo.envId?`, `ContainerInfo.envProjectId?`, `ContainerInfo.image?` (and `projectId` is set from `opendevhub.project` only); `PortConfig.configuration?: Record<string, unknown>`; `Containers.listManaged()` returns both kinds; `readConfig(folder): Promise<{ configuration: Record<string, unknown>; workspaceFolder?: string }>`; `build(folder, imageName, onLine): Promise<void>`; `imageExists(ref): Promise<boolean>`; `remove(containerId): Promise<void>`; `removeImage(ref): Promise<boolean>`; `GitOps.headObjects(p, dir, paths): Promise<(string | undefined)[]>`.
 
 - [ ] **Step 1: Write the failing tests** — add to `test/server/containers.test.ts` (import `ENV_LABEL`, `ENV_PROJECT_LABEL`, `envLabels`, `parseInspect`):
@@ -1218,23 +1440,40 @@ describe("task environment containers", () => {
     Id: "def456",
     Name: "/task",
     State: { Running: true },
-    Config: { Image: "vsc-feat-1234-uid", Labels: { [ENV_LABEL]: "demo-1a2b3c-feat-0a1b", [ENV_PROJECT_LABEL]: "demo-1a2b3c" } },
+    Config: {
+      Image: "vsc-feat-1234-uid",
+      Labels: {
+        [ENV_LABEL]: "demo-1a2b3c-feat-0a1b",
+        [ENV_PROJECT_LABEL]: "demo-1a2b3c",
+      },
+    },
     NetworkSettings: { Networks: { bridge: { IPAddress: "172.17.0.6" } } },
   });
 
   it("reads a task container's labels without making it look like a project's", () => {
     const info = parseInspect(taskInspect);
-    expect(info).toMatchObject({ id: "def456", envId: "demo-1a2b3c-feat-0a1b", envProjectId: "demo-1a2b3c", image: "vsc-feat-1234-uid" });
+    expect(info).toMatchObject({
+      id: "def456",
+      envId: "demo-1a2b3c-feat-0a1b",
+      envProjectId: "demo-1a2b3c",
+      image: "vsc-feat-1234-uid",
+    });
     expect(info.projectId).toBeUndefined();
   });
 
   it("labels task containers with their environment and project", () => {
-    expect(envLabels("e", "p")).toEqual([`${ENV_LABEL}=e`, `${ENV_PROJECT_LABEL}=p`]);
+    expect(envLabels("e", "p")).toEqual([
+      `${ENV_LABEL}=e`,
+      `${ENV_PROJECT_LABEL}=p`,
+    ]);
   });
 
   it("lists project and task containers", async () => {
     const { run, calls } = fakeRunner(({ args }) => {
-      if (args[0] === "ps") return { stdout: args.includes(`label=${LABEL}`) ? "abc123\n" : "def456\n" };
+      if (args[0] === "ps")
+        return {
+          stdout: args.includes(`label=${LABEL}`) ? "abc123\n" : "def456\n",
+        };
       return { stdout: args.at(-1) === "abc123" ? inspectJson : taskInspect };
     });
     const list = await new Containers(run).listManaged();
@@ -1251,22 +1490,47 @@ describe("task environment containers", () => {
       workspace: { workspaceFolder: "/workspaces/feat" },
     });
     const { run, calls } = fakeRunner(() => ({ stdout }));
-    expect(await new Containers(run).readConfig("/src/demo.worktrees/feat")).toEqual({ configuration: { image: "node" }, workspaceFolder: "/workspaces/feat" });
-    expect(calls[0].args).toEqual(["read-configuration", "--workspace-folder", "/src/demo.worktrees/feat"]);
+    expect(
+      await new Containers(run).readConfig("/src/demo.worktrees/feat")
+    ).toEqual({
+      configuration: { image: "node" },
+      workspaceFolder: "/workspaces/feat",
+    });
+    expect(calls[0].args).toEqual([
+      "read-configuration",
+      "--workspace-folder",
+      "/src/demo.worktrees/feat",
+    ]);
   });
 
   it("builds an image and reports the CLI's error", async () => {
-    const ok = fakeRunner(() => ({ stdout: '{"outcome":"success","imageName":["img"]}\n' }));
+    const ok = fakeRunner(() => ({
+      stdout: '{"outcome":"success","imageName":["img"]}\n',
+    }));
     await new Containers(ok.run).build("/f", "img", () => {});
-    expect(ok.calls[0].args).toEqual(["build", "--workspace-folder", "/f", "--image-name", "img"]);
-    const bad = fakeRunner(() => ({ exitCode: 1, stdout: '{"outcome":"error","message":"no Dockerfile"}\n', stderr: "boom" }));
-    await expect(new Containers(bad.run).build("/f", "img", () => {})).rejects.toThrow(/devcontainer build failed: no Dockerfile/);
+    expect(ok.calls[0].args).toEqual([
+      "build",
+      "--workspace-folder",
+      "/f",
+      "--image-name",
+      "img",
+    ]);
+    const bad = fakeRunner(() => ({
+      exitCode: 1,
+      stdout: '{"outcome":"error","message":"no Dockerfile"}\n',
+      stderr: "boom",
+    }));
+    await expect(
+      new Containers(bad.run).build("/f", "img", () => {})
+    ).rejects.toThrow(/devcontainer build failed: no Dockerfile/);
   });
 
   it("checks for an image, removes containers (a missing one is fine) and removes images", async () => {
     const { run, calls } = fakeRunner(({ args }) => {
-      if (args[0] === "image" && args[1] === "inspect") return { exitCode: args.at(-1) === "there" ? 0 : 1 };
-      if (args[0] === "rm" && args.at(-1) === "gone") return { exitCode: 1, stderr: "Error: No such container: gone" };
+      if (args[0] === "image" && args[1] === "inspect")
+        return { exitCode: args.at(-1) === "there" ? 0 : 1 };
+      if (args[0] === "rm" && args.at(-1) === "gone")
+        return { exitCode: 1, stderr: "Error: No such container: gone" };
       return {};
     });
     const c = new Containers(run);
@@ -1280,11 +1544,18 @@ describe("task environment containers", () => {
   });
 
   it("returns the raw configuration with the port settings", async () => {
-    const stdout = JSON.stringify({ configuration: { customizations: { opendevhub: { isolation: "isolated" } } }, mergedConfiguration: { forwardPorts: [3000] } });
+    const stdout = JSON.stringify({
+      configuration: {
+        customizations: { opendevhub: { isolation: "isolated" } },
+      },
+      mergedConfiguration: { forwardPorts: [3000] },
+    });
     const { run } = fakeRunner(() => ({ stdout }));
     const cfg = await new Containers(run).readConfiguration(project);
     expect(cfg.forwardPorts).toEqual([3000]);
-    expect(cfg.configuration).toEqual({ customizations: { opendevhub: { isolation: "isolated" } } });
+    expect(cfg.configuration).toEqual({
+      customizations: { opendevhub: { isolation: "isolated" } },
+    });
   });
 });
 ```
@@ -1294,19 +1565,37 @@ Add to `test/server/git.test.ts` (outside the real-repo `describe`, with `vi` im
 ```ts
 describe("headObjects", () => {
   it("returns the object id of each path at HEAD, undefined where it is missing", async () => {
-    const exec = vi.fn(async (_p: Project, _cmd: string[], _o?: { timeoutMs?: number }) => ({ exitCode: 0, stdout: "aaa\n-\nbbb\n", stderr: "", timedOut: false }));
+    const exec = vi.fn(
+      async (_p: Project, _cmd: string[], _o?: { timeoutMs?: number }) => ({
+        exitCode: 0,
+        stdout: "aaa\n-\nbbb\n",
+        stderr: "",
+        timedOut: false,
+      })
+    );
     const ops = new GitOps({ containers: { exec } });
-    expect(await ops.headObjects(project, "/w/x", [".devcontainer", ".devcontainer.json", "package-lock.json"])).toEqual(["aaa", undefined, "bbb"]);
+    expect(
+      await ops.headObjects(project, "/w/x", [
+        ".devcontainer",
+        ".devcontainer.json",
+        "package-lock.json",
+      ])
+    ).toEqual(["aaa", undefined, "bbb"]);
     expect(exec.mock.calls[0][1].slice(0, 2)).toEqual(["sh", "-c"]);
-    expect(exec.mock.calls[0][1].slice(3)).toEqual(["sh", "/w/x", ".devcontainer", ".devcontainer.json", "package-lock.json"]);
+    expect(exec.mock.calls[0][1].slice(3)).toEqual([
+      "sh",
+      "/w/x",
+      ".devcontainer",
+      ".devcontainer.json",
+      "package-lock.json",
+    ]);
   });
 });
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/containers.test.ts test/server/git.test.ts`
-Expected: FAIL — missing exports and methods.
+Run: `pnpm vitest run test/server/containers.test.ts test/server/git.test.ts` Expected: FAIL — missing exports and methods.
 
 - [ ] **Step 3: Implement `containers.ts`** — after `LABEL`:
 
@@ -1348,7 +1637,10 @@ Add a helper above `class Containers`:
 ```ts
 /** The last `{"outcome": …}` line the devcontainer CLI printed. */
 function lastOutcome(stdout: string): Record<string, unknown> | undefined {
-  const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("{"));
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("{"));
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const parsed = JSON.parse(lines[i]) as Record<string, unknown>;
@@ -1441,8 +1733,7 @@ Replace `listManaged` and add the new methods:
 
 - [ ] **Step 5: Run the tests**
 
-Run: `pnpm vitest run test/server/containers.test.ts test/server/git.test.ts && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/server/containers.test.ts test/server/git.test.ts && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1454,10 +1745,12 @@ git commit -m "feat: task container labels, image build and removal, and object 
 ### Task 8: `Images` — one base image per project and image key
 
 **Files:**
+
 - Create: `src/server/images.ts`
 - Test: `test/server/images.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Containers.imageExists/build`, `GitOps.headObjects` (Task 7).
 - Produces: `KEY_PATHS`, `imageKey({ cliVersion, objects, generation }): string` (64 hex), `baseImageRef(projectId, key): string`, `class Images { ensureBase(project, worktree: EnvWorktree, keyFiles: string[], onLine): Promise<{ key: string; ref: string }> }`.
 
@@ -1465,13 +1758,23 @@ git commit -m "feat: task container labels, image build and removal, and object 
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
-import { Images, baseImageRef, imageKey } from "../../src/server/images";
+
 import type { RunResult } from "../../src/server/exec";
+import { Images, baseImageRef, imageKey } from "../../src/server/images";
 import type { EnvWorktree, Project } from "../../src/shared/types";
 
-const project: Project = { id: "demo-abc123", name: "demo", path: "/src/demo", devcontainerPath: "/x" };
+const project: Project = {
+  id: "demo-abc123",
+  name: "demo",
+  path: "/src/demo",
+  devcontainerPath: "/x",
+};
 const other: Project = { ...project, id: "other-def456", path: "/src/other" };
-const wt = (name: string): EnvWorktree => ({ path: `/workspaces/demo.worktrees/${name}`, hostPath: `/src/demo.worktrees/${name}`, branch: name });
+const wt = (name: string): EnvWorktree => ({
+  path: `/workspaces/demo.worktrees/${name}`,
+  hostPath: `/src/demo.worktrees/${name}`,
+  branch: name,
+});
 
 function deferred() {
   let resolve!: () => void;
@@ -1480,44 +1783,104 @@ function deferred() {
 }
 
 function setup(objects: (string | undefined)[] = ["tree1", undefined]) {
-  const builds: Array<{ folder: string; ref: string; done: ReturnType<typeof deferred> }> = [];
+  const builds: Array<{
+    folder: string;
+    ref: string;
+    done: ReturnType<typeof deferred>;
+  }> = [];
   const containers = {
     imageExists: vi.fn(async (_ref: string) => false),
-    build: vi.fn((folder: string, ref: string, _onLine: (l: string) => void) => {
-      const done = deferred();
-      builds.push({ folder, ref, done });
-      return done.promise;
-    }),
+    build: vi.fn(
+      (folder: string, ref: string, _onLine: (l: string) => void) => {
+        const done = deferred();
+        builds.push({ folder, ref, done });
+        return done.promise;
+      }
+    ),
   };
-  const git = { headObjects: vi.fn(async (_p: Project, _dir: string, _paths: string[]) => objects) };
-  const run = vi.fn(async (): Promise<RunResult> => ({ exitCode: 0, stdout: "0.89.0\n", stderr: "", timedOut: false }));
-  return { images: new Images({ run, containers, git }), containers, git, builds, run };
+  const git = {
+    headObjects: vi.fn(
+      async (_p: Project, _dir: string, _paths: string[]) => objects
+    ),
+  };
+  const run = vi.fn(async (): Promise<RunResult> => ({
+    exitCode: 0,
+    stdout: "0.89.0\n",
+    stderr: "",
+    timedOut: false,
+  }));
+  return {
+    images: new Images({ run, containers, git }),
+    containers,
+    git,
+    builds,
+    run,
+  };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("imageKey", () => {
   it("changes with each input", () => {
-    const k = imageKey({ cliVersion: "0.89.0", objects: ["a", undefined], generation: 0 });
+    const k = imageKey({
+      cliVersion: "0.89.0",
+      objects: ["a", undefined],
+      generation: 0,
+    });
     expect(k).toMatch(/^[0-9a-f]{64}$/);
-    expect(imageKey({ cliVersion: "0.90.0", objects: ["a", undefined], generation: 0 })).not.toBe(k);
-    expect(imageKey({ cliVersion: "0.89.0", objects: ["b", undefined], generation: 0 })).not.toBe(k);
-    expect(imageKey({ cliVersion: "0.89.0", objects: [undefined, "a"], generation: 0 })).not.toBe(k);
-    expect(imageKey({ cliVersion: "0.89.0", objects: ["a", undefined], generation: 1 })).not.toBe(k);
+    expect(
+      imageKey({
+        cliVersion: "0.90.0",
+        objects: ["a", undefined],
+        generation: 0,
+      })
+    ).not.toBe(k);
+    expect(
+      imageKey({
+        cliVersion: "0.89.0",
+        objects: ["b", undefined],
+        generation: 0,
+      })
+    ).not.toBe(k);
+    expect(
+      imageKey({
+        cliVersion: "0.89.0",
+        objects: [undefined, "a"],
+        generation: 0,
+      })
+    ).not.toBe(k);
+    expect(
+      imageKey({
+        cliVersion: "0.89.0",
+        objects: ["a", undefined],
+        generation: 1,
+      })
+    ).not.toBe(k);
   });
   it("names the base image after the project and the key", () => {
-    expect(baseImageRef("demo-abc123", "0123456789abcdef")).toBe("opendevhub/demo-abc123:0123456789ab-base");
+    expect(baseImageRef("demo-abc123", "0123456789abcdef")).toBe(
+      "opendevhub/demo-abc123:0123456789ab-base"
+    );
   });
 });
 
 describe("Images.ensureBase", () => {
   it("reads the key inputs at the worktree's HEAD, with the key files", async () => {
     const { images, git, builds } = setup();
-    const p = images.ensureBase(project, wt("a"), ["package-lock.json"], () => {});
+    const p = images.ensureBase(
+      project,
+      wt("a"),
+      ["package-lock.json"],
+      () => {}
+    );
     await tick();
     builds[0].done.resolve();
     const { key, ref } = await p;
-    expect(git.headObjects).toHaveBeenCalledWith(project, "/workspaces/demo.worktrees/a", [".devcontainer", ".devcontainer.json", "package-lock.json"]);
+    expect(git.headObjects).toHaveBeenCalledWith(
+      project,
+      "/workspaces/demo.worktrees/a",
+      [".devcontainer", ".devcontainer.json", "package-lock.json"]
+    );
     expect(ref).toBe(baseImageRef(project.id, key));
     expect(builds[0].folder).toBe("/src/demo.worktrees/a");
   });
@@ -1541,12 +1904,17 @@ describe("Images.ensureBase", () => {
 
   it("builds one image at a time per project, and other projects in parallel", async () => {
     const { images, git, builds } = setup();
-    git.headObjects.mockImplementation(async (_p: Project, dir: string) => [dir]);
+    git.headObjects.mockImplementation(async (_p: Project, dir: string) => [
+      dir,
+    ]);
     const a = images.ensureBase(project, wt("a"), [], () => {});
     const b = images.ensureBase(project, wt("b"), [], () => {});
     const c = images.ensureBase(other, wt("c"), [], () => {});
     await tick();
-    expect(builds.map((x) => x.folder)).toEqual(["/src/demo.worktrees/a", "/src/demo.worktrees/c"]);
+    expect(builds.map((x) => x.folder)).toEqual([
+      "/src/demo.worktrees/a",
+      "/src/demo.worktrees/c",
+    ]);
     builds[0].done.resolve();
     await a;
     await tick();
@@ -1558,22 +1926,26 @@ describe("Images.ensureBase", () => {
   it("lets the next request retry after a failed build", async () => {
     const { images, containers } = setup();
     containers.build.mockRejectedValueOnce(new Error("boom"));
-    await expect(images.ensureBase(project, wt("a"), [], () => {})).rejects.toThrow("boom");
+    await expect(
+      images.ensureBase(project, wt("a"), [], () => {})
+    ).rejects.toThrow("boom");
     containers.build.mockResolvedValueOnce(undefined);
-    await expect(images.ensureBase(project, wt("a"), [], () => {})).resolves.toMatchObject({ key: expect.any(String) });
+    await expect(
+      images.ensureBase(project, wt("a"), [], () => {})
+    ).resolves.toMatchObject({ key: expect.any(String) });
   });
 });
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/images.test.ts`
-Expected: FAIL — cannot find module `../../src/server/images`.
+Run: `pnpm vitest run test/server/images.test.ts` Expected: FAIL — cannot find module `../../src/server/images`.
 
 - [ ] **Step 3: Implement** — `src/server/images.ts`:
 
 ```ts
 import { createHash } from "node:crypto";
+
 import type { EnvWorktree, Project } from "../shared/types";
 import type { Containers } from "./containers";
 import type { Runner } from "./exec";
@@ -1582,8 +1954,16 @@ import type { GitOps } from "./git";
 /** What a config's image depends on, besides the key files a project lists. */
 export const KEY_PATHS = [".devcontainer", ".devcontainer.json"];
 
-export function imageKey(input: { cliVersion: string; objects: (string | undefined)[]; generation: number }): string {
-  const parts = [input.cliVersion, input.objects.map((o) => o ?? null), input.generation];
+export function imageKey(input: {
+  cliVersion: string;
+  objects: (string | undefined)[];
+  generation: number;
+}): string {
+  const parts = [
+    input.cliVersion,
+    input.objects.map((o) => o ?? null),
+    input.generation,
+  ];
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 
@@ -1610,19 +1990,22 @@ export class Images {
     project: Project,
     worktree: EnvWorktree,
     keyFiles: string[],
-    onLine: (line: string) => void,
+    onLine: (line: string) => void
   ): Promise<{ key: string; ref: string }> {
     const [cliVersion, objects] = await Promise.all([
       this.cliVersion(),
-      this.deps.git.headObjects(project, worktree.path, [...KEY_PATHS, ...keyFiles]),
+      this.deps.git.headObjects(project, worktree.path, [
+        ...KEY_PATHS,
+        ...keyFiles,
+      ]),
     ]);
     const key = imageKey({ cliVersion, objects, generation: 0 });
     const ref = baseImageRef(project.id, key);
     let pending = this.building.get(ref);
     if (!pending) {
-      pending = this.enqueue(project.id, () => this.buildIfMissing(ref, worktree.hostPath, onLine)).finally(() =>
-        this.building.delete(ref),
-      );
+      pending = this.enqueue(project.id, () =>
+        this.buildIfMissing(ref, worktree.hostPath, onLine)
+      ).finally(() => this.building.delete(ref));
       this.building.set(ref, pending);
     }
     await pending;
@@ -1630,15 +2013,23 @@ export class Images {
   }
 
   private enqueue<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
-    const next = (this.queues.get(projectId) ?? Promise.resolve()).catch(() => {}).then(fn);
+    const next = (this.queues.get(projectId) ?? Promise.resolve())
+      .catch(() => {})
+      .then(fn);
     this.queues.set(projectId, next);
-    void next.catch(() => {}).finally(() => {
-      if (this.queues.get(projectId) === next) this.queues.delete(projectId);
-    });
+    void next
+      .catch(() => {})
+      .finally(() => {
+        if (this.queues.get(projectId) === next) this.queues.delete(projectId);
+      });
     return next;
   }
 
-  private async buildIfMissing(ref: string, folder: string, onLine: (line: string) => void): Promise<void> {
+  private async buildIfMissing(
+    ref: string,
+    folder: string,
+    onLine: (line: string) => void
+  ): Promise<void> {
     if (await this.deps.containers.imageExists(ref)) return;
     onLine(`image: building ${ref}`);
     await this.deps.containers.build(folder, ref, onLine);
@@ -1646,7 +2037,9 @@ export class Images {
   }
 
   private cliVersion(): Promise<string> {
-    this.cli ??= this.deps.run("devcontainer", ["--version"], { timeoutMs: 15_000 }).then((r) => r.stdout.trim() || "unknown");
+    this.cli ??= this.deps
+      .run("devcontainer", ["--version"], { timeoutMs: 15_000 })
+      .then((r) => r.stdout.trim() || "unknown");
     return this.cli;
   }
 }
@@ -1654,8 +2047,7 @@ export class Images {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `pnpm vitest run test/server/images.test.ts`
-Expected: PASS.
+Run: `pnpm vitest run test/server/images.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1667,10 +2059,12 @@ git commit -m "feat: base images for task environments, built once per key and o
 ### Task 9: The store keeps task environments
 
 **Files:**
+
 - Modify: `src/server/state.ts`
 - Test: `test/server/state.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PersistedEnv` (Task 6), `compareSessions` (`src/server/status.ts`).
 - Produces: `interface EnvRecord { id: EnvId; projectId: ProjectId; worktree: EnvWorktree; image?: { key: string; ref: string } }`; `StateStore.environments(projectId): EnvRecord[]`, `environment(id)`, `putEnvironment(rec)`, `removeEnvironment(id)`, `setIsolation(projectId, info)`, `isolation(projectId)`. `setSessions(envId, list)` stores per environment; `sessionsOf(projectId)` aggregates the main and task environments. The snapshot fills `environments` and `isolation`.
 
@@ -1678,31 +2072,60 @@ git commit -m "feat: base images for task environments, built once per key and o
 
 ```ts
 describe("task environments", () => {
-  const rec = { id: "a-feat-0a1b", projectId: "a", worktree: { path: "/w/a.worktrees/feat", hostPath: "/src/a.worktrees/feat", branch: "feat" } };
+  const rec = {
+    id: "a-feat-0a1b",
+    projectId: "a",
+    worktree: {
+      path: "/w/a.worktrees/feat",
+      hostPath: "/src/a.worktrees/feat",
+      branch: "feat",
+    },
+  };
 
   it("records an environment, persists it with its durable runtime, and restores it", () => {
     const { store, saved } = make();
     store.setProjects([p("a")]);
     store.putEnvironment(rec);
-    store.updateRuntime(rec.id, { containerId: "c2", password: "pw2", containerState: "running" });
-    expect(saved.at(-1)?.environments?.[rec.id]).toMatchObject({ projectId: "a", worktree: rec.worktree, containerId: "c2", password: "pw2" });
+    store.updateRuntime(rec.id, {
+      containerId: "c2",
+      password: "pw2",
+      containerState: "running",
+    });
+    expect(saved.at(-1)?.environments?.[rec.id]).toMatchObject({
+      projectId: "a",
+      worktree: rec.worktree,
+      containerId: "c2",
+      password: "pw2",
+    });
     expect(saved.at(-1)?.projects).not.toHaveProperty(rec.id);
     const restored = make(saved.at(-1)).store;
     restored.setProjects([p("a")]);
     expect(restored.environment(rec.id)).toEqual(rec);
-    expect(restored.runtime(rec.id)).toMatchObject({ projectId: "a", containerId: "c2", containerState: "stopped" });
+    expect(restored.runtime(rec.id)).toMatchObject({
+      projectId: "a",
+      containerId: "c2",
+      containerState: "stopped",
+    });
   });
 
   it("shows environments in the snapshot without secrets, with their own URL", () => {
     const { store } = make();
     store.setProjects([p("a")]);
     store.putEnvironment({ ...rec, image: { key: "k", ref: "r" } });
-    store.updateRuntime(rec.id, { password: "secret2", containerState: "running" });
+    store.updateRuntime(rec.id, {
+      password: "secret2",
+      containerState: "running",
+    });
     store.setIsolation("a", { default: "isolated" });
     const view = store.snapshot().projects[0];
     expect(JSON.stringify(view)).not.toContain("secret2");
     expect(view.environments).toEqual([
-      expect.objectContaining({ id: rec.id, worktree: rec.worktree, image: { key: "k", ref: "r" }, openUrl: `http://${rec.id}.localhost:7777/` }),
+      expect.objectContaining({
+        id: rec.id,
+        worktree: rec.worktree,
+        image: { key: "k", ref: "r" },
+        openUrl: `http://${rec.id}.localhost:7777/`,
+      }),
     ]);
     expect(view.environments[0].runtime.containerState).toBe("running");
     expect(view.isolation).toEqual({ default: "isolated" });
@@ -1712,7 +2135,15 @@ describe("task environments", () => {
     const { store } = make();
     store.setProjects([p("a")]);
     store.putEnvironment(rec);
-    const s = (id: string, updatedAt: number, envId?: string) => ({ id, projectId: "a", title: id, directory: "/w", updatedAt, status: "idle" as const, ...(envId ? { envId } : {}) });
+    const s = (id: string, updatedAt: number, envId?: string) => ({
+      id,
+      projectId: "a",
+      title: id,
+      directory: "/w",
+      updatedAt,
+      status: "idle" as const,
+      ...(envId ? { envId } : {}),
+    });
     store.setSessions("a", [s("main", 1)]);
     store.setSessions(rec.id, [s("task", 2, rec.id)]);
     expect(store.sessionsOf("a").map((x) => x.id)).toEqual(["task", "main"]);
@@ -1722,7 +2153,16 @@ describe("task environments", () => {
     const { store, saved } = make();
     store.setProjects([p("a")]);
     store.putEnvironment(rec);
-    store.setSessions(rec.id, [{ id: "t", projectId: "a", title: "t", directory: "/w", updatedAt: 1, status: "idle" }]);
+    store.setSessions(rec.id, [
+      {
+        id: "t",
+        projectId: "a",
+        title: "t",
+        directory: "/w",
+        updatedAt: 1,
+        status: "idle",
+      },
+    ]);
     store.removeEnvironment(rec.id);
     expect(store.environments("a")).toEqual([]);
     expect(store.sessionsOf("a")).toEqual([]);
@@ -1733,8 +2173,7 @@ describe("task environments", () => {
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/state.test.ts`
-Expected: FAIL — `putEnvironment is not a function`.
+Run: `pnpm vitest run test/server/state.test.ts` Expected: FAIL — `putEnvironment is not a function`.
 
 - [ ] **Step 3: Implement** — in `src/server/state.ts`, extend the imports with `EnvId`, `EnvWorktree`, `IsolationInfo`, `PublicRuntime` (shared types), `PersistedEnv` (config) and `import { compareSessions } from "./status";`. Add after `DURABLE_KEYS`:
 
@@ -1766,12 +2205,12 @@ function publicRuntime(r: ProjectRuntime): PublicRuntime {
 Add fields `private envs = new Map<EnvId, EnvRecord>();` and `private isolationInfo = new Map<ProjectId, IsolationInfo>();`. At the end of the constructor:
 
 ```ts
-    for (const [id, saved] of Object.entries(opts.persisted.environments ?? {})) {
-      if (!saved?.worktree?.path || !saved.projectId) continue;
-      const { projectId, worktree, image, ...runtime } = saved;
-      this.envs.set(id, { id, projectId, worktree, ...(image ? { image } : {}) });
-      this.runtimes.set(id, { ...defaultRuntime(projectId), ...runtime });
-    }
+for (const [id, saved] of Object.entries(opts.persisted.environments ?? {})) {
+  if (!saved?.worktree?.path || !saved.projectId) continue;
+  const { projectId, worktree, image, ...runtime } = saved;
+  this.envs.set(id, { id, projectId, worktree, ...(image ? { image } : {}) });
+  this.runtimes.set(id, { ...defaultRuntime(projectId), ...runtime });
+}
 ```
 
 Replace `sessionsOf` and add the environment methods:
@@ -1860,8 +2299,7 @@ Replace `save()`:
 
 - [ ] **Step 4: Run the tests**
 
-Run: `pnpm vitest run test/server/state.test.ts && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/server/state.test.ts && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1871,13 +2309,16 @@ git commit -m "feat: the store keeps task environments, their sessions and the i
 ```
 
 ---
+
 ### Task 10: The orchestrator runs task environments and routes opencode calls to them
 
 **Files:**
+
 - Modify: `src/server/orchestrator.ts`
 - Test: `test/server/orchestrator.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Env` helpers (Task 4), `env-config` (Task 5), `EnvFiles`/`stateDir` (Task 6), `envLabels`, `ContainerInfo.envId`, `readConfig`, `remove`, `removeImage`, `PortConfig.configuration` (Task 7), `Images` (Task 8), `EnvRecord` and the store's environment methods (Task 9).
 - Produces (public): `createEnv(projectId, worktreePath): Promise<{ envId: EnvId }>` (starts in the background), `startEnv(projectId, envId): Promise<void>`, `stopEnv(projectId, envId): Promise<void>`, `removeEnv(projectId, envId): Promise<void>` — `startEnv`, `stopEnv` and `removeEnv` throw `NotFoundError`/`BusyError` synchronously. `stop(projectId)` also stops the project's task containers. `adopt` and `refreshContainers` cover task containers.
 - Produces (private, used by Task 11): `type TaskEnv = Env & { worktree: EnvWorktree }`, `taskEnv(project, rec)`, `recordTaskEnv(project, worktree: EnvWorktree): TaskEnv`, `ensureTaskEnv(project, worktree): Promise<TaskEnv>`, `bringUpTask(env)` (rethrows after recording the error), `destroyEnv(env)`, `isolationFor(project, requested): { isolated: boolean; notice?: string }`.
@@ -1889,7 +2330,11 @@ Add imports: `type ExecTarget` from `../../src/server/containers`, `envIdFor` fr
 
 ```ts
 // Untyped so it is both a Worktree and an EnvWorktree (hostPath is required in the latter).
-const feat = { path: "/workspaces/demo.worktrees/feat", hostPath: "/src/demo.worktrees/feat", branch: "feat" };
+const feat = {
+  path: "/workspaces/demo.worktrees/feat",
+  hostPath: "/src/demo.worktrees/feat",
+  branch: "feat",
+};
 const featEnv = envIdFor(project.id, feat.path, "feat");
 const runningTask: ContainerInfo = {
   id: "c2",
@@ -1934,18 +2379,28 @@ In `setup()`, replace the `up`, `inspect`, `stop` and `readConfiguration` fakes,
 After the `publisher` fake:
 
 ```ts
-  const images = {
-    ensureBase: vi.fn(async (p: Project, _w: EnvWorktree, _keyFiles: string[], _onLine: (l: string) => void) => ({
+const images = {
+  ensureBase: vi.fn(
+    async (
+      p: Project,
+      _w: EnvWorktree,
+      _keyFiles: string[],
+      _onLine: (l: string) => void
+    ) => ({
       key: "k".repeat(64),
       ref: `opendevhub/${p.id}:kkkkkkkkkkkk-base`,
-    })),
-  };
-  const envFiles = {
-    path: (id: string) => `/state/envs/${id}/devcontainer.json`,
-    write: vi.fn(async (id: string, _config: Record<string, unknown>) => `/state/envs/${id}/devcontainer.json`),
-    remove: vi.fn(async (_id: string) => {}),
-  };
-  const projectSettings = vi.fn((_p: Project): unknown => undefined);
+    })
+  ),
+};
+const envFiles = {
+  path: (id: string) => `/state/envs/${id}/devcontainer.json`,
+  write: vi.fn(
+    async (id: string, _config: Record<string, unknown>) =>
+      `/state/envs/${id}/devcontainer.json`
+  ),
+  remove: vi.fn(async (_id: string) => {}),
+};
+const projectSettings = vi.fn((_p: Project): unknown => undefined);
 ```
 
 Pass `images, envFiles, projectSettings` to `new Orchestrator({ … })` and add them to `setup`'s return value. Add these helpers after `setup`:
@@ -1964,23 +2419,42 @@ async function withWorktree(persisted?: PersistedState) {
 async function withEnv() {
   const s = await withWorktree();
   const { envId } = await s.orch.createEnv(project.id, feat.path);
-  await vi.waitFor(() => expect(s.store.runtime(envId).opencode).toBe("healthy"));
+  await vi.waitFor(() =>
+    expect(s.store.runtime(envId).opencode).toBe("healthy")
+  );
   return { ...s, envId };
 }
 ```
 
-Run: `pnpm vitest run test/server/orchestrator.test.ts`
-Expected: the existing tests still PASS (`createEnv` doesn't exist yet, but nothing calls these helpers so far; `pnpm typecheck` will fail until Step 4).
+Run: `pnpm vitest run test/server/orchestrator.test.ts` Expected: the existing tests still PASS (`createEnv` doesn't exist yet, but nothing calls these helpers so far; `pnpm typecheck` will fail until Step 4).
 
 - [ ] **Step 2: Write the failing tests** — add a new `describe` to `test/server/orchestrator.test.ts`:
 
 ```ts
 describe("task environments", () => {
   it("gives a worktree its own container from the base image", async () => {
-    const { orch, store, containers, images, envFiles, runtime, forwarder, monitors, envId } = await withEnv();
+    const {
+      orch,
+      store,
+      containers,
+      images,
+      envFiles,
+      runtime,
+      forwarder,
+      monitors,
+      envId,
+    } = await withEnv();
     expect(envId).toBe(featEnv);
-    expect(store.environment(envId)).toMatchObject({ projectId: project.id, worktree: feat, image: { ref: `opendevhub/${project.id}:kkkkkkkkkkkk-base` } });
-    expect(images.ensureBase.mock.calls[0].slice(0, 3)).toEqual([project, feat, []]);
+    expect(store.environment(envId)).toMatchObject({
+      projectId: project.id,
+      worktree: feat,
+      image: { ref: `opendevhub/${project.id}:kkkkkkkkkkkk-base` },
+    });
+    expect(images.ensureBase.mock.calls[0].slice(0, 3)).toEqual([
+      project,
+      feat,
+      [],
+    ]);
     expect(containers.readConfig).toHaveBeenCalledWith(feat.hostPath);
     const written = envFiles.write.mock.calls[0][1];
     expect(written).toMatchObject({
@@ -1992,23 +2466,41 @@ describe("task environments", () => {
     expect(containers.up.mock.calls.at(-1)![0]).toEqual({
       id: envId,
       path: feat.hostPath,
-      idLabels: [`opendevhub.env=${envId}`, `opendevhub.env-project=${project.id}`],
+      idLabels: [
+        `opendevhub.env=${envId}`,
+        `opendevhub.env-project=${project.id}`,
+      ],
       overrideConfig: `/state/envs/${envId}/devcontainer.json`,
     });
-    expect(runtime.ensureRunning.mock.calls.at(-1)![1]).toMatchObject({ address: { host: "172.17.0.10", port: 4096 }, workspaceFolder: feat.path });
+    expect(runtime.ensureRunning.mock.calls.at(-1)![1]).toMatchObject({
+      address: { host: "172.17.0.10", port: 4096 },
+      workspaceFolder: feat.path,
+    });
     expect(forwarder.open.mock.calls.at(-1)![0]).toBe(envId);
-    expect(monitors.at(-1)!.opts).toMatchObject({ envId, projectId: project.id, directory: feat.path });
+    expect(monitors.at(-1)!.opts).toMatchObject({
+      envId,
+      projectId: project.id,
+      directory: feat.path,
+    });
     expect(monitors.at(-1)!.opts.extraDirectories).toBeUndefined();
     expect(monitors[0].opts.extraDirectories!()).toEqual([]);
-    expect(orch.opencodeAddress(envId)).toEqual({ host: "172.17.0.10", port: 4096 });
+    expect(orch.opencodeAddress(envId)).toEqual({
+      host: "172.17.0.10",
+      port: 4096,
+    });
     expect(store.runtime(project.id).containerId).toBe("c1");
   });
 
   it("records why a worktree's config can't get its own container", async () => {
     const s = await withWorktree();
-    s.containers.readConfig.mockResolvedValueOnce({ configuration: { dockerComposeFile: "c.yml" }, workspaceFolder: "/workspaces/feat" });
+    s.containers.readConfig.mockResolvedValueOnce({
+      configuration: { dockerComposeFile: "c.yml" },
+      workspaceFolder: "/workspaces/feat",
+    });
     const { envId } = await s.orch.createEnv(project.id, feat.path);
-    await vi.waitFor(() => expect(s.store.runtime(envId).containerState).toBe("error"));
+    await vi.waitFor(() =>
+      expect(s.store.runtime(envId).containerState).toBe("error")
+    );
     expect(s.store.runtime(envId).error).toMatch(/Docker Compose/);
     expect(s.containers.up).toHaveBeenCalledTimes(1);
   });
@@ -2016,11 +2508,20 @@ describe("task environments", () => {
   it("refuses its own container when the project's config can't run one per worktree", async () => {
     const s = setup();
     s.worktrees.list.mockResolvedValue([feat]);
-    s.containers.readConfiguration.mockResolvedValue({ forwardPorts: [], portsAttributes: {}, configuration: { appPort: 3000 } });
+    s.containers.readConfiguration.mockResolvedValue({
+      forwardPorts: [],
+      portsAttributes: {},
+      configuration: { appPort: 3000 },
+    });
     await s.orch.rescan();
     await s.orch.start(project.id);
-    expect(s.store.isolation(project.id)).toEqual({ default: "shared", unsupported: expect.stringMatching(/appPort/) });
-    await expect(s.orch.createEnv(project.id, feat.path)).rejects.toBeInstanceOf(InvalidRequestError);
+    expect(s.store.isolation(project.id)).toEqual({
+      default: "shared",
+      unsupported: expect.stringMatching(/appPort/),
+    });
+    await expect(
+      s.orch.createEnv(project.id, feat.path)
+    ).rejects.toBeInstanceOf(InvalidRequestError);
   });
 
   it("reads the isolation default from devcontainer.json, with config.json taking precedence", async () => {
@@ -2028,7 +2529,9 @@ describe("task environments", () => {
     s.containers.readConfiguration.mockResolvedValue({
       forwardPorts: [],
       portsAttributes: {},
-      configuration: { customizations: { opendevhub: { isolation: "isolated" } } },
+      configuration: {
+        customizations: { opendevhub: { isolation: "isolated" } },
+      },
     });
     await s.orch.rescan();
     await s.orch.start(project.id);
@@ -2040,16 +2543,34 @@ describe("task environments", () => {
 
   it("only gives known worktrees in the mounted folder their own container, while the project runs", async () => {
     const s = await withWorktree();
-    await expect(s.orch.createEnv(project.id, "/elsewhere")).rejects.toBeInstanceOf(InvalidRequestError);
-    s.store.updateRuntime(project.id, { worktrees: [{ path: "/tmp/wt", branch: "x" }] });
-    await expect(s.orch.createEnv(project.id, "/tmp/wt")).rejects.toThrow(/mounted worktrees folder/);
+    await expect(
+      s.orch.createEnv(project.id, "/elsewhere")
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    s.store.updateRuntime(project.id, {
+      worktrees: [{ path: "/tmp/wt", branch: "x" }],
+    });
+    await expect(s.orch.createEnv(project.id, "/tmp/wt")).rejects.toThrow(
+      /mounted worktrees folder/
+    );
     await s.orch.stop(project.id);
-    await expect(s.orch.createEnv(project.id, feat.path)).rejects.toBeInstanceOf(UnavailableError);
+    await expect(
+      s.orch.createEnv(project.id, feat.path)
+    ).rejects.toBeInstanceOf(UnavailableError);
   });
 
   it("stops a task container on its own, and together with the project", async () => {
     const { orch, store, containers, envId } = await withEnv();
-    store.setSessions(envId, [{ id: "t", projectId: project.id, envId, title: "t", directory: feat.path, updatedAt: 1, status: "idle" }]);
+    store.setSessions(envId, [
+      {
+        id: "t",
+        projectId: project.id,
+        envId,
+        title: "t",
+        directory: feat.path,
+        updatedAt: 1,
+        status: "idle",
+      },
+    ]);
     await orch.stopEnv(project.id, envId);
     expect(containers.stop).toHaveBeenCalledWith("c2");
     expect(store.runtime(envId).containerState).toBe("stopped");
@@ -2065,7 +2586,9 @@ describe("task environments", () => {
 
   it("removes a task container, the image the CLI left for it, its config and its record", async () => {
     const { orch, store, containers, envFiles, envId } = await withEnv();
-    containers.remove.mockRejectedValueOnce(new CommandError("docker rm failed: busy"));
+    containers.remove.mockRejectedValueOnce(
+      new CommandError("docker rm failed: busy")
+    );
     await expect(orch.removeEnv(project.id, envId)).rejects.toThrow(/busy/);
     expect(store.environment(envId)).toBeDefined();
     await orch.removeEnv(project.id, envId);
@@ -2078,24 +2601,55 @@ describe("task environments", () => {
 
   it("re-adopts running task containers after a restart and ignores ones it has no record of", async () => {
     const s = setup({
-      projects: { [project.id]: { password: "pw", workspaceFolder: "/workspaces/demo" } },
-      environments: { [featEnv]: { projectId: project.id, worktree: feat, containerId: "c2", password: "pw" } },
+      projects: {
+        [project.id]: { password: "pw", workspaceFolder: "/workspaces/demo" },
+      },
+      environments: {
+        [featEnv]: {
+          projectId: project.id,
+          worktree: feat,
+          containerId: "c2",
+          password: "pw",
+        },
+      },
     });
-    const stray: ContainerInfo = { ...runningTask, id: "c3", name: "stray", envId: "demo-abc123-old-ffff" };
-    s.containers.listManaged.mockResolvedValueOnce([running, runningTask, stray]);
+    const stray: ContainerInfo = {
+      ...runningTask,
+      id: "c3",
+      name: "stray",
+      envId: "demo-abc123-old-ffff",
+    };
+    s.containers.listManaged.mockResolvedValueOnce([
+      running,
+      runningTask,
+      stray,
+    ]);
     await s.orch.rescan();
     await s.orch.adopt();
-    expect(s.store.runtime(project.id)).toMatchObject({ containerId: "c1", opencode: "healthy" });
-    expect(s.store.runtime(featEnv)).toMatchObject({ containerId: "c2", containerState: "running", opencode: "healthy" });
+    expect(s.store.runtime(project.id)).toMatchObject({
+      containerId: "c1",
+      opencode: "healthy",
+    });
+    expect(s.store.runtime(featEnv)).toMatchObject({
+      containerId: "c2",
+      containerState: "running",
+      opencode: "healthy",
+    });
     expect(s.monitors.map((m) => m.opts.envId)).toEqual([project.id, featEnv]);
-    expect(s.orch.logLines(project.id).some((l) => l.includes("ignoring container stray"))).toBe(true);
+    expect(
+      s.orch
+        .logLines(project.id)
+        .some((l) => l.includes("ignoring container stray"))
+    ).toBe(true);
     expect(s.store.environments(project.id)).toHaveLength(1);
     expect(s.store.runtime("demo-abc123-old-ffff").containerId).toBeUndefined();
   });
 
   it("notices a task container stopped outside opendevhub", async () => {
     const { orch, store, containers, envId } = await withEnv();
-    containers.inspect.mockImplementation(async (id?: string) => (id === "c2" ? { ...runningTask, running: false } : running));
+    containers.inspect.mockImplementation(async (id?: string) =>
+      id === "c2" ? { ...runningTask, running: false } : running
+    );
     await orch.refreshContainers();
     expect(store.runtime(envId).containerState).toBe("stopped");
     expect(store.runtime(project.id).containerState).toBe("running");
@@ -2109,21 +2663,28 @@ describe("task environments", () => {
     clientFor.mockClear();
     await orch.startSession(project.id, "/workspaces/demo");
     expect(clientFor.mock.calls[0][0].baseUrl).toBe("http://172.17.0.9:4096");
-    store.setSessions(envId, [{ ...waiting({ permissions: [permission], forms: [] }), envId, directory: feat.path }]);
+    store.setSessions(envId, [
+      {
+        ...waiting({ permissions: [permission], forms: [] }),
+        envId,
+        directory: feat.path,
+      },
+    ]);
     clientFor.mockClear();
     await orch.replyPermission(project.id, "per_1", { decision: "once" });
     expect(clientFor.mock.calls[0][0].baseUrl).toBe("http://172.17.0.10:4096");
     expect(client.replyPermission).toHaveBeenCalled();
     await orch.stopEnv(project.id, envId);
-    await expect(orch.startSession(project.id, feat.path)).rejects.toThrow(/container is not running/);
+    await expect(orch.startSession(project.id, feat.path)).rejects.toThrow(
+      /container is not running/
+    );
   });
 });
 ```
 
 - [ ] **Step 3: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/orchestrator.test.ts -t "task environments"`
-Expected: FAIL — `orch.createEnv is not a function`.
+Run: `pnpm vitest run test/server/orchestrator.test.ts -t "task environments"` Expected: FAIL — `orch.createEnv is not a function`.
 
 - [ ] **Step 4: Add deps and helpers** — in `src/server/orchestrator.ts`:
 
@@ -2134,7 +2695,15 @@ Replace `ContainersPort` and add ports:
 ```ts
 export type ContainersPort = Pick<
   Containers,
-  "up" | "inspect" | "listManaged" | "stop" | "readConfiguration" | "workspaceFolder" | "readConfig" | "remove" | "removeImage"
+  | "up"
+  | "inspect"
+  | "listManaged"
+  | "stop"
+  | "readConfiguration"
+  | "workspaceFolder"
+  | "readConfig"
+  | "remove"
+  | "removeImage"
 >;
 export type ImagesPort = Pick<Images, "ensureBase">;
 export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
@@ -2243,11 +2812,11 @@ In `forwardPorts`, call `if (!env.worktree) this.noteSettings(env.project, undef
 In `opencodeClient(id)`, replace the thrown error with:
 
 ```ts
-      throw new UnavailableError(
-        this.deps.store.environment(id)
-          ? "this worktree's container is not running — start it from the Worktrees tab"
-          : "opencode is not running — start the project first",
-      );
+throw new UnavailableError(
+  this.deps.store.environment(id)
+    ? "this worktree's container is not running — start it from the Worktrees tab"
+    : "opencode is not running — start the project first"
+);
 ```
 
 - [ ] **Step 5: Add the task environment lifecycle** — public methods (after `stop`):
@@ -2439,27 +3008,30 @@ In `adopt`, make the loop's first line `if (info.envId) { await this.adoptTask(i
 `openInEditor`: after the host path is computed, take the container from the directory's environment:
 
 ```ts
-    const envRt = this.deps.store.runtime(this.envForDirectory(project, directory).id);
-    return this.deps.editors.open(editorId, {
-      containerPath: directory,
-      hostPath,
-      containerName: envRt.containerState === "running" ? envRt.containerName : undefined,
-    });
+const envRt = this.deps.store.runtime(
+  this.envForDirectory(project, directory).id
+);
+return this.deps.editors.open(editorId, {
+  containerPath: directory,
+  hostPath,
+  containerName:
+    envRt.containerState === "running" ? envRt.containerName : undefined,
+});
 ```
 
 `respond`: record the session's environment with the item and use it:
 
 ```ts
-    let found: { item: T; directory: string; envId: EnvId } | undefined;
-    for (const s of this.deps.store.sessionsOf(id)) {
-      const item = s.pending && find(s.pending);
-      if (item) {
-        found = { item, directory: s.directory, envId: s.envId ?? id };
-        break;
-      }
-    }
-    if (!found) throw new NotFoundError(itemId, what);
-    const client = this.opencodeClient(found.envId);
+let found: { item: T; directory: string; envId: EnvId } | undefined;
+for (const s of this.deps.store.sessionsOf(id)) {
+  const item = s.pending && find(s.pending);
+  if (item) {
+    found = { item, directory: s.directory, envId: s.envId ?? id };
+    break;
+  }
+}
+if (!found) throw new NotFoundError(itemId, what);
+const client = this.opencodeClient(found.envId);
 ```
 
 and in its `finally`, reconcile `found.envId`'s monitor (keep the project's too: `this.monitors.get(id)?.reconcile?.(); if (found.envId !== id) this.monitors.get(found.envId)?.reconcile?.();`).
@@ -2467,22 +3039,23 @@ and in its `finally`, reconcile `found.envId`'s monitor (keep the project's too:
 `pickVariant`: remove `const client = this.opencodeClient(id);` and use each session's own environment:
 
 ```ts
-    const clientOf = (s: SessionSummary) => this.opencodeClient(s.envId ?? id);
-    const kept = variants.find((s) => s.id === keep)!;
-    // A concurrent pick may have discarded this variant since the dashboard last saw it.
-    if (parseTaskMeta((await clientOf(kept).session(keep)).metadata)?.discarded) throw new InvalidRequestError("that variant was already discarded");
+const clientOf = (s: SessionSummary) => this.opencodeClient(s.envId ?? id);
+const kept = variants.find((s) => s.id === keep)!;
+// A concurrent pick may have discarded this variant since the dashboard last saw it.
+if (parseTaskMeta((await clientOf(kept).session(keep)).metadata)?.discarded)
+  throw new InvalidRequestError("that variant was already discarded");
 ```
 
 In `discard`, use `const client = clientOf(s);` inside the loop (within the `try`), and replace the single reconcile with:
 
 ```ts
-      for (const envId of new Set([id, ...others.map((s) => s.envId ?? id)])) this.monitors.get(envId)?.reconcile?.();
+for (const envId of new Set([id, ...others.map((s) => s.envId ?? id)]))
+  this.monitors.get(envId)?.reconcile?.();
 ```
 
 - [ ] **Step 7: Run the tests**
 
-Run: `pnpm vitest run test/server/orchestrator.test.ts && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/server/orchestrator.test.ts && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 8: Commit**
 
@@ -2494,108 +3067,209 @@ git commit -m "feat: run worktrees in their own containers and route their openc
 ### Task 11: Tasks and worktree removal with their own containers
 
 **Files:**
+
 - Modify: `src/server/tasks.ts`, `src/server/orchestrator.ts`
 - Test: `test/server/tasks.test.ts`, `test/server/orchestrator.test.ts`
 
 **Interfaces:**
+
 - Consumes: `isolationFor`, `ensureTaskEnv`, `destroyEnv`, `taskEnv` (Task 10).
 - Produces: `parseTaskRequest` accepts `environment: "shared" | "isolated"`; `createTask` starts isolated variants in their own containers (`TaskVariantResult.envId`, or `notice` when it fell back to shared); `removeWorktree` and `pickVariant` remove a worktree's container before the worktree.
 
 - [ ] **Step 1: Write the failing tests** — add to `test/server/tasks.test.ts` (inside the `parseTaskRequest` describe):
 
 ```ts
-  it("accepts the environment of worktree tasks", () => {
-    expect(parseTaskRequest({ prompt: "x", environment: "isolated" }).environment).toBe("isolated");
-    expect(parseTaskRequest({ prompt: "x" })).not.toHaveProperty("environment");
-    expect(() => parseTaskRequest({ prompt: "x", environment: "vm" })).toThrow(/invalid environment/);
-    expect(() => parseTaskRequest({ prompt: "x", where: "workspace", environment: "isolated" })).toThrow(/new worktree/);
-  });
+it("accepts the environment of worktree tasks", () => {
+  expect(
+    parseTaskRequest({ prompt: "x", environment: "isolated" }).environment
+  ).toBe("isolated");
+  expect(parseTaskRequest({ prompt: "x" })).not.toHaveProperty("environment");
+  expect(() => parseTaskRequest({ prompt: "x", environment: "vm" })).toThrow(
+    /invalid environment/
+  );
+  expect(() =>
+    parseTaskRequest({
+      prompt: "x",
+      where: "workspace",
+      environment: "isolated",
+    })
+  ).toThrow(/new worktree/);
+});
 ```
 
 Add to `describe("task environments")` in `test/server/orchestrator.test.ts`:
 
 ```ts
-  it("starts each variant of an isolated task in its own container", async () => {
-    const s = await withWorktree();
-    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", where: "worktree", environment: "isolated", variants: [{}, {}] });
-    expect(r.variants.map((v) => v.branch)).toEqual(["iso-1", "iso-2"]);
-    expect(r.variants.every((v) => v.envId && v.sessionId && !v.error)).toBe(true);
-    expect(new Set(r.variants.map((v) => v.envId)).size).toBe(2);
-    expect(s.images.ensureBase).toHaveBeenCalledTimes(2);
-    expect(s.client.createSession.mock.calls.map((c) => c[0]).sort()).toEqual(["/workspaces/demo.worktrees/iso-1", "/workspaces/demo.worktrees/iso-2"]);
-    expect(s.store.environments(project.id).map((e) => e.worktree.branch).sort()).toEqual(["iso-1", "iso-2"]);
+it("starts each variant of an isolated task in its own container", async () => {
+  const s = await withWorktree();
+  const r = await s.orch.createTask(project.id, {
+    prompt: "Do it",
+    title: "Iso",
+    where: "worktree",
+    environment: "isolated",
+    variants: [{}, {}],
   });
+  expect(r.variants.map((v) => v.branch)).toEqual(["iso-1", "iso-2"]);
+  expect(r.variants.every((v) => v.envId && v.sessionId && !v.error)).toBe(
+    true
+  );
+  expect(new Set(r.variants.map((v) => v.envId)).size).toBe(2);
+  expect(s.images.ensureBase).toHaveBeenCalledTimes(2);
+  expect(s.client.createSession.mock.calls.map((c) => c[0]).sort()).toEqual([
+    "/workspaces/demo.worktrees/iso-1",
+    "/workspaces/demo.worktrees/iso-2",
+  ]);
+  expect(
+    s.store
+      .environments(project.id)
+      .map((e) => e.worktree.branch)
+      .sort()
+  ).toEqual(["iso-1", "iso-2"]);
+});
 
-  it("uses the project's default when the task doesn't choose", async () => {
-    const s = setup();
-    s.projectSettings.mockReturnValue({ isolation: "isolated" });
-    await s.orch.rescan();
-    await s.orch.start(project.id);
-    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", variants: [{}] });
-    expect(r.variants[0].envId).toBeDefined();
-    const shared = await s.orch.createTask(project.id, { prompt: "Do it", title: "Sh", environment: "shared", variants: [{}] });
-    expect(shared.variants[0].envId).toBeUndefined();
+it("uses the project's default when the task doesn't choose", async () => {
+  const s = setup();
+  s.projectSettings.mockReturnValue({ isolation: "isolated" });
+  await s.orch.rescan();
+  await s.orch.start(project.id);
+  const r = await s.orch.createTask(project.id, {
+    prompt: "Do it",
+    title: "Iso",
+    variants: [{}],
   });
+  expect(r.variants[0].envId).toBeDefined();
+  const shared = await s.orch.createTask(project.id, {
+    prompt: "Do it",
+    title: "Sh",
+    environment: "shared",
+    variants: [{}],
+  });
+  expect(shared.variants[0].envId).toBeUndefined();
+});
 
-  it("runs an isolated task shared, and says why, when the project can't isolate", async () => {
-    const s = setup();
-    s.containers.readConfiguration.mockResolvedValue({ forwardPorts: [], portsAttributes: {}, configuration: { appPort: 1 } });
-    await s.orch.rescan();
-    await s.orch.start(project.id);
-    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", environment: "isolated", variants: [{}] });
-    expect(r.variants[0]).toMatchObject({ sessionId: "ses_new", notice: expect.stringMatching(/shared container: appPort/) });
-    expect(r.variants[0].envId).toBeUndefined();
+it("runs an isolated task shared, and says why, when the project can't isolate", async () => {
+  const s = setup();
+  s.containers.readConfiguration.mockResolvedValue({
+    forwardPorts: [],
+    portsAttributes: {},
+    configuration: { appPort: 1 },
   });
+  await s.orch.rescan();
+  await s.orch.start(project.id);
+  const r = await s.orch.createTask(project.id, {
+    prompt: "Do it",
+    title: "Iso",
+    environment: "isolated",
+    variants: [{}],
+  });
+  expect(r.variants[0]).toMatchObject({
+    sessionId: "ses_new",
+    notice: expect.stringMatching(/shared container: appPort/),
+  });
+  expect(r.variants[0].envId).toBeUndefined();
+});
 
-  it("keeps the worktree of a variant whose container didn't start", async () => {
-    const s = await withWorktree();
-    s.images.ensureBase.mockRejectedValueOnce(new CommandError("devcontainer build failed: boom"));
-    const r = await s.orch.createTask(project.id, { prompt: "Do it", title: "Iso", environment: "isolated", variants: [{}] });
-    expect(r.variants[0].error).toMatch(/its container did not start: devcontainer build failed: boom/);
-    expect(r.variants[0].directory).toBe("/workspaces/demo.worktrees/iso");
-    expect(s.worktrees.remove).not.toHaveBeenCalled();
+it("keeps the worktree of a variant whose container didn't start", async () => {
+  const s = await withWorktree();
+  s.images.ensureBase.mockRejectedValueOnce(
+    new CommandError("devcontainer build failed: boom")
+  );
+  const r = await s.orch.createTask(project.id, {
+    prompt: "Do it",
+    title: "Iso",
+    environment: "isolated",
+    variants: [{}],
   });
+  expect(r.variants[0].error).toMatch(
+    /its container did not start: devcontainer build failed: boom/
+  );
+  expect(r.variants[0].directory).toBe("/workspaces/demo.worktrees/iso");
+  expect(s.worktrees.remove).not.toHaveBeenCalled();
+});
 
-  it("removes a worktree's container before the worktree, and keeps the worktree when that fails", async () => {
-    const { orch, containers, worktrees, store, envId } = await withEnv();
-    containers.remove.mockRejectedValueOnce(new CommandError("docker rm failed: busy"));
-    await expect(orch.removeWorktree(project.id, feat.path, false)).rejects.toThrow(/kept the worktree/);
-    expect(worktrees.remove).not.toHaveBeenCalled();
-    await orch.removeWorktree(project.id, feat.path, false);
-    expect(containers.remove.mock.invocationCallOrder.at(-1)!).toBeLessThan(worktrees.remove.mock.invocationCallOrder[0]);
-    expect(store.environment(envId)).toBeUndefined();
-  });
+it("removes a worktree's container before the worktree, and keeps the worktree when that fails", async () => {
+  const { orch, containers, worktrees, store, envId } = await withEnv();
+  containers.remove.mockRejectedValueOnce(
+    new CommandError("docker rm failed: busy")
+  );
+  await expect(
+    orch.removeWorktree(project.id, feat.path, false)
+  ).rejects.toThrow(/kept the worktree/);
+  expect(worktrees.remove).not.toHaveBeenCalled();
+  await orch.removeWorktree(project.id, feat.path, false);
+  expect(containers.remove.mock.invocationCallOrder.at(-1)!).toBeLessThan(
+    worktrees.remove.mock.invocationCallOrder[0]
+  );
+  expect(store.environment(envId)).toBeUndefined();
+});
 
-  it("Pick removes a discarded variant's container with its worktree", async () => {
-    const { orch, store, containers, envId } = await withEnv();
-    const meta = (variant: number, branch?: string) => ({ task: "tsk_1", variant, of: 2, title: "T", ...(branch ? { branch } : {}) });
-    store.setSessions(project.id, [{ id: "ses_keep", projectId: project.id, title: "T", directory: "/workspaces/demo", updatedAt: 1, status: "idle", task: meta(1) }]);
-    store.setSessions(envId, [{ id: "ses_drop", projectId: project.id, envId, title: "T", directory: feat.path, updatedAt: 1, status: "idle", task: meta(2, "feat") }]);
-    const r = await orch.pickVariant(project.id, "tsk_1", "ses_keep", true);
-    expect(r).toEqual({ discarded: ["ses_drop"], removed: [feat.path], errors: [] });
-    expect(containers.remove).toHaveBeenCalledWith("c2");
-    expect(store.environment(envId)).toBeUndefined();
+it("Pick removes a discarded variant's container with its worktree", async () => {
+  const { orch, store, containers, envId } = await withEnv();
+  const meta = (variant: number, branch?: string) => ({
+    task: "tsk_1",
+    variant,
+    of: 2,
+    title: "T",
+    ...(branch ? { branch } : {}),
   });
+  store.setSessions(project.id, [
+    {
+      id: "ses_keep",
+      projectId: project.id,
+      title: "T",
+      directory: "/workspaces/demo",
+      updatedAt: 1,
+      status: "idle",
+      task: meta(1),
+    },
+  ]);
+  store.setSessions(envId, [
+    {
+      id: "ses_drop",
+      projectId: project.id,
+      envId,
+      title: "T",
+      directory: feat.path,
+      updatedAt: 1,
+      status: "idle",
+      task: meta(2, "feat"),
+    },
+  ]);
+  const r = await orch.pickVariant(project.id, "tsk_1", "ses_keep", true);
+  expect(r).toEqual({
+    discarded: ["ses_drop"],
+    removed: [feat.path],
+    errors: [],
+  });
+  expect(containers.remove).toHaveBeenCalledWith("c2");
+  expect(store.environment(envId)).toBeUndefined();
+});
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/tasks.test.ts test/server/orchestrator.test.ts -t "environment|isolated|container|Pick removes"`
-Expected: FAIL.
+Run: `pnpm vitest run test/server/tasks.test.ts test/server/orchestrator.test.ts -t "environment|isolated|container|Pick removes"` Expected: FAIL.
 
 - [ ] **Step 3: Parse `environment`** — in `src/server/tasks.ts` `parseTaskRequest`, after `where` is validated:
 
 ```ts
-  const environment = body.environment ?? undefined;
-  if (environment !== undefined && environment !== "shared" && environment !== "isolated") {
-    throw new InvalidRequestError(`invalid environment "${String(environment)}"`);
-  }
+const environment = body.environment ?? undefined;
+if (
+  environment !== undefined &&
+  environment !== "shared" &&
+  environment !== "isolated"
+) {
+  throw new InvalidRequestError(`invalid environment "${String(environment)}"`);
+}
 ```
 
 inside the `if (where === "workspace")` block:
 
 ```ts
-    if (environment === "isolated") throw new InvalidRequestError("only a new worktree can get its own container");
+if (environment === "isolated")
+  throw new InvalidRequestError(
+    "only a new worktree can get its own container"
+  );
 ```
 
 and add `...(environment ? { environment } : {}),` to the returned object after `where,`.
@@ -2716,37 +3390,44 @@ and add `...(environment ? { environment } : {}),` to the returned object after 
 - [ ] **Step 5: Remove containers with worktrees** — in `removeWorktree`, right after the `unknown worktree` check:
 
 ```ts
-      const rec = this.deps.store.environments(id).find((e) => e.worktree.path === worktreePath);
-      if (rec) {
-        const env = this.taskEnv(p, rec);
-        try {
-          await this.exclusiveEnv(env, () => this.destroyEnv(env));
-        } catch (err) {
-          if (err instanceof BusyError) throw err;
-          throw new UnavailableError(`kept the worktree: its container could not be removed (${err instanceof Error ? err.message : String(err)})`);
-        }
-      }
+const rec = this.deps.store
+  .environments(id)
+  .find((e) => e.worktree.path === worktreePath);
+if (rec) {
+  const env = this.taskEnv(p, rec);
+  try {
+    await this.exclusiveEnv(env, () => this.destroyEnv(env));
+  } catch (err) {
+    if (err instanceof BusyError) throw err;
+    throw new UnavailableError(
+      `kept the worktree: its container could not be removed (${err instanceof Error ? err.message : String(err)})`
+    );
+  }
+}
 ```
 
 In `pickVariant`'s removal loop, before `await this.deps.worktrees.remove(p, ws, dir, true);` (its own `try`):
 
 ```ts
-        const rec = this.deps.store.environments(id).find((e) => e.worktree.path === dir);
-        if (rec) {
-          const env = this.taskEnv(p, rec);
-          try {
-            await this.exclusiveEnv(env, () => this.destroyEnv(env));
-          } catch (err) {
-            result.errors.push(`${wt.branch ?? dir}: kept — its container could not be removed: ${fail(err)}`);
-            continue;
-          }
-        }
+const rec = this.deps.store
+  .environments(id)
+  .find((e) => e.worktree.path === dir);
+if (rec) {
+  const env = this.taskEnv(p, rec);
+  try {
+    await this.exclusiveEnv(env, () => this.destroyEnv(env));
+  } catch (err) {
+    result.errors.push(
+      `${wt.branch ?? dir}: kept — its container could not be removed: ${fail(err)}`
+    );
+    continue;
+  }
+}
 ```
 
 - [ ] **Step 6: Run the tests**
 
-Run: `pnpm vitest run test/server && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/server && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -2758,10 +3439,12 @@ git commit -m "feat: tasks can run each variant in its own container; removing a
 ### Task 12: `<envId>.localhost`, routes and wiring
 
 **Files:**
+
 - Modify: `src/server/hosts.ts`, `src/server/server.ts`, `src/server/proxy.ts`, `src/server/cli.ts`, `src/server/dashboard-api.ts`
 - Test: `test/server/hosts.test.ts`, `test/server/cli.test.ts`, `test/server/dashboard-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createEnv`, `startEnv`, `stopEnv`, `removeEnv`, `opencodeAddress` (Task 10); `Images` (Task 8); `EnvFiles`, `stateDir`, `Config.projects` (Task 6).
 - Produces: `HostRoute = { kind: "dashboard" } | { kind: "env"; envId: string } | { kind: "reject" }`; `proxyTargets(store, orchestrator): ResolveTarget` exported from `cli.ts`; routes `POST /api/projects/:id/envs` `{ path }` → `{ envId }`, `POST /api/projects/:id/envs/:env/start|stop` → 202, `POST /api/projects/:id/envs/:env/remove` → `{ ok: true }`.
 
@@ -2772,11 +3455,26 @@ Add to `test/server/cli.test.ts` (import `proxyTargets` from `../../src/server/c
 ```ts
 describe("proxyTargets", () => {
   it("proxies to a running environment's opencode, main or task", () => {
-    const store = new StateStore({ port: 7777, persisted: { projects: {} }, persist: () => {} });
-    store.updateRuntime("p-feat-0a1b", { containerState: "running", password: "pw" });
-    const addresses: Record<string, { host: string; port: number }> = { "p-feat-0a1b": { host: "172.17.0.10", port: 4096 } };
-    const resolve = proxyTargets(store, { opencodeAddress: (id: string) => addresses[id] });
-    expect(resolve("p-feat-0a1b")).toEqual({ host: "172.17.0.10", port: 4096, password: "pw" });
+    const store = new StateStore({
+      port: 7777,
+      persisted: { projects: {} },
+      persist: () => {},
+    });
+    store.updateRuntime("p-feat-0a1b", {
+      containerState: "running",
+      password: "pw",
+    });
+    const addresses: Record<string, { host: string; port: number }> = {
+      "p-feat-0a1b": { host: "172.17.0.10", port: 4096 },
+    };
+    const resolve = proxyTargets(store, {
+      opencodeAddress: (id: string) => addresses[id],
+    });
+    expect(resolve("p-feat-0a1b")).toEqual({
+      host: "172.17.0.10",
+      port: 4096,
+      password: "pw",
+    });
     expect(resolve("p")).toBeUndefined();
   });
 });
@@ -2794,36 +3492,52 @@ In `test/server/dashboard-api.test.ts`, add to the orchestrator fake in `setup`:
 and the test:
 
 ```ts
-  it("creates, starts, stops and removes a worktree's own container", async () => {
-    const { app, orchestrator } = setup();
-    const post = (url: string, body?: unknown) =>
-      app.request(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
-    const created = await post(`/api/projects/${project.id}/envs`, { path: "/w/x" });
-    expect(await created.json()).toEqual({ envId: "demo-abc123-x-0a1b" });
-    expect(orchestrator.createEnv).toHaveBeenCalledWith(project.id, "/w/x");
-    expect((await post(`/api/projects/${project.id}/envs/e1/start`)).status).toBe(202);
-    expect(orchestrator.startEnv).toHaveBeenCalledWith(project.id, "e1");
-    expect((await post(`/api/projects/${project.id}/envs/e1/stop`)).status).toBe(202);
-    expect(orchestrator.stopEnv).toHaveBeenCalledWith(project.id, "e1");
-    expect((await post(`/api/projects/${project.id}/envs/e1/remove`)).status).toBe(200);
-    expect(orchestrator.removeEnv).toHaveBeenCalledWith(project.id, "e1");
-    orchestrator.startEnv.mockImplementationOnce(() => {
-      throw new NotFoundError("e9", "environment");
+it("creates, starts, stops and removes a worktree's own container", async () => {
+  const { app, orchestrator } = setup();
+  const post = (url: string, body?: unknown) =>
+    app.request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
     });
-    expect((await post(`/api/projects/${project.id}/envs/e9/start`)).status).toBe(404);
+  const created = await post(`/api/projects/${project.id}/envs`, {
+    path: "/w/x",
   });
+  expect(await created.json()).toEqual({ envId: "demo-abc123-x-0a1b" });
+  expect(orchestrator.createEnv).toHaveBeenCalledWith(project.id, "/w/x");
+  expect((await post(`/api/projects/${project.id}/envs/e1/start`)).status).toBe(
+    202
+  );
+  expect(orchestrator.startEnv).toHaveBeenCalledWith(project.id, "e1");
+  expect((await post(`/api/projects/${project.id}/envs/e1/stop`)).status).toBe(
+    202
+  );
+  expect(orchestrator.stopEnv).toHaveBeenCalledWith(project.id, "e1");
+  expect(
+    (await post(`/api/projects/${project.id}/envs/e1/remove`)).status
+  ).toBe(200);
+  expect(orchestrator.removeEnv).toHaveBeenCalledWith(project.id, "e1");
+  orchestrator.startEnv.mockImplementationOnce(() => {
+    throw new NotFoundError("e9", "environment");
+  });
+  expect((await post(`/api/projects/${project.id}/envs/e9/start`)).status).toBe(
+    404
+  );
+});
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/hosts.test.ts test/server/cli.test.ts test/server/dashboard-api.test.ts`
-Expected: FAIL.
+Run: `pnpm vitest run test/server/hosts.test.ts test/server/cli.test.ts test/server/dashboard-api.test.ts` Expected: FAIL.
 
 - [ ] **Step 3: Hosts and proxy** — in `src/server/hosts.ts`:
 
 ```ts
 /** `<envId>.localhost` reaches an environment's opencode; a main environment's id is its project's. */
-export type HostRoute = { kind: "dashboard" } | { kind: "env"; envId: string } | { kind: "reject" };
+export type HostRoute =
+  | { kind: "dashboard" }
+  | { kind: "env"; envId: string }
+  | { kind: "reject" };
 ```
 
 and return `{ kind: "env", envId: label }`. In `src/server/server.ts`, check `route.kind === "env"` and pass `route.envId` (both in the request handler and the upgrade handler). In `src/server/proxy.ts`, rename the `projectId` parameters of `ResolveTarget`, `proxyRequest` and `proxyUpgrade` to `envId`, and change the 503 page to `sendPage(res, 503, "Not running", "Start it from the dashboard, then reload this page.", dashboardUrl)`.
@@ -2834,12 +3548,13 @@ and return `{ kind: "env", envId: label }`. In `src/server/server.ts`, check `ro
 /** The proxy's upstream for `<envId>.localhost`: a running environment's opencode, main or task. */
 export function proxyTargets(
   store: Pick<StateStore, "runtime">,
-  orchestrator: Pick<Orchestrator, "opencodeAddress">,
+  orchestrator: Pick<Orchestrator, "opencodeAddress">
 ): ResolveTarget {
   return (envId) => {
     const rt = store.runtime(envId);
     const address = orchestrator.opencodeAddress(envId);
-    if (rt.containerState !== "running" || !address || !rt.password) return undefined;
+    if (rt.containerState !== "running" || !address || !rt.password)
+      return undefined;
     return { ...address, password: rt.password };
   };
 }
@@ -2859,32 +3574,38 @@ In `main`, create `const git = new GitOps({ containers });` before the orchestra
 - [ ] **Step 5: Routes** — in `src/server/dashboard-api.ts`, add `"createEnv" | "startEnv" | "stopEnv" | "removeEnv"` to `DashboardOrchestrator`, and after the worktree routes:
 
 ```ts
-  // A worktree's own container.
-  app.post("/api/projects/:id/envs", (c) => json(c, (id, b) => orchestrator.createEnv(id, str(b.path) ?? "")));
-  const envActions = {
-    start: (id: string, envId: string) => orchestrator.startEnv(id, envId),
-    stop: (id: string, envId: string) => orchestrator.stopEnv(id, envId),
-  } as const;
-  for (const [route, run] of Object.entries(envActions)) {
-    app.post(`/api/projects/:id/envs/:env/${route}`, (c) => {
-      if (store.preflight().errors.length > 0) {
-        return c.json({ error: store.preflight().errors.join("; ") }, 412);
-      }
-      try {
-        run(c.req.param("id"), c.req.param("env")).catch(() => {});
-        return c.json({ accepted: true }, 202);
-      } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, errorStatus(err));
-      }
-    });
-  }
-  app.post("/api/projects/:id/envs/:env/remove", (c) => json(c, (id) => orchestrator.removeEnv(id, c.req.param("env") ?? "")));
+// A worktree's own container.
+app.post("/api/projects/:id/envs", (c) =>
+  json(c, (id, b) => orchestrator.createEnv(id, str(b.path) ?? ""))
+);
+const envActions = {
+  start: (id: string, envId: string) => orchestrator.startEnv(id, envId),
+  stop: (id: string, envId: string) => orchestrator.stopEnv(id, envId),
+} as const;
+for (const [route, run] of Object.entries(envActions)) {
+  app.post(`/api/projects/:id/envs/:env/${route}`, (c) => {
+    if (store.preflight().errors.length > 0) {
+      return c.json({ error: store.preflight().errors.join("; ") }, 412);
+    }
+    try {
+      run(c.req.param("id"), c.req.param("env")).catch(() => {});
+      return c.json({ accepted: true }, 202);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        errorStatus(err)
+      );
+    }
+  });
+}
+app.post("/api/projects/:id/envs/:env/remove", (c) =>
+  json(c, (id) => orchestrator.removeEnv(id, c.req.param("env") ?? ""))
+);
 ```
 
 - [ ] **Step 6: Run the tests**
 
-Run: `pnpm test && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm test && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -2894,14 +3615,17 @@ git commit -m "feat: proxy <envId>.localhost and routes to create, start, stop a
 ```
 
 ---
+
 ### Task 13: Web data — env calls, helpers and per-environment session links
 
 **Files:**
+
 - Modify: `src/web/api.ts`, `src/web/derive.ts`
 - Modify: `src/web/components/ProjectActions.tsx`, `SessionList.tsx`, `CommandPalette.tsx`, `PendingCards.tsx`, `src/web/pages/ProjectTask.tsx`
 - Test: `test/web/api.test.ts`, `test/web/derive.test.ts`
 
 **Interfaces:**
+
 - Consumes: the routes of Task 12; `ProjectView.environments` (Tasks 1, 9).
 - Produces: `createEnv(projectId, path): Promise<{ envId: string }>`, `envAction(projectId, envId, "start" | "stop"): Promise<void>`, `removeEnv(projectId, envId): Promise<unknown>`; `envOfDirectory(view, directory): EnvironmentView | undefined`, `openUrlOf(view, envId?): string`, `sessionHref(view, session): string`, `envTone(env): Tone`; `containerShellCommand` uses the directory's environment; `openSessionTab(view, create, directory?)`.
 
@@ -2913,12 +3637,18 @@ describe("environment API", () => {
     const fetchMock = stubFetch(200, { envId: "e1" });
     expect(await createEnv("demo-1", "/w/x")).toEqual({ envId: "e1" });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/demo-1/envs");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ path: "/w/x" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      path: "/w/x",
+    });
     await envAction("demo-1", "e1", "stop");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/demo-1/envs/e1/stop");
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/projects/demo-1/envs/e1/stop"
+    );
     expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
     await removeEnv("demo-1", "e1");
-    expect(fetchMock.mock.calls[2][0]).toBe("/api/projects/demo-1/envs/e1/remove");
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "/api/projects/demo-1/envs/e1/remove"
+    );
   });
 });
 ```
@@ -2929,11 +3659,24 @@ Add to `test/web/derive.test.ts` (import `envOfDirectory`, `envTone`, `openUrlOf
 describe("task environments", () => {
   const env: EnvironmentView = {
     id: "p-feat-0a1b",
-    worktree: { path: "/w.worktrees/feat", hostPath: "/p.worktrees/feat", branch: "feat" },
-    runtime: { projectId: "p", containerState: "running", opencode: "healthy", containerName: "task_c", remoteUser: "node" },
+    worktree: {
+      path: "/w.worktrees/feat",
+      hostPath: "/p.worktrees/feat",
+      branch: "feat",
+    },
+    runtime: {
+      projectId: "p",
+      containerState: "running",
+      opencode: "healthy",
+      containerName: "task_c",
+      remoteUser: "node",
+    },
     openUrl: "http://p-feat-0a1b.localhost:7777/",
   };
-  const view = (): ProjectView => ({ ...snap({}).projects[0], environments: [env] });
+  const view = (): ProjectView => ({
+    ...snap({}).projects[0],
+    environments: [env],
+  });
 
   it("finds a checkout's environment and its opencode URL", () => {
     expect(envOfDirectory(view(), "/w.worktrees/feat")?.id).toBe(env.id);
@@ -2944,43 +3687,83 @@ describe("task environments", () => {
   });
 
   it("links a session to the opencode that runs it", () => {
-    const s = { id: "ses_1", projectId: "p", envId: env.id, title: "t", directory: "/w.worktrees/feat", updatedAt: 1, status: "idle" as const };
-    expect(sessionHref(view(), s)).toMatch(/^http:\/\/p-feat-0a1b\.localhost:7777\/server\/.+\/session\/ses_1$/);
-    expect(sessionHref(view(), { ...s, envId: undefined })).toMatch(/^http:\/\/p\.localhost:7777\//);
+    const s = {
+      id: "ses_1",
+      projectId: "p",
+      envId: env.id,
+      title: "t",
+      directory: "/w.worktrees/feat",
+      updatedAt: 1,
+      status: "idle" as const,
+    };
+    expect(sessionHref(view(), s)).toMatch(
+      /^http:\/\/p-feat-0a1b\.localhost:7777\/server\/.+\/session\/ses_1$/
+    );
+    expect(sessionHref(view(), { ...s, envId: undefined })).toMatch(
+      /^http:\/\/p\.localhost:7777\//
+    );
   });
 
   it("opens a shell in the worktree's own container", () => {
-    expect(containerShellCommand(view(), "/w.worktrees/feat")).toContain(" task_c ");
+    expect(containerShellCommand(view(), "/w.worktrees/feat")).toContain(
+      " task_c "
+    );
   });
 
   it("tones a container by its state", () => {
     expect(envTone(env)).toBe("ok");
-    expect(envTone({ ...env, runtime: { ...env.runtime, containerState: "starting" } })).toBe("busy");
-    expect(envTone({ ...env, runtime: { ...env.runtime, opencode: "unhealthy" } })).toBe("error");
-    expect(envTone({ ...env, runtime: { ...env.runtime, containerState: "stopped" } })).toBe("off");
+    expect(
+      envTone({
+        ...env,
+        runtime: { ...env.runtime, containerState: "starting" },
+      })
+    ).toBe("busy");
+    expect(
+      envTone({ ...env, runtime: { ...env.runtime, opencode: "unhealthy" } })
+    ).toBe("error");
+    expect(
+      envTone({
+        ...env,
+        runtime: { ...env.runtime, containerState: "stopped" },
+      })
+    ).toBe("off");
   });
 });
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/web/api.test.ts test/web/derive.test.ts`
-Expected: FAIL — missing exports.
+Run: `pnpm vitest run test/web/api.test.ts test/web/derive.test.ts` Expected: FAIL — missing exports.
 
 - [ ] **Step 3: Implement `api.ts`**:
 
 ```ts
-export function createEnv(projectId: string, path: string): Promise<{ envId: string }> {
+export function createEnv(
+  projectId: string,
+  path: string
+): Promise<{ envId: string }> {
   return postJson(projectId, "envs", { path }, "create container");
 }
 
-export async function envAction(projectId: string, envId: string, action: "start" | "stop"): Promise<void> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/envs/${encodeURIComponent(envId)}/${action}`, { method: "POST" });
+export async function envAction(
+  projectId: string,
+  envId: string,
+  action: "start" | "stop"
+): Promise<void> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/envs/${encodeURIComponent(envId)}/${action}`,
+    { method: "POST" }
+  );
   if (!res.ok) throw await failure(res, `${action} container`);
 }
 
 export function removeEnv(projectId: string, envId: string): Promise<unknown> {
-  return postJson(projectId, `envs/${encodeURIComponent(envId)}/remove`, {}, "remove container");
+  return postJson(
+    projectId,
+    `envs/${encodeURIComponent(envId)}/remove`,
+    {},
+    "remove container"
+  );
 }
 ```
 
@@ -2988,24 +3771,45 @@ export function removeEnv(projectId: string, envId: string): Promise<unknown> {
 
 ```ts
 /** The worktree's own container, when it has one. */
-export function envOfDirectory(view: ProjectView, directory: string): EnvironmentView | undefined {
+export function envOfDirectory(
+  view: ProjectView,
+  directory: string
+): EnvironmentView | undefined {
   return view.environments.find((e) => e.worktree.path === directory);
 }
 
 /** The opencode URL of an environment; the project's for the main one or one that is gone. */
-export function openUrlOf(view: ProjectView, envId: string | undefined): string {
-  return (envId && view.environments.find((e) => e.id === envId)?.openUrl) || view.openUrl;
+export function openUrlOf(
+  view: ProjectView,
+  envId: string | undefined
+): string {
+  return (
+    (envId && view.environments.find((e) => e.id === envId)?.openUrl) ||
+    view.openUrl
+  );
 }
 
 /** A session in the opencode that runs it. */
-export function sessionHref(view: ProjectView, session: SessionSummary): string {
+export function sessionHref(
+  view: ProjectView,
+  session: SessionSummary
+): string {
   return sessionUrl(openUrlOf(view, session.envId), session.id);
 }
 
 export function envTone(env: EnvironmentView): Tone {
   const { containerState, opencode } = env.runtime;
-  if (containerState === "error" || (containerState === "running" && opencode === "unhealthy")) return "error";
-  if (containerState === "starting" || containerState === "stopping" || opencode === "starting") return "busy";
+  if (
+    containerState === "error" ||
+    (containerState === "running" && opencode === "unhealthy")
+  )
+    return "error";
+  if (
+    containerState === "starting" ||
+    containerState === "stopping" ||
+    opencode === "starting"
+  )
+    return "busy";
   return containerState === "running" ? "ok" : "off";
 }
 ```
@@ -3013,17 +3817,24 @@ export function envTone(env: EnvironmentView): Tone {
 In `containerShellCommand`, replace the first line with:
 
 ```ts
-  const { containerName, remoteUser } = (envOfDirectory(view, directory) ?? view).runtime;
+const { containerName, remoteUser } = (envOfDirectory(view, directory) ?? view)
+  .runtime;
 ```
 
 - [ ] **Step 5: Use the right opencode for each session** — replace each `sessionUrl(view.openUrl, <session>.id)` with `sessionHref(view, <session>)`: `CommandPalette.tsx:63` (`session`), `PendingCards.tsx:115` (`session`), `ProjectTask.tsx:131` (`s`), `ProjectActions.tsx:60` (`latest`). In `SessionList.tsx`, pass `openUrl={openUrlOf(view, session.envId)}` to `SessionRow`. In `ProjectActions.tsx`, change `openSessionTab` to:
 
 ```ts
-export async function openSessionTab(view: ProjectView, create: () => Promise<string | undefined>, directory?: string): Promise<void> {
+export async function openSessionTab(
+  view: ProjectView,
+  create: () => Promise<string | undefined>,
+  directory?: string
+): Promise<void> {
   const tab = window.open("about:blank", "_blank");
   try {
     const id = await create();
-    const base = directory ? openUrlOf(view, envOfDirectory(view, directory)?.id) : view.openUrl;
+    const base = directory
+      ? openUrlOf(view, envOfDirectory(view, directory)?.id)
+      : view.openUrl;
     if (id && tab) tab.location.href = sessionUrl(base, id);
     else tab?.close();
   } catch (err) {
@@ -3037,8 +3848,7 @@ Drop `sessionUrl` imports that become unused.
 
 - [ ] **Step 6: Run the tests**
 
-Run: `pnpm vitest run test/web && pnpm typecheck`
-Expected: PASS.
+Run: `pnpm vitest run test/web && pnpm typecheck` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -3050,10 +3860,12 @@ git commit -m "feat: web calls for worktree containers; sessions open in the ope
 ### Task 14: UI — Own container on worktrees, Ports by environment, the task dialog and the task page
 
 **Files:**
+
 - Create: `src/web/components/EnvBadge.tsx`
 - Modify: `src/web/pages/ProjectWorktrees.tsx`, `src/web/pages/ProjectPage.tsx`, `src/web/components/NewTaskDialog.tsx`, `src/web/pages/ProjectTask.tsx`, `src/web/styles.css`
 
 **Interfaces:**
+
 - Consumes: `createEnv`, `envAction`, `removeEnv`, `envOfDirectory`, `envTone`, `openSessionTab(view, create, directory)` (Task 13).
 - Produces: `EnvBadge({ env })`.
 
@@ -3069,7 +3881,10 @@ import { STATE_LABEL, StatusDot } from "./Status";
 /** A worktree's own container: a dot and its state. */
 export function EnvBadge({ env }: { env: EnvironmentView }) {
   const { containerState, opencode, error } = env.runtime;
-  const label = containerState === "running" && opencode === "unhealthy" ? "opencode down" : STATE_LABEL[containerState];
+  const label =
+    containerState === "running" && opencode === "unhealthy"
+      ? "opencode down"
+      : STATE_LABEL[containerState];
   return (
     <span className="env-badge" title={error ?? `Own container (${env.id})`}>
       <StatusDot tone={envTone(env)} label={label} /> Own container · {label}
@@ -3081,74 +3896,115 @@ export function EnvBadge({ env }: { env: EnvironmentView }) {
 Append to `src/web/styles.css`:
 
 ```css
-.env-badge { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; font-size: 12px; }
-.ports-env { display: flex; align-items: center; gap: 0.35rem; font-size: 13px; margin: 1rem 0 0.4rem; }
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ports-env {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 13px;
+  margin: 1rem 0 0.4rem;
+}
 ```
 
 - [ ] **Step 2: Worktrees tab** — in `src/web/pages/ProjectWorktrees.tsx`, import `createEnv`, `envAction`, `removeEnv`, `envOfDirectory`, `EnvBadge`. Add `const unsupported = view.isolation?.unsupported;`. Add a `<th>Container</th>` after `<th>Sessions</th>`; in the main checkout row add `<td className="muted">Project's</td>` after the sessions cell. Make `newSession` pass the directory: `openSessionTab(view, () => startSession(project.id, directory, title), directory)`. Replace `remove` with:
 
 ```tsx
-  const remove = (path: string, name: string) => {
-    const own = envOfDirectory(view, path);
-    const what = own ? "Its folder, its container and the container's sessions are deleted" : "Its folder is deleted";
-    if (!confirm(`Remove the worktree ${name}? ${what}; the branch is kept.`)) return;
-    busy(path, async () => {
-      try {
-        await removeWorktree(project.id, path, false);
-      } catch (err) {
-        if (!(err instanceof Error) || !/--force/.test(err.message)) throw err;
-        if (!confirm(`${name} has uncommitted or untracked changes. Remove it anyway and discard them?`)) return;
-        await removeWorktree(project.id, path, true);
-      }
-    });
-  };
+const remove = (path: string, name: string) => {
+  const own = envOfDirectory(view, path);
+  const what = own
+    ? "Its folder, its container and the container's sessions are deleted"
+    : "Its folder is deleted";
+  if (!confirm(`Remove the worktree ${name}? ${what}; the branch is kept.`))
+    return;
+  busy(path, async () => {
+    try {
+      await removeWorktree(project.id, path, false);
+    } catch (err) {
+      if (!(err instanceof Error) || !/--force/.test(err.message)) throw err;
+      if (
+        !confirm(
+          `${name} has uncommitted or untracked changes. Remove it anyway and discard them?`
+        )
+      )
+        return;
+      await removeWorktree(project.id, path, true);
+    }
+  });
+};
 ```
 
 In the worktree rows, compute `const env = envOfDirectory(view, w.path);` and `const sessionsReady = env ? env.runtime.opencode === "healthy" : canOpen;`. Add a cell after the sessions cell:
 
 ```tsx
-                  <td>{env ? <EnvBadge env={env} /> : <span className="muted">Shared</span>}</td>
+<td>{env ? <EnvBadge env={env} /> : <span className="muted">Shared</span>}</td>
 ```
 
 Change the row's New session button to `disabled={!sessionsReady || !!pending}`, and add before the `OpenInMenu`:
 
 ```tsx
-                      {env ? (
-                        <>
-                          {env.runtime.containerState === "running" ? (
-                            <button className="small" disabled={!!pending} onClick={() => busy(`env:${env.id}`, () => envAction(project.id, env.id, "stop"))}>
-                              Stop container
-                            </button>
-                          ) : (
-                            <button
-                              className="small"
-                              disabled={!running || !!pending || env.runtime.containerState === "starting"}
-                              onClick={() => busy(`env:${env.id}`, () => envAction(project.id, env.id, "start"))}
-                            >
-                              Start container
-                            </button>
-                          )}
-                          <button
-                            className="small ghost"
-                            disabled={!!pending || env.runtime.containerState === "starting"}
-                            onClick={() => {
-                              if (confirm(`Remove the container of ${name}? Its sessions are deleted; the worktree and its files stay.`))
-                                busy(`env:${env.id}`, () => removeEnv(project.id, env.id));
-                            }}
-                          >
-                            Remove container
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="small"
-                          disabled={!running || !!pending || !!unsupported || !w.hostPath}
-                          title={unsupported ?? (w.hostPath ? "Run this worktree in its own devcontainer" : "Only worktrees in the mounted folder can")}
-                          onClick={() => busy(`env:${w.path}`, () => createEnv(project.id, w.path))}
-                        >
-                          Own container
-                        </button>
-                      )}
+{
+  env ? (
+    <>
+      {env.runtime.containerState === "running" ? (
+        <button
+          className="small"
+          disabled={!!pending}
+          onClick={() =>
+            busy(`env:${env.id}`, () => envAction(project.id, env.id, "stop"))
+          }
+        >
+          Stop container
+        </button>
+      ) : (
+        <button
+          className="small"
+          disabled={
+            !running || !!pending || env.runtime.containerState === "starting"
+          }
+          onClick={() =>
+            busy(`env:${env.id}`, () => envAction(project.id, env.id, "start"))
+          }
+        >
+          Start container
+        </button>
+      )}
+      <button
+        className="small ghost"
+        disabled={!!pending || env.runtime.containerState === "starting"}
+        onClick={() => {
+          if (
+            confirm(
+              `Remove the container of ${name}? Its sessions are deleted; the worktree and its files stay.`
+            )
+          )
+            busy(`env:${env.id}`, () => removeEnv(project.id, env.id));
+        }}
+      >
+        Remove container
+      </button>
+    </>
+  ) : (
+    <button
+      className="small"
+      disabled={!running || !!pending || !!unsupported || !w.hostPath}
+      title={
+        unsupported ??
+        (w.hostPath
+          ? "Run this worktree in its own devcontainer"
+          : "Only worktrees in the mounted folder can")
+      }
+      onClick={() => busy(`env:${w.path}`, () => createEnv(project.id, w.path))}
+    >
+      Own container
+    </button>
+  );
+}
 ```
 
 - [ ] **Step 3: Ports tab by environment** — in `src/web/pages/ProjectPage.tsx`, change the Ports count to `runtime.ports?.length ?? 0` plus `view.environments.reduce((n, e) => n + (e.runtime.ports?.length ?? 0), 0)` (use the page's `view` variable). Replace `ProjectPorts` with:
@@ -3157,15 +4013,24 @@ Change the row's New session button to `disabled={!sessionsReady || !!pending}`,
 export function ProjectPorts() {
   const view = useView();
   const groups = [
-    { key: view.project.id, branch: undefined as string | undefined, runtime: view.runtime },
-    ...view.environments.map((e) => ({ key: e.id, branch: e.worktree.branch, runtime: e.runtime })),
+    {
+      key: view.project.id,
+      branch: undefined as string | undefined,
+      runtime: view.runtime,
+    },
+    ...view.environments.map((e) => ({
+      key: e.id,
+      branch: e.worktree.branch,
+      runtime: e.runtime,
+    })),
   ].filter((g) => (g.runtime.ports?.length ?? 0) > 0);
   if (groups.length === 0) {
     return (
       <div className="empty">
         <h2>No forwarded ports</h2>
         <p className="muted">
-          Add <code>forwardPorts</code> to the project's devcontainer.json to reach its apps from <code>localhost</code>.
+          Add <code>forwardPorts</code> to the project's devcontainer.json to
+          reach its apps from <code>localhost</code>.
         </p>
       </div>
     );
@@ -3176,11 +4041,14 @@ export function ProjectPorts() {
         <section key={g.key}>
           {g.branch && (
             <h3 className="ports-env">
-              <Icon name="branch" size={12} /> {g.branch} <span className="muted">· own container</span>
+              <Icon name="branch" size={12} /> {g.branch}{" "}
+              <span className="muted">· own container</span>
             </h3>
           )}
           {g.runtime.relay && (
-            <p className={`note${g.runtime.relay === "unavailable" ? " note-warn" : ""}`}>
+            <p
+              className={`note${g.runtime.relay === "unavailable" ? " note-warn" : ""}`}
+            >
               {g.runtime.relay === "active"
                 ? "Connections go through a relay inside the container, so apps bound to localhost there are reachable."
                 : "No relay in the container: only apps listening on 0.0.0.0 are reachable. See the Logs tab for why."}
@@ -3198,7 +4066,14 @@ export function ProjectPorts() {
               </thead>
               <tbody>
                 {g.runtime.ports!.map((p) => (
-                  <PortRow key={p.status === "skipped" ? `s-${p.entry}` : `${p.status}-${p.containerPort}`} port={p} />
+                  <PortRow
+                    key={
+                      p.status === "skipped"
+                        ? `s-${p.entry}`
+                        : `${p.status}-${p.containerPort}`
+                    }
+                    port={p}
+                  />
                 ))}
               </tbody>
             </table>
@@ -3213,32 +4088,44 @@ export function ProjectPorts() {
 - [ ] **Step 4: New task dialog** — in `src/web/components/NewTaskDialog.tsx`, import `type Isolation`. Add state `const [environment, setEnvironment] = useState<Isolation>();` and reset it in the project `<select>`'s `onChange` (`setEnvironment(undefined);`). After `effectiveWhere`:
 
 ```tsx
-  const isolation = view?.isolation;
-  const chosenEnv: Isolation = isolation?.unsupported ? "shared" : (environment ?? isolation?.default ?? "shared");
+const isolation = view?.isolation;
+const chosenEnv: Isolation = isolation?.unsupported
+  ? "shared"
+  : (environment ?? isolation?.default ?? "shared");
 ```
 
 In `submit`'s request add `...(worktree ? { environment: chosenEnv } : {}),` after `where`. After the "Where" fieldset:
 
 ```tsx
-        {effectiveWhere === "worktree" && (
-          <fieldset className="task-where">
-            <legend>Environment</legend>
-            <label>
-              <input type="radio" name="environment" checked={chosenEnv === "shared"} onChange={() => setEnvironment("shared")} /> Shared container
-            </label>
-            <label title={isolation?.unsupported}>
-              <input
-                type="radio"
-                name="environment"
-                checked={chosenEnv === "isolated"}
-                disabled={!!isolation?.unsupported}
-                onChange={() => setEnvironment("isolated")}
-              />{" "}
-              Own container
-            </label>
-            {isolation?.unsupported && <span className="muted">{isolation.unsupported}</span>}
-          </fieldset>
-        )}
+{
+  effectiveWhere === "worktree" && (
+    <fieldset className="task-where">
+      <legend>Environment</legend>
+      <label>
+        <input
+          type="radio"
+          name="environment"
+          checked={chosenEnv === "shared"}
+          onChange={() => setEnvironment("shared")}
+        />{" "}
+        Shared container
+      </label>
+      <label title={isolation?.unsupported}>
+        <input
+          type="radio"
+          name="environment"
+          checked={chosenEnv === "isolated"}
+          disabled={!!isolation?.unsupported}
+          onChange={() => setEnvironment("isolated")}
+        />{" "}
+        Own container
+      </label>
+      {isolation?.unsupported && (
+        <span className="muted">{isolation.unsupported}</span>
+      )}
+    </fieldset>
+  );
+}
 ```
 
 - [ ] **Step 5: Task page** — in `src/web/pages/ProjectTask.tsx`, import `EnvBadge` and `envOfDirectory`; in each variant column compute `const env = envOfDirectory(view, s.directory);` and add to the `task-facts` list after Branch:
@@ -3250,8 +4137,7 @@ In `submit`'s request add `...(worktree ? { environment: chosenEnv } : {}),` aft
 
 - [ ] **Step 6: Typecheck and build**
 
-Run: `pnpm typecheck && pnpm build && pnpm test`
-Expected: PASS.
+Run: `pnpm typecheck && pnpm build && pnpm test` Expected: PASS.
 
 - [ ] **Step 7: See it working** — use the `run` skill (or `pnpm dev` plus `pnpm dev:web`) against a project with a mounted worktree:
   - The Worktrees tab shows "Shared" and an **Own container** button; clicking it shows "Own container · Starting…", then "Running"; **Stop container**/**Start container** toggle; **Remove container** returns the row to "Shared".
@@ -3269,10 +4155,12 @@ git commit -m "feat: Own container on worktrees, ports by environment and the En
 ### Task 15: End-to-end test with real containers, and the README
 
 **Files:**
+
 - Create: `test/e2e/environments.e2e.ts`
 - Modify: `README.md`
 
 **Interfaces:**
+
 - Consumes: everything above.
 
 - [ ] **Step 1: Write the e2e test** — `test/e2e/environments.e2e.ts`:
@@ -3282,7 +4170,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
+
 import { Containers, envLabels } from "../../src/server/containers";
 import { EditorLauncher } from "../../src/server/editors";
 import { EnvFiles } from "../../src/server/env-files";
@@ -3318,157 +4208,256 @@ const devcontainer = (extra: Record<string, unknown> = {}) =>
       ...extra,
     },
     null,
-    2,
+    2
   );
 
-describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: per-task environments", () => {
-  it("runs isolated tasks side by side, each in its own container with its own ports", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "odh-envs-"));
-    const repo = path.join(tmp, "envs-demo");
-    fs.mkdirSync(path.join(repo, ".devcontainer"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repo, ".devcontainer/Dockerfile"),
-      "FROM mcr.microsoft.com/devcontainers/javascript-node:22\nRUN npm i -g @opencode/cli@2\n",
-    );
-    fs.writeFileSync(path.join(repo, ".devcontainer/devcontainer.json"), devcontainer());
-    const hostGit = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
-    hostGit("init", "-q", "-b", "main");
-    hostGit("config", "user.name", "e2e");
-    hostGit("config", "user.email", "e2e@example.com");
-    hostGit("add", "-A");
-    hostGit("commit", "-q", "-m", "init");
-
-    const project: Project = { id: projectId(repo), name: "envs-demo", path: repo, devcontainerPath: path.join(repo, ".devcontainer/devcontainer.json") };
-    const store = new StateStore({ port: 0, persisted: { projects: {} }, persist: () => {} });
-    const containers = new Containers(spawnRunner);
-    const git = new GitOps({ containers });
-    const envFiles = new EnvFiles(path.join(tmp, "envs"));
-    const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
-    const runtime = new OpencodeRuntime({ containers, clientFor });
-    const orch = new Orchestrator({
-      store,
-      containers,
-      runtime,
-      forwarder: new PortForwarder(),
-      relay: new RelayRuntime({ containers }),
-      network: new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) }),
-      worktrees: new Worktrees({ containers, run: spawnRunner }),
-      git,
-      images: new Images({ run: spawnRunner, containers, git }),
-      envFiles,
-      publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }),
-      editors: new EditorLauncher([]),
-      clientFor,
-      roots: () => [],
-      scan: async () => [project],
-    });
-    orch.onLog((_id, line) => console.log(`[e2e envs] ${line}`));
-    const targetOf = (envId: string) => {
-      const rec = store.environment(envId)!;
-      return { id: envId, path: rec.worktree.hostPath, idLabels: envLabels(envId, project.id), overrideConfig: envFiles.path(envId) };
-    };
-    const lifecycle = async (envId: string) =>
-      (await containers.exec(targetOf(envId), ["cat", "/tmp/lifecycle.log"])).stdout.split("\n").filter(Boolean);
-
-    try {
-      await orch.rescan();
-      await orch.start(project.id);
-      expect(store.runtime(project.id)).toMatchObject({ containerState: "running", opencode: "healthy" });
-      expect(store.snapshot().projects[0].isolation).toEqual({ default: "isolated" });
-      const mainContainer = store.runtime(project.id).containerId;
-      const mainLog = (await containers.exec(project, ["cat", "/tmp/lifecycle.log"])).stdout;
-
-      const two = await orch.createTask(project.id, { prompt: PROMPT, title: "e2e iso", variants: [{}, {}] });
-      expect(two.variants.map((v) => v.error)).toEqual([undefined, undefined]);
-      const envIds = two.variants.map((v) => v.envId!);
-      expect(new Set(envIds).size).toBe(2);
-      for (const id of envIds) {
-        expect(store.runtime(id)).toMatchObject({ containerState: "running", opencode: "healthy" });
-        // image mode: every lifecycle command, once, in the task's own container
-        expect(await lifecycle(id)).toEqual(LIFECYCLE);
-      }
-      expect(new Set(envIds.map((id) => store.environment(id)!.image!.ref)).size).toBe(1);
-      await vi.waitFor(
-        () => expect(envIds.every((id) => store.sessionsOf(project.id).some((s) => s.envId === id))).toBe(true),
-        { timeout: 30_000, interval: 500 },
+describe.skipIf(!process.env.OPENDEVHUB_E2E)(
+  "e2e: per-task environments",
+  () => {
+    it("runs isolated tasks side by side, each in its own container with its own ports", async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "odh-envs-"));
+      const repo = path.join(tmp, "envs-demo");
+      fs.mkdirSync(path.join(repo, ".devcontainer"), { recursive: true });
+      fs.writeFileSync(
+        path.join(repo, ".devcontainer/Dockerfile"),
+        "FROM mcr.microsoft.com/devcontainers/javascript-node:22\nRUN npm i -g @opencode/cli@2\n"
       );
+      fs.writeFileSync(
+        path.join(repo, ".devcontainer/devcontainer.json"),
+        devcontainer()
+      );
+      const hostGit = (...args: string[]) =>
+        execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+      hostGit("init", "-q", "-b", "main");
+      hostGit("config", "user.name", "e2e");
+      hostGit("config", "user.email", "e2e@example.com");
+      hostGit("add", "-A");
+      hostGit("commit", "-q", "-m", "init");
 
-      // Both serve their own port 3000, on different host ports.
-      const hostPorts: number[] = [];
-      for (const id of envIds) {
-        await containers.exec(targetOf(id), [
-          "sh",
-          "-c",
-          `nohup node -e "require('http').createServer((q, r) => r.end('${id}')).listen(3000, '127.0.0.1')" < /dev/null > /tmp/web.log 2>&1 &`,
-        ]);
-        const fwd = store.runtime(id).ports?.find((p) => p.status === "forwarded" && p.containerPort === 3000);
-        expect(fwd?.status).toBe("forwarded");
-        hostPorts.push(fwd?.status === "forwarded" ? fwd.hostPort : 0);
-      }
-      expect(hostPorts[0]).not.toBe(hostPorts[1]);
-      for (const [i, id] of envIds.entries()) {
-        await vi.waitFor(async () => expect(await (await fetch(`http://127.0.0.1:${hostPorts[i]}/`)).text()).toBe(id), {
-          timeout: 15_000,
-          interval: 500,
+      const project: Project = {
+        id: projectId(repo),
+        name: "envs-demo",
+        path: repo,
+        devcontainerPath: path.join(repo, ".devcontainer/devcontainer.json"),
+      };
+      const store = new StateStore({
+        port: 0,
+        persisted: { projects: {} },
+        persist: () => {},
+      });
+      const containers = new Containers(spawnRunner);
+      const git = new GitOps({ containers });
+      const envFiles = new EnvFiles(path.join(tmp, "envs"));
+      const clientFor = (ep: { baseUrl: string; password: string }) =>
+        new OpencodeClient(ep);
+      const runtime = new OpencodeRuntime({ containers, clientFor });
+      const orch = new Orchestrator({
+        store,
+        containers,
+        runtime,
+        forwarder: new PortForwarder(),
+        relay: new RelayRuntime({ containers }),
+        network: new Network({
+          mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE),
+          gateway: new Gateway({ run: spawnRunner }),
+        }),
+        worktrees: new Worktrees({ containers, run: spawnRunner }),
+        git,
+        images: new Images({ run: spawnRunner, containers, git }),
+        envFiles,
+        publisher: new Publisher({
+          containers,
+          run: spawnRunner,
+          forges: { all: () => ({}), remember: () => {} },
+        }),
+        editors: new EditorLauncher([]),
+        clientFor,
+        roots: () => [],
+        scan: async () => [project],
+      });
+      orch.onLog((_id, line) => console.log(`[e2e envs] ${line}`));
+      const targetOf = (envId: string) => {
+        const rec = store.environment(envId)!;
+        return {
+          id: envId,
+          path: rec.worktree.hostPath,
+          idLabels: envLabels(envId, project.id),
+          overrideConfig: envFiles.path(envId),
+        };
+      };
+      const lifecycle = async (envId: string) =>
+        (
+          await containers.exec(targetOf(envId), ["cat", "/tmp/lifecycle.log"])
+        ).stdout
+          .split("\n")
+          .filter(Boolean);
+
+      try {
+        await orch.rescan();
+        await orch.start(project.id);
+        expect(store.runtime(project.id)).toMatchObject({
+          containerState: "running",
+          opencode: "healthy",
         });
+        expect(store.snapshot().projects[0].isolation).toEqual({
+          default: "isolated",
+        });
+        const mainContainer = store.runtime(project.id).containerId;
+        const mainLog = (
+          await containers.exec(project, ["cat", "/tmp/lifecycle.log"])
+        ).stdout;
+
+        const two = await orch.createTask(project.id, {
+          prompt: PROMPT,
+          title: "e2e iso",
+          variants: [{}, {}],
+        });
+        expect(two.variants.map((v) => v.error)).toEqual([
+          undefined,
+          undefined,
+        ]);
+        const envIds = two.variants.map((v) => v.envId!);
+        expect(new Set(envIds).size).toBe(2);
+        for (const id of envIds) {
+          expect(store.runtime(id)).toMatchObject({
+            containerState: "running",
+            opencode: "healthy",
+          });
+          // image mode: every lifecycle command, once, in the task's own container
+          expect(await lifecycle(id)).toEqual(LIFECYCLE);
+        }
+        expect(
+          new Set(envIds.map((id) => store.environment(id)!.image!.ref)).size
+        ).toBe(1);
+        await vi.waitFor(
+          () =>
+            expect(
+              envIds.every((id) =>
+                store.sessionsOf(project.id).some((s) => s.envId === id)
+              )
+            ).toBe(true),
+          { timeout: 30_000, interval: 500 }
+        );
+
+        // Both serve their own port 3000, on different host ports.
+        const hostPorts: number[] = [];
+        for (const id of envIds) {
+          await containers.exec(targetOf(id), [
+            "sh",
+            "-c",
+            `nohup node -e "require('http').createServer((q, r) => r.end('${id}')).listen(3000, '127.0.0.1')" < /dev/null > /tmp/web.log 2>&1 &`,
+          ]);
+          const fwd = store
+            .runtime(id)
+            .ports?.find(
+              (p) => p.status === "forwarded" && p.containerPort === 3000
+            );
+          expect(fwd?.status).toBe("forwarded");
+          hostPorts.push(fwd?.status === "forwarded" ? fwd.hostPort : 0);
+        }
+        expect(hostPorts[0]).not.toBe(hostPorts[1]);
+        for (const [i, id] of envIds.entries()) {
+          await vi.waitFor(
+            async () =>
+              expect(
+                await (await fetch(`http://127.0.0.1:${hostPorts[i]}/`)).text()
+              ).toBe(id),
+            {
+              timeout: 15_000,
+              interval: 500,
+            }
+          );
+        }
+
+        // A branch that changes .devcontainer gets its own image.
+        const { worktree } = await orch.createWorktree(project.id, {
+          branch: "devc",
+        });
+        fs.writeFileSync(
+          path.join(worktree.hostPath!, ".devcontainer/devcontainer.json"),
+          devcontainer({ containerEnv: { E2E: "1" } })
+        );
+        await containers.exec(project, [
+          "git",
+          "-C",
+          worktree.path,
+          "commit",
+          "-qam",
+          "change the devcontainer",
+        ]);
+        const { envId: devc } = await orch.createEnv(project.id, worktree.path);
+        await vi.waitFor(
+          () => expect(store.runtime(devc).opencode).toBe("healthy"),
+          { timeout: 10 * 60_000, interval: 1000 }
+        );
+        expect(store.environment(devc)!.image!.ref).not.toBe(
+          store.environment(envIds[0])!.image!.ref
+        );
+
+        // A warm environment (image already built) starts in under 10 s.
+        const { worktree: warm } = await orch.createWorktree(project.id, {
+          branch: "warm",
+        });
+        const t0 = Date.now();
+        const { envId: warmId } = await orch.createEnv(project.id, warm.path);
+        await vi.waitFor(
+          () => expect(store.runtime(warmId).opencode).toBe("healthy"),
+          { timeout: 60_000, interval: 200 }
+        );
+        expect(Date.now() - t0).toBeLessThan(10_000);
+
+        // Picking one variant removes the other's container with its worktree.
+        const [keep, drop] = two.variants;
+        const dropContainer = store.runtime(drop.envId!).containerId!;
+        const picked = await orch.pickVariant(
+          project.id,
+          two.task,
+          keep.sessionId!,
+          true
+        );
+        expect(picked.errors).toEqual([]);
+        expect(picked.removed).toEqual([drop.directory]);
+        expect(store.environment(drop.envId!)).toBeUndefined();
+        expect(await containers.inspect(dropContainer)).toBeUndefined();
+
+        // The main environment was never touched.
+        expect(store.runtime(project.id).containerId).toBe(mainContainer);
+        expect(
+          (await containers.exec(project, ["cat", "/tmp/lifecycle.log"])).stdout
+        ).toBe(mainLog);
+      } finally {
+        for (const e of store.environments(project.id))
+          await orch.removeEnv(project.id, e.id).catch(() => {});
+        await orch.stop(project.id).catch(() => {});
+        await orch.shutdown();
+        const images = execFileSync(
+          "docker",
+          ["images", "-q", `opendevhub/${project.id}`],
+          { encoding: "utf8" }
+        )
+          .split(/\s+/)
+          .filter(Boolean);
+        if (images.length > 0)
+          execFileSync("docker", ["image", "rm", "-f", ...images]);
+        fs.rmSync(tmp, { recursive: true, force: true });
       }
-
-      // A branch that changes .devcontainer gets its own image.
-      const { worktree } = await orch.createWorktree(project.id, { branch: "devc" });
-      fs.writeFileSync(path.join(worktree.hostPath!, ".devcontainer/devcontainer.json"), devcontainer({ containerEnv: { E2E: "1" } }));
-      await containers.exec(project, ["git", "-C", worktree.path, "commit", "-qam", "change the devcontainer"]);
-      const { envId: devc } = await orch.createEnv(project.id, worktree.path);
-      await vi.waitFor(() => expect(store.runtime(devc).opencode).toBe("healthy"), { timeout: 10 * 60_000, interval: 1000 });
-      expect(store.environment(devc)!.image!.ref).not.toBe(store.environment(envIds[0])!.image!.ref);
-
-      // A warm environment (image already built) starts in under 10 s.
-      const { worktree: warm } = await orch.createWorktree(project.id, { branch: "warm" });
-      const t0 = Date.now();
-      const { envId: warmId } = await orch.createEnv(project.id, warm.path);
-      await vi.waitFor(() => expect(store.runtime(warmId).opencode).toBe("healthy"), { timeout: 60_000, interval: 200 });
-      expect(Date.now() - t0).toBeLessThan(10_000);
-
-      // Picking one variant removes the other's container with its worktree.
-      const [keep, drop] = two.variants;
-      const dropContainer = store.runtime(drop.envId!).containerId!;
-      const picked = await orch.pickVariant(project.id, two.task, keep.sessionId!, true);
-      expect(picked.errors).toEqual([]);
-      expect(picked.removed).toEqual([drop.directory]);
-      expect(store.environment(drop.envId!)).toBeUndefined();
-      expect(await containers.inspect(dropContainer)).toBeUndefined();
-
-      // The main environment was never touched.
-      expect(store.runtime(project.id).containerId).toBe(mainContainer);
-      expect((await containers.exec(project, ["cat", "/tmp/lifecycle.log"])).stdout).toBe(mainLog);
-    } finally {
-      for (const e of store.environments(project.id)) await orch.removeEnv(project.id, e.id).catch(() => {});
-      await orch.stop(project.id).catch(() => {});
-      await orch.shutdown();
-      const images = execFileSync("docker", ["images", "-q", `opendevhub/${project.id}`], { encoding: "utf8" }).split(/\s+/).filter(Boolean);
-      if (images.length > 0) execFileSync("docker", ["image", "rm", "-f", ...images]);
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-});
+    });
+  }
+);
 ```
 
 - [ ] **Step 2: Run it**
 
-Run: `pnpm test:e2e test/e2e/environments.e2e.ts`
-Expected: PASS (the first run builds two images and takes several minutes). Also run `pnpm test:e2e test/e2e/tasks.e2e.ts test/e2e/opendevhub.e2e.ts` to confirm the shared mode is unchanged.
+Run: `pnpm test:e2e test/e2e/environments.e2e.ts` Expected: PASS (the first run builds two images and takes several minutes). Also run `pnpm test:e2e test/e2e/tasks.e2e.ts test/e2e/opendevhub.e2e.ts` to confirm the shared mode is unchanged.
 
 - [ ] **Step 3: README** — add after the `## Worktrees` section of `README.md`:
 
-~~~markdown
+````markdown
 ## Own containers for worktrees
 
-A worktree can run in its own devcontainer, with its own opencode, processes, ports and `$HOME`, so
-parallel agents don't trip over each other's dev servers or databases. Use **Own container** on a row of
-the Worktrees tab, or choose **Environment: Own container** in the New task dialog.
+A worktree can run in its own devcontainer, with its own opencode, processes, ports and `$HOME`, so parallel agents don't trip over each other's dev servers or databases. Use **Own container** on a row of the Worktrees tab, or choose **Environment: Own container** in the New task dialog.
 
-- The container starts from an image built once per project and devcontainer config
-  (`opendevhub/<project>:<key>-base`). All lifecycle commands run in each container, so a task gets
-  its own `npm ci`.
+- The container starts from an image built once per project and devcontainer config (`opendevhub/<project>:<key>-base`). All lifecycle commands run in each container, so a task gets its own `npm ci`.
 - Make it the default for a project in `devcontainer.json`:
 
   ```jsonc
@@ -3480,22 +4469,18 @@ the Worktrees tab, or choose **Environment: Own container** in the New task dial
   }
   ```
 
-  or for a repo you don't own, in `~/.config/opendevhub/config.json`:
-  `"projects": { "/path/to/repo": { "isolation": "isolated" } }`.
-- Git commands (review, commit, merge, worktree add and remove) still run in the project's container,
-  which has to be running.
+  or for a repo you don't own, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "isolation": "isolated" } }`.
+
+- Git commands (review, commit, merge, worktree add and remove) still run in the project's container, which has to be running.
 - Removing a worktree's container deletes the sessions that ran in it; the worktree and its files stay.
-~~~
+````
 
 and under `## Known limitations`:
 
-~~~markdown
-- Own containers don't support Docker Compose configs, `appPort`, `runArgs` that publish ports, host
-  networking, or lifecycle commands that use `${containerWorkspaceFolder}`; such projects run tasks
-  in the shared container and say why.
-- A Dockerfile whose build context reaches outside `.devcontainer` can change without opendevhub
-  noticing; remove the `opendevhub/<project>:*` images to force a rebuild.
-~~~
+```markdown
+- Own containers don't support Docker Compose configs, `appPort`, `runArgs` that publish ports, host networking, or lifecycle commands that use `${containerWorkspaceFolder}`; such projects run tasks in the shared container and say why.
+- A Dockerfile whose build context reaches outside `.devcontainer` can change without opendevhub noticing; remove the `opendevhub/<project>:*` images to force a rebuild.
+```
 
 - [ ] **Step 4: Commit**
 

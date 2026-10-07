@@ -34,11 +34,13 @@
 ### Task 1: Shared type and `docker stats` parsing
 
 **Files:**
+
 - Modify: `src/shared/types.ts` (next to `UsageReport`, and `DashboardSnapshot`)
 - Create: `src/server/resources.ts`
 - Test: `test/server/resources.test.ts`
 
 **Interfaces:**
+
 - Produces: `ResourceStats { cpu: number; memory: number; memoryLimit: number }` and `DashboardSnapshot.resources?: Record<EnvId, ResourceStats>` in `src/shared/types.ts`; `parseStats(stdout: string): Map<string, ResourceStats>`, `RunningContainer { envId: EnvId; containerId: string }`, `sampleResources(run: Runner, running: RunningContainer[]): Promise<Record<EnvId, ResourceStats>>` in `src/server/resources.ts`.
 
 - [ ] **Step 1: Add the shared type**
@@ -70,18 +72,22 @@ and inside `DashboardSnapshot`, after `usage?`:
 
 ```ts
 import { describe, expect, it } from "vitest";
+
 import { parseStats, sampleResources } from "../../src/server/resources";
 import { fakeRunner } from "../helpers/fake-runner";
 
 const MiB = 1024 ** 2;
 const GiB = 1024 ** 3;
-const line = (id: string, cpu: string, mem: string) => JSON.stringify({ ID: id, CPUPerc: cpu, MemUsage: mem, Name: "x" });
+const line = (id: string, cpu: string, mem: string) =>
+  JSON.stringify({ ID: id, CPUPerc: cpu, MemUsage: mem, Name: "x" });
 const FULL_A = "aaaaaaaaaaaa" + "0".repeat(52);
 const FULL_B = "bbbbbbbbbbbb" + "0".repeat(52);
 
 describe("parseStats", () => {
   it("reads CPU and memory with binary units, rounded", () => {
-    const stats = parseStats(`${line("aaaaaaaaaaaa", "12.6%", "1.248GiB / 31.24GiB")}\n`);
+    const stats = parseStats(
+      `${line("aaaaaaaaaaaa", "12.6%", "1.248GiB / 31.24GiB")}\n`
+    );
     expect(stats.get("aaaaaaaaaaaa")).toEqual({
       cpu: 13,
       memory: Math.round((1.248 * GiB) / MiB) * MiB,
@@ -96,10 +102,18 @@ describe("parseStats", () => {
         line("b", "150.2%", "700MB / 1TiB"),
         line("c", "1%", "3000000kB / 4GB"),
         line("d", "1%", "1048576B / 8GiB"),
-      ].join("\n"),
+      ].join("\n")
     );
-    expect(out.get("a")).toEqual({ cpu: 0, memory: 1 * MiB, memoryLimit: 2 * MiB });
-    expect(out.get("b")).toEqual({ cpu: 150, memory: Math.round(700e6 / MiB) * MiB, memoryLimit: 1024 ** 4 });
+    expect(out.get("a")).toEqual({
+      cpu: 0,
+      memory: 1 * MiB,
+      memoryLimit: 2 * MiB,
+    });
+    expect(out.get("b")).toEqual({
+      cpu: 150,
+      memory: Math.round(700e6 / MiB) * MiB,
+      memoryLimit: 1024 ** 4,
+    });
     expect(out.get("c")?.memory).toBe(Math.round(3e9 / MiB) * MiB);
     expect(out.get("d")?.memory).toBe(MiB);
   });
@@ -114,7 +128,7 @@ describe("parseStats", () => {
         "{broken",
         JSON.stringify({ ID: "", CPUPerc: "1%", MemUsage: "1MiB / 2MiB" }),
         line("ok", "2%", "1MiB / 2MiB"),
-      ].join("\n"),
+      ].join("\n")
     );
     expect([...out.keys()]).toEqual(["ok"]);
   });
@@ -136,7 +150,14 @@ describe("sampleResources", () => {
       { envId: "env-1", containerId: FULL_B },
     ]);
     expect(calls[0].cmd).toBe("docker");
-    expect(calls[0].args).toEqual(["stats", "--no-stream", "--format", "{{json .}}", FULL_A, FULL_B]);
+    expect(calls[0].args).toEqual([
+      "stats",
+      "--no-stream",
+      "--format",
+      "{{json .}}",
+      FULL_A,
+      FULL_B,
+    ]);
     expect(calls[0].opts?.timeoutMs).toBe(15_000);
     expect(out).toEqual({
       proj: { cpu: 5, memory: GiB, memoryLimit: 2 * GiB },
@@ -147,8 +168,11 @@ describe("sampleResources", () => {
   it("retries once without a container that is gone", async () => {
     const { run, calls } = fakeRunner((c) =>
       c.args.includes(FULL_B)
-        ? { exitCode: 1, stderr: "Error response from daemon: No such container: " + FULL_B }
-        : { stdout: line("aaaaaaaaaaaa", "5%", "1GiB / 2GiB") },
+        ? {
+            exitCode: 1,
+            stderr: "Error response from daemon: No such container: " + FULL_B,
+          }
+        : { stdout: line("aaaaaaaaaaaa", "5%", "1GiB / 2GiB") }
     );
     const out = await sampleResources(run, [
       { envId: "proj", containerId: FULL_A },
@@ -160,19 +184,25 @@ describe("sampleResources", () => {
   });
 
   it("returns nothing when docker fails for another reason or times out", async () => {
-    const failing = fakeRunner(() => ({ exitCode: 1, stderr: "Cannot connect to the Docker daemon" }));
-    expect(await sampleResources(failing.run, [{ envId: "p", containerId: FULL_A }])).toEqual({});
+    const failing = fakeRunner(() => ({
+      exitCode: 1,
+      stderr: "Cannot connect to the Docker daemon",
+    }));
+    expect(
+      await sampleResources(failing.run, [{ envId: "p", containerId: FULL_A }])
+    ).toEqual({});
     expect(failing.calls).toHaveLength(1);
     const slow = fakeRunner(() => ({ exitCode: 1, timedOut: true }));
-    expect(await sampleResources(slow.run, [{ envId: "p", containerId: FULL_A }])).toEqual({});
+    expect(
+      await sampleResources(slow.run, [{ envId: "p", containerId: FULL_A }])
+    ).toEqual({});
   });
 });
 ```
 
 - [ ] **Step 3: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/resources.test.ts`
-Expected: FAIL, cannot resolve `../../src/server/resources`.
+Run: `pnpm vitest run test/server/resources.test.ts` Expected: FAIL, cannot resolve `../../src/server/resources`.
 
 - [ ] **Step 4: Implement**
 
@@ -220,13 +250,22 @@ export function parseStats(stdout: string): Map<string, ResourceStats> {
     } catch {
       continue;
     }
-    if (typeof row.ID !== "string" || row.ID === "" || typeof row.CPUPerc !== "string" || typeof row.MemUsage !== "string") {
+    if (
+      typeof row.ID !== "string" ||
+      row.ID === "" ||
+      typeof row.CPUPerc !== "string" ||
+      typeof row.MemUsage !== "string"
+    ) {
       continue;
     }
     const cpu = /^([\d.]+)%$/.exec(row.CPUPerc.trim());
     const [used, limit] = row.MemUsage.split("/").map(parseSize);
     if (!cpu || used === undefined || !limit) continue;
-    out.set(row.ID, { cpu: Math.round(Number(cpu[1])), memory: roundMiB(used), memoryLimit: roundMiB(limit) });
+    out.set(row.ID, {
+      cpu: Math.round(Number(cpu[1])),
+      memory: roundMiB(used),
+      memoryLimit: roundMiB(limit),
+    });
   }
   return out;
 }
@@ -236,15 +275,29 @@ export interface RunningContainer {
   containerId: string;
 }
 
-const sameContainer = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+const sameContainer = (a: string, b: string) =>
+  a.startsWith(b) || b.startsWith(a);
 
 /** Every running environment's load from one `docker stats` call; nothing when docker fails. */
-export async function sampleResources(run: Runner, running: RunningContainer[]): Promise<Record<EnvId, ResourceStats>> {
+export async function sampleResources(
+  run: Runner,
+  running: RunningContainer[]
+): Promise<Record<EnvId, ResourceStats>> {
   let targets = running;
   for (let attempt = 0; attempt < 2 && targets.length > 0; attempt++) {
-    const r = await run("docker", ["stats", "--no-stream", "--format", "{{json .}}", ...targets.map((t) => t.containerId)], {
-      timeoutMs: STATS_TIMEOUT_MS,
-    });
+    const r = await run(
+      "docker",
+      [
+        "stats",
+        "--no-stream",
+        "--format",
+        "{{json .}}",
+        ...targets.map((t) => t.containerId),
+      ],
+      {
+        timeoutMs: STATS_TIMEOUT_MS,
+      }
+    );
     if (r.exitCode === 0 && !r.timedOut) {
       const rows = [...parseStats(r.stdout)];
       const out: Record<EnvId, ResourceStats> = {};
@@ -255,9 +308,13 @@ export async function sampleResources(run: Runner, running: RunningContainer[]):
       return out;
     }
     // One container that is gone fails the whole call: drop the ones docker names and try once more.
-    const gone = [...r.stderr.matchAll(/No such container: (\S+)/g)].map((m) => m[1]);
+    const gone = [...r.stderr.matchAll(/No such container: (\S+)/g)].map(
+      (m) => m[1]
+    );
     if (gone.length === 0) break;
-    targets = targets.filter((t) => !gone.some((g) => sameContainer(t.containerId, g)));
+    targets = targets.filter(
+      (t) => !gone.some((g) => sameContainer(t.containerId, g))
+    );
   }
   return {};
 }
@@ -265,8 +322,7 @@ export async function sampleResources(run: Runner, running: RunningContainer[]):
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `pnpm vitest run test/server/resources.test.ts`
-Expected: PASS (7 tests).
+Run: `pnpm vitest run test/server/resources.test.ts` Expected: PASS (7 tests).
 
 - [ ] **Step 6: Commit**
 
@@ -282,10 +338,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 2: Stats in the store and the snapshot
 
 **Files:**
+
 - Modify: `src/server/state.ts`
 - Test: `test/server/state.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ResourceStats` (Task 1), `RunningContainer` from `src/server/resources.ts`.
 - Produces: `StateStore.runningContainers(): RunningContainer[]`, `StateStore.setResources(r: Record<EnvId, ResourceStats>): void`; `snapshot().resources` when non-empty.
 
@@ -294,48 +352,58 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Append inside the `describe("StateStore", …)` block of `test/server/state.test.ts`:
 
 ```ts
-  it("lists the containers of running main and task environments", () => {
-    const { store } = make();
-    store.setProjects([p("a"), p("b")]);
-    store.putEnvironment({ id: "env-1", projectId: "a", worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" } });
-    store.updateRuntime("a", { containerState: "running", containerId: "ca" });
-    store.updateRuntime("b", { containerState: "stopped", containerId: "cb" });
-    store.updateRuntime("env-1", { containerState: "running", containerId: "ce" });
-    expect(store.runningContainers()).toEqual([
-      { envId: "a", containerId: "ca" },
-      { envId: "env-1", containerId: "ce" },
-    ]);
+it("lists the containers of running main and task environments", () => {
+  const { store } = make();
+  store.setProjects([p("a"), p("b")]);
+  store.putEnvironment({
+    id: "env-1",
+    projectId: "a",
+    worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" },
   });
+  store.updateRuntime("a", { containerState: "running", containerId: "ca" });
+  store.updateRuntime("b", { containerState: "stopped", containerId: "cb" });
+  store.updateRuntime("env-1", {
+    containerState: "running",
+    containerId: "ce",
+  });
+  expect(store.runningContainers()).toEqual([
+    { envId: "a", containerId: "ca" },
+    { envId: "env-1", containerId: "ce" },
+  ]);
+});
 
-  it("puts resources in the snapshot and emits only when they change", () => {
-    const { store } = make();
-    store.setProjects([p("a")]);
-    expect(store.snapshot().resources).toBeUndefined();
-    const fn = vi.fn();
-    store.subscribe(fn);
-    const stats = { a: { cpu: 3, memory: 1024 ** 2, memoryLimit: 1024 ** 3 } };
-    store.setResources(stats);
-    store.setResources(structuredClone(stats));
-    expect(fn).toHaveBeenCalledTimes(1);
-    expect(store.snapshot().resources).toEqual(stats);
-    store.setResources({});
-    expect(store.snapshot().resources).toBeUndefined();
-  });
+it("puts resources in the snapshot and emits only when they change", () => {
+  const { store } = make();
+  store.setProjects([p("a")]);
+  expect(store.snapshot().resources).toBeUndefined();
+  const fn = vi.fn();
+  store.subscribe(fn);
+  const stats = { a: { cpu: 3, memory: 1024 ** 2, memoryLimit: 1024 ** 3 } };
+  store.setResources(stats);
+  store.setResources(structuredClone(stats));
+  expect(fn).toHaveBeenCalledTimes(1);
+  expect(store.snapshot().resources).toEqual(stats);
+  store.setResources({});
+  expect(store.snapshot().resources).toBeUndefined();
+});
 
-  it("drops a removed environment's resources", () => {
-    const { store } = make();
-    store.setProjects([p("a")]);
-    store.putEnvironment({ id: "env-1", projectId: "a", worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" } });
-    store.setResources({ "env-1": { cpu: 1, memory: 0, memoryLimit: 1 } });
-    store.removeEnvironment("env-1");
-    expect(store.snapshot().resources).toBeUndefined();
+it("drops a removed environment's resources", () => {
+  const { store } = make();
+  store.setProjects([p("a")]);
+  store.putEnvironment({
+    id: "env-1",
+    projectId: "a",
+    worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" },
   });
+  store.setResources({ "env-1": { cpu: 1, memory: 0, memoryLimit: 1 } });
+  store.removeEnvironment("env-1");
+  expect(store.snapshot().resources).toBeUndefined();
+});
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/state.test.ts`
-Expected: FAIL, `store.runningContainers is not a function` / `store.setResources is not a function`.
+Run: `pnpm vitest run test/server/state.test.ts` Expected: FAIL, `store.runningContainers is not a function` / `store.setResources is not a function`.
 
 - [ ] **Step 3: Implement**
 
@@ -352,7 +420,7 @@ Add a field after `private usageTotals?: UsageTotals;`:
 In `removeEnvironment`, after `this.sessions.delete(id);`:
 
 ```ts
-    delete this.resourceStats[id];
+delete this.resourceStats[id];
 ```
 
 After `setUsage`:
@@ -381,8 +449,7 @@ In `snapshot()`, after the `usage` spread:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `pnpm vitest run test/server/state.test.ts`
-Expected: PASS.
+Run: `pnpm vitest run test/server/state.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -398,11 +465,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 3: The sampler loop, wired into the CLI
 
 **Files:**
+
 - Modify: `src/server/resources.ts`
 - Modify: `src/server/cli.ts` (around the `refresh` interval and `shutdown`, ~lines 188–198)
 - Test: `test/server/resources.test.ts`
 
 **Interfaces:**
+
 - Consumes: `sampleResources` (Task 1); `StateStore.runningContainers`, `StateStore.setResources` (Task 2).
 - Produces: `startResourceSampler(opts: { run: Runner; store: Pick<StateStore, "runningContainers" | "setResources">; intervalMs?: number }): { stop(): void }`.
 
@@ -416,17 +485,29 @@ describe("startResourceSampler", () => {
 
   const storeWith = (running: { envId: string; containerId: string }[]) => {
     const writes: Record<string, unknown>[] = [];
-    return { writes, store: { runningContainers: () => running, setResources: (r: Record<string, never>) => void writes.push(r) } };
+    return {
+      writes,
+      store: {
+        runningContainers: () => running,
+        setResources: (r: Record<string, never>) => void writes.push(r),
+      },
+    };
   };
 
   it("samples at once, then every interval", async () => {
     vi.useFakeTimers();
-    const { run, calls } = fakeRunner(() => ({ stdout: line("aaaaaaaaaaaa", "5%", "1GiB / 2GiB") }));
-    const { store, writes } = storeWith([{ envId: "proj", containerId: FULL_A }]);
+    const { run, calls } = fakeRunner(() => ({
+      stdout: line("aaaaaaaaaaaa", "5%", "1GiB / 2GiB"),
+    }));
+    const { store, writes } = storeWith([
+      { envId: "proj", containerId: FULL_A },
+    ]);
     const sampler = startResourceSampler({ run, store, intervalMs: 5000 });
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
-    expect(writes).toEqual([{ proj: { cpu: 5, memory: GiB, memoryLimit: 2 * GiB } }]);
+    expect(writes).toEqual([
+      { proj: { cpu: 5, memory: GiB, memoryLimit: 2 * GiB } },
+    ]);
     await vi.advanceTimersByTimeAsync(5000);
     expect(calls).toHaveLength(2);
     sampler.stop();
@@ -448,8 +529,12 @@ describe("startResourceSampler", () => {
   it("never overlaps rounds and writes nothing after stop", async () => {
     vi.useFakeTimers();
     let finish!: (r: Partial<RunResult>) => void;
-    const { run, calls } = fakeRunner(() => new Promise<Partial<RunResult>>((resolve) => (finish = resolve)));
-    const { store, writes } = storeWith([{ envId: "proj", containerId: FULL_A }]);
+    const { run, calls } = fakeRunner(
+      () => new Promise<Partial<RunResult>>((resolve) => (finish = resolve))
+    );
+    const { store, writes } = storeWith([
+      { envId: "proj", containerId: FULL_A },
+    ]);
     const sampler = startResourceSampler({ run, store, intervalMs: 5000 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(calls).toHaveLength(1);
@@ -464,8 +549,7 @@ describe("startResourceSampler", () => {
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/server/resources.test.ts`
-Expected: FAIL, `startResourceSampler is not a function` (or not exported).
+Run: `pnpm vitest run test/server/resources.test.ts` Expected: FAIL, `startResourceSampler is not a function` (or not exported).
 
 - [ ] **Step 3: Implement the loop**
 
@@ -483,7 +567,10 @@ export function startResourceSampler(opts: SamplerOptions): { stop(): void } {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const round = async () => {
-    const stats = await sampleResources(opts.run, opts.store.runningContainers()).catch(() => ({}));
+    const stats = await sampleResources(
+      opts.run,
+      opts.store.runningContainers()
+    ).catch(() => ({}));
     if (stopped) return;
     opts.store.setResources(stats);
     timer = setTimeout(() => void round(), opts.intervalMs ?? 5000);
@@ -502,33 +589,34 @@ export function startResourceSampler(opts: SamplerOptions): { stop(): void } {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `pnpm vitest run test/server/resources.test.ts`
-Expected: PASS (10 tests).
+Run: `pnpm vitest run test/server/resources.test.ts` Expected: PASS (10 tests).
 
 - [ ] **Step 5: Wire it into the CLI**
 
 In `src/server/cli.ts`, add `import { startResourceSampler } from "./resources";` with the other `./` imports. After
 
 ```ts
-  const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);
+const refresh = setInterval(
+  () => void orchestrator.refreshContainers().catch(() => {}),
+  10_000
+);
 ```
 
 add
 
 ```ts
-  const sampler = startResourceSampler({ run: spawnRunner, store });
+const sampler = startResourceSampler({ run: spawnRunner, store });
 ```
 
 and in `shutdown`, after `clearInterval(refresh);`:
 
 ```ts
-    sampler.stop();
+sampler.stop();
 ```
 
 - [ ] **Step 6: Typecheck and run the server tests**
 
-Run: `pnpm typecheck && pnpm vitest run test/server`
-Expected: no type errors; all PASS.
+Run: `pnpm typecheck && pnpm vitest run test/server` Expected: no type errors; all PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -546,10 +634,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 4: Web helpers
 
 **Files:**
+
 - Create: `src/web/resources.ts`
 - Test: `test/web/resources.test.ts`
 
 **Interfaces:**
+
 - Consumes: `DashboardSnapshot.resources`, `ResourceStats` (Task 1); `Checkout` from `src/web/checkouts.ts`; `envOfDirectory` from `src/web/derive.ts`.
 - Produces: `formatCpu(cpu: number): string`, `formatMemory(bytes: number): string`, `ProjectResources { cpu: number; memory: number; count: number }`, `projectResources(snapshot: DashboardSnapshot | undefined, view: ProjectView): ProjectResources | undefined`, `checkoutResources(snapshot: DashboardSnapshot | undefined, view: ProjectView, checkout: Checkout): ResourceStats | undefined`.
 
@@ -559,13 +649,28 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { DashboardSnapshot, EnvironmentView, ProjectView, ResourceStats } from "../../src/shared/types";
+
+import type {
+  DashboardSnapshot,
+  EnvironmentView,
+  ProjectView,
+  ResourceStats,
+} from "../../src/shared/types";
 import { checkouts } from "../../src/web/checkouts";
-import { checkoutResources, formatCpu, formatMemory, projectResources } from "../../src/web/resources";
+import {
+  checkoutResources,
+  formatCpu,
+  formatMemory,
+  projectResources,
+} from "../../src/web/resources";
 
 const MiB = 1024 ** 2;
 const GiB = 1024 ** 3;
-const stats = (cpu: number, memory: number): ResourceStats => ({ cpu, memory, memoryLimit: 8 * GiB });
+const stats = (cpu: number, memory: number): ResourceStats => ({
+  cpu,
+  memory,
+  memoryLimit: 8 * GiB,
+});
 
 const env = (id: string, path: string): EnvironmentView =>
   ({
@@ -576,7 +681,12 @@ const env = (id: string, path: string): EnvironmentView =>
   }) as EnvironmentView;
 
 const view: ProjectView = {
-  project: { id: "p", name: "demo", path: "/src/demo", devcontainerPath: "/src/demo/x" },
+  project: {
+    id: "p",
+    name: "demo",
+    path: "/src/demo",
+    devcontainerPath: "/src/demo/x",
+  },
   runtime: {
     projectId: "p",
     containerState: "running",
@@ -589,10 +699,15 @@ const view: ProjectView = {
   },
   sessions: [],
   openUrl: "http://p",
-  environments: [env("env-own", "/workspaces/demo.worktrees/own"), env("env-off", "/elsewhere")],
+  environments: [
+    env("env-own", "/workspaces/demo.worktrees/own"),
+    env("env-off", "/elsewhere"),
+  ],
 };
 
-const snap = (resources?: DashboardSnapshot["resources"]): DashboardSnapshot => ({
+const snap = (
+  resources?: DashboardSnapshot["resources"]
+): DashboardSnapshot => ({
   roots: [],
   preflight: { errors: [] },
   editors: [],
@@ -618,18 +733,31 @@ describe("formatting", () => {
 
 describe("projectResources", () => {
   it("sums the main and task environments that have stats", () => {
-    const r = projectResources(snap({ p: stats(10, GiB), "env-own": stats(5, 512 * MiB), other: stats(99, GiB) }), view);
+    const r = projectResources(
+      snap({
+        p: stats(10, GiB),
+        "env-own": stats(5, 512 * MiB),
+        other: stats(99, GiB),
+      }),
+      view
+    );
     expect(r).toEqual({ cpu: 15, memory: GiB + 512 * MiB, count: 2 });
   });
 
   it("counts task environments when the main one is stopped", () => {
-    expect(projectResources(snap({ "env-off": stats(3, MiB) }), view)).toEqual({ cpu: 3, memory: MiB, count: 1 });
+    expect(projectResources(snap({ "env-off": stats(3, MiB) }), view)).toEqual({
+      cpu: 3,
+      memory: MiB,
+      count: 1,
+    });
   });
 
   it("is undefined without stats", () => {
     expect(projectResources(snap(), view)).toBeUndefined();
     expect(projectResources(undefined, view)).toBeUndefined();
-    expect(projectResources(snap({ other: stats(1, 1) }), view)).toBeUndefined();
+    expect(
+      projectResources(snap({ other: stats(1, 1) }), view)
+    ).toBeUndefined();
   });
 });
 
@@ -653,15 +781,18 @@ describe("checkoutResources", () => {
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `pnpm vitest run test/web/resources.test.ts`
-Expected: FAIL, cannot resolve `../../src/web/resources`.
+Run: `pnpm vitest run test/web/resources.test.ts` Expected: FAIL, cannot resolve `../../src/web/resources`.
 
 - [ ] **Step 3: Implement**
 
 `src/web/resources.ts`:
 
 ```ts
-import type { DashboardSnapshot, ProjectView, ResourceStats } from "../shared/types";
+import type {
+  DashboardSnapshot,
+  ProjectView,
+  ResourceStats,
+} from "../shared/types";
 import type { Checkout } from "./checkouts";
 import { envOfDirectory } from "./derive";
 
@@ -674,7 +805,9 @@ export function formatCpu(cpu: number): string {
 }
 
 export function formatMemory(bytes: number): string {
-  return bytes < GiB ? `${Math.round(bytes / MiB)} MiB` : `${(bytes / GiB).toFixed(1)} GiB`;
+  return bytes < GiB
+    ? `${Math.round(bytes / MiB)} MiB`
+    : `${(bytes / GiB).toFixed(1)} GiB`;
 }
 
 /** No limit: a container without one reports the host's memory, so a sum would count the host once per container. */
@@ -686,7 +819,10 @@ export interface ProjectResources {
 }
 
 /** The project's main and task containers added up; undefined when none has stats. */
-export function projectResources(snapshot: DashboardSnapshot | undefined, view: ProjectView): ProjectResources | undefined {
+export function projectResources(
+  snapshot: DashboardSnapshot | undefined,
+  view: ProjectView
+): ProjectResources | undefined {
   const all = snapshot?.resources;
   if (!all) return undefined;
   const found = [view.project.id, ...view.environments.map((e) => e.id)]
@@ -704,7 +840,7 @@ export function projectResources(snapshot: DashboardSnapshot | undefined, view: 
 export function checkoutResources(
   snapshot: DashboardSnapshot | undefined,
   view: ProjectView,
-  checkout: Checkout,
+  checkout: Checkout
 ): ResourceStats | undefined {
   if (!checkout.worktree) return snapshot?.resources?.[view.project.id];
   const env = envOfDirectory(view, checkout.directory);
@@ -714,8 +850,7 @@ export function checkoutResources(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `pnpm vitest run test/web/resources.test.ts`
-Expected: PASS (8 tests). If `checkouts(view)` doesn't yield `[main, own, shared]` in that order, check the `Worktree` fields `checkouts()` reads (`src/web/checkouts.ts:21`) and fix the fixture, not the helper.
+Run: `pnpm vitest run test/web/resources.test.ts` Expected: PASS (8 tests). If `checkouts(view)` doesn't yield `[main, own, shared]` in that order, check the `Worktree` fields `checkouts()` reads (`src/web/checkouts.ts:21`) and fix the fixture, not the helper.
 
 - [ ] **Step 5: Commit**
 
@@ -731,11 +866,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 5: Show the numbers on the tiles
 
 **Files:**
+
 - Create: `src/web/components/ResourceStat.tsx`
 - Modify: `src/web/pages/Overview.tsx` (`ProjectTile`, ~line 138)
 - Modify: `src/web/pages/ProjectOverview.tsx` (`CheckoutCard`, ~line 160)
 
 **Interfaces:**
+
 - Consumes: `formatCpu`, `formatMemory`, `projectResources`, `checkoutResources` (Task 4); `useDash()` from `src/web/DashboardContext.tsx` (returns `{ snapshot, … }`).
 - Produces: `ResourceStat({ cpu, memory, memoryLimit?, count? })`.
 
@@ -747,10 +884,24 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 import { formatCpu, formatMemory } from "../resources";
 
 /** `CPU 12% · 1.3 GiB`; the tooltip has the container count or the memory limit. */
-export function ResourceStat({ cpu, memory, memoryLimit, count }: { cpu: number; memory: number; memoryLimit?: number; count?: number }) {
+export function ResourceStat({
+  cpu,
+  memory,
+  memoryLimit,
+  count,
+}: {
+  cpu: number;
+  memory: number;
+  memoryLimit?: number;
+  count?: number;
+}) {
   const title = [
-    count !== undefined ? `${count} ${count === 1 ? "container" : "containers"}` : undefined,
-    memoryLimit !== undefined ? `${formatMemory(memory)} of ${formatMemory(memoryLimit)}` : undefined,
+    count !== undefined
+      ? `${count} ${count === 1 ? "container" : "containers"}`
+      : undefined,
+    memoryLimit !== undefined
+      ? `${formatMemory(memory)} of ${formatMemory(memoryLimit)}`
+      : undefined,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -774,14 +925,16 @@ import { projectResources } from "../resources";
 In `ProjectTile`, after `const navigate = useNavigate();`:
 
 ```ts
-  const { snapshot } = useDash();
-  const resources = projectResources(snapshot, view);
+const { snapshot } = useDash();
+const resources = projectResources(snapshot, view);
 ```
 
 In the stats row (`<div className="flex min-h-5 flex-wrap gap-x-3.5 …">`), after the closing `)}` of the `running ? (…) : (…)` expression and before the row's `</div>`:
 
 ```tsx
-          {resources && <ResourceStat {...resources} />}
+{
+  resources && <ResourceStat {...resources} />;
+}
 ```
 
 - [ ] **Step 3: Checkout card**
@@ -796,24 +949,26 @@ import { checkoutResources } from "../resources";
 In `CheckoutCard`, after `const to = checkoutPath(view.project.id, c.target);`:
 
 ```ts
-  const { snapshot } = useDash();
-  const resources = checkoutResources(snapshot, view, c);
+const { snapshot } = useDash();
+const resources = checkoutResources(snapshot, view, c);
 ```
 
 In its stats row, after `{n.attention + n.running + n.idle === 0 && <span>No sessions</span>}`:
 
 ```tsx
-          {resources && <ResourceStat {...resources} />}
+{
+  resources && <ResourceStat {...resources} />;
+}
 ```
 
 - [ ] **Step 4: Typecheck and run all tests**
 
-Run: `pnpm typecheck && pnpm test`
-Expected: no type errors; all PASS.
+Run: `pnpm typecheck && pnpm test` Expected: no type errors; all PASS.
 
 - [ ] **Step 5: See it in the app**
 
 Use the `run` skill to start opendevhub with at least one running environment. Open the Overview and a project page, and check:
+
 - the project tile shows `CPU n% · x` and its tooltip `n containers`
 - the main checkout card and a worktree with its own container each show their numbers, with tooltip `x of y`; a shared worktree shows none
 - the numbers change within ~10 s under load (e.g. `docker exec <container> sh -c 'yes > /dev/null & sleep 15; kill %1'`)

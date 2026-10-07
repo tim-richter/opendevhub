@@ -15,13 +15,14 @@ import type {
 } from "../shared/types";
 import type { ContainerInfo, Containers, ImageInfo } from "./containers";
 import type { BranchRef, GitOps } from "./git";
-import { BusyError, type Orchestrator } from "./orchestrator";
-import type { StateStore } from "./state";
-import { InvalidRequestError } from "./worktrees";
 import { BASE_PROJECT_LABEL } from "./images";
 import type { RawSession } from "./opencode/client";
+import { BusyError } from "./orchestrator";
+import type { Orchestrator } from "./orchestrator";
+import type { StateStore } from "./state";
 import { rollUp, rootOf } from "./status";
 import { parseTaskMeta } from "./tasks";
+import { InvalidRequestError } from "./worktrees";
 
 /** A task environment may be starting from an image this new, before its record names it. */
 export const FRESH_IMAGE_MS = 15 * 60_000;
@@ -39,59 +40,115 @@ export interface StaleDockerInput {
   now: number;
 }
 
-function staleContainer(c: ContainerInfo, input: StaleDockerInput): ContainerCleanupItem | undefined {
+const staleContainer = (
+  c: ContainerInfo,
+  input: StaleDockerInput
+): ContainerCleanupItem | undefined => {
   let why: ContainerCleanupItem["why"] | undefined;
   const projectId = c.envProjectId ?? c.projectId;
-  if (c.envId && !input.hasEnv(c.envId)) why = "orphan-env";
-  else if (projectId && !input.projects.has(projectId)) why = "removed-project";
-  if (!why) return undefined;
+  if (c.envId && !input.hasEnv(c.envId)) {
+    why = "orphan-env";
+  } else if (projectId && !input.projects.has(projectId)) {
+    why = "removed-project";
+  }
+  if (!why) {
+    return undefined;
+  }
   return {
     id: `container:${c.id}`,
     kind: "container",
     checked: !c.running,
-    reason: why === "orphan-env" ? "opendevhub has no record of its worktree environment" : "its project is no longer configured",
+    reason:
+      why === "orphan-env"
+        ? "opendevhub has no record of its worktree environment"
+        : "its project is no longer configured",
     containerId: c.id,
     ...(c.name ? { name: c.name } : {}),
     running: c.running,
     why,
     ...(projectId ? { projectId } : {}),
   };
-}
+};
 
-function staleImage(img: ImageInfo, input: StaleDockerInput, used: Set<string>): ImageCleanupItem | undefined {
-  if (img.refs.length === 0 || used.has(img.id) || input.now - img.created < FRESH_IMAGE_MS) return undefined;
+const staleImage = (
+  img: ImageInfo,
+  input: StaleDockerInput,
+  used: Set<string>
+): ImageCleanupItem | undefined => {
+  if (
+    img.refs.length === 0 ||
+    used.has(img.id) ||
+    input.now - img.created < FRESH_IMAGE_MS
+  ) {
+    return undefined;
+  }
   const base = img.refs.find((r) => r.startsWith(BASE_REPO));
   let why: ImageCleanupItem["why"] | undefined;
   let projectId: string | undefined;
   if (base) {
-    projectId = base.slice(BASE_REPO.length).split(":")[0];
-    if (!input.projects.has(projectId)) why = "removed-project";
-    else if (base.endsWith("-base") && !img.refs.some((r) => input.recordedRefs.has(r))) why = "superseded";
+    [projectId] = base.slice(BASE_REPO.length).split(":");
+    if (!input.projects.has(projectId)) {
+      why = "removed-project";
+    } else if (
+      base.endsWith("-base") &&
+      !img.refs.some((r) => input.recordedRefs.has(r))
+    ) {
+      why = "superseded";
+    }
   } else if (img.labels[BASE_PROJECT_LABEL]) {
     projectId = img.labels[BASE_PROJECT_LABEL];
     why = "uid";
   }
-  if (!why) return undefined;
+  if (!why) {
+    return undefined;
+  }
   const ref = base ?? img.refs[0];
   const reasons = {
-    superseded: "no environment uses it",
     "removed-project": "its project is no longer configured",
+    superseded: "no environment uses it",
     uid: "left behind by a removed task container",
   } as const;
-  return { id: `image:${ref}`, kind: "image", checked: true, reason: reasons[why], ref, bytes: img.bytes, why, ...(projectId ? { projectId } : {}) };
-}
+  return {
+    bytes: img.bytes,
+    checked: true,
+    id: `image:${ref}`,
+    kind: "image",
+    reason: reasons[why],
+    ref,
+    why,
+    ...(projectId ? { projectId } : {}),
+  };
+};
 
 /** Containers and images nothing current needs. An image only stale containers run counts as unused, so one apply frees both. */
-export function staleDocker(input: StaleDockerInput): (ContainerCleanupItem | ImageCleanupItem)[] {
-  const containers = input.containers.flatMap((c) => staleContainer(c, input) ?? []);
+export const staleDocker = (
+  input: StaleDockerInput
+): (ContainerCleanupItem | ImageCleanupItem)[] => {
+  const containers = input.containers.flatMap(
+    (c) => staleContainer(c, input) ?? []
+  );
   const doomed = new Set(containers.map((c) => c.containerId));
-  const used = new Set(input.containers.filter((c) => !doomed.has(c.id) && c.imageId).map((c) => c.imageId!));
-  return [...containers, ...input.images.flatMap((img) => staleImage(img, input, used) ?? [])];
-}
+  const used = new Set(
+    input.containers.flatMap((c) =>
+      !doomed.has(c.id) && c.imageId ? [c.imageId] : []
+    )
+  );
+  return [
+    ...containers,
+    ...input.images.flatMap((img) => staleImage(img, input, used) ?? []),
+  ];
+};
 
 export type BranchGit = Pick<
   GitOps,
-  "remotes" | "fetchPrune" | "branchRefs" | "remoteHead" | "isAncestor" | "recordedBase" | "currentBranch" | "isClean"
+  | "remotes"
+  | "fetchPrune"
+  | "branchRefs"
+  | "remoteHead"
+  | "isAncestor"
+  | "recordedBase"
+  | "currentBranch"
+  | "isClean"
 >;
 
 export interface BranchScanInput {
@@ -104,62 +161,95 @@ export interface BranchScanInput {
   envOf: (worktreePath: string) => EnvId | undefined;
 }
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+const message = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 /** The remote cleanup fetches from (`origin`, else the first) and the main checkout's branch. */
-async function repoContext(git: BranchGit, p: Project, ws: string) {
+const repoContext = async (git: BranchGit, p: Project, ws: string) => {
   const remotes = await git.remotes(p, ws);
   const remote = remotes.includes("origin") ? "origin" : remotes[0];
-  return { remote, current: await git.currentBranch(p, ws) };
-}
+  return { current: await git.currentBranch(p, ws), remote };
+};
 
 /** The branch's recorded base, else the remote's HEAD branch, else the main checkout's branch. */
-async function baseOf(git: BranchGit, p: Project, ws: string, branch: string, ctx: { remote?: string; current?: string }) {
+const baseOf = async (
+  git: BranchGit,
+  p: Project,
+  ws: string,
+  branch: string,
+  ctx: { remote?: string; current?: string }
+) => {
   const recorded = await git.recordedBase(p, ws, branch);
-  if (recorded) return recorded;
-  return (ctx.remote && (await git.remoteHead(p, ws, ctx.remote))) || ctx.current;
-}
+  if (recorded) {
+    return recorded;
+  }
+  return (
+    (ctx.remote && (await git.remoteHead(p, ws, ctx.remote))) || ctx.current
+  );
+};
 
 /** Merged into its base, or pushed once and deleted on the remote since. Throws when git can't compare. */
-async function verdict(git: BranchGit, p: Project, ws: string, ref: BranchRef, base: string) {
-  if (await git.isAncestor(p, ws, ref.name, base)) return "merged" as const;
-  if (ref.upstream && ref.gone) return "upstream-gone" as const;
+const verdict = async (
+  git: BranchGit,
+  p: Project,
+  ws: string,
+  ref: BranchRef,
+  base: string
+) => {
+  if (await git.isAncestor(p, ws, ref.name, base)) {
+    return "merged" as const;
+  }
+  if (ref.upstream && ref.gone) {
+    return "upstream-gone" as const;
+  }
   return undefined;
-}
+};
 
 /** Local branches that may go, with their worktrees. Fetches first; a failed fetch leaves a warning and local refs. */
-export async function scanBranches(git: BranchGit, input: BranchScanInput): Promise<{ warning?: string; items: BranchCleanupItem[] }> {
+export const scanBranches = async (
+  git: BranchGit,
+  input: BranchScanInput
+): Promise<{ warning?: string; items: BranchCleanupItem[] }> => {
   const { project: p, workspace: ws } = input;
   const ctx = await repoContext(git, p, ws);
   let warning: string | undefined;
   if (ctx.remote) {
     try {
       await git.fetchPrune(p, ws, ctx.remote);
-    } catch (err) {
-      warning = `using local refs: ${message(err)}`;
+    } catch (error) {
+      warning = `using local refs: ${message(error)}`;
     }
   }
   const items: BranchCleanupItem[] = [];
   for (const ref of await git.branchRefs(p, ws)) {
-    if (ref.name === ctx.current) continue;
+    if (ref.name === ctx.current) {
+      continue;
+    }
     const base = await baseOf(git, p, ws, ref.name, ctx);
-    if (!base || base === ref.name || base.startsWith("-")) continue;
+    if (!base || base === ref.name || base.startsWith("-")) {
+      continue;
+    }
     const why = await verdict(git, p, ws, ref, base).catch(() => undefined);
-    if (!why) continue;
+    if (!why) {
+      continue;
+    }
     const worktree = input.worktrees.find((w) => w.branch === ref.name);
     // A worktree whose status can't be read counts as dirty, so it's never removed by default.
-    const dirty = worktree ? !(await git.isClean(p, worktree.path).catch(() => false)) : false;
+    const dirty = worktree
+      ? !(await git.isClean(p, worktree.path).catch(() => false))
+      : false;
     const env = worktree && input.envOf(worktree.path);
     items.push({
+      base,
+      branch: ref.name,
+      checked: why === "merged" && !dirty,
       id: `branch:${p.id}:${ref.name}`,
       kind: "branch",
-      checked: why === "merged" && !dirty,
-      reason: why === "merged" ? `merged into ${base}` : "its upstream is gone; it may not be merged",
       projectId: p.id,
-      branch: ref.name,
-      base,
+      reason:
+        why === "merged"
+          ? `merged into ${base}`
+          : "its upstream is gone; it may not be merged",
       why,
       ...(worktree ? { worktree: worktree.path } : {}),
       ...(dirty ? { dirty: true } : {}),
@@ -167,33 +257,49 @@ export async function scanBranches(git: BranchGit, input: BranchScanInput): Prom
     });
   }
   return { ...(warning ? { warning } : {}), items };
-}
+};
 
 /**
  * Why a scanned branch must not be removed now, or undefined when it still qualifies. Recomputes the base and the
  * verdict rather than trusting the item; no fetch, so it judges the refs the scan left.
  */
-export async function branchChanged(
+export const branchChanged = async (
   git: BranchGit,
   p: Project,
   ws: string,
   item: BranchCleanupItem,
-  worktrees: Worktree[],
-): Promise<string | undefined> {
-  const ref = (await git.branchRefs(p, ws)).find((r) => r.name === item.branch);
-  if (!ref) return "the branch no longer exists";
+  worktrees: Worktree[]
+): Promise<string | undefined> => {
+  const result = await git.branchRefs(p, ws);
+  const ref = result.find((r) => r.name === item.branch);
+  if (!ref) {
+    return "the branch no longer exists";
+  }
   const ctx = await repoContext(git, p, ws);
-  if (ref.name === ctx.current) return "the branch is checked out in the main checkout";
+  if (ref.name === ctx.current) {
+    return "the branch is checked out in the main checkout";
+  }
   const base = await baseOf(git, p, ws, ref.name, ctx);
-  const why = base && base !== ref.name ? await verdict(git, p, ws, ref, base).catch(() => undefined) : undefined;
-  if (!why || (item.why === "merged" && why !== "merged")) return "changed since scan";
+  const why =
+    base && base !== ref.name
+      ? await verdict(git, p, ws, ref, base).catch(() => undefined)
+      : undefined;
+  if (!why || (item.why === "merged" && why !== "merged")) {
+    return "changed since scan";
+  }
   const worktree = worktrees.find((w) => w.branch === item.branch);
-  if (worktree?.path !== item.worktree) return "changed since scan";
-  if (worktree && !item.dirty && !(await git.isClean(p, worktree.path).catch(() => false))) {
+  if (worktree?.path !== item.worktree) {
+    return "changed since scan";
+  }
+  if (
+    worktree &&
+    !item.dirty &&
+    !(await git.isClean(p, worktree.path).catch(() => false))
+  ) {
     return "changed since scan: the worktree has uncommitted changes";
   }
   return undefined;
-}
+};
 
 /** A session untouched this long is offered for removal, unchecked. */
 export const IDLE_SESSION_MS = 30 * 24 * 60 * 60_000;
@@ -213,28 +319,46 @@ export interface StaleSessionsInput {
   now: number;
 }
 
-const within = (dir: string, root: string) => dir === root || dir.startsWith(root.replace(/\/$/, "") + "/");
+const within = (dir: string, root: string) =>
+  dir === root || dir.startsWith(`${root.replace(/\/$/u, "")}/`);
 
 /** Top-level sessions that may go: discarded task variants, sessions of removed worktrees, and long-idle ones. */
-export function staleSessions(input: StaleSessionsInput): SessionCleanupItem[] {
+export const staleSessions = (
+  input: StaleSessionsInput
+): SessionCleanupItem[] => {
   const parents = new Map(input.sessions.map((s) => [s.id, s.parentID]));
   const busy = new Set([...input.busy].map((id) => rootOf(id, parents)));
   const trees = rollUp(input.sessions);
   const items: SessionCleanupItem[] = [];
   for (const s of input.sessions) {
-    if (s.parentID || s.time.archived !== undefined || busy.has(s.id)) continue;
-    const directory = s.location.directory;
+    if (s.parentID || s.time.archived !== undefined || busy.has(s.id)) {
+      continue;
+    }
+    const { directory } = s.location;
     const updatedAt = trees.get(s.id)?.updatedAt ?? s.time.updated;
     const idleDays = Math.floor((input.now - updatedAt) / (24 * 60 * 60_000));
-    const why = parseTaskMeta(s.metadata)?.discarded
-      ? ("discarded" as const)
-      : input.worktrees && !within(directory, input.workspace) && !input.worktrees.some((w) => within(directory, w))
-        ? ("worktree-gone" as const)
-        : input.now - updatedAt >= IDLE_SESSION_MS
-          ? ("idle" as const)
-          : undefined;
-    if (!why) continue;
-    const reasons = { discarded: "discarded task variant", "worktree-gone": "its worktree was removed", idle: `idle for ${idleDays} days` };
+    let why;
+    if (parseTaskMeta(s.metadata)?.discarded) {
+      why = "discarded" as const;
+    } else if (
+      input.worktrees &&
+      !within(directory, input.workspace) &&
+      !input.worktrees.some((w) => within(directory, w))
+    ) {
+      why = "worktree-gone" as const;
+    } else if (input.now - updatedAt >= IDLE_SESSION_MS) {
+      why = "idle" as const;
+    } else {
+      why = undefined;
+    }
+    if (!why) {
+      continue;
+    }
+    const reasons = {
+      discarded: "discarded task variant",
+      idle: `idle for ${idleDays} days`,
+      "worktree-gone": "its worktree was removed",
+    };
     items.push({
       id: `session:${input.projectId}:${s.id}`,
       kind: "session",
@@ -250,15 +374,31 @@ export function staleSessions(input: StaleSessionsInput): SessionCleanupItem[] {
     });
   }
   return items;
-}
+};
 
 /** opendevhub's base images by name, and the UID images built on them by label. */
-export const CLEANUP_IMAGE_FILTERS = [`reference=${BASE_REPO}*`, `label=${BASE_PROJECT_LABEL}`];
+export const CLEANUP_IMAGE_FILTERS = [
+  `reference=${BASE_REPO}*`,
+  `label=${BASE_PROJECT_LABEL}`,
+];
 
 export interface CleanupDeps {
-  store: Pick<StateStore, "projects" | "project" | "runtime" | "environments" | "environment">;
-  containers: Pick<Containers, "listManaged" | "listImages" | "remove" | "removeImage">;
-  branches: Pick<Orchestrator, "cleanupScan" | "cleanupBranch" | "cleanupSessionScan" | "cleanupSession" | "appendLog">;
+  store: Pick<
+    StateStore,
+    "projects" | "project" | "runtime" | "environments" | "environment"
+  >;
+  containers: Pick<
+    Containers,
+    "listManaged" | "listImages" | "remove" | "removeImage"
+  >;
+  branches: Pick<
+    Orchestrator,
+    | "cleanupScan"
+    | "cleanupBranch"
+    | "cleanupSessionScan"
+    | "cleanupSession"
+    | "appendLog"
+  >;
   now?: () => number;
 }
 
@@ -274,8 +414,11 @@ export class Cleanup {
     const [perProject, docker] = await Promise.all([
       Promise.all(this.deps.store.projects().map((p) => this.scanProject(p))),
       this.docker().then(
-        (items) => ({ items, error: undefined }),
-        (err: unknown) => ({ items: [] as DockerItem[], error: message(err) }),
+        (items) => ({ error: undefined, items }),
+        (error: unknown) => ({
+          error: message(error),
+          items: [] as DockerItem[],
+        })
       ),
     ]);
     return {
@@ -288,115 +431,181 @@ export class Cleanup {
 
   /** Removes the selected items: branches, then sessions, then containers, then images, each re-checked first. */
   async apply(items: CleanupItem[]): Promise<CleanupResult> {
-    if (this.applying) throw new BusyError("cleanup");
+    if (this.applying) {
+      throw new BusyError("cleanup");
+    }
     this.applying = true;
     try {
       const results: CleanupResult["results"] = [];
       let freedBytes = 0;
-      for (const item of items) if (item.kind === "branch") results.push({ id: item.id, ...(await this.removeBranch(item)) });
-      for (const item of items) if (item.kind === "session") results.push({ id: item.id, ...(await this.removeSession(item)) });
+      for (const item of items) {
+        if (item.kind === "branch") {
+          results.push({ id: item.id, ...(await this.removeBranch(item)) });
+        }
+      }
+      for (const item of items) {
+        if (item.kind === "session") {
+          results.push({ id: item.id, ...(await this.removeSession(item)) });
+        }
+      }
       for (const kind of ["container", "image"] as const) {
         const selected = items.filter((i) => i.kind === kind);
-        if (selected.length === 0) continue;
+        if (selected.length === 0) {
+          continue;
+        }
         // Scanned again per kind, since removing containers frees their images. Only an item the fresh scan lists is
         // removed, and the fresh item (not the request's) supplies the reason, owner and size.
         let fresh: Map<string, DockerItem>;
         try {
-          fresh = new Map((await this.docker()).map((i) => [i.id, i]));
-        } catch (err) {
-          for (const item of selected) results.push({ id: item.id, outcome: "failed", message: message(err) });
+          const scanned = await this.docker();
+          fresh = new Map(scanned.map((i) => [i.id, i]));
+        } catch (error) {
+          for (const item of selected) {
+            results.push({
+              id: item.id,
+              message: message(error),
+              outcome: "failed",
+            });
+          }
           continue;
         }
         for (const item of selected) {
           const current = fresh.get(item.id);
-          const outcome = current ? await this.removeDocker(current) : { outcome: "skipped" as const, message: "in use, or already gone" };
-          if (current?.kind === "image" && outcome.outcome === "removed") freedBytes += current.bytes;
+          const outcome = current
+            ? await this.removeDocker(current)
+            : {
+                message: "in use, or already gone",
+                outcome: "skipped" as const,
+              };
+          if (current?.kind === "image" && outcome.outcome === "removed") {
+            freedBytes += current.bytes;
+          }
           results.push({ id: item.id, ...outcome });
         }
       }
-      return { results, freedBytes };
+      return { freedBytes, results };
     } finally {
       this.applying = false;
     }
   }
 
-  private async scanProject(p: Project): Promise<{ summary: CleanupProject; items: CleanupItem[] }> {
+  private async scanProject(
+    p: Project
+  ): Promise<{ summary: CleanupProject; items: CleanupItem[] }> {
     const summary: CleanupProject = { id: p.id, name: p.name };
-    if (this.deps.store.runtime(p.id).containerState !== "running") return { summary: { ...summary, skipped: "not running" }, items: [] };
+    if (this.deps.store.runtime(p.id).containerState !== "running") {
+      return { items: [], summary: { ...summary, skipped: "not running" } };
+    }
     const warnings: string[] = [];
     const items: CleanupItem[] = [];
     try {
       const r = await this.deps.branches.cleanupScan(p.id);
-      if (r.warning) warnings.push(r.warning);
+      if (r.warning) {
+        warnings.push(r.warning);
+      }
       items.push(...r.items);
-    } catch (err) {
-      warnings.push(err instanceof BusyError ? "busy with another git action; scan again in a moment" : `could not scan branches: ${message(err)}`);
+    } catch (error) {
+      warnings.push(
+        error instanceof BusyError
+          ? "busy with another git action; scan again in a moment"
+          : `could not scan branches: ${message(error)}`
+      );
     }
     // After the branch scan, which refreshes the worktree list that tells a removed worktree's sessions apart.
     try {
       const r = await this.deps.branches.cleanupSessionScan(p.id);
-      if (r.warning) warnings.push(r.warning);
+      if (r.warning) {
+        warnings.push(r.warning);
+      }
       items.push(...r.items);
-    } catch (err) {
-      warnings.push(`could not scan sessions: ${message(err)}`);
+    } catch (error) {
+      warnings.push(`could not scan sessions: ${message(error)}`);
     }
-    return { summary: { ...summary, ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}) }, items };
+    return {
+      items,
+      summary: {
+        ...summary,
+        ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}),
+      },
+    };
   }
 
   private async docker(): Promise<DockerItem[]> {
     const { store, containers } = this.deps;
-    const [list, images] = await Promise.all([containers.listManaged(), containers.listImages(CLEANUP_IMAGE_FILTERS)]);
+    const [list, images] = await Promise.all([
+      containers.listManaged(),
+      containers.listImages(CLEANUP_IMAGE_FILTERS),
+    ]);
     const projects = store.projects();
-    const recordedRefs = new Set(projects.flatMap((p) => store.environments(p.id)).flatMap((e) => (e.image ? [e.image.ref] : [])));
+    const recordedRefs = new Set(
+      projects
+        .flatMap((p) => store.environments(p.id))
+        .flatMap((e) => (e.image ? [e.image.ref] : []))
+    );
     return staleDocker({
       containers: list,
-      images,
-      projects: new Set(projects.map((p) => p.id)),
       hasEnv: (id) => store.environment(id) !== undefined,
-      recordedRefs,
+      images,
       now: this.now(),
+      projects: new Set(projects.map((p) => p.id)),
+      recordedRefs,
     });
   }
 
   private async removeBranch(item: BranchCleanupItem): Promise<CleanupOutcome> {
     try {
       return await this.deps.branches.cleanupBranch(item.projectId, item);
-    } catch (err) {
-      if (err instanceof BusyError) return { outcome: "skipped", message: "project busy" };
-      if (this.deps.store.project(item.projectId)) {
-        this.deps.branches.appendLog(item.projectId, `cleanup: could not delete branch ${item.branch}: ${message(err)}`);
+    } catch (error) {
+      if (error instanceof BusyError) {
+        return { message: "project busy", outcome: "skipped" };
       }
-      return { outcome: "failed", message: message(err) };
+      if (this.deps.store.project(item.projectId)) {
+        this.deps.branches.appendLog(
+          item.projectId,
+          `cleanup: could not delete branch ${item.branch}: ${message(error)}`
+        );
+      }
+      return { message: message(error), outcome: "failed" };
     }
   }
 
-  private async removeSession(item: SessionCleanupItem): Promise<CleanupOutcome> {
+  private async removeSession(
+    item: SessionCleanupItem
+  ): Promise<CleanupOutcome> {
     try {
       return await this.deps.branches.cleanupSession(item.projectId, item);
-    } catch (err) {
+    } catch (error) {
       if (this.deps.store.project(item.projectId)) {
-        this.deps.branches.appendLog(item.projectId, `cleanup: could not remove session ${item.sessionId}: ${message(err)}`);
+        this.deps.branches.appendLog(
+          item.projectId,
+          `cleanup: could not remove session ${item.sessionId}: ${message(error)}`
+        );
       }
-      return { outcome: "failed", message: message(err) };
+      return { message: message(error), outcome: "failed" };
     }
   }
 
   private async removeDocker(item: DockerItem): Promise<CleanupOutcome> {
-    const what = item.kind === "container" ? `container ${item.name ?? item.containerId}` : `image ${item.ref}`;
+    const what =
+      item.kind === "container"
+        ? `container ${item.name ?? item.containerId}`
+        : `image ${item.ref}`;
     const log = (line: string) => {
-      if (item.projectId && this.deps.store.project(item.projectId)) this.deps.branches.appendLog(item.projectId, line);
+      if (item.projectId && this.deps.store.project(item.projectId)) {
+        this.deps.branches.appendLog(item.projectId, line);
+      }
     };
     try {
       if (item.kind === "container") {
         await this.deps.containers.remove(item.containerId);
       } else if (!(await this.deps.containers.removeImage(item.ref))) {
-        return { outcome: "skipped", message: "in use, or already gone" };
+        return { message: "in use, or already gone", outcome: "skipped" };
       }
       log(`cleanup: removed ${what} (${item.reason})`);
       return { outcome: "removed" };
-    } catch (err) {
-      log(`cleanup: could not remove ${what}: ${message(err)}`);
-      return { outcome: "failed", message: message(err) };
+    } catch (error) {
+      log(`cleanup: could not remove ${what}: ${message(error)}`);
+      return { message: message(error), outcome: "failed" };
     }
   }
 
@@ -405,33 +614,42 @@ export class Cleanup {
   }
 }
 
-function field(o: Record<string, unknown>, key: string): string {
+const field = (o: Record<string, unknown>, key: string): string => {
   const v = o[key];
-  if (typeof v !== "string" || v === "" || v.startsWith("-")) throw new InvalidRequestError(`cleanup item needs a valid ${key}`);
+  if (typeof v !== "string" || v === "" || v.startsWith("-")) {
+    throw new InvalidRequestError(`cleanup item needs a valid ${key}`);
+  }
   return v;
-}
+};
 
 /**
  * The selected items of `POST /api/cleanup`. Only kind and identity matter: apply re-derives everything else from
  * fresh state, so a forged reason or verdict changes nothing.
  */
-export function parseCleanupItems(value: unknown): CleanupItem[] {
-  if (!Array.isArray(value)) throw new InvalidRequestError("items must be a list");
+export const parseCleanupItems = (value: unknown): CleanupItem[] => {
+  if (!Array.isArray(value)) {
+    throw new InvalidRequestError("items must be a list");
+  }
   return value.map((raw): CleanupItem => {
-    const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const o = (raw && typeof raw === "object" ? raw : {}) as Record<
+      string,
+      unknown
+    >;
     if (o.kind === "branch") {
       const projectId = field(o, "projectId");
       const branch = field(o, "branch");
-      if (o.why !== "merged" && o.why !== "upstream-gone") throw new InvalidRequestError("cleanup item needs a valid why");
+      if (o.why !== "merged" && o.why !== "upstream-gone") {
+        throw new InvalidRequestError("cleanup item needs a valid why");
+      }
       const worktree = typeof o.worktree === "string" ? o.worktree : undefined;
       return {
+        base: typeof o.base === "string" ? o.base : "",
+        branch,
+        checked: true,
         id: `branch:${projectId}:${branch}`,
         kind: "branch",
-        checked: true,
-        reason: typeof o.reason === "string" ? o.reason : "",
         projectId,
-        branch,
-        base: typeof o.base === "string" ? o.base : "",
+        reason: typeof o.reason === "string" ? o.reason : "",
         why: o.why,
         ...(worktree ? { worktree } : {}),
         ...(o.dirty === true ? { dirty: true } : {}),
@@ -439,16 +657,33 @@ export function parseCleanupItems(value: unknown): CleanupItem[] {
     }
     if (o.kind === "container") {
       const containerId = field(o, "containerId");
-      return { id: `container:${containerId}`, kind: "container", checked: true, reason: "", containerId, running: false, why: "orphan-env" };
+      return {
+        checked: true,
+        containerId,
+        id: `container:${containerId}`,
+        kind: "container",
+        reason: "",
+        running: false,
+        why: "orphan-env",
+      };
     }
     if (o.kind === "image") {
       const ref = field(o, "ref");
-      return { id: `image:${ref}`, kind: "image", checked: true, reason: "", ref, bytes: 0, why: "superseded" };
+      return {
+        bytes: 0,
+        checked: true,
+        id: `image:${ref}`,
+        kind: "image",
+        reason: "",
+        ref,
+        why: "superseded",
+      };
     }
     if (o.kind === "session") {
       const projectId = field(o, "projectId");
       const sessionId = field(o, "sessionId");
-      const envId = typeof o.envId === "string" && o.envId !== "" ? o.envId : undefined;
+      const envId =
+        typeof o.envId === "string" && o.envId !== "" ? o.envId : undefined;
       return {
         id: `session:${projectId}:${sessionId}`,
         kind: "session",
@@ -463,6 +698,8 @@ export function parseCleanupItems(value: unknown): CleanupItem[] {
         why: "idle",
       };
     }
-    throw new InvalidRequestError(`unknown cleanup item kind ${String(o.kind)}`);
+    throw new InvalidRequestError(
+      `unknown cleanup item kind ${String(o.kind)}`
+    );
   });
-}
+};

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import type { FormField } from "../../src/shared/types";
 import {
   buildAnswer,
@@ -11,21 +12,42 @@ import {
   safeUrl,
 } from "../../src/web/forms";
 
-const f = (key: string, type: string, over: Partial<FormField> = {}): FormField => ({ key, type, ...over });
+const f = (
+  key: string,
+  type: string,
+  over: Partial<FormField> = {}
+): FormField => ({ key, type, ...over });
 
 describe("form fields", () => {
   it("knows which field types it can render", () => {
-    expect(formSupported([f("a", "string"), f("b", "number"), f("c", "integer"), f("d", "boolean"), f("e", "multiselect"), f("g", "external")])).toBe(true);
-    expect(formSupported([f("a", "string"), f("b", "file")])).toBe(false);
+    expect(
+      formSupported([
+        f("a", "string"),
+        f("b", "number"),
+        f("c", "integer"),
+        f("d", "boolean"),
+        f("e", "multiselect"),
+        f("g", "external"),
+      ])
+    ).toBeTruthy();
+    expect(formSupported([f("a", "string"), f("b", "file")])).toBeFalsy();
   });
 
   it("labels with the title, falling back to the key", () => {
-    expect(fieldLabel(f("db", "string", { title: "Database" }))).toBe("Database");
+    expect(fieldLabel(f("db", "string", { title: "Database" }))).toBe(
+      "Database"
+    );
     expect(fieldLabel(f("db", "string", { title: "  " }))).toBe("db");
   });
 
   it("accepts string and object options", () => {
-    expect(optionsOf(f("x", "string", { options: ["a", { value: "b", label: "Bee" }, { value: "c" }] }))).toEqual([
+    expect(
+      optionsOf(
+        f("x", "string", {
+          options: ["a", { value: "b", label: "Bee" }, { value: "c" }],
+        })
+      )
+    ).toStrictEqual([
       { value: "a", label: "a" },
       { value: "b", label: "Bee" },
       { value: "c", label: "c" },
@@ -41,31 +63,58 @@ describe("form fields", () => {
         f("m", "multiselect", { default: ["a"] }),
         f("e", "external"),
         f("t", "string"),
-      ]),
-    ).toEqual({ s: "x", n: "3", b: true, m: ["a"], t: "" });
+      ])
+    ).toStrictEqual({ s: "x", n: "3", b: true, m: ["a"], t: "" });
   });
 });
 
-describe("isVisible", () => {
-  const dependent = f("detail", "string", { when: [{ key: "kind", op: "eq", value: "other" }] });
+describe(isVisible, () => {
+  const dependent = f("detail", "string", {
+    when: [{ key: "kind", op: "eq", value: "other" }],
+  });
 
   it("honours hidden and when eq/neq", () => {
-    expect(isVisible(f("x", "string", { hidden: true }), {})).toBe(false);
-    expect(isVisible(dependent, { kind: "other" })).toBe(true);
-    expect(isVisible(dependent, { kind: "a" })).toBe(false);
-    expect(isVisible(f("y", "string", { when: [{ key: "kind", op: "neq", value: "a" }] }), { kind: "b" })).toBe(true);
+    expect(isVisible(f("x", "string", { hidden: true }), {})).toBeFalsy();
+    expect(isVisible(dependent, { kind: "other" })).toBeTruthy();
+    expect(isVisible(dependent, { kind: "a" })).toBeFalsy();
+    expect(
+      isVisible(
+        f("y", "string", { when: [{ key: "kind", op: "neq", value: "a" }] }),
+        { kind: "b" }
+      )
+    ).toBeTruthy();
   });
 
   it("treats an untouched field as not equal, and compares typed numbers and booleans by value", () => {
-    expect(isVisible(dependent, {})).toBe(false);
-    expect(isVisible(f("y", "string", { when: [{ key: "kind", op: "neq", value: "a" }] }), {})).toBe(true);
-    expect(isVisible(f("z", "string", { when: [{ key: "n", op: "eq", value: 3 }] }), { n: "3" })).toBe(true);
-    expect(isVisible(f("z", "string", { when: [{ key: "ok", op: "eq", value: true }] }), { ok: true })).toBe(true);
-    expect(isVisible(f("z", "string", { when: [{ key: "tags", op: "eq", value: "x" }] }), { tags: ["x", "y"] })).toBe(true);
+    expect(isVisible(dependent, {})).toBeFalsy();
+    expect(
+      isVisible(
+        f("y", "string", { when: [{ key: "kind", op: "neq", value: "a" }] }),
+        {}
+      )
+    ).toBeTruthy();
+    expect(
+      isVisible(
+        f("z", "string", { when: [{ key: "n", op: "eq", value: 3 }] }),
+        { n: "3" }
+      )
+    ).toBeTruthy();
+    expect(
+      isVisible(
+        f("z", "string", { when: [{ key: "ok", op: "eq", value: true }] }),
+        { ok: true }
+      )
+    ).toBeTruthy();
+    expect(
+      isVisible(
+        f("z", "string", { when: [{ key: "tags", op: "eq", value: "x" }] }),
+        { tags: ["x", "y"] }
+      )
+    ).toBeTruthy();
   });
 });
 
-describe("buildAnswer", () => {
+describe(buildAnswer, () => {
   it("converts values to opencode's answer types", () => {
     const fields = [
       f("s", "string"),
@@ -75,7 +124,13 @@ describe("buildAnswer", () => {
       f("m", "multiselect", { custom: true }),
       f("e", "external", { url: "https://x" }),
     ];
-    expect(buildAnswer(fields, { s: "hi", n: "2.5", i: "4", b: false, m: ["a"] }, { m: " c, d ,," })).toEqual({
+    expect(
+      buildAnswer(
+        fields,
+        { s: "hi", n: "2.5", i: "4", b: false, m: ["a"] },
+        { m: " c, d ,," }
+      )
+    ).toStrictEqual({
       ok: true,
       answer: { s: "hi", n: 2.5, i: 4, b: false, m: ["a", "c", "d"] },
     });
@@ -85,10 +140,18 @@ describe("buildAnswer", () => {
     const fields = [
       f("opt", "string"),
       f("kind", "string"),
-      f("detail", "string", { required: true, when: [{ key: "kind", op: "eq", value: "other" }] }),
+      f("detail", "string", {
+        required: true,
+        when: [{ key: "kind", op: "eq", value: "other" }],
+      }),
       f("secret", "string", { hidden: true, default: "token" }),
     ];
-    expect(buildAnswer(fields, { opt: "  ", kind: "a", detail: "" })).toEqual({ ok: true, answer: { kind: "a", secret: "token" } });
+    expect(
+      buildAnswer(fields, { opt: "  ", kind: "a", detail: "" })
+    ).toStrictEqual({
+      ok: true,
+      answer: { kind: "a", secret: "token" },
+    });
   });
 
   it("reports per-field errors", () => {
@@ -100,8 +163,15 @@ describe("buildAnswer", () => {
       f("p", "string", { pattern: "[a-z]+" }),
       f("l", "string", { minLength: 3 }),
     ];
-    const result = buildAnswer(fields, { s: "", i: "1.5", n: "9", m: ["a", "b"], p: "abc1", l: "ab" });
-    expect(result).toEqual({
+    const result = buildAnswer(fields, {
+      s: "",
+      i: "1.5",
+      n: "9",
+      m: ["a", "b"],
+      p: "abc1",
+      l: "ab",
+    });
+    expect(result).toStrictEqual({
       ok: false,
       errors: {
         s: "Required",
@@ -115,15 +185,19 @@ describe("buildAnswer", () => {
   });
 
   it("ignores a pattern that is not a valid regular expression", () => {
-    expect(buildAnswer([f("p", "string", { pattern: "([" })], { p: "anything" })).toEqual({ ok: true, answer: { p: "anything" } });
+    expect(
+      buildAnswer([f("p", "string", { pattern: "([" })], { p: "anything" })
+    ).toStrictEqual({ ok: true, answer: { p: "anything" } });
   });
 
   it("requires at least one pick for a required multiselect", () => {
-    expect(buildAnswer([f("m", "multiselect", { required: true })], { m: [] })).toEqual({ ok: false, errors: { m: "Pick at least one" } });
+    expect(
+      buildAnswer([f("m", "multiselect", { required: true })], { m: [] })
+    ).toStrictEqual({ ok: false, errors: { m: "Pick at least one" } });
   });
 });
 
-describe("safeUrl", () => {
+describe(safeUrl, () => {
   it("only lets http(s) links through", () => {
     expect(safeUrl("https://example.com/a")).toBe("https://example.com/a");
     expect(safeUrl("http://localhost:3000")).toBe("http://localhost:3000/");
@@ -134,7 +208,7 @@ describe("safeUrl", () => {
   });
 });
 
-describe("inputType", () => {
+describe(inputType, () => {
   it("maps formats the browser can validate", () => {
     expect(inputType("email")).toBe("email");
     expect(inputType("uri")).toBe("url");

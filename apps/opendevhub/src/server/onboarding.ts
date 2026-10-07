@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import { isStackId, renderDevcontainer } from "../shared/stacks";
 import type { Candidate, CandidateList } from "../shared/types";
 import { scanCandidates } from "./discovery";
@@ -24,11 +25,13 @@ export class Onboarding {
   constructor(private readonly deps: OnboardingDeps) {}
 
   private scan(): Promise<Candidate[]> {
-    return (this.deps.scan ?? ((roots) => scanCandidates(roots)))(this.deps.roots());
+    return (this.deps.scan ?? ((roots) => scanCandidates(roots)))(
+      this.deps.roots()
+    );
   }
 
   async list(): Promise<CandidateList> {
-    return { roots: this.deps.roots(), candidates: await this.scan() };
+    return { candidates: await this.scan(), roots: this.deps.roots() };
   }
 
   /**
@@ -36,16 +39,30 @@ export class Onboarding {
    * candidates right now: that keeps writes under a root, in a git repo without a devcontainer.
    */
   async add(repoPath: string, stack: unknown): Promise<Candidate> {
-    if (!isStackId(stack)) throw new InvalidRequestError(`unknown stack ${String(stack)}`);
-    const candidate = (await this.scan()).find((c) => c.path === repoPath);
-    if (!candidate) throw new NotFoundError(repoPath || "(empty path)", "repo without a devcontainer");
+    if (!isStackId(stack)) {
+      throw new InvalidRequestError(`unknown stack ${String(stack)}`);
+    }
+    const result = await this.scan();
+    const candidate = result.find((c) => c.path === repoPath);
+    if (!candidate) {
+      throw new NotFoundError(
+        repoPath || "(empty path)",
+        "repo without a devcontainer"
+      );
+    }
     const dir = path.join(candidate.path, ".devcontainer");
     await fs.mkdir(dir, { recursive: true });
     try {
-      await fs.writeFile(path.join(dir, "devcontainer.json"), renderDevcontainer(candidate.name, stack), { flag: "wx" });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EEXIST") throw new DevcontainerExistsError(candidate.path);
-      throw err;
+      await fs.writeFile(
+        path.join(dir, "devcontainer.json"),
+        renderDevcontainer(candidate.name, stack),
+        { flag: "wx" }
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new DevcontainerExistsError(candidate.path);
+      }
+      throw error;
     }
     return candidate;
   }

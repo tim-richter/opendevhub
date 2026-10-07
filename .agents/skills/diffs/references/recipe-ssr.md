@@ -3,18 +3,16 @@
 Create props on the server and pass the result to the matching React component:
 
 ```tsx
-import { preloadMultiFileDiff } from '@pierre/diffs/ssr';
-import { MultiFileDiff } from '@pierre/diffs/react';
+import { MultiFileDiff } from "@pierre/diffs/react";
+import { preloadMultiFileDiff } from "@pierre/diffs/ssr";
 
 const preloaded = await preloadMultiFileDiff({
-  oldFile: { name: 'src/value.ts', contents: oldSource },
-  newFile: { name: 'src/value.ts', contents: newSource },
-  options: { theme: 'pierre-dark', diffStyle: 'split' },
+  oldFile: { name: "src/value.ts", contents: oldSource },
+  newFile: { name: "src/value.ts", contents: newSource },
+  options: { theme: "pierre-dark", diffStyle: "split" },
 });
 
 <MultiFileDiff {...preloaded} />;
 ```
 
-Select the preload function that matches the client component. Use
-`preloadDiffHTML` or `preloadUnresolvedFileHTML` when the host needs an HTML
-string only.
+Select the preload function that matches the client component. Use `preloadDiffHTML` or `preloadUnresolvedFileHTML` when the host needs an HTML string only.

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+
 import { slugify } from "../shared/tasks";
 import type { EnvId, Isolation, ProjectId } from "../shared/types";
 
@@ -6,11 +7,18 @@ const MAX_LABEL = 63;
 const BRANCH_SLUG_MAX = 20;
 
 /** `<projectId>-<branch slug>-<hash4>`, at most 63 characters so it works as a hostname label. */
-export function envIdFor(projectId: ProjectId, worktreePath: string, branch: string): EnvId {
-  const hash = createHash("sha256").update(`${projectId}\0${worktreePath}`).digest("hex").slice(0, 4);
+export const envIdFor = (
+  projectId: ProjectId,
+  worktreePath: string,
+  branch: string
+): EnvId => {
+  const hash = createHash("sha256")
+    .update(`${projectId}\0${worktreePath}`)
+    .digest("hex")
+    .slice(0, 4);
   const tail = `-${slugify(branch, BRANCH_SLUG_MAX) || "worktree"}-${hash}`;
-  return projectId.slice(0, MAX_LABEL - tail.length).replace(/-+$/, "") + tail;
-}
+  return projectId.slice(0, MAX_LABEL - tail.length).replace(/-+$/u, "") + tail;
+};
 
 export interface EnvSettings {
   isolation: Isolation;
@@ -20,25 +28,47 @@ export interface EnvSettings {
   sshAgent: boolean;
 }
 
-const KEY_FILE = /^[\w.@+][\w.@+/-]*$/;
+const KEY_FILE = /^[\w.@+][\w.@+/-]*$/u;
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 
 /** `customizations.opendevhub` from devcontainer.json, with the project's `config.json` entry taking precedence. */
-export function resolveEnvSettings(custom: unknown, override: unknown): EnvSettings {
+export const resolveEnvSettings = (
+  custom: unknown,
+  override: unknown
+): EnvSettings => {
   const c = record(custom);
   const o = record(override);
-  const isolation = [o.isolation, c.isolation].find((v): v is Isolation => v === "shared" || v === "isolated") ?? "shared";
-  const files = Array.isArray(o.keyFiles) ? o.keyFiles : Array.isArray(c.keyFiles) ? c.keyFiles : [];
-  const sshAgent = [o.sshAgent, c.sshAgent].find((v): v is boolean => typeof v === "boolean") ?? true;
+  const isolation =
+    [o.isolation, c.isolation].find(
+      (v): v is Isolation => v === "shared" || v === "isolated"
+    ) ?? "shared";
+  let files;
+  if (Array.isArray(o.keyFiles)) {
+    files = o.keyFiles;
+  } else if (Array.isArray(c.keyFiles)) {
+    files = c.keyFiles;
+  } else {
+    files = [];
+  }
+  const sshAgent =
+    [o.sshAgent, c.sshAgent].find(
+      (v): v is boolean => typeof v === "boolean"
+    ) ?? true;
   return {
     isolation,
-    keyFiles: files.filter((f): f is string => typeof f === "string" && KEY_FILE.test(f) && !f.split("/").includes("..")),
+    keyFiles: files.filter(
+      (f): f is string =>
+        typeof f === "string" &&
+        KEY_FILE.test(f) &&
+        !f.split("/").includes("..")
+    ),
     sshAgent,
   };
-}
+};
 
 export const LIFECYCLE_KEYS = [
   "onCreateCommand",
@@ -49,52 +79,97 @@ export const LIFECYCLE_KEYS = [
 ] as const;
 
 /** Keys that describe how to build the image; the pinned image already carries their result in its label. */
-const IMAGE_KEYS = ["image", "build", "dockerFile", "context", "dockerComposeFile", "service", "runServices", "features", "overrideFeatureInstallOrder"];
+const IMAGE_KEYS = new Set([
+  "image",
+  "build",
+  "dockerFile",
+  "context",
+  "dockerComposeFile",
+  "service",
+  "runServices",
+  "features",
+  "overrideFeatureInstallOrder",
+]);
 
-const PUBLISH = /^(-p|-P$|--publish(-all)?(=|$))/;
+const PUBLISH = /^(?<g1>-p|-P$|--publish(?<g2>-all)?(?<g3>=|$))/u;
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const escapeRegExp = (text: string): string =>
+  text.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
 /** Matches `folder` as a whole path or a path prefix, not as the start of a longer name. */
-function folderPattern(folder: string): RegExp {
-  return new RegExp(`${escapeRegExp(folder)}(?=$|[^\\w.-])`, "g");
-}
+const folderPattern = (folder: string): RegExp =>
+  new RegExp(`${escapeRegExp(folder)}(?=$|[^\\w.-])`, "gu");
 
 /** Why this config can't run one container per worktree; undefined when it can. */
-export function isolationBlocker(config: Record<string, unknown>, guessedFolder?: string): string | undefined {
-  if (config.dockerComposeFile !== undefined) return "Docker Compose configurations can't run in their own container yet";
-  if (config.appPort !== undefined) return "appPort publishes host ports, which several containers can't share";
-  const args = Array.isArray(config.runArgs) ? config.runArgs.filter((a): a is string => typeof a === "string") : [];
-  if (args.some((a) => PUBLISH.test(a))) return "runArgs publish host ports (-p/--publish), which several containers can't share";
-  if (args.some((a, i) => /^--net(work)?=host$/.test(a) || (/^--net(work)?$/.test(a) && args[i + 1] === "host"))) {
+export const isolationBlocker = (
+  config: Record<string, unknown>,
+  guessedFolder?: string
+): string | undefined => {
+  if (config.dockerComposeFile !== undefined) {
+    return "Docker Compose configurations can't run in their own container yet";
+  }
+  if (config.appPort !== undefined) {
+    return "appPort publishes host ports, which several containers can't share";
+  }
+  const args = Array.isArray(config.runArgs)
+    ? config.runArgs.filter((a): a is string => typeof a === "string")
+    : [];
+  if (args.some((a) => PUBLISH.test(a))) {
+    return "runArgs publish host ports (-p/--publish), which several containers can't share";
+  }
+  if (
+    args.some(
+      (a, i) =>
+        /^--net(?<g1>work)?=host$/u.test(a) ||
+        (/^--net(?<g1>work)?$/u.test(a) && args[i + 1] === "host")
+    )
+  ) {
     return "host networking is not supported";
   }
-  if (guessedFolder && LIFECYCLE_KEYS.some((k) => config[k] !== undefined && folderPattern(guessedFolder).test(JSON.stringify(config[k])))) {
+  if (
+    guessedFolder &&
+    LIFECYCLE_KEYS.some(
+      (k) =>
+        config[k] !== undefined &&
+        folderPattern(guessedFolder).test(JSON.stringify(config[k]))
+    )
+  ) {
     return "a lifecycle command uses ${containerWorkspaceFolder}, which can't point at each task's worktree yet";
   }
   return undefined;
-}
+};
 
-function replaceFolder(value: unknown, from: string, to: string): unknown {
-  if (typeof value === "string") return value.replace(folderPattern(from), to);
-  if (Array.isArray(value)) return value.map((v) => replaceFolder(v, from, to));
+const replaceFolder = (value: unknown, from: string, to: string): unknown => {
+  if (typeof value === "string") {
+    return value.replace(folderPattern(from), to);
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => replaceFolder(v, from, to));
+  }
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replaceFolder(v, from, to)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, replaceFolder(v, from, to)])
+    );
   }
   return value;
-}
+};
 
-function withoutName(args: unknown[]): unknown[] {
+const withoutName = (args: unknown[]): unknown[] => {
   const out: unknown[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--name") i++;
-    else if (typeof args[i] === "string" && (args[i] as string).startsWith("--name=")) continue;
-    else out.push(args[i]);
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === "--name") {
+      i += 1;
+    } else if (
+      typeof args[i] === "string" &&
+      (args[i] as string).startsWith("--name=")
+    ) {
+      continue;
+    } else {
+      out.push(args[i]);
+    }
   }
   return out;
-}
+};
 
 export interface OverrideInput {
   /** The worktree's configuration, as `devcontainer read-configuration` printed it. */
@@ -112,12 +187,25 @@ export interface OverrideInput {
  * worktree mounted where the main container sees it, and the repository's .git next to it, so git links
  * resolve the same way in both containers.
  */
-export function buildOverrideConfig(input: OverrideInput): { config: Record<string, unknown>; notes: string[] } {
+export const buildOverrideConfig = (
+  input: OverrideInput
+): {
+  config: Record<string, unknown>;
+  notes: string[];
+} => {
   const notes: string[] = [];
   const config: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.config)) {
-    if (key === "configFilePath" || IMAGE_KEYS.includes(key) || (LIFECYCLE_KEYS as readonly string[]).includes(key)) continue;
-    config[key] = input.guessedFolder ? replaceFolder(value, input.guessedFolder, input.worktree.path) : value;
+    if (
+      key === "configFilePath" ||
+      IMAGE_KEYS.has(key) ||
+      (LIFECYCLE_KEYS as readonly string[]).includes(key)
+    ) {
+      continue;
+    }
+    config[key] = input.guessedFolder
+      ? replaceFolder(value, input.guessedFolder, input.worktree.path)
+      : value;
   }
   config.image = input.image;
   config.workspaceMount = `type=bind,source=${input.worktree.hostPath},target=${input.worktree.path}`;
@@ -128,8 +216,12 @@ export function buildOverrideConfig(input: OverrideInput): { config: Record<stri
   ];
   if (Array.isArray(config.runArgs)) {
     const kept = withoutName(config.runArgs);
-    if (kept.length !== config.runArgs.length) notes.push("removed --name from runArgs: every task container needs its own name");
+    if (kept.length !== config.runArgs.length) {
+      notes.push(
+        "removed --name from runArgs: every task container needs its own name"
+      );
+    }
     config.runArgs = kept;
   }
   return { config, notes };
-}
+};

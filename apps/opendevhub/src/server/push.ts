@@ -1,5 +1,7 @@
 import fs from "node:fs";
+
 import webpush from "web-push";
+
 import type { Notice } from "../shared/notices";
 import { writeJson } from "./config";
 
@@ -19,7 +21,8 @@ interface PushFile {
 }
 
 /** What a push carries: a notice, or the test notification. */
-export type PushMessage = Pick<Notice, "tag" | "title" | "body" | "url"> & Partial<Notice>;
+export type PushMessage = Pick<Notice, "tag" | "title" | "body" | "url"> &
+  Partial<Notice>;
 
 export interface SendOptions {
   TTL: number;
@@ -28,7 +31,11 @@ export interface SendOptions {
 }
 
 /** `web-push`'s sendNotification, narrowed to what we use; rejects with `statusCode` for a non-2xx answer. */
-export type PushSender = (subscription: Subscription, payload: string, options: SendOptions) => Promise<{ statusCode: number }>;
+export type PushSender = (
+  subscription: Subscription,
+  payload: string,
+  options: SendOptions
+) => Promise<{ statusCode: number }>;
 
 export class InvalidSubscriptionError extends Error {
   constructor(message: string) {
@@ -41,13 +48,17 @@ const SUBJECT = "mailto:opendevhub@localhost";
 /** A notice that waited in the push service while the laptop slept is probably stale. */
 const TTL = 900;
 
-function str(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
+const str = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
 
-function parseSubscription(raw: unknown): Subscription {
-  const s = (raw ?? {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
-  if (!str(s.endpoint)) throw new InvalidSubscriptionError("subscription needs an endpoint");
+const parseSubscription = (raw: unknown): Subscription => {
+  const s = (raw ?? {}) as {
+    endpoint?: unknown;
+    keys?: { p256dh?: unknown; auth?: unknown };
+  };
+  if (!str(s.endpoint)) {
+    throw new InvalidSubscriptionError("subscription needs an endpoint");
+  }
   let url: URL;
   try {
     url = new URL(s.endpoint);
@@ -55,15 +66,30 @@ function parseSubscription(raw: unknown): Subscription {
     throw new InvalidSubscriptionError("subscription endpoint is not a URL");
   }
   // Push services are https; anything else would make the server POST to arbitrary local addresses.
-  if (url.protocol !== "https:") throw new InvalidSubscriptionError("subscription endpoint must be https");
-  if (!str(s.keys?.p256dh) || !str(s.keys?.auth)) throw new InvalidSubscriptionError("subscription needs keys.p256dh and keys.auth");
-  return { endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } };
-}
+  if (url.protocol !== "https:") {
+    throw new InvalidSubscriptionError("subscription endpoint must be https");
+  }
+  if (!str(s.keys?.p256dh) || !str(s.keys?.auth)) {
+    throw new InvalidSubscriptionError(
+      "subscription needs keys.p256dh and keys.auth"
+    );
+  }
+  return {
+    endpoint: s.endpoint,
+    keys: { auth: s.keys.auth, p256dh: s.keys.p256dh },
+  };
+};
 
-function parseFile(text: string): PushFile | undefined {
+const parseFile = (text: string): PushFile | undefined => {
   try {
     const raw = JSON.parse(text) as Partial<PushFile>;
-    if (!str(raw.vapid?.publicKey) || !str(raw.vapid?.privateKey) || !Array.isArray(raw.subscriptions)) return undefined;
+    if (
+      !str(raw.vapid?.publicKey) ||
+      !str(raw.vapid?.privateKey) ||
+      !Array.isArray(raw.subscriptions)
+    ) {
+      return undefined;
+    }
     const subscriptions = raw.subscriptions.flatMap((s) => {
       try {
         return [parseSubscription(s)];
@@ -71,11 +97,17 @@ function parseFile(text: string): PushFile | undefined {
         return [];
       }
     });
-    return { vapid: { publicKey: raw.vapid.publicKey, privateKey: raw.vapid.privateKey }, subscriptions };
+    return {
+      subscriptions,
+      vapid: {
+        privateKey: raw.vapid.privateKey,
+        publicKey: raw.vapid.publicKey,
+      },
+    };
   } catch {
     return undefined;
   }
-}
+};
 
 /** Web Push delivery: VAPID keys and browser subscriptions in `push.json`, one send per subscription. */
 export class Push {
@@ -84,8 +116,17 @@ export class Push {
   private readonly sendFn: PushSender;
   private readonly log: (line: string) => void;
 
-  constructor(private readonly opts: { file: string; send?: PushSender; log?: (line: string) => void }) {
-    this.sendFn = opts.send ?? ((sub, payload, options) => webpush.sendNotification(sub, payload, options));
+  constructor(
+    private readonly opts: {
+      file: string;
+      send?: PushSender;
+      log?: (line: string) => void;
+    }
+  ) {
+    this.sendFn =
+      opts.send ??
+      ((sub, payload, options) =>
+        webpush.sendNotification(sub, payload, options));
     this.log = opts.log ?? ((line) => console.warn(line));
   }
 
@@ -101,14 +142,19 @@ export class Push {
   subscribe(raw: unknown): void {
     const sub = parseSubscription(raw);
     const data = this.load();
-    data.subscriptions = [...data.subscriptions.filter((s) => s.endpoint !== sub.endpoint), sub];
+    data.subscriptions = [
+      ...data.subscriptions.filter((s) => s.endpoint !== sub.endpoint),
+      sub,
+    ];
     this.save();
   }
 
   unsubscribe(endpoint: string): void {
     const data = this.load();
     const kept = data.subscriptions.filter((s) => s.endpoint !== endpoint);
-    if (kept.length === data.subscriptions.length) return;
+    if (kept.length === data.subscriptions.length) {
+      return;
+    }
     data.subscriptions = kept;
     this.save();
   }
@@ -117,36 +163,44 @@ export class Push {
   async send(message: PushMessage): Promise<number> {
     const data = this.load();
     const subs = data.subscriptions;
-    if (subs.length === 0) return 0;
+    if (subs.length === 0) {
+      return 0;
+    }
     const options: SendOptions = {
       TTL,
-      urgency: /^(perm|form):/.test(message.tag) ? "high" : "normal",
+      urgency: /^(?<g1>perm|form):/u.test(message.tag) ? "high" : "normal",
       vapidDetails: { subject: SUBJECT, ...data.vapid },
     };
     const payload = JSON.stringify(message);
-    const results = await Promise.allSettled(subs.map((s) => this.sendFn(s, payload, options)));
+    const results = await Promise.allSettled(
+      subs.map((s) => this.sendFn(s, payload, options))
+    );
 
     const gone = new Set<string>();
     let sent = 0;
     let failure: { host: string; reason: string } | undefined;
-    results.forEach((r, i) => {
+    for (const [i, r] of results.entries()) {
       if (r.status === "fulfilled") {
-        sent++;
-        return;
+        sent += 1;
+        continue;
       }
       const err = r.reason as { statusCode?: number; message?: string };
       if (err?.statusCode === 404 || err?.statusCode === 410) {
         gone.add(subs[i].endpoint);
-        return;
+        continue;
       }
       failure ??= {
         host: new URL(subs[i].endpoint).host,
-        reason: err?.statusCode ? `HTTP ${err.statusCode}` : (err?.message ?? String(r.reason)),
+        reason: err?.statusCode
+          ? `HTTP ${err.statusCode}`
+          : (err?.message ?? String(r.reason)),
       };
-    });
+    }
 
     if (gone.size > 0) {
-      data.subscriptions = data.subscriptions.filter((s) => !gone.has(s.endpoint));
+      data.subscriptions = data.subscriptions.filter(
+        (s) => !gone.has(s.endpoint)
+      );
       this.save();
     }
     if (failure && !this.failing) {
@@ -160,17 +214,23 @@ export class Push {
   }
 
   private load(): PushFile {
-    if (this.data) return this.data;
+    if (this.data) {
+      return this.data;
+    }
     let text: string | undefined;
     try {
-      text = fs.readFileSync(this.opts.file, "utf8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      text = fs.readFileSync(this.opts.file, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
     }
     let data = text === undefined ? undefined : parseFile(text);
-    if (text !== undefined && !data) this.log("push: push.json is invalid; starting with new keys");
+    if (text !== undefined && !data) {
+      this.log("push: push.json is invalid; starting with new keys");
+    }
     if (!data) {
-      data = { vapid: webpush.generateVAPIDKeys(), subscriptions: [] };
+      data = { subscriptions: [], vapid: webpush.generateVAPIDKeys() };
       this.data = data;
       this.save();
     }

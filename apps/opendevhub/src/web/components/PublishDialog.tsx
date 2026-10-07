@@ -1,13 +1,28 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { PublishInfo, PublishResult, PublishStrategy, ReviewData } from "../../shared/types";
-import { fetchPublishInfo, publishChanges, suggestPublish } from "../api";
-import { acceptSuggestion, publishBlocker } from "../review";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
+
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+
+import type {
+  PublishInfo,
+  PublishResult,
+  PublishStrategy,
+  ReviewData,
+} from "../../shared/types";
+import { fetchPublishInfo, publishChanges, suggestPublish } from "../api";
+import { acceptSuggestion, publishBlocker } from "../review";
 import { Choice } from "./Choice";
 
 const STRATEGY_LABEL: Record<PublishStrategy, string> = {
@@ -16,7 +31,11 @@ const STRATEGY_LABEL: Record<PublishStrategy, string> = {
 };
 
 /** The checkout's remotes, forge and open PR; reloaded when the review loads or its branch changes. */
-export function usePublishInfo(projectId: string, directory: string, data: ReviewData | undefined) {
+export const usePublishInfo = (
+  projectId: string,
+  directory: string,
+  data: ReviewData | undefined
+) => {
   const [info, setInfo] = useState<PublishInfo>();
   const [error, setError] = useState<string>();
   const loadInfo = useCallback(
@@ -27,24 +46,32 @@ export function usePublishInfo(projectId: string, directory: string, data: Revie
           setError(undefined);
           return i;
         })
-        .catch((err: unknown) => {
+        .catch((err) => {
           setError(err instanceof Error ? err.message : String(err));
           return undefined;
         }),
-    [projectId, directory],
+    [projectId, directory]
   );
   const loaded = !!data;
   const branch = data?.branch;
   useEffect(() => {
-    if (loaded) void loadInfo();
+    if (loaded) {
+      void loadInfo();
+    }
   }, [loadInfo, loaded, branch]);
   /** Why publishing isn't possible right now; undefined when it is. */
-  const blocker = !data || !info ? (error ?? "Loading…") : (publishBlocker(data) ?? (info.remotes.length === 0 ? "This repository has no remote" : undefined));
-  return { info, loadInfo, blocker };
-}
+  const blocker =
+    !data || !info
+      ? (error ?? "Loading…")
+      : (publishBlocker(data) ??
+        (info.remotes.length === 0
+          ? "This repository has no remote"
+          : undefined));
+  return { blocker, info, loadInfo };
+};
 
 /** Pushes the branch and opens or updates its pull request. Mount it while open, so every opening starts fresh. */
-export function PublishDialog(props: {
+export const PublishDialog = (props: {
   projectId: string;
   directory: string;
   info: PublishInfo;
@@ -54,14 +81,16 @@ export function PublishDialog(props: {
   checksWarning?: string;
   onClose: () => void;
   onPublished: (result: PublishResult) => void;
-}) {
+}) => {
   const { projectId, directory } = props;
   const [info, setInfo] = useState(props.info);
   const [remote, setRemote] = useState(props.info.remote);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [base, setBase] = useState(props.baseName ?? "");
-  const [strategy, setStrategy] = useState<PublishStrategy>(props.info.strategy);
+  const [strategy, setStrategy] = useState<PublishStrategy>(
+    props.info.strategy
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [generating, setGenerating] = useState(true);
@@ -71,30 +100,56 @@ export function PublishDialog(props: {
     const request = ++suggestion.current;
     suggestPublish(projectId, directory)
       .then((s) => {
-        setTitle((current) => acceptSuggestion({ current, suggestion: s.title, request, latest: suggestion.current }));
-        setDescription((current) => acceptSuggestion({ current, suggestion: s.description, request, latest: suggestion.current }));
+        setTitle((current) =>
+          acceptSuggestion({
+            current,
+            latest: suggestion.current,
+            request,
+            suggestion: s.title,
+          })
+        );
+        setDescription((current) =>
+          acceptSuggestion({
+            current,
+            latest: suggestion.current,
+            request,
+            suggestion: s.description,
+          })
+        );
       })
-      .catch(() => {})
+      .catch(() => undefined)
       .finally(() => {
-        if (request === suggestion.current) setGenerating(false);
+        if (request === suggestion.current) {
+          setGenerating(false);
+        }
       });
     return () => {
-      suggestion.current++;
+      suggestion.current += 1;
     };
   }, [projectId, directory]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!remote) return;
+    if (!remote) {
+      return;
+    }
     setBusy(true);
     setError(undefined);
-    publishChanges(projectId, directory, { remote, base, strategy, title, description })
+    publishChanges(projectId, directory, {
+      base,
+      description,
+      remote,
+      strategy,
+      title,
+    })
       .then((r) => {
         props.onPublished(r);
         void props.loadInfo(remote);
         props.onClose();
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : String(err))
+      )
       .finally(() => setBusy(false));
   };
 
@@ -103,15 +158,22 @@ export function PublishDialog(props: {
       <DialogContent className="sm:max-w-xl">
         <form className="flex flex-col gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{info.pr ? "Update pull request" : "Publish"}</DialogTitle>
+            <DialogTitle>
+              {info.pr ? "Update pull request" : "Publish"}
+            </DialogTitle>
             <DialogDescription>
-              Pushes {info.pushFrom === "host" ? "from this machine, with your own git credentials" : "from the container"}
-              {info.forge.kind !== "unknown" ? ` to ${info.forge.kind}` : ""}.
+              Pushes{" "}
+              {info.pushFrom === "host"
+                ? "from this machine, with your own git credentials"
+                : "from the container"}
+              {info.forge.kind === "unknown" ? "" : ` to ${info.forge.kind}`}.
             </DialogDescription>
           </DialogHeader>
           {props.checksWarning && (
             <Alert className="border-warn/40 bg-warn/10">
-              <AlertDescription className="text-warn">{props.checksWarning} You can still publish.</AlertDescription>
+              <AlertDescription className="text-warn">
+                {props.checksWarning} You can still publish.
+              </AlertDescription>
             </Alert>
           )}
           <Input
@@ -120,7 +182,13 @@ export function PublishDialog(props: {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
-          <Textarea aria-label="Pull request description" rows={6} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Textarea
+            aria-label="Pull request description"
+            rows={6}
+            placeholder="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
           <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm">
             <Label className="font-normal" htmlFor="publish-remote">
               Remote
@@ -132,17 +200,25 @@ export function PublishDialog(props: {
               onChange={(r) => {
                 setRemote(r);
                 void props.loadInfo(r).then((i) => {
-                  if (!i) return;
+                  if (!i) {
+                    return;
+                  }
                   setInfo(i);
                   setStrategy(i.strategy);
                 });
               }}
-              options={info.remotes.map((r) => ({ value: r, label: r }))}
+              options={info.remotes.map((r) => ({ label: r, value: r }))}
             />
             <Label className="font-normal" htmlFor="publish-base">
               Into
             </Label>
-            <Input id="publish-base" className="h-8" value={base} onChange={(e) => setBase(e.target.value)} aria-label="Target branch" />
+            <Input
+              id="publish-base"
+              className="h-8"
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+              aria-label="Target branch"
+            />
             <Label className="font-normal" htmlFor="publish-strategy">
               How
             </Label>
@@ -151,7 +227,10 @@ export function PublishDialog(props: {
               label="How to publish"
               value={strategy}
               onChange={(v) => setStrategy(v as PublishStrategy)}
-              options={info.strategies.map((s) => ({ value: s, label: STRATEGY_LABEL[s] }))}
+              options={info.strategies.map((s) => ({
+                label: STRATEGY_LABEL[s],
+                value: s,
+              }))}
             />
           </div>
           {error && (
@@ -163,12 +242,22 @@ export function PublishDialog(props: {
             <Button type="button" variant="ghost" onClick={props.onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={busy || !remote || !title.trim() || !base.trim()}>
-              {busy ? "Publishing…" : info.pr ? "Update PR" : "Publish"}
+            <Button
+              type="submit"
+              disabled={busy || !remote || !title.trim() || !base.trim()}
+            >
+              {publishLabel(busy, !!info.pr)}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   );
-}
+};
+
+const publishLabel = (busy: boolean, hasPr: boolean): string => {
+  if (busy) {
+    return "Publishing…";
+  }
+  return hasPr ? "Update PR" : "Publish";
+};

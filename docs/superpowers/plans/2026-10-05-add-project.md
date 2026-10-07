@@ -40,11 +40,13 @@
 ### Task 1: Shared stacks table and template
 
 **Files:**
+
 - Create: `src/shared/stacks.ts`
 - Modify: `src/shared/types.ts` (add `Candidate`, `CandidateList`, `AddProjectResult`)
 - Test: `test/shared/stacks.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `type StackId = "node" | "python" | "go" | "rust" | "ruby" | "java" | "dotnet" | "php" | "generic"`
   - `interface Stack { id: StackId; label: string; image: string }`
@@ -60,16 +62,29 @@
 ```ts
 // test/shared/stacks.test.ts
 import { describe, expect, it } from "vitest";
-import { isStackId, OPENCODE_INSTALL, renderDevcontainer, STACK_IDS, STACKS } from "../../src/shared/stacks";
+
+import {
+  isStackId,
+  OPENCODE_INSTALL,
+  renderDevcontainer,
+  STACK_IDS,
+  STACKS,
+} from "../../src/shared/stacks";
 
 describe("stacks", () => {
   it("has an mcr devcontainers image for every stack", () => {
     for (const id of STACK_IDS) {
       expect(STACKS[id].id).toBe(id);
-      expect(STACKS[id].image).toMatch(/^mcr\.microsoft\.com\/devcontainers\/[a-z-]+:[\w.]+$/);
+      expect(STACKS[id].image).toMatch(
+        /^mcr\.microsoft\.com\/devcontainers\/[a-z-]+:[\w.]+$/
+      );
     }
-    expect(STACKS.node.image).toBe("mcr.microsoft.com/devcontainers/javascript-node:22");
-    expect(STACKS.generic.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+    expect(STACKS.node.image).toBe(
+      "mcr.microsoft.com/devcontainers/javascript-node:22"
+    );
+    expect(STACKS.generic.image).toBe(
+      "mcr.microsoft.com/devcontainers/base:ubuntu"
+    );
   });
 
   it("recognises stack ids only", () => {
@@ -81,33 +96,49 @@ describe("stacks", () => {
   it("renders name, image and the opencode installer, in that order", () => {
     const text = renderDevcontainer("my-app", "python");
     expect(text.endsWith("}\n")).toBe(true);
-    expect(Object.keys(JSON.parse(text))).toEqual(["name", "image", "postCreateCommand"]);
+    expect(Object.keys(JSON.parse(text))).toEqual([
+      "name",
+      "image",
+      "postCreateCommand",
+    ]);
     expect(JSON.parse(text)).toEqual({
       name: "my-app",
       image: "mcr.microsoft.com/devcontainers/python:3",
       postCreateCommand: "curl -fsSL https://opencode.ai/install | bash",
     });
-    expect(OPENCODE_INSTALL).toBe("curl -fsSL https://opencode.ai/install | bash");
+    expect(OPENCODE_INSTALL).toBe(
+      "curl -fsSL https://opencode.ai/install | bash"
+    );
     expect(text).toContain('\n  "name": "my-app"');
   });
 
   it("escapes names that need it", () => {
-    expect(JSON.parse(renderDevcontainer('we"ird', "generic")).name).toBe('we"ird');
+    expect(JSON.parse(renderDevcontainer('we"ird', "generic")).name).toBe(
+      'we"ird'
+    );
   });
 });
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run test/shared/stacks.test.ts`
-Expected: FAIL, because `src/shared/stacks.ts` can't be resolved.
+Run: `npx vitest run test/shared/stacks.test.ts` Expected: FAIL, because `src/shared/stacks.ts` can't be resolved.
 
 - [ ] **Step 3: Implement**
 
 ```ts
 // src/shared/stacks.ts
 /** Base images for repos opendevhub writes a devcontainer for, in detection order. */
-export type StackId = "node" | "python" | "go" | "rust" | "ruby" | "java" | "dotnet" | "php" | "generic";
+export type StackId =
+  | "node"
+  | "python"
+  | "go"
+  | "rust"
+  | "ruby"
+  | "java"
+  | "dotnet"
+  | "php"
+  | "generic";
 
 export interface Stack {
   id: StackId;
@@ -126,7 +157,11 @@ export const STACKS: Record<StackId, Stack> = {
   java: { id: "java", label: "Java", image: `${MCR}/java:21` },
   dotnet: { id: "dotnet", label: ".NET", image: `${MCR}/dotnet:8.0` },
   php: { id: "php", label: "PHP", image: `${MCR}/php:8` },
-  generic: { id: "generic", label: "Other (Ubuntu)", image: `${MCR}/base:ubuntu` },
+  generic: {
+    id: "generic",
+    label: "Other (Ubuntu)",
+    image: `${MCR}/base:ubuntu`,
+  },
 };
 
 export const STACK_IDS = Object.keys(STACKS) as StackId[];
@@ -172,8 +207,7 @@ export interface AddProjectResult {
 
 - [ ] **Step 4: Run the tests and typecheck**
 
-Run: `npx vitest run test/shared/stacks.test.ts && npm run typecheck`
-Expected: PASS, and no type errors.
+Run: `npx vitest run test/shared/stacks.test.ts && npm run typecheck` Expected: PASS, and no type errors.
 
 - [ ] **Step 5: Commit**
 
@@ -189,10 +223,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 2: Stack detection
 
 **Files:**
+
 - Create: `src/server/stacks.ts`
 - Test: `test/server/stacks.test.ts`
 
 **Interfaces:**
+
 - Consumes: `StackId` from `src/shared/stacks.ts` (Task 1).
 - Produces: `detectStack(dir: string): Promise<StackId>`.
 
@@ -203,11 +239,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { detectStack } from "../../src/server/stacks";
 
 let dir: string;
-const touch = (...names: string[]) => names.forEach((n) => fs.writeFileSync(path.join(dir, n), ""));
+const touch = (...names: string[]) =>
+  names.forEach((n) => fs.writeFileSync(path.join(dir, n), ""));
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-stack-"));
@@ -254,24 +293,31 @@ describe("detectStack", () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run test/server/stacks.test.ts`
-Expected: FAIL, because `src/server/stacks.ts` can't be resolved.
+Run: `npx vitest run test/server/stacks.test.ts` Expected: FAIL, because `src/server/stacks.ts` can't be resolved.
 
 - [ ] **Step 3: Implement**
 
 ```ts
 // src/server/stacks.ts
 import fs from "node:fs/promises";
+
 import type { StackId } from "../shared/stacks";
 
 /** Top-level files that identify a stack; the first stack with a match wins. */
 const MARKERS: [StackId, (name: string) => boolean][] = [
   ["node", (n) => n === "package.json"],
-  ["python", (n) => n === "pyproject.toml" || n === "requirements.txt" || n === "setup.py"],
+  [
+    "python",
+    (n) =>
+      n === "pyproject.toml" || n === "requirements.txt" || n === "setup.py",
+  ],
   ["go", (n) => n === "go.mod"],
   ["rust", (n) => n === "Cargo.toml"],
   ["ruby", (n) => n === "Gemfile"],
-  ["java", (n) => n === "pom.xml" || n === "build.gradle" || n === "build.gradle.kts"],
+  [
+    "java",
+    (n) => n === "pom.xml" || n === "build.gradle" || n === "build.gradle.kts",
+  ],
   ["dotnet", (n) => n.endsWith(".csproj") || n.endsWith(".sln")],
   ["php", (n) => n === "composer.json"],
 ];
@@ -279,7 +325,9 @@ const MARKERS: [StackId, (name: string) => boolean][] = [
 export async function detectStack(dir: string): Promise<StackId> {
   let files: string[];
   try {
-    files = (await fs.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
+    files = (await fs.readdir(dir, { withFileTypes: true }))
+      .filter((e) => e.isFile())
+      .map((e) => e.name);
   } catch {
     return "generic";
   }
@@ -289,8 +337,7 @@ export async function detectStack(dir: string): Promise<StackId> {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run test/server/stacks.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/stacks.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -306,10 +353,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 3: `scanCandidates` in discovery
 
 **Files:**
+
 - Modify: `src/server/discovery.ts`
 - Test: `test/server/discovery.test.ts`
 
 **Interfaces:**
+
 - Consumes: `detectStack` (Task 2), `Candidate` (Task 1).
 - Produces: `scanCandidates(roots: string[], maxDepth = 2, onWarn?: (msg: string) => void): Promise<Candidate[]>`. `scanRoots` keeps its signature and behaviour.
 
@@ -371,13 +420,19 @@ describe("scanCandidates", () => {
   it("dedupes overlapping roots and keeps the first root a repo was found under", async () => {
     git("org/b");
     const found = await scanCandidates([root, path.join(root, "org")]);
-    expect(found).toEqual([{ path: path.join(root, "org/b"), name: "b", root, stack: "generic" }]);
+    expect(found).toEqual([
+      { path: path.join(root, "org/b"), name: "b", root, stack: "generic" },
+    ]);
   });
 
   it("warns once for a missing root", async () => {
     git("a");
     const warn = vi.fn();
-    expect((await scanCandidates([path.join(root, "nope"), root], 2, warn)).map((c) => c.name)).toEqual(["a"]);
+    expect(
+      (await scanCandidates([path.join(root, "nope"), root], 2, warn)).map(
+        (c) => c.name
+      )
+    ).toEqual(["a"]);
     expect(warn).toHaveBeenCalledOnce();
   });
 });
@@ -385,8 +440,7 @@ describe("scanCandidates", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/discovery.test.ts`
-Expected: FAIL, because `scanCandidates` isn't exported. The existing `scanRoots` tests still pass.
+Run: `npx vitest run test/server/discovery.test.ts` Expected: FAIL, because `scanCandidates` isn't exported. The existing `scanRoots` tests still pass.
 
 - [ ] **Step 3: Implement**
 
@@ -414,20 +468,32 @@ async function walk(
   roots: string[],
   maxDepth: number,
   onWarn: (msg: string) => void,
-  claim: (dir: string, root: string) => Promise<boolean>,
+  claim: (dir: string, root: string) => Promise<boolean>
 ): Promise<void> {
-  async function visit(dir: string, root: string, depth: number): Promise<void> {
+  async function visit(
+    dir: string,
+    root: string,
+    depth: number
+  ): Promise<void> {
     if (await claim(dir, root)) return;
     if (depth >= maxDepth) return;
     let entries: Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch (err) {
-      if (depth === 0) onWarn(`opendevhub: cannot read root ${dir}: ${(err as Error).message}`);
+      if (depth === 0)
+        onWarn(
+          `opendevhub: cannot read root ${dir}: ${(err as Error).message}`
+        );
       return;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+      if (
+        !entry.isDirectory() ||
+        entry.name.startsWith(".") ||
+        SKIP_DIRS.has(entry.name)
+      )
+        continue;
       // Worktrees opendevhub keeps next to a project carry its devcontainer.json too; they aren't projects.
       if (entry.name.endsWith(WORKTREES_SUFFIX)) continue;
       await visit(path.join(dir, entry.name), root, depth + 1);
@@ -442,24 +508,31 @@ async function walk(
 export async function scanRoots(
   roots: string[],
   maxDepth = 2,
-  onWarn: (msg: string) => void = (m) => console.warn(m),
+  onWarn: (msg: string) => void = (m) => console.warn(m)
 ): Promise<Project[]> {
   const found = new Map<string, Project>();
   await walk(roots, maxDepth, onWarn, async (dir) => {
     if (found.has(dir)) return true;
     const spec = await findDevcontainerSpec(dir);
     if (!spec) return false;
-    found.set(dir, { id: projectId(dir), name: path.basename(dir), path: dir, devcontainerPath: spec });
+    found.set(dir, {
+      id: projectId(dir),
+      name: path.basename(dir),
+      path: dir,
+      devcontainerPath: spec,
+    });
     return true;
   });
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+  return [...found.values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)
+  );
 }
 
 /** Git repos under the roots that have no devcontainer: what Add project offers. */
 export async function scanCandidates(
   roots: string[],
   maxDepth = 2,
-  onWarn: (msg: string) => void = (m) => console.warn(m),
+  onWarn: (msg: string) => void = (m) => console.warn(m)
 ): Promise<Candidate[]> {
   const found = new Map<string, Candidate>();
   const projects = new Set<string>();
@@ -470,10 +543,17 @@ export async function scanCandidates(
       return true;
     }
     if (!(await isGitRepo(dir))) return false;
-    found.set(dir, { path: dir, name: path.basename(dir), root, stack: await detectStack(dir) });
+    found.set(dir, {
+      path: dir,
+      name: path.basename(dir),
+      root,
+      stack: await detectStack(dir),
+    });
     return true;
   });
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+  return [...found.values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)
+  );
 }
 ```
 
@@ -481,8 +561,7 @@ The old `scanRoots` body (the inner `visit` and its loop) is removed. Keep the `
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run test/server/discovery.test.ts`
-Expected: PASS, for both the old `scanRoots` tests and the new ones.
+Run: `npx vitest run test/server/discovery.test.ts` Expected: PASS, for both the old `scanRoots` tests and the new ones.
 
 - [ ] **Step 5: Commit**
 
@@ -498,10 +577,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 4: Onboarding module (validate and write)
 
 **Files:**
+
 - Create: `src/server/onboarding.ts`
 - Test: `test/server/onboarding.test.ts`
 
 **Interfaces:**
+
 - Consumes: `scanCandidates` (Task 3), `isStackId` and `renderDevcontainer` (Task 1), `InvalidRequestError` from `src/server/worktrees.ts`, `NotFoundError` from `src/server/orchestrator.ts`.
 - Produces:
   - `class DevcontainerExistsError extends Error` (mapped to 409 in Task 5)
@@ -516,8 +597,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DevcontainerExistsError, Onboarding } from "../../src/server/onboarding";
+
+import {
+  DevcontainerExistsError,
+  Onboarding,
+} from "../../src/server/onboarding";
 import { NotFoundError } from "../../src/server/orchestrator";
 import { InvalidRequestError } from "../../src/server/worktrees";
 import { renderDevcontainer } from "../../src/shared/stacks";
@@ -528,7 +614,8 @@ const repo = (rel: string) => {
   fs.mkdirSync(path.join(root, rel, ".git"), { recursive: true });
   return path.join(root, rel);
 };
-const spec = (dir: string) => path.join(dir, ".devcontainer", "devcontainer.json");
+const spec = (dir: string) =>
+  path.join(dir, ".devcontainer", "devcontainer.json");
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "odh-onboard-"));
@@ -549,13 +636,19 @@ describe("Onboarding", () => {
     const app = repo("app");
     const added = await onboarding.add(app, "rust");
     expect(added.path).toBe(app);
-    expect(fs.readFileSync(spec(app), "utf8")).toBe(renderDevcontainer("app", "rust"));
+    expect(fs.readFileSync(spec(app), "utf8")).toBe(
+      renderDevcontainer("app", "rust")
+    );
   });
 
   it("rejects an unknown stack before touching the disk", async () => {
     const app = repo("app");
-    await expect(onboarding.add(app, "cobol")).rejects.toBeInstanceOf(InvalidRequestError);
-    await expect(onboarding.add(app, undefined)).rejects.toBeInstanceOf(InvalidRequestError);
+    await expect(onboarding.add(app, "cobol")).rejects.toBeInstanceOf(
+      InvalidRequestError
+    );
+    await expect(onboarding.add(app, undefined)).rejects.toBeInstanceOf(
+      InvalidRequestError
+    );
     expect(fs.existsSync(path.join(app, ".devcontainer"))).toBe(false);
   });
 
@@ -565,20 +658,30 @@ describe("Onboarding", () => {
     ["a path with ..", () => `${root}/app/../app`],
     ["a trailing slash", () => `${path.join(root, "app")}/`],
     ["a relative path", () => "app"],
-    ["a plain folder", () => (fs.mkdirSync(path.join(root, "plain")), path.join(root, "plain"))],
+    [
+      "a plain folder",
+      () => (fs.mkdirSync(path.join(root, "plain")), path.join(root, "plain")),
+    ],
     ["a repo below maxDepth", () => repo("a/b/c")],
     ["an empty path", () => ""],
-  ])("refuses %s with NotFoundError and writes nothing", async (_what, target) => {
-    repo("app");
-    const p = target();
-    await expect(onboarding.add(p, "node")).rejects.toBeInstanceOf(NotFoundError);
-    expect(fs.existsSync(spec(path.join(root, "app")))).toBe(false);
-  });
+  ])(
+    "refuses %s with NotFoundError and writes nothing",
+    async (_what, target) => {
+      repo("app");
+      const p = target();
+      await expect(onboarding.add(p, "node")).rejects.toBeInstanceOf(
+        NotFoundError
+      );
+      expect(fs.existsSync(spec(path.join(root, "app")))).toBe(false);
+    }
+  );
 
   it("refuses a repo that became a project since it was listed", async () => {
     const app = repo("app");
     fs.writeFileSync(path.join(app, ".devcontainer.json"), "{}");
-    await expect(onboarding.add(app, "node")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(onboarding.add(app, "node")).rejects.toBeInstanceOf(
+      NotFoundError
+    );
     expect(fs.existsSync(spec(app))).toBe(false);
   });
 
@@ -588,13 +691,17 @@ describe("Onboarding", () => {
       roots: () => [root],
       // The scan still sees a candidate, then another writer creates the file.
       scan: async () => {
-        const found = [{ path: app, name: "app", root, stack: "node" as const }];
+        const found = [
+          { path: app, name: "app", root, stack: "node" as const },
+        ];
         fs.mkdirSync(path.join(app, ".devcontainer"));
         fs.writeFileSync(spec(app), "mine");
         return found;
       },
     });
-    await expect(racing.add(app, "node")).rejects.toBeInstanceOf(DevcontainerExistsError);
+    await expect(racing.add(app, "node")).rejects.toBeInstanceOf(
+      DevcontainerExistsError
+    );
     expect(fs.readFileSync(spec(app), "utf8")).toBe("mine");
   });
 });
@@ -602,8 +709,7 @@ describe("Onboarding", () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run test/server/onboarding.test.ts`
-Expected: FAIL, because `src/server/onboarding.ts` can't be resolved.
+Run: `npx vitest run test/server/onboarding.test.ts` Expected: FAIL, because `src/server/onboarding.ts` can't be resolved.
 
 - [ ] **Step 3: Implement**
 
@@ -611,6 +717,7 @@ Expected: FAIL, because `src/server/onboarding.ts` can't be resolved.
 // src/server/onboarding.ts
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import { isStackId, renderDevcontainer } from "../shared/stacks";
 import type { Candidate, CandidateList } from "../shared/types";
 import { scanCandidates } from "./discovery";
@@ -635,7 +742,9 @@ export class Onboarding {
   constructor(private readonly deps: OnboardingDeps) {}
 
   private scan(): Promise<Candidate[]> {
-    return (this.deps.scan ?? ((roots) => scanCandidates(roots)))(this.deps.roots());
+    return (this.deps.scan ?? ((roots) => scanCandidates(roots)))(
+      this.deps.roots()
+    );
   }
 
   async list(): Promise<CandidateList> {
@@ -647,15 +756,25 @@ export class Onboarding {
    * candidates right now: that keeps writes under a root, in a git repo without a devcontainer.
    */
   async add(repoPath: string, stack: unknown): Promise<Candidate> {
-    if (!isStackId(stack)) throw new InvalidRequestError(`unknown stack ${String(stack)}`);
+    if (!isStackId(stack))
+      throw new InvalidRequestError(`unknown stack ${String(stack)}`);
     const candidate = (await this.scan()).find((c) => c.path === repoPath);
-    if (!candidate) throw new NotFoundError(repoPath || "(empty path)", "repo without a devcontainer");
+    if (!candidate)
+      throw new NotFoundError(
+        repoPath || "(empty path)",
+        "repo without a devcontainer"
+      );
     const dir = path.join(candidate.path, ".devcontainer");
     await fs.mkdir(dir, { recursive: true });
     try {
-      await fs.writeFile(path.join(dir, "devcontainer.json"), renderDevcontainer(candidate.name, stack), { flag: "wx" });
+      await fs.writeFile(
+        path.join(dir, "devcontainer.json"),
+        renderDevcontainer(candidate.name, stack),
+        { flag: "wx" }
+      );
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EEXIST") throw new DevcontainerExistsError(candidate.path);
+      if ((err as NodeJS.ErrnoException).code === "EEXIST")
+        throw new DevcontainerExistsError(candidate.path);
       throw err;
     }
     return candidate;
@@ -667,8 +786,7 @@ export type OnboardingPort = Pick<Onboarding, "list" | "add">;
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run test/server/onboarding.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/server/onboarding.test.ts` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -684,11 +802,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 5: Dashboard routes and wiring
 
 **Files:**
+
 - Modify: `src/server/dashboard-api.ts` (`DashboardDeps`, `errorStatus`, new routes after the rescan route)
 - Modify: `src/server/cli.ts:166` (construct `Onboarding`)
 - Test: `test/server/dashboard-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: `OnboardingPort` and `DevcontainerExistsError` (Task 4), `AddProjectResult` and `CandidateList` (Task 1), `store.projects()`, `store.preflight()`, `orchestrator.rescan()`, `orchestrator.start(id)`.
 - Produces: `GET /api/onboarding/candidates` returns `CandidateList`. `POST /api/onboarding` with body `{ path: string, stack: StackId }` returns `AddProjectResult` (200) or `{ error }` with 400, 404, 409 or 500.
 
@@ -697,11 +817,24 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 In `test/server/dashboard-api.test.ts`, give `setup` an onboarding fake and pass it to the app:
 
 ```ts
-import { DevcontainerExistsError, type OnboardingPort } from "../../src/server/onboarding";
+import {
+  DevcontainerExistsError,
+  type OnboardingPort,
+} from "../../src/server/onboarding";
 import type { Candidate } from "../../src/shared/types";
 
-const added: Candidate = { path: "/src/new-app", name: "new-app", root: "/src", stack: "node" };
-const newProject: Project = { id: "new-app-def456", name: "new-app", path: "/src/new-app", devcontainerPath: "/src/new-app/.devcontainer/devcontainer.json" };
+const added: Candidate = {
+  path: "/src/new-app",
+  name: "new-app",
+  root: "/src",
+  stack: "node",
+};
+const newProject: Project = {
+  id: "new-app-def456",
+  name: "new-app",
+  path: "/src/new-app",
+  devcontainerPath: "/src/new-app/.devcontainer/devcontainer.json",
+};
 
 // inside setup(), before the return:
 const onboarding = {
@@ -709,8 +842,15 @@ const onboarding = {
   add: vi.fn(async (_path: string, _stack: unknown) => added),
 } satisfies OnboardingPort;
 // Rescanning after a write discovers the new project.
-orchestrator.rescan.mockImplementation(async () => store.setProjects([project, newProject]));
-return { store, orchestrator, onboarding, app: createDashboardApp({ store, orchestrator, onboarding, webDir }) };
+orchestrator.rescan.mockImplementation(async () =>
+  store.setProjects([project, newProject])
+);
+return {
+  store,
+  orchestrator,
+  onboarding,
+  app: createDashboardApp({ store, orchestrator, onboarding, webDir }),
+};
 ```
 
 Add the tests:
@@ -718,18 +858,27 @@ Add the tests:
 ```ts
 describe("add project", () => {
   const post = (app: ReturnType<typeof setup>["app"], body: unknown) =>
-    app.request("/api/onboarding", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    app.request("/api/onboarding", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
 
   it("GET candidates returns the onboarding list", async () => {
     const { app } = setup();
-    expect(await (await app.request("/api/onboarding/candidates")).json()).toEqual({ roots: ["/src"], candidates: [added] });
+    expect(
+      await (await app.request("/api/onboarding/candidates")).json()
+    ).toEqual({ roots: ["/src"], candidates: [added] });
   });
 
   it("writes, rescans, starts the new project and returns its id", async () => {
     const { app, onboarding, orchestrator } = setup();
     const res = await post(app, { path: "/src/new-app", stack: "node" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ projectId: newProject.id, started: true });
+    expect(await res.json()).toEqual({
+      projectId: newProject.id,
+      started: true,
+    });
     expect(onboarding.add).toHaveBeenCalledWith("/src/new-app", "node");
     expect(orchestrator.rescan).toHaveBeenCalled();
     expect(orchestrator.start).toHaveBeenCalledWith(newProject.id);
@@ -739,7 +888,11 @@ describe("add project", () => {
     const { app, store, orchestrator } = setup();
     store.setPreflight({ errors: ["docker not found"] });
     const res = await post(app, { path: "/src/new-app", stack: "node" });
-    expect(await res.json()).toEqual({ projectId: newProject.id, started: false, error: "docker not found" });
+    expect(await res.json()).toEqual({
+      projectId: newProject.id,
+      started: false,
+      error: "docker not found",
+    });
     expect(orchestrator.start).not.toHaveBeenCalled();
   });
 
@@ -767,7 +920,11 @@ describe("add project", () => {
     const { app, onboarding } = setup();
     const res = await app.request("/api/onboarding", {
       method: "POST",
-      headers: { origin: "http://evil.example", host: "localhost:7777", "content-type": "application/json" },
+      headers: {
+        origin: "http://evil.example",
+        host: "localhost:7777",
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ path: "/src/new-app", stack: "node" }),
     });
     expect(res.status).toBe(403);
@@ -778,8 +935,7 @@ describe("add project", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/server/dashboard-api.test.ts`
-Expected: FAIL. `onboarding` is not a known `DashboardDeps` field, and the routes return 404.
+Run: `npx vitest run test/server/dashboard-api.test.ts` Expected: FAIL. `onboarding` is not a known `DashboardDeps` field, and the routes return 404.
 
 - [ ] **Step 3: Implement**
 
@@ -800,26 +956,41 @@ export interface DashboardDeps {
 In `errorStatus`, map the new error:
 
 ```ts
-  if (err instanceof BusyError || err instanceof AlreadyAnsweredError || err instanceof DevcontainerExistsError) return 409;
+if (
+  err instanceof BusyError ||
+  err instanceof AlreadyAnsweredError ||
+  err instanceof DevcontainerExistsError
+)
+  return 409;
 ```
 
 Destructure `onboarding` in `createDashboardApp` (`const { store, orchestrator, onboarding } = deps;`). Move the `json` helper so it is defined before the rescan route. It doesn't depend on anything defined after it. Then add after the rescan route:
 
 ```ts
-  // Add project: repos under the roots without a devcontainer.
-  app.get("/api/onboarding/candidates", async (c) => c.json(await onboarding.list()));
-  app.post("/api/onboarding", (c) =>
-    json(c, async (_id, b): Promise<AddProjectResult> => {
-      const added = await onboarding.add(str(b.path) ?? "", b.stack);
-      await orchestrator.rescan();
-      const project = store.projects().find((p) => p.path === added.path);
-      if (!project) throw new Error(`${added.path} was not discovered after writing its devcontainer.json`);
-      const errors = store.preflight().errors;
-      if (errors.length > 0) return { projectId: project.id, started: false, error: errors.join("; ") };
-      orchestrator.start(project.id).catch(() => {});
-      return { projectId: project.id, started: true };
-    }),
-  );
+// Add project: repos under the roots without a devcontainer.
+app.get("/api/onboarding/candidates", async (c) =>
+  c.json(await onboarding.list())
+);
+app.post("/api/onboarding", (c) =>
+  json(c, async (_id, b): Promise<AddProjectResult> => {
+    const added = await onboarding.add(str(b.path) ?? "", b.stack);
+    await orchestrator.rescan();
+    const project = store.projects().find((p) => p.path === added.path);
+    if (!project)
+      throw new Error(
+        `${added.path} was not discovered after writing its devcontainer.json`
+      );
+    const errors = store.preflight().errors;
+    if (errors.length > 0)
+      return {
+        projectId: project.id,
+        started: false,
+        error: errors.join("; "),
+      };
+    orchestrator.start(project.id).catch(() => {});
+    return { projectId: project.id, started: true };
+  })
+);
 ```
 
 In `src/server/cli.ts`, import `Onboarding` and wire it in:
@@ -827,20 +998,19 @@ In `src/server/cli.ts`, import `Onboarding` and wire it in:
 ```ts
 import { Onboarding } from "./onboarding";
 // …
-  const app = createDashboardApp({
-    store,
-    orchestrator,
-    onboarding: new Onboarding({ roots: () => config.roots }),
-    webDir: findWebDir(),
-  });
+const app = createDashboardApp({
+  store,
+  orchestrator,
+  onboarding: new Onboarding({ roots: () => config.roots }),
+  webDir: findWebDir(),
+});
 ```
 
 Run `npm run typecheck`. If any other caller of `createDashboardApp` fails to compile (for example in `test/e2e/*.e2e.ts`), pass `onboarding: new Onboarding({ roots: () => [] })` there.
 
 - [ ] **Step 4: Run the tests and typecheck**
 
-Run: `npx vitest run test/server && npm run typecheck`
-Expected: PASS, and no type errors.
+Run: `npx vitest run test/server && npm run typecheck` Expected: PASS, and no type errors.
 
 - [ ] **Step 5: Commit**
 
@@ -856,6 +1026,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 6: Web: Add project dialog, sidebar + and ⌘K entry
 
 **Files:**
+
 - Create: `src/web/onboarding.ts` (pure helpers)
 - Create: `src/web/components/AddProjectDialog.tsx`
 - Modify: `src/web/api.ts` (`fetchCandidates`, `addProject`)
@@ -865,6 +1036,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `test/web/onboarding.test.ts`
 
 **Interfaces:**
+
 - Consumes: `STACKS`, `STACK_IDS`, `renderDevcontainer` and `StackId` (Task 1); `Candidate`, `CandidateList` and `AddProjectResult` (Task 1); the routes from Task 5.
 - Produces: `fetchCandidates(): Promise<CandidateList>`, `addProject(path: string, stack: StackId): Promise<AddProjectResult>`, `candidateLabel(c: Candidate): string`, `addedDestination(r: AddProjectResult): string`.
 
@@ -873,28 +1045,44 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```ts
 // test/web/onboarding.test.ts
 import { describe, expect, it } from "vitest";
+
 import { addedDestination, candidateLabel } from "../../src/web/onboarding";
 
 describe("candidateLabel", () => {
   it("shows the path relative to the root", () => {
-    expect(candidateLabel({ path: "/home/u/code/org/app", name: "app", root: "/home/u/code", stack: "node" })).toBe("org/app");
+    expect(
+      candidateLabel({
+        path: "/home/u/code/org/app",
+        name: "app",
+        root: "/home/u/code",
+        stack: "node",
+      })
+    ).toBe("org/app");
   });
   it("shows the folder name when the root itself is the repo", () => {
-    expect(candidateLabel({ path: "/home/u/code", name: "code", root: "/home/u/code", stack: "node" })).toBe("code");
+    expect(
+      candidateLabel({
+        path: "/home/u/code",
+        name: "code",
+        root: "/home/u/code",
+        stack: "node",
+      })
+    ).toBe("code");
   });
 });
 
 describe("addedDestination", () => {
   it("links to the project page", () => {
-    expect(addedDestination({ projectId: "my app-abc123", started: true })).toBe("/p/my%20app-abc123");
+    expect(
+      addedDestination({ projectId: "my app-abc123", started: true })
+    ).toBe("/p/my%20app-abc123");
   });
 });
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run test/web/onboarding.test.ts`
-Expected: FAIL, because `src/web/onboarding.ts` can't be resolved.
+Run: `npx vitest run test/web/onboarding.test.ts` Expected: FAIL, because `src/web/onboarding.ts` can't be resolved.
 
 - [ ] **Step 3: Implement the helpers and API calls**
 
@@ -905,7 +1093,9 @@ import type { AddProjectResult, Candidate } from "../shared/types";
 /** Where the repo sits under its root, as listed in Add project. */
 export function candidateLabel(c: Candidate): string {
   if (c.path === c.root) return c.name;
-  return c.path.startsWith(`${c.root}/`) ? c.path.slice(c.root.length + 1) : c.path;
+  return c.path.startsWith(`${c.root}/`)
+    ? c.path.slice(c.root.length + 1)
+    : c.path;
 }
 
 export function addedDestination(r: AddProjectResult): string {
@@ -922,7 +1112,10 @@ export async function fetchCandidates(): Promise<CandidateList> {
   return (await res.json()) as CandidateList;
 }
 
-export async function addProject(path: string, stack: StackId): Promise<AddProjectResult> {
+export async function addProject(
+  path: string,
+  stack: StackId
+): Promise<AddProjectResult> {
   const res = await fetch("/api/onboarding", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -933,8 +1126,7 @@ export async function addProject(path: string, stack: StackId): Promise<AddProje
 }
 ```
 
-Run: `npx vitest run test/web/onboarding.test.ts`
-Expected: PASS.
+Run: `npx vitest run test/web/onboarding.test.ts` Expected: PASS.
 
 - [ ] **Step 4: Context state**
 
@@ -952,21 +1144,41 @@ In `DashboardProvider`: `const [addProjectOpen, setAddProjectOpen] = useState(fa
 - [ ] **Step 5: The dialog**
 
 ```tsx
+import { PlayIcon } from "lucide-react";
 // src/web/components/AddProjectDialog.tsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { PlayIcon } from "lucide-react";
-import { renderDevcontainer, STACK_IDS, STACKS, type StackId } from "../../shared/stacks";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+
+import {
+  renderDevcontainer,
+  STACK_IDS,
+  STACKS,
+  type StackId,
+} from "../../shared/stacks";
 import type { Candidate, CandidateList } from "../../shared/types";
 import { addProject, fetchCandidates } from "../api";
 import { useDash } from "../DashboardContext";
 import { addedDestination, candidateLabel } from "../onboarding";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Choice } from "./Choice";
 
 export function AddProjectDialog() {
@@ -988,7 +1200,8 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
     let live = true;
     fetchCandidates().then(
       (l) => live && setList(l),
-      (err: unknown) => live && setError(err instanceof Error ? err.message : String(err)),
+      (err: unknown) =>
+        live && setError(err instanceof Error ? err.message : String(err))
     );
     return () => {
       live = false;
@@ -1010,20 +1223,30 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
         (result) => {
           onClose();
           void navigate(addedDestination(result));
-          if (!result.started) report(new Error(`Added ${picked.name}, but it wasn't started: ${result.error ?? "unknown reason"}`));
+          if (!result.started)
+            report(
+              new Error(
+                `Added ${picked.name}, but it wasn't started: ${result.error ?? "unknown reason"}`
+              )
+            );
         },
-        (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+        (err: unknown) =>
+          setError(err instanceof Error ? err.message : String(err))
       )
       .finally(() => setBusy(false));
   };
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl" showCloseButton={!busy}>
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+        showCloseButton={!busy}
+      >
         <DialogHeader>
           <DialogTitle>Add project</DialogTitle>
           <DialogDescription>
-            Pick a git repo under your roots that has no devcontainer. opendevhub writes one that installs opencode.
+            Pick a git repo under your roots that has no devcontainer.
+            opendevhub writes one that installs opencode.
           </DialogDescription>
         </DialogHeader>
 
@@ -1039,15 +1262,24 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
                 </div>
               )}
               {list && list.candidates.length === 0 && (
-                <div className="p-3 text-sm text-muted-foreground">
-                  No git repos without a devcontainer under {list.roots.join(", ")}
+                <div className="text-muted-foreground p-3 text-sm">
+                  No git repos without a devcontainer under{" "}
+                  {list.roots.join(", ")}
                 </div>
               )}
-              {list && list.candidates.length > 0 && <CommandEmpty>No match</CommandEmpty>}
+              {list && list.candidates.length > 0 && (
+                <CommandEmpty>No match</CommandEmpty>
+              )}
               {list?.candidates.map((c) => (
-                <CommandItem key={c.path} value={`${c.name} ${c.path}`} onSelect={() => pick(c)}>
+                <CommandItem
+                  key={c.path}
+                  value={`${c.name} ${c.path}`}
+                  onSelect={() => pick(c)}
+                >
                   <span className="font-medium">{c.name}</span>
-                  <span className="truncate text-muted-foreground">{candidateLabel(c)}</span>
+                  <span className="text-muted-foreground truncate">
+                    {candidateLabel(c)}
+                  </span>
                 </CommandItem>
               ))}
             </CommandList>
@@ -1057,9 +1289,17 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-between gap-2 text-sm">
               <div className="min-w-0">
                 <div className="font-medium">{picked.name}</div>
-                <div className="truncate text-muted-foreground">{picked.path}</div>
+                <div className="text-muted-foreground truncate">
+                  {picked.path}
+                </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setPicked(undefined)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => setPicked(undefined)}
+              >
                 Change
               </Button>
             </div>
@@ -1070,17 +1310,25 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
                 size="default"
                 className="w-full"
                 value={stack}
-                options={STACK_IDS.map((id) => ({ value: id, label: STACKS[id].label, title: STACKS[id].image }))}
+                options={STACK_IDS.map((id) => ({
+                  value: id,
+                  label: STACKS[id].label,
+                  title: STACKS[id].image,
+                }))}
                 onChange={(v) => setStack(v as StackId)}
               />
-              <p className="text-xs text-muted-foreground">Detected: {STACKS[picked.stack].label}</p>
+              <p className="text-muted-foreground text-xs">
+                Detected: {STACKS[picked.stack].label}
+              </p>
             </div>
             <div className="grid gap-2">
               <Label>.devcontainer/devcontainer.json</Label>
-              <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
+              <pre className="bg-muted/40 overflow-x-auto rounded-md border p-3 font-mono text-xs">
                 {renderDevcontainer(picked.name, stack)}
               </pre>
-              <p className="text-xs text-muted-foreground">The file is left uncommitted.</p>
+              <p className="text-muted-foreground text-xs">
+                The file is left uncommitted.
+              </p>
             </div>
           </div>
         )}
@@ -1092,7 +1340,12 @@ function AddProjectForm({ onClose }: { onClose: () => void }) {
         )}
 
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancel
           </Button>
           <Button type="button" disabled={!picked || busy} onClick={submit}>
@@ -1134,8 +1387,7 @@ In `src/web/components/CommandPalette.tsx`, read `openAddProject` from `useDash(
 
 - [ ] **Step 8: Typecheck, tests, build**
 
-Run: `npm run typecheck && npx vitest run && npm run build`
-Expected: all pass. The build writes `dist/` without errors.
+Run: `npm run typecheck && npx vitest run && npm run build` Expected: all pass. The build writes `dist/` without errors.
 
 - [ ] **Step 9: Check it in the real app**
 
@@ -1162,10 +1414,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 7: e2e test and README
 
 **Files:**
+
 - Create: `test/e2e/add-project.e2e.ts`
 - Modify: `README.md`
 
 **Interfaces:**
+
 - Consumes: `Onboarding` (Task 4), `createDashboardApp` (Task 5), `scanRoots`, `Orchestrator` and the real ports, built the way `test/e2e/opendevhub.e2e.ts` builds them.
 
 - [ ] **Step 1: Write the e2e test**
@@ -1176,7 +1430,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
+
 import { Containers } from "../../src/server/containers";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import { scanRoots } from "../../src/server/discovery";
@@ -1195,74 +1451,109 @@ import { RelayRuntime } from "../../src/server/relay/runtime";
 import { StateStore } from "../../src/server/state";
 import { Worktrees } from "../../src/server/worktrees";
 
-describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: add a repo without a devcontainer", () => {
-  it("lists it, writes the template, and the project starts with opencode", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "odh-e2e-add-"));
-    const repo = path.join(root, "hello");
-    fs.mkdirSync(repo);
-    execFileSync("git", ["init", "-q", repo]);
-    fs.writeFileSync(path.join(repo, "package.json"), "{}\n");
+describe.skipIf(!process.env.OPENDEVHUB_E2E)(
+  "e2e: add a repo without a devcontainer",
+  () => {
+    it("lists it, writes the template, and the project starts with opencode", async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "odh-e2e-add-"));
+      const repo = path.join(root, "hello");
+      fs.mkdirSync(repo);
+      execFileSync("git", ["init", "-q", repo]);
+      fs.writeFileSync(path.join(repo, "package.json"), "{}\n");
 
-    const roots = () => [root];
-    const store = new StateStore({ port: 0, persisted: { projects: {} }, persist: () => {} });
-    const containers = new Containers(spawnRunner);
-    const clientFor = (ep: { baseUrl: string; password: string }) => new OpencodeClient(ep);
-    const orch = new Orchestrator({
-      store,
-      containers,
-      runtime: new OpencodeRuntime({ containers, clientFor }),
-      forwarder: new PortForwarder(),
-      relay: new RelayRuntime({ containers }),
-      network: new Network({ mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE), gateway: new Gateway({ run: spawnRunner }) }),
-      worktrees: new Worktrees({ containers, run: spawnRunner }),
-      git: new GitOps({ containers }),
-      publisher: new Publisher({ containers, run: spawnRunner, forges: { all: () => ({}), remember: () => {} } }),
-      editors: new EditorLauncher([]),
-      clientFor,
-      roots,
-      scan: (r) => scanRoots(r),
-    });
-    orch.onLog((_id, line) => console.log(`[e2e add] ${line}`));
-    const app = createDashboardApp({ store, orchestrator: orch, onboarding: new Onboarding({ roots }) });
-
-    let projectId = "";
-    try {
-      const list = await (await app.request("/api/onboarding/candidates")).json();
-      expect(list.candidates).toEqual([{ path: repo, name: "hello", root, stack: "node" }]);
-
-      const res = await app.request("/api/onboarding", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: repo, stack: "node" }),
+      const roots = () => [root];
+      const store = new StateStore({
+        port: 0,
+        persisted: { projects: {} },
+        persist: () => {},
       });
-      expect(res.status).toBe(200);
-      const result = await res.json();
-      expect(result.started).toBe(true);
-      projectId = result.projectId;
-      expect(fs.existsSync(path.join(repo, ".devcontainer", "devcontainer.json"))).toBe(true);
+      const containers = new Containers(spawnRunner);
+      const clientFor = (ep: { baseUrl: string; password: string }) =>
+        new OpencodeClient(ep);
+      const orch = new Orchestrator({
+        store,
+        containers,
+        runtime: new OpencodeRuntime({ containers, clientFor }),
+        forwarder: new PortForwarder(),
+        relay: new RelayRuntime({ containers }),
+        network: new Network({
+          mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE),
+          gateway: new Gateway({ run: spawnRunner }),
+        }),
+        worktrees: new Worktrees({ containers, run: spawnRunner }),
+        git: new GitOps({ containers }),
+        publisher: new Publisher({
+          containers,
+          run: spawnRunner,
+          forges: { all: () => ({}), remember: () => {} },
+        }),
+        editors: new EditorLauncher([]),
+        clientFor,
+        roots,
+        scan: (r) => scanRoots(r),
+      });
+      orch.onLog((_id, line) => console.log(`[e2e add] ${line}`));
+      const app = createDashboardApp({
+        store,
+        orchestrator: orch,
+        onboarding: new Onboarding({ roots }),
+      });
 
-      await vi.waitFor(
-        () => expect(store.runtime(projectId)).toMatchObject({ containerState: "running", opencode: "healthy" }),
-        { timeout: 15 * 60_000, interval: 2000 },
-      );
-    } finally {
-      if (projectId) {
-        await orch.stop(projectId).catch(() => {});
-        const id = execFileSync("docker", ["ps", "-aq", "--filter", `label=devcontainer.local_folder=${repo}`]).toString().trim();
-        if (id) execFileSync("docker", ["rm", "-f", ...id.split("\n")]);
+      let projectId = "";
+      try {
+        const list = await (
+          await app.request("/api/onboarding/candidates")
+        ).json();
+        expect(list.candidates).toEqual([
+          { path: repo, name: "hello", root, stack: "node" },
+        ]);
+
+        const res = await app.request("/api/onboarding", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path: repo, stack: "node" }),
+        });
+        expect(res.status).toBe(200);
+        const result = await res.json();
+        expect(result.started).toBe(true);
+        projectId = result.projectId;
+        expect(
+          fs.existsSync(path.join(repo, ".devcontainer", "devcontainer.json"))
+        ).toBe(true);
+
+        await vi.waitFor(
+          () =>
+            expect(store.runtime(projectId)).toMatchObject({
+              containerState: "running",
+              opencode: "healthy",
+            }),
+          { timeout: 15 * 60_000, interval: 2000 }
+        );
+      } finally {
+        if (projectId) {
+          await orch.stop(projectId).catch(() => {});
+          const id = execFileSync("docker", [
+            "ps",
+            "-aq",
+            "--filter",
+            `label=devcontainer.local_folder=${repo}`,
+          ])
+            .toString()
+            .trim();
+          if (id) execFileSync("docker", ["rm", "-f", ...id.split("\n")]);
+        }
+        fs.rmSync(root, { recursive: true, force: true });
       }
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-});
+    });
+  }
+);
 ```
 
 The test assumes the `Orchestrator` constructor takes the same fields as in `test/e2e/opendevhub.e2e.ts`. If that file passes more required fields, copy them.
 
 - [ ] **Step 2: Run the e2e test**
 
-Run: `OPENDEVHUB_E2E=1 npx vitest run -c vitest.e2e.config.ts test/e2e/add-project.e2e.ts`
-Expected: PASS. The first run pulls `javascript-node:22` and runs the opencode installer, which needs network access. If the installer fails because there is no network, report that; don't weaken the test.
+Run: `OPENDEVHUB_E2E=1 npx vitest run -c vitest.e2e.config.ts test/e2e/add-project.e2e.ts` Expected: PASS. The first run pulls `javascript-node:22` and runs the opencode installer, which needs network access. If the installer fails because there is no network, report that; don't weaken the test.
 
 - [ ] **Step 3: Update the README**
 
@@ -1298,8 +1589,7 @@ Also remove the "Bootstrap repos that have no devcontainer" bullet from `docs/su
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `npm run typecheck && npx vitest run`
-Expected: PASS.
+Run: `npm run typecheck && npx vitest run` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 

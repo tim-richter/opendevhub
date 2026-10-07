@@ -2,25 +2,22 @@
   "name": "opendevhub",
   "version": "0.1.0",
   "description": "Local dashboard to orchestrate opencode v2 agents running in devcontainers",
+  "homepage": "https://github.com/tim-richter/opendevhub#readme",
+  "bugs": {
+    "url": "https://github.com/tim-richter/opendevhub/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tim-richter/opendevhub.git",
     "directory": "apps/opendevhub"
   },
-  "homepage": "https://github.com/tim-richter/opendevhub#readme",
-  "bugs": {
-    "url": "https://github.com/tim-richter/opendevhub/issues"
-  },
-  "type": "module",
   "bin": {
     "opendevhub": "dist/bin.js"
   },
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=22.13"
-  },
+  "type": "module",
   "publishConfig": {
     "access": "public",
     "provenance": true
@@ -74,5 +71,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.2",
     "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

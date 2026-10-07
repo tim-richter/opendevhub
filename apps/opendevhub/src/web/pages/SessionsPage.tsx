@@ -1,10 +1,12 @@
 import { useSearchParams } from "react-router";
-import type { SessionStatus } from "../../shared/types";
+
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+
+import type { SessionStatus } from "../../shared/types";
 import { Choice } from "../components/Choice";
 import { Empty, muted, Page, PageHeader, Segmented } from "../components/Page";
 import { SessionList } from "../components/SessionList";
-import { Card } from "@/components/ui/card";
 import { useDash } from "../DashboardContext";
 import { allSessions, matches, needsAttention } from "../derive";
 
@@ -16,10 +18,12 @@ const CHIPS: { id: StatusFilter; label: string }[] = [
   { id: "idle", label: "Idle" },
 ];
 
-export function SessionsPage() {
+export const SessionsPage = () => {
   const { snapshot } = useDash();
   const [params, setParams] = useSearchParams();
-  if (!snapshot) return null;
+  if (!snapshot) {
+    return null;
+  }
 
   const status = (params.get("status") ?? "all") as StatusFilter;
   const project = params.get("project") ?? "";
@@ -28,26 +32,46 @@ export function SessionsPage() {
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        if (value && value !== "all") next.set(key, value);
-        else next.delete(key);
+        if (value && value !== "all") {
+          next.set(key, value);
+        } else {
+          next.delete(key);
+        }
         return next;
       },
-      { replace: true },
+      { replace: true }
     );
 
   const all = allSessions(snapshot);
   const byStatus = (f: StatusFilter) =>
-    all.filter((e) =>
-      f === "all" ? true : f === "attention" ? needsAttention(e.session.status) : e.session.status === f,
-    );
+    all.filter((e) => {
+      if (f === "all") {
+        return true;
+      }
+      if (f === "attention") {
+        return needsAttention(e.session.status);
+      }
+      return e.session.status === f;
+    });
   const entries = byStatus(status)
     .filter((e) => !project || e.view.project.id === project)
     .filter((e) => matches(q, e.session.title, e.view.project.name));
   const withSessions = snapshot.projects.filter((v) => v.sessions.length > 0);
 
+  const filtered =
+    entries.length === 0 ? (
+      <p className={muted}>No sessions match these filters.</p>
+    ) : (
+      <Card className="overflow-hidden py-0">
+        <SessionList entries={entries} showProject />
+      </Card>
+    );
   return (
     <Page>
-      <PageHeader title="Sessions" description="Every opencode session across running projects" />
+      <PageHeader
+        title="Sessions"
+        description="Every opencode session across running projects"
+      />
 
       <div className="flex flex-wrap items-center gap-2.5">
         <Segmented
@@ -58,7 +82,10 @@ export function SessionsPage() {
             id: c.id,
             label: (
               <>
-                {c.label} <span className="text-xs text-muted-foreground tabular-nums">{byStatus(c.id).length}</span>
+                {c.label}{" "}
+                <span className="text-muted-foreground text-xs tabular-nums">
+                  {byStatus(c.id).length}
+                </span>
               </>
             ),
           }))}
@@ -68,22 +95,31 @@ export function SessionsPage() {
           size="default"
           value={project}
           onChange={(v) => set("project", v)}
-          options={[{ value: "", label: "All projects" }, ...withSessions.map((v) => ({ value: v.project.id, label: v.project.name }))]}
+          options={[
+            { label: "All projects", value: "" },
+            ...withSessions.map((v) => ({
+              label: v.project.name,
+              value: v.project.id,
+            })),
+          ]}
         />
-        <Input className="w-56 md:ml-auto max-md:w-full" placeholder="Search titles…" value={q} onChange={(e) => set("q", e.target.value)} />
+        <Input
+          className="w-56 max-md:w-full md:ml-auto"
+          placeholder="Search titles…"
+          value={q}
+          onChange={(e) => set("q", e.target.value)}
+        />
       </div>
 
       {all.length === 0 ? (
         <Empty title="No sessions">
-          <p className={muted}>Start a project and open opencode to create one.</p>
+          <p className={muted}>
+            Start a project and open opencode to create one.
+          </p>
         </Empty>
-      ) : entries.length === 0 ? (
-        <p className={muted}>No sessions match these filters.</p>
       ) : (
-        <Card className="overflow-hidden py-0">
-          <SessionList entries={entries} showProject />
-        </Card>
+        filtered
       )}
     </Page>
   );
-}
+};

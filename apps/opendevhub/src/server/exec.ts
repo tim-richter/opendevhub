@@ -19,7 +19,11 @@ export interface RunOptions {
   input?: string;
 }
 
-export type Runner = (cmd: string, args: string[], opts?: RunOptions) => Promise<RunResult>;
+export type Runner = (
+  cmd: string,
+  args: string[],
+  opts?: RunOptions
+) => Promise<RunResult>;
 
 export const spawnRunner: Runner = (cmd, args, opts = {}) =>
   new Promise((resolve) => {
@@ -27,7 +31,7 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     let stderr = "";
     let timedOut = false;
     let settled = false;
-    const carry = { out: "", err: "" };
+    const carry = { err: "", out: "" };
     const child = spawn(cmd, args, {
       env: { ...process.env, ...opts.env },
       stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -36,26 +40,38 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     });
     if (opts.input !== undefined) {
       // A child that exits without reading would otherwise raise EPIPE here.
-      child.stdin?.on("error", () => {});
+      child.stdin?.on("error", () => undefined);
       child.stdin?.end(opts.input);
     }
     const kill = (signal: NodeJS.Signals) => {
       try {
-        if (opts.detached && child.pid) process.kill(-child.pid, signal);
-        else child.kill(signal);
+        if (opts.detached && child.pid) {
+          process.kill(-child.pid, signal);
+        } else {
+          child.kill(signal);
+        }
       } catch {
         child.kill(signal);
       }
     };
 
     const feed = (key: "out" | "err", chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      if (key === "out") stdout += text;
-      else stderr += text;
-      if (!opts.onLine) return;
-      const parts = (carry[key] + text).split(/\r?\n/);
+      const text = chunk.toString("utf-8");
+      if (key === "out") {
+        stdout += text;
+      } else {
+        stderr += text;
+      }
+      if (!opts.onLine) {
+        return;
+      }
+      const parts = (carry[key] + text).split(/\r?\n/u);
       carry[key] = parts.pop() ?? "";
-      for (const line of parts) if (line.trim()) opts.onLine(line);
+      for (const line of parts) {
+        if (line.trim()) {
+          opts.onLine(line);
+        }
+      }
     };
     child.stdout?.on("data", (c: Buffer) => feed("out", c));
     child.stderr?.on("data", (c: Buffer) => feed("err", c));
@@ -69,11 +85,19 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
       : undefined;
 
     const finish = (exitCode: number) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimeout(timer);
-      if (opts.onLine) for (const rest of [carry.out, carry.err]) if (rest.trim()) opts.onLine(rest);
-      resolve({ exitCode, stdout, stderr, timedOut });
+      if (opts.onLine) {
+        for (const rest of [carry.out, carry.err]) {
+          if (rest.trim()) {
+            opts.onLine(rest);
+          }
+        }
+      }
+      resolve({ exitCode, stderr, stdout, timedOut });
     };
     child.on("error", (err) => {
       stderr += err.message;

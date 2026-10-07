@@ -1,11 +1,20 @@
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
 import type { NodeState, NodeView } from "../shared/types";
 import type { NodeConfig } from "./config";
-import { type Runner, spawnRunner } from "./exec";
+import { spawnRunner } from "./exec";
+import type { Runner } from "./exec";
 import { nodePreflight } from "./node-preflight";
-import { SshHost, type Spawn, type SshTarget, defaultSpawn, describeSshFailure, masterArgs, parseSshPort } from "./ssh";
+import {
+  SshHost,
+  defaultSpawn,
+  describeSshFailure,
+  masterArgs,
+  parseSshPort,
+} from "./ssh";
+import type { Spawn, SshTarget } from "./ssh";
 
 export interface NodeConnectionOptions {
   node: NodeConfig;
@@ -14,18 +23,24 @@ export interface NodeConnectionOptions {
   onChange: () => void;
   run?: Runner;
   spawn?: Spawn;
-  preflight?: (host: SshHost, sshPort: number, dest: string) => Promise<string[]>;
+  preflight?: (
+    host: SshHost,
+    sshPort: number,
+    dest: string
+  ) => Promise<string[]>;
   readyTimeoutMs?: number;
   readyIntervalMs?: number;
   retryMinMs?: number;
   retryMaxMs?: number;
 }
 
-export function nextDelay(current: number, max: number): number {
-  return Math.min(current * 2, max);
-}
+export const nextDelay = (current: number, max: number): number =>
+  Math.min(current * 2, max);
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 /**
  * Keeps one node reachable: an ssh ControlMaster as a child process, preflight once it's up, and
@@ -43,9 +58,17 @@ export class NodeConnection {
   private closed = false;
 
   constructor(private readonly opts: NodeConnectionOptions) {
-    this.target = { dest: opts.node.ssh, control: path.join(opts.controlDir, `${opts.node.id}.sock`) };
+    this.target = {
+      control: path.join(opts.controlDir, `${opts.node.id}.sock`),
+      dest: opts.node.ssh,
+    };
     this.run = opts.run ?? spawnRunner;
-    this.host = new SshHost(opts.node.id, this.target, this.run, opts.spawn ?? defaultSpawn);
+    this.host = new SshHost(
+      opts.node.id,
+      this.target,
+      this.run,
+      opts.spawn ?? defaultSpawn
+    );
     this.delay = opts.retryMinMs ?? 1000;
   }
 
@@ -55,7 +78,13 @@ export class NodeConnection {
 
   view(): NodeView {
     const { node } = this.opts;
-    return { id: node.id, label: node.label ?? node.ssh, ssh: node.ssh, state: this.state, ...(this.reason ? { reason: this.reason } : {}) };
+    return {
+      id: node.id,
+      label: node.label ?? node.ssh,
+      ssh: node.ssh,
+      state: this.state,
+      ...(this.reason ? { reason: this.reason } : {}),
+    };
   }
 
   start(): void {
@@ -65,25 +94,45 @@ export class NodeConnection {
   async close(): Promise<void> {
     this.closed = true;
     clearTimeout(this.retryTimer);
-    const master = this.master;
+    const { master } = this;
     this.master = undefined;
     if (master && master.exitCode === null) {
-      await this.run("ssh", ["-S", this.target.control, "-O", "exit", this.target.dest], { timeoutMs: 5000 }).catch(() => undefined);
+      await this.run(
+        "ssh",
+        ["-S", this.target.control, "-O", "exit", this.target.dest],
+        { timeoutMs: 5000 }
+      ).catch(() => undefined);
       master.kill();
     }
   }
 
   private async connect(): Promise<void> {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
     this.set("connecting");
     try {
       await this.openMaster();
-      const home = (await this.host.run("sh", ["-c", 'printf %s "$HOME"'], { timeoutMs: 10_000 })).stdout.trim();
-      if (!home.startsWith("/")) throw new Error(`could not read $HOME on ${this.target.dest}`);
+      const result = await this.host.run("sh", ["-c", 'printf %s "$HOME"'], {
+        timeoutMs: 10_000,
+      });
+      const home = result.stdout.trim();
+      if (!home.startsWith("/")) {
+        throw new Error(`could not read $HOME on ${this.target.dest}`);
+      }
       this.host.home = home;
-      const port = parseSshPort((await this.run("ssh", ["-G", this.target.dest], { timeoutMs: 10_000 })).stdout);
-      const errors = await (this.opts.preflight ?? nodePreflight)(this.host, port, this.target.dest);
-      if (this.closed) return;
+      const result2 = await this.run("ssh", ["-G", this.target.dest], {
+        timeoutMs: 10_000,
+      });
+      const port = parseSshPort(result2.stdout);
+      const errors = await (this.opts.preflight ?? nodePreflight)(
+        this.host,
+        port,
+        this.target.dest
+      );
+      if (this.closed) {
+        return;
+      }
       if (errors.length > 0) {
         this.set("error", errors.join("; "));
         this.retry(this.opts.retryMaxMs ?? 60_000);
@@ -91,9 +140,14 @@ export class NodeConnection {
       }
       this.delay = this.opts.retryMinMs ?? 1000;
       this.set("online");
-    } catch (err) {
-      if (this.closed) return;
-      this.set("unreachable", err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      if (this.closed) {
+        return;
+      }
+      this.set(
+        "unreachable",
+        error instanceof Error ? error.message : String(error)
+      );
       this.retry();
     }
   }
@@ -101,17 +155,23 @@ export class NodeConnection {
   /** Starts a fresh master and resolves once `ssh -O check` answers; rejects with ssh's reason when it exits first. */
   private async openMaster(): Promise<void> {
     this.stopMaster();
-    fs.mkdirSync(path.dirname(this.target.control), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.dirname(this.target.control), {
+      mode: 0o700,
+      recursive: true,
+    });
     fs.chmodSync(path.dirname(this.target.control), 0o700);
     // A socket left by a crash makes the new ssh silently skip being a master.
     fs.rmSync(this.target.control, { force: true });
-    const child = (this.opts.spawn ?? defaultSpawn)("ssh", masterArgs(this.target));
+    const child = (this.opts.spawn ?? defaultSpawn)(
+      "ssh",
+      masterArgs(this.target)
+    );
     this.master = child;
     let stderr = "";
     let exited = false;
     child.stdout?.resume();
     child.stderr?.on("data", (c: Buffer) => {
-      stderr = (stderr + c.toString("utf8")).slice(-2000);
+      stderr = (stderr + c.toString("utf-8")).slice(-2000);
     });
     child.once("error", (err) => {
       stderr += `\n${err.message}`;
@@ -119,10 +179,14 @@ export class NodeConnection {
     });
     child.once("exit", () => {
       exited = true;
-      if (this.master !== child) return;
+      if (this.master !== child) {
+        return;
+      }
       this.master = undefined;
       // While connecting, openMaster's own loop reports the exit.
-      if (this.closed || this.state === "connecting") return;
+      if (this.closed || this.state === "connecting") {
+        return;
+      }
       this.set("unreachable", describeSshFailure(this.target.dest, stderr));
       this.retry();
     });
@@ -130,35 +194,53 @@ export class NodeConnection {
     const timeoutMs = this.opts.readyTimeoutMs ?? 20_000;
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      if (exited) throw new Error(describeSshFailure(this.target.dest, stderr));
-      const check = await this.run("ssh", ["-S", this.target.control, "-O", "check", this.target.dest], { timeoutMs: 5000 });
-      if (check.exitCode === 0 && !exited) return;
+      if (exited) {
+        throw new Error(describeSshFailure(this.target.dest, stderr));
+      }
+      const check = await this.run(
+        "ssh",
+        ["-S", this.target.control, "-O", "check", this.target.dest],
+        { timeoutMs: 5000 }
+      );
+      if (check.exitCode === 0 && !exited) {
+        return;
+      }
       if (Date.now() > deadline) {
         this.stopMaster();
-        throw new Error(`ssh to ${this.target.dest} did not connect within ${Math.round(timeoutMs / 1000)} s`);
+        throw new Error(
+          `ssh to ${this.target.dest} did not connect within ${Math.round(timeoutMs / 1000)} s`
+        );
       }
       await sleep(this.opts.readyIntervalMs ?? 250);
     }
   }
 
   private stopMaster(): void {
-    const master = this.master;
+    const { master } = this;
     this.master = undefined;
-    if (master && master.exitCode === null) master.kill();
+    if (master && master.exitCode === null) {
+      master.kill();
+    }
   }
 
   /** Reconnects after `ms`, or after the backoff delay, which then doubles. */
   private retry(ms?: number): void {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
     clearTimeout(this.retryTimer);
     const wait = ms ?? this.delay;
-    if (ms === undefined) this.delay = nextDelay(this.delay, this.opts.retryMaxMs ?? 60_000);
+    if (ms === undefined) {
+      this.delay = nextDelay(this.delay, this.opts.retryMaxMs ?? 60_000);
+    }
     this.retryTimer = setTimeout(() => void this.connect(), wait);
     this.retryTimer.unref?.();
   }
 
   private set(state: NodeState, reason?: string): void {
-    if (this.closed || (this.state === state && this.reason === reason)) return;
+    if (this.closed || (this.state === state && this.reason === reason)) {
+      return;
+    }
     this.state = state;
     this.reason = reason;
     this.opts.onChange();

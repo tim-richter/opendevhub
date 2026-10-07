@@ -1,26 +1,74 @@
+import {
+  ChevronRightIcon,
+  ExternalLinkIcon,
+  GitBranchIcon,
+  GitCompareIcon,
+  KeyRoundIcon,
+  MessagesSquareIcon,
+  PlayIcon,
+  PlusIcon,
+  ServerIcon,
+  TerminalIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, Outlet, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
-import type { ForwardedPort, ProjectView } from "../../shared/types";
-import { refreshWorktrees } from "../api";
-import { CopyButton } from "../components/CopyButton";
-import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, GitCompareIcon, KeyRoundIcon, MessagesSquareIcon, PlayIcon, PlusIcon, ServerIcon, TerminalIcon, XIcon } from "lucide-react";
+import {
+  Link,
+  Outlet,
+  useNavigate,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { Empty, GroupTitle, muted, Note, PageHeader, TabBar, TabLink } from "../components/Page";
+
+import type { ForwardedPort, ProjectView } from "../../shared/types";
+import { refreshWorktrees } from "../api";
+import {
+  checkoutCounts,
+  checkoutPath,
+  checkoutRuntime,
+  checkouts,
+  checkoutTone,
+} from "../checkouts";
+import type { Checkout } from "../checkouts";
+import { CopyButton } from "../components/CopyButton";
+import { EnvBadge } from "../components/EnvBadge";
 import { LogPanel } from "../components/LogPanel";
 import { OpenInMenu } from "../components/OpenInMenu";
+import {
+  Empty,
+  GroupTitle,
+  muted,
+  Note,
+  PageHeader,
+  TabBar,
+  TabLink,
+} from "../components/Page";
 import { projectFlags, StartStopButton } from "../components/ProjectActions";
 import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { Count, StatusDot } from "../components/Status";
-import { EnvBadge } from "../components/EnvBadge";
-import { checkoutReady, ContainerMenu, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
-import { type Checkout, checkoutCounts, checkoutPath, checkoutRuntime, checkouts, checkoutTone } from "../checkouts";
+import {
+  checkoutReady,
+  ContainerMenu,
+  UnmountedNotice,
+  useCheckoutActions,
+} from "../components/Worktrees";
 import { useDash } from "../DashboardContext";
-import { compareSessions, envOfDirectory, matches, needsAttention, type SessionEntry, sshAgentBadge } from "../derive";
+import {
+  compareSessions,
+  envOfDirectory,
+  matches,
+  needsAttention,
+  sshAgentBadge,
+} from "../derive";
+import type { SessionEntry } from "../derive";
 import { checkoutResources } from "../resources";
 import { useProjectView } from "./ProjectLayout";
 
@@ -34,25 +82,30 @@ export interface CheckoutContext {
 export const useCheckout = () => useOutletContext<CheckoutContext>();
 
 /** One checkout (the main one or a worktree) and its tabs. */
-export function CheckoutPage() {
+export const CheckoutPage = () => {
   const view = useProjectView();
   const { worktree = "" } = useParams();
   const navigate = useNavigate();
   const { running } = projectFlags(view, false);
-  const { pending, newSession, remove, containerAction } = useCheckoutActions(view);
+  const { pending, newSession, remove, containerAction } =
+    useCheckoutActions(view);
   const { snapshot } = useDash();
   const checkout = checkouts(view).find((c) => c.target === worktree);
   const projectPath = `/p/${encodeURIComponent(view.project.id)}`;
 
   // A worktree made a moment ago (or outside opendevhub) may not be listed yet.
   useEffect(() => {
-    if (!checkout && running) void refreshWorktrees(view.project.id).catch(() => {});
+    if (!checkout && running) {
+      void refreshWorktrees(view.project.id).catch(() => undefined);
+    }
   }, [checkout, running, view.project.id]);
 
   if (!checkout) {
     return (
       <Empty title="Unknown worktree">
-        <p className={muted}>{view.project.name} has no worktree named {worktree}.</p>
+        <p className={muted}>
+          {view.project.name} has no worktree named {worktree}.
+        </p>
         <Button asChild variant="link">
           <Link to={projectPath}>Back to {view.project.name}</Link>
         </Button>
@@ -66,10 +119,35 @@ export function CheckoutPage() {
   const agent = sshAgentBadge(checkoutRuntime(view, checkout.directory));
   const resources = checkoutResources(snapshot, view, checkout);
 
+  const startControl =
+    env && running ? (
+      <Button
+        variant="outline"
+        disabled={
+          !!pending ||
+          env.runtime.containerState === "starting" ||
+          env.runtime.containerState === "stopping"
+        }
+        onClick={() => containerAction(env, "start")}
+      >
+        <PlayIcon className="size-3" />{" "}
+        {env.runtime.containerState === "starting"
+          ? "Starting…"
+          : "Start container"}
+      </Button>
+    ) : (
+      <StartStopButton view={view} />
+    );
   return (
     <>
-      <nav aria-label="Breadcrumb" className="-mb-4 flex items-center gap-1 text-sm text-muted-foreground">
-        <Link to={projectPath} className="hover:text-foreground hover:underline">
+      <nav
+        aria-label="Breadcrumb"
+        className="text-muted-foreground -mb-4 flex items-center gap-1 text-sm"
+      >
+        <Link
+          to={projectPath}
+          className="hover:text-foreground hover:underline"
+        >
           {view.project.name}
         </Link>
         <ChevronRightIcon className="size-3.5" />
@@ -78,7 +156,9 @@ export function CheckoutPage() {
         title={
           <>
             <StatusDot tone={checkoutTone(view, checkout.directory)} />
-            {checkout.worktree && <GitBranchIcon className="size-5 text-muted-foreground" />}
+            {checkout.worktree && (
+              <GitBranchIcon className="text-muted-foreground size-5" />
+            )}
             <span className="truncate">{checkout.label}</span>
           </>
         }
@@ -86,42 +166,53 @@ export function CheckoutPage() {
           <p className="flex min-w-0 items-center gap-1 font-mono text-xs">
             {checkout.hostPath ? (
               <>
-                <span className="truncate">{checkout.hostPath}</span> <CopyButton text={checkout.hostPath} label="Copy path" />
+                <span className="truncate">{checkout.hostPath}</span>{" "}
+                <CopyButton text={checkout.hostPath} label="Copy path" />
               </>
             ) : (
-              <span className="truncate">only in container ({checkout.directory})</span>
+              <span className="truncate">
+                only in container ({checkout.directory})
+              </span>
             )}
             {env && <EnvBadge env={env} />}
             {agent && (
               <Badge
                 variant="outline"
-                className={cn("gap-1 font-normal", agent.warn ? "text-warn" : "text-muted-foreground")}
+                className={cn(
+                  "gap-1 font-normal",
+                  agent.warn ? "text-warn" : "text-muted-foreground"
+                )}
                 title={agent.title}
               >
                 <KeyRoundIcon className="size-3" /> {agent.label}
               </Badge>
             )}
-            {resources && <ResourceStat {...resources} className="ml-1 font-sans" />}
+            {resources && (
+              <ResourceStat {...resources} className="ml-1 font-sans" />
+            )}
           </p>
         }
         actions={
           <>
             {checkoutReady(view, checkout) ? (
-              <Button variant="outline" disabled={!!pending} onClick={() => newSession(checkout)}>
-                <PlusIcon /> New session
-              </Button>
-            ) : env && running ? (
               <Button
                 variant="outline"
-                disabled={!!pending || env.runtime.containerState === "starting" || env.runtime.containerState === "stopping"}
-                onClick={() => containerAction(env, "start")}
+                disabled={!!pending}
+                onClick={() => newSession(checkout)}
               >
-                <PlayIcon className="size-3" /> {env.runtime.containerState === "starting" ? "Starting…" : "Start container"}
+                <PlusIcon /> New session
               </Button>
             ) : (
-              <StartStopButton view={view} />
+              startControl
             )}
-            {!checkout.worktree?.node && <OpenInMenu view={view} directory={checkout.directory} hostPath={checkout.hostPath} icon />}
+            {!checkout.worktree?.node && (
+              <OpenInMenu
+                view={view}
+                directory={checkout.directory}
+                hostPath={checkout.hostPath}
+                icon
+              />
+            )}
             <ContainerMenu view={view} checkout={checkout} />
             {checkout.worktree && (
               <Button
@@ -131,7 +222,9 @@ export function CheckoutPage() {
                 aria-label={`Remove worktree ${checkout.label}`}
                 title="Remove worktree"
                 disabled={!running || !!pending}
-                onClick={() => remove(checkout, () => void navigate(projectPath))}
+                onClick={() =>
+                  remove(checkout, () => void navigate(projectPath))
+                }
               >
                 <XIcon />
               </Button>
@@ -144,24 +237,31 @@ export function CheckoutPage() {
 
       <TabBar label="Worktree">
         <TabLink to={base} end>
-          <MessagesSquareIcon className="size-4" /> Sessions <Count n={n.attention} tone="attention" />
+          <MessagesSquareIcon className="size-4" /> Sessions{" "}
+          <Count n={n.attention} tone="attention" />
           {n.attention === 0 && <Count n={n.running + n.idle} tone="muted" />}
         </TabLink>
         <TabLink to={`${base}/review`}>
           <GitCompareIcon className="size-4" /> Review
         </TabLink>
-        <TabLink to={`${base}/terminal`}><TerminalIcon className="size-4" /> Terminal</TabLink>
+        <TabLink to={`${base}/terminal`}>
+          <TerminalIcon className="size-4" /> Terminal
+        </TabLink>
         <TabLink to={`${base}/runtime`}>
-          <ServerIcon className="size-4" /> Runtime <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
+          <ServerIcon className="size-4" /> Runtime{" "}
+          <Count
+            n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0}
+            tone="muted"
+          />
         </TabLink>
       </TabBar>
 
-      <Outlet context={{ view, checkout } satisfies CheckoutContext} />
+      <Outlet context={{ checkout, view } satisfies CheckoutContext} />
     </>
   );
-}
+};
 
-export function CheckoutSessions() {
+export const CheckoutSessions = () => {
   const { view, checkout } = useCheckout();
   const { newTask } = useDash();
   const [params] = useSearchParams();
@@ -172,26 +272,39 @@ export function CheckoutSessions() {
   const own = envOfDirectory(view, checkout.directory);
   const { pending, newSession } = useCheckoutActions(view);
 
-  const mine = useMemo(() => view.sessions.filter((s) => s.directory === checkout.directory), [view.sessions, checkout.directory]);
+  const mine = useMemo(
+    () => view.sessions.filter((s) => s.directory === checkout.directory),
+    [view.sessions, checkout.directory]
+  );
   const entries = useMemo<SessionEntry[]>(
     () =>
       [...mine]
-        .sort(compareSessions)
+        .toSorted(compareSessions)
         .filter((s) => matches(query, s.title))
         .map((session) => ({ session, view })),
-    [mine, view, query],
+    [mine, view, query]
   );
 
   useEffect(() => {
-    if (!highlight) return;
-    document.getElementById(`session-${highlight}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
-    document.querySelector<HTMLElement>(`#pending-${CSS.escape(highlight)} [data-pending-card]`)?.focus({ preventScroll: true });
+    if (!highlight) {
+      return;
+    }
+    document
+      .getElementById(`session-${highlight}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document
+      .querySelector<HTMLElement>(
+        `#pending-${CSS.escape(highlight)} [data-pending-card]`
+      )
+      ?.focus({ preventScroll: true });
   }, [highlight]);
 
   if (mine.length === 0) {
     return canOpen ? (
       <Empty title="No sessions here yet">
-        <p className={muted}>Start a session in this checkout, or a task for the project.</p>
+        <p className={muted}>
+          Start a session in this checkout, or a task for the project.
+        </p>
         <div className="flex gap-2">
           <Button disabled={!!pending} onClick={() => newSession(checkout)}>
             <PlusIcon /> New session
@@ -204,7 +317,8 @@ export function CheckoutSessions() {
     ) : (
       <Empty title="Not running">
         <p className={muted}>
-          {own ? "Start this worktree's container" : "Start the container"} to see this checkout's opencode sessions.
+          {own ? "Start this worktree's container" : "Start the container"} to
+          see this checkout&apos;s opencode sessions.
         </p>
         {!own && <StartStopButton view={view} />}
       </Empty>
@@ -216,52 +330,92 @@ export function CheckoutSessions() {
   const idle = entries.filter((e) => e.session.status === "idle");
   // Never hide the highlighted session behind "show more".
   const highlightIdx = idle.findIndex((e) => e.session.id === highlight);
-  const idleShown = showAllIdle || highlightIdx >= IDLE_LIMIT ? idle : idle.slice(0, IDLE_LIMIT);
+  const idleShown =
+    showAllIdle || highlightIdx >= IDLE_LIMIT
+      ? idle
+      : idle.slice(0, IDLE_LIMIT);
 
   return (
     <div className="flex flex-col gap-5">
       {mine.length > IDLE_LIMIT && (
-        <Input className="w-72 max-md:w-full" placeholder="Filter sessions…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Input
+          className="w-72 max-md:w-full"
+          placeholder="Filter sessions…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       )}
-      <Group title="Needs you" entries={attention} highlight={highlight} tone="attention" />
+      <Group
+        title="Needs you"
+        entries={attention}
+        highlight={highlight}
+        tone="attention"
+      />
       <Group title="Working" entries={active} highlight={highlight} />
-      <Group title="Idle" entries={idleShown} highlight={highlight} total={idle.length} />
+      <Group
+        title="Idle"
+        entries={idleShown}
+        highlight={highlight}
+        total={idle.length}
+      />
       {idleShown.length < idle.length && (
-        <Button variant="link" className="self-start px-0" onClick={() => setShowAllIdle(true)}>
+        <Button
+          variant="link"
+          className="self-start px-0"
+          onClick={() => setShowAllIdle(true)}
+        >
           Show {idle.length - idleShown.length} more idle sessions
         </Button>
       )}
       {entries.length === 0 && <p className={muted}>No sessions match.</p>}
     </div>
   );
-}
+};
 
-function Group(props: { title: string; entries: SessionEntry[]; highlight?: string; total?: number; tone?: "attention" }) {
-  if (props.entries.length === 0) return null;
+const Group = (props: {
+  title: string;
+  entries: SessionEntry[];
+  highlight?: string;
+  total?: number;
+  tone?: "attention";
+}) => {
+  if (props.entries.length === 0) {
+    return null;
+  }
   const attention = props.tone === "attention";
   return (
     <section>
       <GroupTitle className={cn(attention && "text-attention")}>
-        {props.title} <span className="ml-1 font-medium text-muted-foreground">{props.total ?? props.entries.length}</span>
+        {props.title}{" "}
+        <span className="text-muted-foreground ml-1 font-medium">
+          {props.total ?? props.entries.length}
+        </span>
       </GroupTitle>
-      <Card className={cn("overflow-hidden py-0", attention && "border-attention/45")}>
-        <SessionList entries={props.entries} highlight={props.highlight} hideWorktree />
+      <Card
+        className={cn(
+          "overflow-hidden py-0",
+          attention && "border-attention/45"
+        )}
+      >
+        <SessionList
+          entries={props.entries}
+          highlight={props.highlight}
+          hideWorktree
+        />
       </Card>
     </section>
   );
-}
+};
 
 /** The checkout's container at work: its forwarded ports beside its log. */
-export function CheckoutRuntime() {
-  return (
-    <div className="grid items-start gap-8 lg:grid-cols-2">
-      <CheckoutPorts />
-      <CheckoutLogs />
-    </div>
-  );
-}
+export const CheckoutRuntime = () => (
+  <div className="grid items-start gap-8 lg:grid-cols-2">
+    <CheckoutPorts />
+    <CheckoutLogs />
+  </div>
+);
 
-function CheckoutPorts() {
+const CheckoutPorts = () => {
   const { view, checkout } = useCheckout();
   const own = envOfDirectory(view, checkout.directory);
   const runtime = checkoutRuntime(view, checkout.directory);
@@ -273,18 +427,25 @@ function CheckoutPorts() {
         <h2 className="text-lg font-semibold">Forwarded ports</h2>
         {ports.length > 0 && (
           <p className={muted}>
-            {own ? "This worktree runs in its own container; these ports are its own." : "Shared with the other checkouts in the project's container."}
-            {runtime.relay === "active" && " Relayed from inside the container, so apps bound to localhost there are reachable."}
+            {own
+              ? "This worktree runs in its own container; these ports are its own."
+              : "Shared with the other checkouts in the project's container."}
+            {runtime.relay === "active" &&
+              " Relayed from inside the container, so apps bound to localhost there are reachable."}
           </p>
         )}
       </div>
       {runtime.relay === "unavailable" && ports.length > 0 && (
-        <Note warn>No relay in the container: only apps listening on 0.0.0.0 are reachable. The log says why.</Note>
+        <Note warn>
+          No relay in the container: only apps listening on 0.0.0.0 are
+          reachable. The log says why.
+        </Note>
       )}
       {ports.length === 0 ? (
         <Empty title="No forwarded ports">
           <p className={muted}>
-            Add <code className="font-mono">forwardPorts</code> to the project's devcontainer.json to reach its apps from{" "}
+            Add <code className="font-mono">forwardPorts</code> to the
+            project&apos;s devcontainer.json to reach its apps from{" "}
             <code className="font-mono">localhost</code>.
           </p>
         </Empty>
@@ -292,26 +453,45 @@ function CheckoutPorts() {
         <Card className="gap-0 py-0">
           <ul className="divide-y">
             {ports.map((p) => (
-              <PortRow key={p.status === "skipped" ? `s-${p.entry}` : `${p.status}-${p.containerPort}`} port={p} />
+              <PortRow
+                key={
+                  p.status === "skipped"
+                    ? `s-${p.entry}`
+                    : `${p.status}-${p.containerPort}`
+                }
+                port={p}
+              />
             ))}
           </ul>
-          <p className={cn("border-t px-4 py-3 text-sm", forwarded === ports.length ? "text-ok" : "text-muted-foreground")}>
-            {forwarded === ports.length ? `All ${forwarded} forwarded` : `${forwarded} of ${ports.length} forwarded`}
+          <p
+            className={cn(
+              "border-t px-4 py-3 text-sm",
+              forwarded === ports.length ? "text-ok" : "text-muted-foreground"
+            )}
+          >
+            {forwarded === ports.length
+              ? `All ${forwarded} forwarded`
+              : `${forwarded} of ${ports.length} forwarded`}
           </p>
         </Card>
       )}
     </section>
   );
-}
+};
 
-function PortRow({ port: p }: { port: ForwardedPort }) {
+const PortRow = ({ port: p }: { port: ForwardedPort }) => {
   const row = "flex min-h-12 items-center gap-4 px-4 py-2 text-sm";
   if (p.status !== "forwarded") {
     const skipped = p.status === "skipped";
     return (
       <li className={cn(row, "text-muted-foreground")}>
-        <StatusDot tone={skipped ? "off" : "error"} label={skipped ? "Skipped" : "Failed"} />
-        <span className="w-14 font-mono">{skipped ? p.entry : p.containerPort}</span>
+        <StatusDot
+          tone={skipped ? "off" : "error"}
+          label={skipped ? "Skipped" : "Failed"}
+        />
+        <span className="w-14 font-mono">
+          {skipped ? p.entry : p.containerPort}
+        </span>
         <span className="min-w-0 flex-1 truncate" title={p.reason}>
           {skipped ? "Skipped" : "Failed"}: {p.reason}
         </span>
@@ -325,25 +505,33 @@ function PortRow({ port: p }: { port: ForwardedPort }) {
     <li className={row}>
       <StatusDot tone="ok" label="Forwarded" />
       <span className="w-14 font-mono">{p.containerPort}</span>
-      <a className="inline-flex min-w-0 items-center gap-1 font-mono text-primary hover:underline" href={url} target="_blank" rel="noreferrer">
+      <a
+        className="text-primary inline-flex min-w-0 items-center gap-1 font-mono hover:underline"
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+      >
         localhost:{p.hostPort} <ExternalLinkIcon className="size-3" />
       </a>
       {moved && (
-        <span className="text-muted-foreground" title={`Port ${p.containerPort} was taken on this machine`}>
+        <span
+          className="text-muted-foreground"
+          title={`Port ${p.containerPort} was taken on this machine`}
+        >
           moved
         </span>
       )}
-      <span className="ml-auto truncate text-muted-foreground">{p.label}</span>
+      <span className="text-muted-foreground ml-auto truncate">{p.label}</span>
       <CopyButton text={url} label="Copy URL" />
     </li>
   );
-}
+};
 
-function CheckoutLogs() {
+const CheckoutLogs = () => {
   const { view, checkout } = useCheckout();
   const own = envOfDirectory(view, checkout.directory);
   const { logs, loadLogs } = useDash();
-  const id = view.project.id;
+  const { id } = view.project;
   useEffect(() => loadLogs(id), [id, loadLogs]);
   return (
     <LogPanel
@@ -351,10 +539,12 @@ function CheckoutLogs() {
       hint={
         own ? (
           <>
-            The project's log; lines from this worktree's own container start with <code className="font-mono">[{own.worktree.branch}]</code>.
+            The project&apos;s log; lines from this worktree&apos;s own
+            container start with{" "}
+            <code className="font-mono">[{own.worktree.branch}]</code>.
           </>
         ) : undefined
       }
     />
   );
-}
+};

@@ -1,11 +1,26 @@
 import { describe, expect, it } from "vitest";
-import type { DashboardSnapshot, EnvironmentView, ProjectView, ResourceStats } from "../../src/shared/types";
+
+import type {
+  DashboardSnapshot,
+  EnvironmentView,
+  ProjectView,
+  ResourceStats,
+} from "../../src/shared/types";
 import { checkouts } from "../../src/web/checkouts";
-import { checkoutResources, formatCpu, formatMemory, projectResources } from "../../src/web/resources";
+import {
+  checkoutResources,
+  formatCpu,
+  formatMemory,
+  projectResources,
+} from "../../src/web/resources";
 
 const MiB = 1024 ** 2;
 const GiB = 1024 ** 3;
-const stats = (cpu: number, memory: number): ResourceStats => ({ cpu, memory, memoryLimit: 8 * GiB });
+const stats = (cpu: number, memory: number): ResourceStats => ({
+  cpu,
+  memory,
+  memoryLimit: 8 * GiB,
+});
 
 const env = (id: string, path: string): EnvironmentView =>
   ({
@@ -16,7 +31,12 @@ const env = (id: string, path: string): EnvironmentView =>
   }) as EnvironmentView;
 
 const view: ProjectView = {
-  project: { id: "p", name: "demo", path: "/src/demo", devcontainerPath: "/src/demo/x" },
+  project: {
+    id: "p",
+    name: "demo",
+    path: "/src/demo",
+    devcontainerPath: "/src/demo/x",
+  },
   runtime: {
     projectId: "p",
     containerState: "running",
@@ -29,10 +49,15 @@ const view: ProjectView = {
   },
   sessions: [],
   openUrl: "http://p",
-  environments: [env("env-own", "/workspaces/demo.worktrees/own"), env("env-off", "/elsewhere")],
+  environments: [
+    env("env-own", "/workspaces/demo.worktrees/own"),
+    env("env-off", "/elsewhere"),
+  ],
 };
 
-const snap = (resources?: DashboardSnapshot["resources"]): DashboardSnapshot => ({
+const snap = (
+  resources?: DashboardSnapshot["resources"]
+): DashboardSnapshot => ({
   roots: [],
   preflight: { errors: [] },
   editors: [],
@@ -56,33 +81,48 @@ describe("formatting", () => {
   });
 });
 
-describe("projectResources", () => {
+describe(projectResources, () => {
   it("sums the main and task environments that have stats", () => {
-    const r = projectResources(snap({ p: stats(10, GiB), "env-own": stats(5, 512 * MiB), other: stats(99, GiB) }), view);
-    expect(r).toEqual({ cpu: 15, memory: GiB + 512 * MiB, count: 2 });
+    const r = projectResources(
+      snap({
+        p: stats(10, GiB),
+        "env-own": stats(5, 512 * MiB),
+        other: stats(99, GiB),
+      }),
+      view
+    );
+    expect(r).toStrictEqual({ cpu: 15, memory: GiB + 512 * MiB, count: 2 });
   });
 
   it("counts task environments when the main one is stopped", () => {
-    expect(projectResources(snap({ "env-off": stats(3, MiB) }), view)).toEqual({ cpu: 3, memory: MiB, count: 1 });
+    expect(
+      projectResources(snap({ "env-off": stats(3, MiB) }), view)
+    ).toStrictEqual({
+      cpu: 3,
+      memory: MiB,
+      count: 1,
+    });
   });
 
   it("is undefined without stats", () => {
     expect(projectResources(snap(), view)).toBeUndefined();
     expect(projectResources(undefined, view)).toBeUndefined();
-    expect(projectResources(snap({ other: stats(1, 1) }), view)).toBeUndefined();
+    expect(
+      projectResources(snap({ other: stats(1, 1) }), view)
+    ).toBeUndefined();
   });
 });
 
-describe("checkoutResources", () => {
+describe(checkoutResources, () => {
   const s = snap({ p: stats(10, GiB), "env-own": stats(5, MiB) });
   const [main, own, shared] = checkouts(view);
 
   it("gives the main checkout the main container's numbers", () => {
-    expect(checkoutResources(s, view, main)).toEqual(stats(10, GiB));
+    expect(checkoutResources(s, view, main)).toStrictEqual(stats(10, GiB));
   });
 
   it("gives a worktree with its own container that container's numbers", () => {
-    expect(checkoutResources(s, view, own)).toEqual(stats(5, MiB));
+    expect(checkoutResources(s, view, own)).toStrictEqual(stats(5, MiB));
   });
 
   it("gives a worktree sharing the main container nothing", () => {

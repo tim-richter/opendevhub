@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { CommandError, type Containers, type ExecTarget, tailLines } from "../containers";
+
+import { CommandError, tailLines } from "../containers";
+import type { Containers, ExecTarget } from "../containers";
 import type { HostPort } from "../network";
 import type { OpencodeClient, OpencodeEndpoint } from "./client";
 
@@ -24,24 +26,21 @@ for sh in bash zsh; do
 done
 exit 1
 `;
-const SEARCHED = "PATH, ~/.opencode/bin, ~/.local/bin, ~/.bun/bin and bash/zsh login shells";
+const SEARCHED =
+  "PATH, ~/.opencode/bin, ~/.local/bin, ~/.bun/bin and bash/zsh login shells";
 
 /** Last line of the output that is an absolute path to an `opencode` binary (shells may print noise). */
-export function parseBinaryPath(output: string): string | undefined {
-  return output
-    .split(/\r?\n/)
+export const parseBinaryPath = (output: string): string | undefined =>
+  output
+    .split(/\r?\n/u)
     .map((l) => l.trim())
-    .filter((l) => /^\/\S*\/opencode$/.test(l))
-    .at(-1);
-}
+    .findLast((l) => /^\/\S*\/opencode$/u.test(l));
 
-export function parseOpencodeVersion(output: string): string | undefined {
-  return output.match(/(\d+)\.(\d+)\.(\d+)/)?.[0];
-}
+export const parseOpencodeVersion = (output: string): string | undefined =>
+  output.match(/(?<g1>\d+)\.(?<g2>\d+)\.(?<g3>\d+)/u)?.[0];
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+const shellQuote = (value: string): string =>
+  `'${value.replaceAll("'", `'\\''`)}'`;
 
 export interface RuntimeDeps {
   containers: Pick<Containers, "exec">;
@@ -70,8 +69,14 @@ export class OpencodeRuntime {
   }
 
   async resolveBinary(target: ExecTarget): Promise<string | undefined> {
-    const resolved = await this.deps.containers.exec(target, ["sh", "-c", RESOLVE_BINARY]);
-    return resolved.exitCode === 0 ? parseBinaryPath(resolved.stdout) : undefined;
+    const resolved = await this.deps.containers.exec(target, [
+      "sh",
+      "-c",
+      RESOLVE_BINARY,
+    ]);
+    return resolved.exitCode === 0
+      ? parseBinaryPath(resolved.stdout)
+      : undefined;
   }
 
   async ensureRunning(
@@ -83,11 +88,13 @@ export class OpencodeRuntime {
       onLine: (line: string) => void;
       /** Extra environment for `opencode serve` (and so for every tool the agent runs). */
       env?: Record<string, string>;
-    },
+    }
   ): Promise<{ password: string; version: string }> {
     if (args.password) {
       try {
-        const info = await this.deps.clientFor(this.endpoint(args.address, args.password)).info();
+        const info = await this.deps
+          .clientFor(this.endpoint(args.address, args.password))
+          .info();
         return { password: args.password, version: info.version };
       } catch {
         // not running or different password: relaunch below
@@ -96,37 +103,63 @@ export class OpencodeRuntime {
 
     const { containers } = this.deps;
     const binary = await this.resolveBinary(target);
-    if (!binary) throw new CommandError(`opencode v2 not found in the devcontainer (searched ${SEARCHED})`);
+    if (!binary) {
+      throw new CommandError(
+        `opencode v2 not found in the devcontainer (searched ${SEARCHED})`
+      );
+    }
     const versionRun = await containers.exec(target, [binary, "--version"]);
     if (versionRun.exitCode !== 0) {
-      throw new CommandError(`failed to run ${binary} --version`, tailLines(versionRun.stderr + versionRun.stdout));
+      throw new CommandError(
+        `failed to run ${binary} --version`,
+        tailLines(versionRun.stderr + versionRun.stdout)
+      );
     }
     const version = parseOpencodeVersion(versionRun.stdout);
     if (!version || Number(version.split(".")[0]) < 2) {
-      throw new CommandError(`opencode ${version ?? "(unknown version)"} found, but opendevhub requires opencode v2`);
+      throw new CommandError(
+        `opencode ${version ?? "(unknown version)"} found, but opendevhub requires opencode v2`
+      );
     }
     args.onLine(`opencode ${version} found at ${binary}`);
 
-    const password = this.deps.generatePassword?.() ?? randomBytes(32).toString("base64url");
+    const password =
+      this.deps.generatePassword?.() ?? randomBytes(32).toString("base64url");
     const port = this.deps.port ?? OPENCODE_PORT;
     await containers.exec(target, ["sh", "-c", KILL_SERVER]);
     const script =
       `cd ${shellQuote(args.workspaceFolder)} && ` +
       `nohup ${shellQuote(binary)} serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
-    const launch = await containers.exec(target, ["sh", "-c", script], { env: { ...args.env, OPENCODE_PASSWORD: password } });
+    const launch = await containers.exec(target, ["sh", "-c", script], {
+      env: { ...args.env, OPENCODE_PASSWORD: password },
+    });
     if (launch.exitCode !== 0) {
-      throw new CommandError("failed to launch opencode serve", tailLines(launch.stderr + launch.stdout));
+      throw new CommandError(
+        "failed to launch opencode serve",
+        tailLines(launch.stderr + launch.stdout)
+      );
     }
     args.onLine(`launched opencode serve on port ${port}; waiting for health`);
 
     const ep = this.endpoint(args.address, password);
     const deadline = Date.now() + (this.deps.healthTimeoutMs ?? 30_000);
     while (Date.now() < deadline) {
-      if (await this.isHealthy(ep)) return { password, version };
-      await new Promise((r) => setTimeout(r, this.deps.healthIntervalMs ?? 500));
+      if (await this.isHealthy(ep)) {
+        return { password, version };
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, this.deps.healthIntervalMs ?? 500);
+      });
     }
-    const log = await containers.exec(target, ["sh", "-c", `tail -n 20 ${LOG_FILE} 2>/dev/null`]);
-    throw new CommandError("opencode did not become healthy within 30 s", tailLines(log.stdout));
+    const log = await containers.exec(target, [
+      "sh",
+      "-c",
+      `tail -n 20 ${LOG_FILE} 2>/dev/null`,
+    ]);
+    throw new CommandError(
+      "opencode did not become healthy within 30 s",
+      tailLines(log.stdout)
+    );
   }
 
   async stopServer(target: ExecTarget): Promise<void> {

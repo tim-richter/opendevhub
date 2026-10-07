@@ -1,10 +1,31 @@
-import type { JiraSettings, JiraSettingsInput, JiraTaskSource } from "../shared/jira";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import type { DashboardSnapshot } from "../shared/types";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
+import { useNavigate } from "react-router";
+
 import type { ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
-import { type Action, fetchJiraSettings, saveJiraSettings, fetchForgejoSettings, saveForgejoSettings, postAction, rescan as postRescan } from "./api";
+import type {
+  JiraSettings,
+  JiraSettingsInput,
+  JiraTaskSource,
+} from "../shared/jira";
+import type { DashboardSnapshot } from "../shared/types";
+import {
+  fetchJiraSettings,
+  saveJiraSettings,
+  fetchForgejoSettings,
+  saveForgejoSettings,
+  postAction,
+  rescan as postRescan,
+} from "./api";
+import type { Action } from "./api";
 import { attentionCounts } from "./derive";
 import { enablePush, pushSupported, syncPush } from "./push";
 import { useDashboard } from "./useDashboard";
@@ -57,33 +78,59 @@ interface DashboardContextValue {
 
 const Ctx = createContext<DashboardContextValue | undefined>(undefined);
 
-export function DashboardProvider({ children }: { children: ReactNode }) {
+export const DashboardProvider = ({ children }: { children: ReactNode }) => {
   const { snapshot, connected, logs, loadLogs: fetchLogs } = useDashboard();
   const [highlight, setHighlight] = useState<Highlight>();
   const navigate = useNavigate();
   const [error, setError] = useState<string>();
   const [scanning, setScanning] = useState(false);
-  const [newTaskFor, setNewTaskFor] = useState<DashboardContextValue["newTaskFor"]>();
+  const [newTaskFor, setNewTaskFor] =
+    useState<DashboardContextValue["newTaskFor"]>();
   const queryClient = useQueryClient();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
-  const [permission, setPermission] = useState<Permission>(() => (pushSupported() ? Notification.permission : "unsupported"));
+  const [permission, setPermission] = useState<Permission>(() =>
+    pushSupported() ? Notification.permission : "unsupported"
+  );
   const [jira, setJira] = useState<JiraSettings>();
   const [jiraError, setJiraError] = useState<string>();
   const [forgejo, setForgejo] = useState<ForgejoSettings>();
   const [forgejoError, setForgejoError] = useState<string>();
 
   useEffect(() => {
-    if (!connected) return;
+    if (!connected) {
+      return;
+    }
     let cancelled = false;
     void fetchJiraSettings().then(
-      (settings) => { if (!cancelled) { setJira(settings); setJiraError(undefined); } },
-      (err: unknown) => { if (!cancelled) setJiraError(err instanceof Error ? err.message : String(err)); },
+      (settings) => {
+        if (!cancelled) {
+          setJira(settings);
+          setJiraError(undefined);
+        }
+      },
+      (err) => {
+        if (!cancelled) {
+          setJiraError(err instanceof Error ? err.message : String(err));
+        }
+      }
     );
     void fetchForgejoSettings().then(
-      (settings) => { if (!cancelled) { queryClient.removeQueries({ queryKey: ["forgejo"] }); setForgejo(settings); setForgejoError(undefined); } },
-      (err: unknown) => { if (!cancelled) setForgejoError(err instanceof Error ? err.message : String(err)); },
+      (settings) => {
+        if (!cancelled) {
+          queryClient.removeQueries({ queryKey: ["forgejo"] });
+          setForgejo(settings);
+          setForgejoError(undefined);
+        }
+      },
+      (err) => {
+        if (!cancelled) {
+          setForgejoError(err instanceof Error ? err.message : String(err));
+        }
+      }
     );
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [connected, queryClient]);
 
   const updateJira = useCallback(async (input: JiraSettingsInput) => {
@@ -92,29 +139,45 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setJiraError(undefined);
   }, []);
 
-  const updateForgejo = useCallback(async (input: ForgejoSettingsInput) => {
-    const settings = await saveForgejoSettings(input);
-    await queryClient.cancelQueries({ queryKey: ["forgejo"] });
-    queryClient.removeQueries({ queryKey: ["forgejo"] });
-    setForgejo(settings);
-    setForgejoError(undefined);
-  }, [queryClient]);
+  const updateForgejo = useCallback(
+    async (input: ForgejoSettingsInput) => {
+      const settings = await saveForgejoSettings(input);
+      await queryClient.cancelQueries({ queryKey: ["forgejo"] });
+      queryClient.removeQueries({ queryKey: ["forgejo"] });
+      setForgejo(settings);
+      setForgejoError(undefined);
+    },
+    [queryClient]
+  );
 
   // A clicked notification takes the user straight to the session: the service worker focuses this
   // tab and says which one.
   useEffect(() => {
-    if (highlight) void navigate(`/p/${encodeURIComponent(highlight.projectId)}?session=${encodeURIComponent(highlight.sessionId)}`);
+    if (highlight) {
+      void navigate(
+        `/p/${encodeURIComponent(highlight.projectId)}?session=${encodeURIComponent(highlight.sessionId)}`
+      );
+    }
   }, [highlight, navigate]);
   useEffect(() => {
-    if (!pushSupported()) return;
+    if (!pushSupported()) {
+      return;
+    }
     const onMessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string; projectId?: unknown; sessionId?: unknown } | undefined;
-      if (data?.type === "open" && typeof data.projectId === "string" && typeof data.sessionId === "string") {
+      const data = event.data as
+        | { type?: string; projectId?: unknown; sessionId?: unknown }
+        | undefined;
+      if (
+        data?.type === "open" &&
+        typeof data.projectId === "string" &&
+        typeof data.sessionId === "string"
+      ) {
         setHighlight({ projectId: data.projectId, sessionId: data.sessionId });
       }
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
-    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
 
   const attention = snapshot ? attentionCounts(snapshot).attention : 0;
@@ -122,11 +185,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     document.title = attention > 0 ? `(${attention}) opendevhub` : "opendevhub";
   }, [attention]);
 
-  const fail = useCallback((err: unknown) => setError(err instanceof Error ? err.message : String(err)), []);
+  const fail = useCallback(
+    (err: unknown) =>
+      setError(err instanceof Error ? err.message : String(err)),
+    []
+  );
   const act = useCallback(
     (projectId: string, action: Action) =>
       void postAction(projectId, action).then(() => setError(undefined), fail),
-    [fail],
+    [fail]
   );
   const rescan = useCallback(() => {
     setScanning(true);
@@ -134,26 +201,62 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       .catch(fail)
       .finally(() => setScanning(false));
   }, [fail]);
-  const newTask = useCallback((projectId?: string, draft?: NewTaskDraft) => setNewTaskFor({ projectId, ...draft }), []);
-  const loadLogs = useCallback((projectId: string) => void fetchLogs(projectId).catch(fail), [fetchLogs, fail]);
+  const newTask = useCallback(
+    (projectId?: string, draft?: NewTaskDraft) =>
+      setNewTaskFor({ projectId, ...draft }),
+    []
+  );
+  const loadLogs = useCallback(
+    (projectId: string) => void fetchLogs(projectId).catch(fail),
+    [fetchLogs, fail]
+  );
   const requestPermission = useCallback(
     () =>
       void enablePush()
         .then(setPermission)
-        .catch((err: unknown) => {
+        .catch((err) => {
           setPermission(Notification.permission);
           fail(err);
         }),
-    [fail],
+    [fail]
   );
 
   // Keeps this browser subscribed (and moves it to new keys) without a click once permission is granted.
   useEffect(() => {
-    syncPush().catch((err: unknown) => console.warn("opendevhub: push subscription failed", err));
+    syncPush().catch((err) =>
+      console.warn("opendevhub: push subscription failed", err)
+    );
   }, []);
 
   const value = useMemo<DashboardContextValue>(
     () => ({
+      act,
+      addProjectOpen,
+      closeAddProject: () => setAddProjectOpen(false),
+      closeNewTask: () => setNewTaskFor(undefined),
+      connected,
+      dismissError: () => setError(undefined),
+      error,
+      forgejo,
+      forgejoError,
+      highlight,
+      jira,
+      jiraError,
+      loadLogs,
+      logs,
+      newTask,
+      newTaskFor,
+      openAddProject: () => setAddProjectOpen(true),
+      permission,
+      report: fail,
+      requestPermission,
+      rescan,
+      scanning,
+      snapshot,
+      updateForgejo,
+      updateJira,
+    }),
+    [
       snapshot,
       connected,
       logs,
@@ -163,40 +266,37 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       rescan,
       scanning,
       error,
-      dismissError: () => setError(undefined),
-      report: fail,
-      newTask,
-      newTaskFor,
-      closeNewTask: () => setNewTaskFor(undefined),
-      addProjectOpen,
-      openAddProject: () => setAddProjectOpen(true),
-      closeAddProject: () => setAddProjectOpen(false),
       permission,
       requestPermission,
-      jira,
-      jiraError,
-      updateJira,
+      fail,
+      newTask,
+      newTaskFor,
+      addProjectOpen,
       forgejo,
       forgejoError,
       updateForgejo,
-    }),
-    [snapshot, connected, logs, loadLogs, highlight, act, rescan, scanning, error, permission, requestPermission, fail, newTask, newTaskFor, addProjectOpen, forgejo, forgejoError, updateForgejo, jira, jiraError, updateJira],
+      jira,
+      jiraError,
+      updateJira,
+    ]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
+};
 
-export function useDash(): DashboardContextValue {
+export const useDash = (): DashboardContextValue => {
   const value = useContext(Ctx);
-  if (!value) throw new Error("useDash must be used inside DashboardProvider");
+  if (!value) {
+    throw new Error("useDash must be used inside DashboardProvider");
+  }
   return value;
-}
+};
 
 /** Re-render periodically so relative timestamps stay fresh. */
-export function useNow(intervalMs = 30_000): number {
+export const useNow = (intervalMs = 30_000): number => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
-}
+};
