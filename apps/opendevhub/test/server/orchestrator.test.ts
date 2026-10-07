@@ -399,6 +399,18 @@ const permission = { id: "per_1", sessionId: "ses_child", action: "bash", resour
 const form = { id: "frm_1", sessionId: "ses_root", title: "Which DB?", fields: [] };
 
 describe("Orchestrator", () => {
+  it("routes terminals to shared, isolated and remote containers and rejects unknown or stopped checkouts", async () => {
+    const shared = await withWorktree();
+    expect(shared.orch.terminalTarget(project.id, feat.path)).toMatchObject({ containerId: "c1" });
+    expect(() => shared.orch.terminalTarget(project.id, "/unknown")).toThrow(/neither the workspace nor a known worktree/);
+    shared.store.updateRuntime(project.id, { containerState: "stopped" });
+    expect(() => shared.orch.terminalTarget(project.id, feat.path)).toThrow(/Start this checkout/);
+    const isolated = await withEnv();
+    expect(isolated.orch.terminalTarget(project.id, feat.path)).toMatchObject({ containerId: "c2" });
+    const remote = await withRemoteRunning();
+    expect(remote.orch.terminalTarget(project.id, remoteFix.path)).toMatchObject({ containerId: "r1", node: "box", user: "node" });
+  });
+
   it("runs the main container as the project's main environment", async () => {
     const { orch, monitors } = setup();
     await orch.rescan();

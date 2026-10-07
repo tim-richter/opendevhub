@@ -268,6 +268,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     port: config.port,
     app,
     resolveTarget: proxyTargets(store, orchestrator),
+    terminalTarget: (id, directory) => {
+      const target = orchestrator.terminalTarget(id, directory);
+      const conn = target.node ? nodes.connection(target.node) : undefined;
+      if (target.node && (!conn?.online || !conn.target)) throw new Error("The node is offline");
+      return { ...target, ssh: conn?.target };
+    },
   });
   const refresh = setInterval(() => void orchestrator.refreshContainers().catch(() => {}), 10_000);
   const sampler = startResourceSampler({ run: spawnRunner, store });

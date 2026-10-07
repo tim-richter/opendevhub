@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router";
 import { legacyPath } from "./checkouts";
 import { Shell } from "./layout/Shell";
@@ -13,10 +14,13 @@ import { CleanupPage } from "./pages/CleanupPage";
 import { NodesPage } from "./pages/NodesPage";
 import { UsagePage } from "./pages/UsagePage";
 
+const CheckoutTerminal = lazy(() => import("./pages/CheckoutTerminal").then((module) => ({ default: module.CheckoutTerminal })));
+
 const checkoutTabs = (
   <>
     <Route index element={<CheckoutSessions />} />
     <Route path="review" element={<ProjectReview />} />
+    <Route path="terminal" element={<Suspense fallback={<p>Loading terminal…</p>}><CheckoutTerminal /></Suspense>} />
     <Route path="runtime" element={<CheckoutRuntime />} />
     <Route path="ports" element={<Navigate replace to="../runtime" relative="path" />} />
     <Route path="logs" element={<Navigate replace to="../runtime" relative="path" />} />

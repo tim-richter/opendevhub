@@ -1127,6 +1127,16 @@ export class Orchestrator {
     });
   }
 
+  /** Only known checkouts in running environments may open a terminal. */
+  terminalTarget(id: ProjectId, directory: string) {
+    const project = this.requireProject(id);
+    this.checkDirectory(id, directory);
+    const env = this.envForDirectory(project, directory);
+    const rt = this.deps.store.runtime(env.id);
+    if (rt.containerState !== "running" || !rt.containerId) throw new UnavailableError("Start this checkout's container to open a terminal");
+    return { containerId: rt.containerId, user: rt.remoteUser, node: env.node };
+  }
+
   /** A checkout as checks run it: its environment (and whether it runs) and its host folder. */
   checkTarget(id: ProjectId, directory: string): CheckTarget {
     const project = this.requireProject(id);

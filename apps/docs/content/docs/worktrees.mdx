@@ -46,3 +46,15 @@ or, for a repo you don't own, in `~/.config/opendevhub/config.json`:
 ```json
 { "projects": { "/path/to/repo": { "isolation": "isolated" } } }
 ```
+
+## Terminal
+
+Open a checkout and select **Terminal** to use an interactive shell in its devcontainer.
+Each worktree has its own terminal, including worktrees on remote nodes. Shared
+worktrees use the project's container with their own working directory.
+
+Choose **bash**, **zsh**, **sh**, or **fish** from the shell selector. The shell must
+be installed in the container; the selection is remembered for each checkout.
+Terminal sessions and recent output remain available for 30 minutes after leaving
+the tab. Use `exit` to end a shell, or **Reconnect** to open it again after it exits.
+Sessions end when opendevhub or their container stops.

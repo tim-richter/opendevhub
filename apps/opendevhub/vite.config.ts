@@ -11,7 +11,7 @@ export default defineConfig({
   server: {
     proxy: {
       // "/api/" rather than "/api", so the source file /api.ts is still served by Vite.
-      "/api/": { target: "http://localhost:7777", changeOrigin: true, headers: { origin: "http://localhost:7777" } },
+      "/api/": { target: "http://localhost:7777", changeOrigin: true, ws: true, headers: { origin: "http://localhost:7777" } },
     },
   },
 });

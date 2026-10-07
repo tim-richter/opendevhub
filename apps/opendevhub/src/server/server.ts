@@ -2,6 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { getRequestListener } from "@hono/node-server";
 import { classifyHost } from "./hosts";
+import { Terminals, type TerminalTarget } from "./terminals";
 import { type ResolveTarget, proxyRequest, proxyUpgrade } from "./proxy";
 
 export interface ServerHandle {
@@ -14,7 +15,13 @@ export interface FetchApp {
   fetch: (request: Request) => Response | Promise<Response>;
 }
 
-export async function startServer(opts: { port: number; app: FetchApp; resolveTarget: ResolveTarget }): Promise<ServerHandle> {
+export async function startServer(opts: {
+  port: number;
+  app: FetchApp;
+  resolveTarget: ResolveTarget;
+  terminalTarget?: (project: string, directory: string) => TerminalTarget;
+}): Promise<ServerHandle> {
+  const terminals = opts.terminalTarget ? new Terminals(opts.terminalTarget) : undefined;
   const dashboard = getRequestListener(opts.app.fetch);
   let port = opts.port;
   const dashboardUrl = () => `http://localhost:${port}/`;
@@ -28,6 +35,7 @@ export async function startServer(opts: { port: number; app: FetchApp; resolveTa
   });
   server.on("upgrade", (req, socket, head) => {
     const route = classifyHost(req.headers.host, port);
+    if (route.kind === "dashboard" && terminals && req.url?.startsWith("/api/terminal?")) return terminals.upgrade(req, socket, head);
     if (route.kind === "env") return proxyUpgrade(req, socket, head, route.envId, opts.resolveTarget);
     socket.end("HTTP/1.1 421 Misdirected Request\r\n\r\n");
   });
@@ -45,6 +53,7 @@ export async function startServer(opts: { port: number; app: FetchApp; resolveTa
     port,
     close: () =>
       new Promise<void>((resolve) => {
+        terminals?.close();
         server.closeAllConnections();
         server.close(() => resolve());
       }),

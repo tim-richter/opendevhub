@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate, useOutletContext, useParams, useSearchParams
 import type { ForwardedPort, ProjectView } from "../../shared/types";
 import { refreshWorktrees } from "../api";
 import { CopyButton } from "../components/CopyButton";
-import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, GitCompareIcon, KeyRoundIcon, MessagesSquareIcon, PlayIcon, PlusIcon, ServerIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, ExternalLinkIcon, GitBranchIcon, GitCompareIcon, KeyRoundIcon, MessagesSquareIcon, PlayIcon, PlusIcon, ServerIcon, TerminalIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -148,6 +148,7 @@ export function CheckoutPage() {
         <TabLink to={`${base}/review`}>
           <GitCompareIcon className="size-4" /> Review
         </TabLink>
+        <TabLink to={`${base}/terminal`}><TerminalIcon className="size-4" /> Terminal</TabLink>
         <TabLink to={`${base}/runtime`}>
           <ServerIcon className="size-4" /> Runtime <Count n={checkoutRuntime(view, checkout.directory).ports?.length ?? 0} tone="muted" />
         </TabLink>
