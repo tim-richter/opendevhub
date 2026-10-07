@@ -69,7 +69,12 @@ The saved token is never returned to the browser or injected into task container
 Leave the token field blank to keep the saved token. Changing the URL requires a new token.
 Disabling retains the connection details; **Remove token and disable** removes the saved token.
 
-Forgejo API access remains read-only. Posting comments, approving, and merging happen on Forgejo.
+Read scopes are sufficient for browsing and agent handoff. **Write review** lets you add inline
+comments, a summary, and choose Comment, Approve, or Request changes. Submitting a review requires
+`write:repository` and `write:issue` scopes. Drafts are discarded when leaving the editor or refreshing.
+Reviews target the loaded commit; if it changes, refresh before submitting. The editor also offers
+**Create PR worktree**, which fetches the PR ref using the project’s git credentials and verifies
+the commit before creating a new worktree. Merging remains on Forgejo.
 Agent handoff uses opendevhub’s existing task/session APIs and does not give the Forgejo token to
 containers. Responses larger than 20 MiB cannot be displayed here. The existing [Publish](./publish) action continues
 to use your git credentials independently of this integration.

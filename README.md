@@ -209,7 +209,9 @@ the API, put in browser storage, or injected into task containers. Changing the 
 requires a new token. Disabling keeps the credential for later; **Remove token and disable**
 deletes it from the OS store.
 
-Forgejo API access is read-only: posting comments, approvals and merging remain on Forgejo. Agent
+**Write review** preserves inline review submission (with `write:repository` and `write:issue`
+scopes) and creating a PR worktree from its verified head commit. Read scopes suffice for browsing
+and agent handoff. Merging remains on Forgejo. Agent
 handoff uses the existing task/session APIs without exposing the token to containers. It uses the
 Forgejo REST API independently of the existing git-based Publish action. Responses larger than
 20 MiB show an error and can be opened on Forgejo instead.

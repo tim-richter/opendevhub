@@ -144,6 +144,30 @@ describe("dashboard API", () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it("routes reviews and creates worktrees only for the displayed open PR commit", async () => {
+    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const sha = "a".repeat(40);
+    const forgejo = {
+      view: vi.fn(), save: vi.fn(), pulls: vi.fn(),
+      diff: vi.fn(async () => ({ pull: { state: "open", url: "https://forge.example/team/repo/pulls/7", number: 7 }, commitId: sha } as never)),
+      test: vi.fn(), inbox: vi.fn(), details: vi.fn(), patch: vi.fn(), comments: vi.fn(), reviews: vi.fn(), reviewComments: vi.fn(), checks: vi.fn(),
+      review: vi.fn(async () => ({ sent: true as const })),
+    };
+    const app = createDashboardApp({ store, orchestrator, onboarding, push, cleanup, checks, forgejo });
+    const post = (route: string, body: unknown) => app.request(`/api/forgejo/pulls/team/repo/7/${route}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    const review = { commitId: sha, event: "COMMENT", body: "Looks good", comments: [] };
+    expect((await post("reviews", review)).status).toBe(200);
+    expect(forgejo.review).toHaveBeenCalledWith("team", "repo", "7", review);
+    expect((await post("worktree", { projectId: "p", branch: "review/pr-7", commitId: "b".repeat(40) })).status).toBe(400);
+    expect(orchestrator.createWorktree).not.toHaveBeenCalled();
+    expect((await post("worktree", { projectId: "p", branch: "review/pr-7", commitId: sha })).status).toBe(200);
+    expect(orchestrator.createWorktree).toHaveBeenCalledWith("p", {
+      branch: "review/pr-7", pull: { url: "https://forge.example/team/repo/pulls/7", number: 7, commitId: sha },
+    });
+  });
+
   it("routes Forgejo PR lists and selected diffs", async () => {
     const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
     const forgejo = {

@@ -14,7 +14,7 @@ export interface ForgejoSettingsInput {
 }
 
 export type ForgejoPullFilter = "all" | "open" | "closed";
-export type ForgejoInbox = "authored" | "review-requested" | "assigned";
+export type ForgejoInbox = "authored" | "review-requested" | "assigned" | "review";
 
 export interface ForgejoPullQuery {
   state?: ForgejoPullFilter;
@@ -96,4 +96,18 @@ export interface ForgejoDiff {
   base: string;
   head: string;
   patch: string;
+  commitId?: string;
+}
+
+export interface ForgejoReviewComment {
+  path: string;
+  body: string;
+  old_position: number;
+  new_position: number;
+}
+export interface ForgejoReviewInput {
+  commitId: string;
+  body: string;
+  event: "COMMENT" | "APPROVED" | "REQUEST_CHANGES";
+  comments: ForgejoReviewComment[];
 }

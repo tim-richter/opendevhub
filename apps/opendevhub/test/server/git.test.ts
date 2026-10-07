@@ -316,3 +316,19 @@ describe("hostHeadObjects", () => {
     );
   });
 });
+
+describe("PR worktree source", () => {
+  it("fetches the PR ref from a matching remote and verifies the exact commit", async () => {
+    const sha = "a".repeat(40);
+    const exec = vi.fn(async (_p: unknown, cmd: string[]) => {
+      const args = cmd.slice(3);
+      const stdout = args[0] === "remote" ? (args[1] === "get-url" ? "git@forge.example:team/demo.git\n" : "origin\n") : args[0] === "rev-parse" ? sha : "";
+      return { exitCode: 0, stdout, stderr: "", timedOut: false };
+    });
+    const gitOps = new GitOps({ containers: { exec } });
+    expect(await gitOps.fetchPull(project, "/repo", "https://forge.example/team/demo/pulls/7", 7, sha)).toBe(sha);
+    expect(exec.mock.calls.find(([, cmd]) => cmd.includes("fetch"))?.[1]).toEqual(["git", "-C", "/repo", "fetch", "--no-tags", "--", "origin", "refs/pull/7/head"]);
+    await expect(gitOps.fetchPull(project, "/repo", "https://other.example/team/demo/pulls/7", 7, sha)).rejects.toThrow("no remote matching");
+    await expect(gitOps.fetchPull(project, "/repo", "https://forge.example/team/demo/pulls/7", 7, "b".repeat(40))).rejects.toThrow("PR changed");
+  });
+});

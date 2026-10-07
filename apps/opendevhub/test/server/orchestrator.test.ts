@@ -236,6 +236,7 @@ function setup(persisted: PersistedState = { projects: {} }, network?: NetworkPo
     deleteBranch: vi.fn(async (_p: Project, _ws: string, _b: string, _force?: boolean) => {}),
     localBranches: vi.fn(async (_p: Project, _dir: string): Promise<string[]> => ["main"]),
     remotes: vi.fn(async (_p: Project, _dir: string): Promise<string[]> => ["origin"]),
+    fetchPull: vi.fn(async () => "a".repeat(40)),
     fetchPrune: vi.fn(async (_p: Project, _dir: string, _remote: string) => {}),
     branchRefs: vi.fn(async (_p: Project, _dir: string): Promise<{ name: string; upstream?: string; gone: boolean }[]> => []),
     remoteHead: vi.fn(async (_p: Project, _dir: string, _remote: string): Promise<string | undefined> => "main"),

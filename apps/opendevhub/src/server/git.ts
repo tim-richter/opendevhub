@@ -117,6 +117,24 @@ export class GitOps {
     if (r.exitCode !== 0) throw failure(args, r);
   }
 
+  async fetchPull(p: ExecTarget, dir: string, url: string, number: number, commitId: string): Promise<string> {
+    const { parseRemote } = await import("./forge");
+    const expected = new URL(url);
+    const repoPath = decodeURIComponent(expected.pathname).replace(/\/pulls\/\d+$/, "").replace(/^\//, "");
+    for (const remote of await this.remotes(p, dir)) {
+      const info = parseRemote(await this.git(p, dir, ["remote", "get-url", remote]));
+      if (info?.host !== expected.hostname || info.path !== repoPath) continue;
+      const r = await this.deps.containers.exec(p, ["git", "-C", dir, "fetch", "--no-tags", "--", remote, `refs/pull/${number}/head`], {
+        env: { GIT_TERMINAL_PROMPT: "0" }, timeoutMs: FETCH_TIMEOUT_MS,
+      });
+      if (r.exitCode !== 0) throw failure(["fetch"], r);
+      const sha = (await this.git(p, dir, ["rev-parse", "FETCH_HEAD"])).trim();
+      if (sha !== commitId) throw new CommandError("The PR changed. Refresh its diff before creating a worktree.");
+      return sha;
+    }
+    throw new CommandError("This project has no remote matching the Forgejo repository.");
+  }
+
   async branchRefs(p: ExecTarget, dir: string): Promise<BranchRef[]> {
     return parseBranchRefs(await this.git(p, dir, ["for-each-ref", `--format=${REF_FORMAT}`, "refs/heads"]));
   }

@@ -1,5 +1,5 @@
 import type { StackId } from "../shared/stacks";
-import type { ForgejoChecks, ForgejoComment, ForgejoConnection, ForgejoPage, ForgejoPullDetails, ForgejoPullFilter, ForgejoPullQuery, ForgejoPulls, ForgejoReview, ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
+import type { ForgejoReviewInput, ForgejoChecks, ForgejoComment, ForgejoConnection, ForgejoPage, ForgejoPullDetails, ForgejoPullFilter, ForgejoPullQuery, ForgejoPulls, ForgejoReview, ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
 import type { AddProjectResult, CandidateList, CheckDef, CheckRun, ChecksConfig, ChecksView, CleanupItem, CleanupPlan, CleanupResult, DashboardSnapshot, FormAnswer, LogEvent, ModelsInfo, NodeView, PermissionDecision, PickResult, PublishInfo, PublishRequest, PublishResult, ReviewData, ReviewMode, TaskRequest, TaskResult, UpdateResult, UsageReport, Worktree } from "../shared/types";
 
 export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
@@ -319,4 +319,18 @@ export async function removeNode(id: string): Promise<void> {
 export async function dismissStarting(projectId: string, task: string): Promise<void> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(task)}/starting`, { method: "DELETE" });
   if (!res.ok) throw await failure(res, "dismiss");
+}
+
+export async function sendForgejoReview(owner: string, repo: string, number: string, input: ForgejoReviewInput): Promise<void> {
+  const res = await fetch(`/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/reviews`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await failure(res, "send review");
+}
+export async function createForgejoWorktree(owner: string, repo: string, number: string, projectId: string, branch: string, commitId: string): Promise<{ worktree: Worktree }> {
+  const res = await fetch(`/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/worktree`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId, branch, commitId }),
+  });
+  if (!res.ok) throw await failure(res, "create PR worktree");
+  return res.json();
 }
