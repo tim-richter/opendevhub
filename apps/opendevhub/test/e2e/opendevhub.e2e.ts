@@ -252,7 +252,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: real devcontainer + opencode 
     expect(run.results[1].output).toEqual([fixture]);
     expect(run.results[2]).toMatchObject({ timedOut: true });
     // `timeout` ended the whole command in the container, not only the client.
-    expect((await containers.exec(project, ["sh", "-c", "pgrep -f 'sleep 60' || true"])).stdout.trim()).toBe("");
+    expect((await containers.exec(project, ["sh", "-c", "pgrep -f '[s]leep 60' || true"])).stdout.trim()).toBe("");
 
     const server = await startServer({
       port: 0,

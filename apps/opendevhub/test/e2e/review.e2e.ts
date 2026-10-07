@@ -72,7 +72,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: review and local git in a rea
       expect(worktree.hostPath).toBeDefined();
       fs.writeFileSync(path.join(worktree.hostPath!, "b.txt"), "new file\n");
 
-      let r = await orch.review(project.id, worktree.path);
+      let r = await orch.review(project.id, worktree.path, { mode: "branch" });
       expect(r).toMatchObject({ branch: "feature/x", base: { name: "main", source: "config" }, mode: "branch", dirty: true, ahead: 0, behind: 0 });
       expect(r.files.map((f) => f.file)).toContain("b.txt");
 
