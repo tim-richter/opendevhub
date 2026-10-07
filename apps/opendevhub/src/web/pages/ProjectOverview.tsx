@@ -11,14 +11,14 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Chip, GroupTitle, muted, Note, PageHeader, Section } from "../components/Page";
 import { OpenInMenu } from "../components/OpenInMenu";
-import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
+import { AllContainersMenu, projectFlags } from "../components/ProjectActions";
 import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL } from "../components/Status";
 import { EnvBadge } from "../components/EnvBadge";
 import { ProjectSettingsButton } from "../components/ProjectSettingsDialog";
 import { Tip } from "../components/Tip";
-import { checkoutReady, ContainerMenu, NewWorktreeButton, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
+import { checkoutReady, ContainerMenu, NewWorktreeButton, useCheckoutActions } from "../components/Worktrees";
 import { type Checkout, checkoutCounts, checkoutOf, checkoutPath, checkouts, checkoutTone, orphanSessions, projectTasks } from "../checkouts";
 import { useDash } from "../DashboardContext";
 import { formatCost, formatTokens } from "../tasks";
@@ -90,11 +90,9 @@ export function ProjectOverview() {
             <Button variant="outline" onClick={() => newTask(project.id)} title="New task (n)">
               <PlusIcon /> New task
             </Button>
-            <StartStopButton view={view} />
-            <OpenButton view={view} />
             <OpenInMenu view={view} directory={workspaceFolderOf(view)} hostPath={project.path} />
             <ProjectSettingsButton view={view} />
-            <MoreMenu view={view} />
+            <AllContainersMenu view={view} />
           </>
         }
       />
@@ -134,7 +132,6 @@ export function ProjectOverview() {
           <NewWorktreeButton view={view} />
         </div>
         {!running && <Note>Start the project to create worktrees. Worktrees on this machine can still be opened.</Note>}
-        <UnmountedNotice view={view} />
         <ul className="grid gap-3 md:grid-cols-2">
           {checkouts(view).map((c) => (
             <CheckoutCard key={c.directory} view={view} checkout={c} />

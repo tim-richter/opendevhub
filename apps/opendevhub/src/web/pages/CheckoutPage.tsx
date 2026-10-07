@@ -17,7 +17,7 @@ import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { Count, StatusDot } from "../components/Status";
 import { EnvBadge } from "../components/EnvBadge";
-import { checkoutReady, ContainerMenu, useCheckoutActions } from "../components/Worktrees";
+import { checkoutReady, ContainerMenu, UnmountedNotice, useCheckoutActions } from "../components/Worktrees";
 import { type Checkout, checkoutCounts, checkoutPath, checkoutRuntime, checkouts, checkoutTone } from "../checkouts";
 import { useDash } from "../DashboardContext";
 import { compareSessions, envOfDirectory, matches, needsAttention, type SessionEntry, sshAgentBadge } from "../derive";
@@ -139,6 +139,8 @@ export function CheckoutPage() {
           </>
         }
       />
+
+      {!checkout.worktree && <UnmountedNotice view={view} />}
 
       <TabBar label="Worktree">
         <TabLink to={base} end>

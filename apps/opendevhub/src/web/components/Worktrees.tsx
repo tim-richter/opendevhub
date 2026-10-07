@@ -71,11 +71,49 @@ export function checkoutReady(view: ProjectView, c: Checkout): boolean {
   return env ? env.runtime.opencode === "healthy" : projectFlags(view, false).canOpen;
 }
 
+/** The main checkout's container: it is the project's own, so start, stop, rebuild and restart go through the project. */
+function MainContainerMenu({ view, checkout: c, compact }: { view: ProjectView; checkout: Checkout; compact?: boolean }) {
+  const { act, snapshot } = useDash();
+  const { canStop, locked, running } = projectFlags(view, (snapshot?.preflight.errors.length ?? 0) > 0);
+  const id = view.project.id;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size={compact ? "icon-sm" : "icon"}
+          className="text-muted-foreground"
+          aria-label={`Container of ${c.label}`}
+          title="Container"
+        >
+          <BoxIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem disabled={locked} onSelect={() => act(id, canStop ? "stop" : "start")}>
+          {canStop ? "Stop container" : "Start container"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={locked}
+          onSelect={() => {
+            if (confirm(`Rebuild the container of ${c.label}? Running sessions will be interrupted.`)) act(id, "rebuild");
+          }}
+        >
+          Rebuild container
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={locked || !running} onSelect={() => act(id, "restart-opencode")}>
+          Restart opencode
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /** A worktree's container: run it in its own, or start, stop and remove the one it has. */
 export function ContainerMenu({ view, checkout: c, compact }: { view: ProjectView; checkout: Checkout; compact?: boolean }) {
   const { running } = projectFlags(view, false);
   const { pending, ownContainer, containerAction, removeContainer } = useCheckoutActions(view);
-  if (!c.worktree) return null;
+  if (!c.worktree) return <MainContainerMenu view={view} checkout={c} compact={compact} />;
   const env = envOfDirectory(view, c.directory);
   const unsupported = view.isolation?.unsupported;
   const state = env?.runtime.containerState;

@@ -1,10 +1,9 @@
-import { EllipsisIcon, ExternalLinkIcon, PlayIcon, SquareIcon } from "lucide-react";
-import { useState } from "react";
-import type { ProjectView, SessionSummary } from "../../shared/types";
+import { EllipsisIcon, PlayIcon, SquareIcon } from "lucide-react";
+import type { ProjectView } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
-import { startSession } from "../api";
+import { envAction } from "../api";
 import { useDash } from "../DashboardContext";
-import { envOfDirectory, openUrlOf, sessionHref, workspaceFolderOf } from "../derive";
+import { envOfDirectory, openUrlOf } from "../derive";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,7 +11,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 
 export function projectFlags(view: ProjectView, blocked: boolean) {
   const { runtime } = view;
@@ -49,43 +47,6 @@ export async function openSessionTab(view: ProjectView, create: () => Promise<st
   }
 }
 
-/**
- * Opens the most recent session, or starts one in the workspace folder. opencode's home screen
- * starts with an empty project list (kept in browser storage, out of our reach), so landing on a
- * session spares the user from adding the workspace folder by hand.
- */
-export function OpenButton({ view, compact }: { view: ProjectView; compact?: boolean }) {
-  const { report } = useDash();
-  const [starting, setStarting] = useState(false);
-  const { canOpen } = projectFlags(view, false);
-  const latest = view.sessions.reduce<SessionSummary | undefined>(
-    (best, s) => (!best || s.updatedAt > best.updatedAt ? s : best),
-    undefined,
-  );
-  const enabled = canOpen && !starting;
-  return (
-    <Button asChild size={compact ? "sm" : "default"} className={cn(!enabled && "pointer-events-none opacity-50")}>
-      <a
-        href={enabled ? (latest ? sessionHref(view, latest) : view.openUrl) : undefined}
-        target="_blank"
-        rel="noreferrer"
-        aria-disabled={!enabled}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!enabled || latest) return;
-          e.preventDefault();
-          setStarting(true);
-          openSessionTab(view, () => startSession(view.project.id, workspaceFolderOf(view)))
-            .catch(report)
-            .finally(() => setStarting(false));
-        }}
-      >
-        {compact ? "Open" : "Open in opencode"} <ExternalLinkIcon />
-      </a>
-    </Button>
-  );
-}
-
 export function StartStopButton({ view, compact }: { view: ProjectView; compact?: boolean }) {
   const { act, snapshot } = useDash();
   const blocked = (snapshot?.preflight.errors.length ?? 0) > 0;
@@ -107,32 +68,40 @@ export function StartStopButton({ view, compact }: { view: ProjectView; compact?
   );
 }
 
-export function MoreMenu({ view }: { view: ProjectView }) {
-  const { act, snapshot } = useDash();
+/** Project-wide actions on every container of the project: the main checkout's and each worktree's own. */
+export function AllContainersMenu({ view }: { view: ProjectView }) {
+  const { act, snapshot, report } = useDash();
   const blocked = (snapshot?.preflight.errors.length ?? 0) > 0;
   const { locked, running } = projectFlags(view, blocked);
   const id = view.project.id;
+  const count = 1 + view.environments.length;
+
+  const all = (action: "rebuild" | "restart-opencode") => {
+    if (!locked && (action === "rebuild" || running)) act(id, action);
+    for (const env of view.environments) {
+      const state = env.runtime.containerState;
+      if (state === "starting" || state === "stopping") continue;
+      if (action === "restart-opencode" && state !== "running") continue;
+      envAction(id, env.id, action).catch(report);
+    }
+  };
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="More actions">
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="All containers" title="All containers">
           <EllipsisIcon />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
-          disabled={locked}
           onSelect={() => {
-            if (confirm(`Rebuild the devcontainer for ${view.project.name}? Running sessions will be interrupted.`))
-              act(id, "rebuild");
+            if (confirm(`Rebuild all ${count} containers of ${view.project.name}? Running sessions will be interrupted.`)) all("rebuild");
           }}
         >
-          Rebuild container
+          Rebuild all containers
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={locked || !running} onSelect={() => act(id, "restart-opencode")}>
-          Restart opencode
-        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => all("restart-opencode")}>Restart opencode in all containers</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

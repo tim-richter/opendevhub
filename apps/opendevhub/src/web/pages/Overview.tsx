@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Empty, muted, Page, PageHeader, Section, Segmented } from "../components/Page";
-import { MoreMenu, OpenButton, projectFlags, StartStopButton } from "../components/ProjectActions";
+import { AllContainersMenu, projectFlags } from "../components/ProjectActions";
 import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import { STATE_LABEL, StatusDot, TONE_LABEL, TONE_TEXT } from "../components/Status";
@@ -143,7 +143,7 @@ function ProjectTile({ view }: { view: ProjectView }) {
   const resources = projectResources(snapshot, view);
   const tone = projectTone(view);
   const c = projectCounts(view);
-  const { canOpen, running } = projectFlags(view, false);
+  const { running } = projectFlags(view, false);
   const to = `/p/${encodeURIComponent(view.project.id)}`;
   const status = view.runtime.containerState === "running" ? TONE_LABEL[tone] : STATE_LABEL[view.runtime.containerState];
 
@@ -188,10 +188,8 @@ function ProjectTile({ view }: { view: ProjectView }) {
           </p>
         )}
         <div className="mt-auto flex cursor-default items-center gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
-          {canOpen ? <OpenButton view={view} compact /> : null}
-          <StartStopButton view={view} compact />
           <div className="ml-auto">
-            <MoreMenu view={view} />
+            <AllContainersMenu view={view} />
           </div>
         </div>
       </Card>
