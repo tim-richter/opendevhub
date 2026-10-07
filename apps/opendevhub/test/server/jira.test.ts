@@ -228,7 +228,7 @@ describe("Jira Server/Data Center API", () => {
       key: "APP-1",
       project: "App",
       instanceUrl: configured.url,
-      description: "Fails on Safari\nAcceptance: login succeeds",
+      description: "Fails on Safari\\\nAcceptance: login succeeds",
       labels: ["login"],
       assignee: "Alice",
       reporter: "Bob",

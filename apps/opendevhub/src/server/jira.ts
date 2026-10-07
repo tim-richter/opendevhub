@@ -10,6 +10,7 @@ import {
   IntegrationError,
   integrationUrl,
 } from "./integration-settings";
+import { jiraToMarkdown } from "./jira-markup";
 import { OsSecretStore } from "./secrets";
 import type { SecretStore } from "./secrets";
 
@@ -272,7 +273,7 @@ export class Jira {
     return {
       ...summary,
       createdAt: f.created,
-      description: f.description ?? "",
+      description: jiraToMarkdown(f.description ?? ""),
       instanceUrl: connection.url,
       labels: f.labels,
       project: f.project.name,
