@@ -1,22 +1,14 @@
-import { CheckIcon, PlusIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-import type { ProjectView } from "../../shared/types";
-import {
-  Empty,
-  muted,
-  Page,
-  PageHeader,
-  Section,
-  Segmented,
-} from "../components/Page";
-import { AllContainersMenu, projectFlags } from "../components/ProjectActions";
+import type { ProjectView, SessionStatus } from "../../shared/types";
+import { Empty, muted, Page, Section, Segmented } from "../components/Page";
+import { AllContainersMenu } from "../components/ProjectActions";
 import { ResourceStat } from "../components/ResourceStat";
 import { SessionList } from "../components/SessionList";
 import {
@@ -25,19 +17,29 @@ import {
   TONE_LABEL,
   TONE_TEXT,
 } from "../components/Status";
+import { Tip } from "../components/Tip";
 import { useDash } from "../DashboardContext";
 import {
   allSessions,
+  compareSessions,
   matches,
   needsAttention,
   projectCounts,
   projectTone,
 } from "../derive";
+import type { ProjectCounts } from "../derive";
 import { projectResources } from "../resources";
+import { formatCost } from "../tasks";
 import { formatUsage } from "../usage";
 
 type Filter = "all" | "running" | "stopped";
 const ACTIVE_LIMIT = 6;
+const FILTER_THRESHOLD = 6;
+/** More sessions than this and a project's lights end in a "+n". */
+const LIGHT_LIMIT = 12;
+
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
 
 export const Overview = () => {
   const { snapshot, newTask } = useDash();
@@ -50,16 +52,13 @@ export const Overview = () => {
   const sessions = allSessions(snapshot);
   const attention = sessions.filter((e) => needsAttention(e.session.status));
   const active = sessions.filter((e) => e.session.status === "running");
-  const runningProjects = snapshot.projects.filter(
+  const activeProjects = new Set(active.map((e) => e.view.project.id)).size;
+  const upProjects = snapshot.projects.filter(
     (v) => v.runtime.containerState === "running"
-  );
-  const ports = snapshot.projects.reduce(
-    (n, v) => n + projectCounts(v).ports,
-    0
-  );
+  ).length;
 
   const isUp = (v: ProjectView) => v.runtime.containerState !== "stopped";
-  const tiles = [...snapshot.projects]
+  const rows = [...snapshot.projects]
     .toSorted((a, b) => a.project.name.localeCompare(b.project.name))
     .filter((v) => {
       if (filter === "all") {
@@ -72,102 +71,105 @@ export const Overview = () => {
     })
     .filter((v) => matches(query, v.project.name, v.project.path));
 
-  const tileList =
-    tiles.length === 0 ? (
-      <p className={muted}>No projects match.</p>
-    ) : (
-      <ul className="grid gap-3 md:grid-cols-2">
-        {tiles.map((v) => (
-          <ProjectTile key={v.project.id} view={v} />
-        ))}
-      </ul>
-    );
+  const hasProjects = snapshot.projects.length > 0;
+  let headline = "Nothing is waiting on you";
+  if (!hasProjects) {
+    headline = "No projects yet";
+  } else if (attention.length > 0) {
+    headline = `${plural(attention.length, "agent is", "agents are")} waiting on you`;
+  }
+
   return (
     <Page>
-      <PageHeader
-        title="Overview"
-        description={
-          <>
-            {snapshot.roots.join(" · ") || "No roots configured"}
-            {snapshot.usage && (
-              <p className="tabular-nums">
-                Today {formatUsage(snapshot.usage.today)}
-              </p>
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div className="flex min-w-0 flex-col gap-2">
+          <h1 className="sr-only">Overview</h1>
+          <p
+            className={cn(
+              "text-2xl font-semibold tracking-tight text-balance",
+              attention.length > 0 && "text-attention"
             )}
-          </>
-        }
-        actions={
-          <Button onClick={() => newTask()} title="New task (n)">
-            <PlusIcon /> New task
-          </Button>
-        }
-      />
+            aria-live="polite"
+          >
+            {headline}
+          </p>
+          {hasProjects && (
+            <p className="text-muted-foreground flex flex-wrap gap-x-5 gap-y-1 tabular-nums">
+              <span>
+                {plural(active.length, "agent")} working
+                {activeProjects > 0 &&
+                  ` in ${plural(activeProjects, "project")}`}
+              </span>
+              <span>
+                {upProjects} of {plural(snapshot.projects.length, "container")}{" "}
+                running
+              </span>
+              {snapshot.usage && (
+                <Link
+                  to="/usage"
+                  className="hover:text-foreground underline-offset-4 hover:underline"
+                  title={formatUsage(snapshot.usage.today)}
+                >
+                  {formatCost(snapshot.usage.today.cost)} spent today
+                </Link>
+              )}
+            </p>
+          )}
+        </div>
+        <Button
+          onClick={() => newTask()}
+          title="New task (n)"
+          className="max-md:w-full"
+        >
+          <PlusIcon /> New task
+        </Button>
+      </header>
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat
-          label="Projects running"
-          value={runningProjects.length}
-          of={snapshot.projects.length}
-        />
-        <Stat
-          label="Agents working"
-          value={active.length}
-          tone={active.length > 0 ? "running" : undefined}
-        />
-        <Stat
-          label="Need you"
-          value={attention.length}
-          tone={attention.length > 0 ? "attention" : undefined}
-        />
-        <Stat label="Forwarded ports" value={ports} />
-      </section>
-
-      {attention.length > 0 ? (
+      {attention.length > 0 && (
         <Section
-          title="Needs you"
-          hint="Agents blocked on a permission or a question"
+          title="Waiting on you"
+          hint="Answer here, or open the session in opencode"
           attention
         >
           <SessionList entries={attention} showProject />
         </Section>
-      ) : (
-        snapshot.projects.length > 0 && (
-          <p className="text-ok flex items-center gap-1.5 font-medium">
-            <CheckIcon className="size-4" /> No agent is waiting on you.
-          </p>
-        )
       )}
 
-      <section className="flex flex-col gap-3">
+      <section className="flex flex-col gap-3" aria-labelledby="projects">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 className="font-semibold">Projects</h2>
-          <Segmented
-            label="Show projects"
-            value={filter}
-            onChange={setFilter}
-            options={(["all", "running", "stopped"] as const).map((f) => ({
-              id: f,
-              label: f.charAt(0).toUpperCase() + f.slice(1),
-            }))}
-          />
-          {snapshot.projects.length > 6 && (
+          <h2 id="projects" className="font-semibold">
+            Projects
+          </h2>
+          {hasProjects && (
+            <Segmented
+              label="Show projects"
+              value={filter}
+              onChange={setFilter}
+              options={(["all", "running", "stopped"] as const).map((f) => ({
+                id: f,
+                label: f.charAt(0).toUpperCase() + f.slice(1),
+              }))}
+            />
+          )}
+          {snapshot.projects.length > FILTER_THRESHOLD && (
             <Input
               className="ml-auto w-56 max-md:w-full"
-              placeholder="Filter…"
+              placeholder="Filter projects"
+              aria-label="Filter projects"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           )}
         </div>
-        {snapshot.projects.length === 0 ? (
-          <Empty title="No projects yet">
+        {hasProjects ? (
+          <ProjectRack views={rows} />
+        ) : (
+          <Empty title="No projects found">
             <p className={muted}>
-              No folder with a devcontainer was found under the configured
-              roots.
+              No folder with a devcontainer was found under{" "}
+              {snapshot.roots.join(", ") || "the configured roots"}.
             </p>
           </Empty>
-        ) : (
-          tileList
         )}
       </section>
 
@@ -180,7 +182,7 @@ export const Overview = () => {
                 to="/sessions?status=running"
                 className="text-muted-foreground hover:text-foreground text-sm"
               >
-                All {active.length} →
+                See all {active.length}
               </Link>
             )
           }
@@ -192,44 +194,73 @@ export const Overview = () => {
   );
 };
 
-const Stat = (props: {
-  label: string;
-  value: number;
-  of?: number;
-  tone?: "attention" | "running";
-}) => (
-  <Card
-    className={cn(
-      "gap-0.5 px-4 py-3",
-      props.tone === "attention" && "border-attention/50"
-    )}
-  >
-    <span
-      className={cn(
-        "text-2xl font-semibold tracking-tight tabular-nums",
-        props.tone === "attention" && "text-attention",
-        props.tone === "running" && "text-running"
-      )}
-    >
-      {props.value}
-      {props.of !== undefined && (
-        <span className="text-muted-foreground text-base font-medium">
-          {" "}
-          / {props.of}
-        </span>
-      )}
-    </span>
-    <span className="text-muted-foreground text-xs">{props.label}</span>
-  </Card>
-);
+const ProjectRack = ({ views }: { views: ProjectView[] }) => {
+  if (views.length === 0) {
+    return <p className={muted}>No projects match.</p>;
+  }
+  return (
+    <ul className="bg-card overflow-hidden rounded-xl border">
+      {views.map((v) => (
+        <ProjectRow key={v.project.id} view={v} />
+      ))}
+    </ul>
+  );
+};
 
-const ProjectTile = ({ view }: { view: ProjectView }) => {
-  const navigate = useNavigate();
+const LIGHT: Record<SessionStatus, string> = {
+  idle: "bg-muted-foreground/30",
+  "needs-answer": "bg-attention",
+  "needs-permission": "bg-attention",
+  running: "bg-running",
+};
+
+/** One light per session, the ones waiting on you first, so a glance down the list shows every agent. */
+const AgentLights = ({
+  view,
+  counts,
+}: {
+  view: ProjectView;
+  counts: ProjectCounts;
+}) => {
+  const ordered = view.sessions.toSorted(compareSessions);
+  const shown = ordered.slice(0, LIGHT_LIMIT);
+  const parts = [
+    counts.attention > 0 && `${counts.attention} waiting on you`,
+    counts.running > 0 && `${counts.running} working`,
+    counts.idle > 0 && `${counts.idle} idle`,
+  ].filter(Boolean);
+  const label = `Sessions: ${parts.join(", ")}`;
+  if (shown.length === 0) {
+    return null;
+  }
+  return (
+    <Tip label={label}>
+      <span
+        className="inline-flex h-5 items-center gap-1"
+        role="img"
+        aria-label={label}
+      >
+        {shown.map((s) => (
+          <span
+            key={s.id}
+            className={cn("h-4 w-1.5 rounded-full", LIGHT[s.status])}
+          />
+        ))}
+        {ordered.length > LIGHT_LIMIT && (
+          <span className="text-muted-foreground ml-0.5 text-xs tabular-nums">
+            +{ordered.length - LIGHT_LIMIT}
+          </span>
+        )}
+      </span>
+    </Tip>
+  );
+};
+
+const ProjectRow = ({ view }: { view: ProjectView }) => {
   const { snapshot } = useDash();
   const resources = projectResources(snapshot, view);
   const tone = projectTone(view);
-  const c = projectCounts(view);
-  const { running } = projectFlags(view, false);
+  const counts = projectCounts(view);
   const to = `/p/${encodeURIComponent(view.project.id)}`;
   const status =
     view.runtime.containerState === "running"
@@ -237,75 +268,62 @@ const ProjectTile = ({ view }: { view: ProjectView }) => {
       : STATE_LABEL[view.runtime.containerState];
 
   return (
-    <li>
-      <Card
-        className={cn(
-          "hover:border-foreground/20 h-full min-w-0 cursor-pointer gap-2 px-4 py-3 transition-[border-color,box-shadow] hover:shadow-md",
-          tone === "attention" && "border-attention/60",
-          tone === "off" && "bg-muted/40"
-        )}
-        onClick={() => void navigate(to)}
-      >
+    <li
+      className={cn(
+        "hover:bg-muted/50 relative grid items-center gap-x-5 gap-y-1.5 border-t px-4 py-3 first:border-t-0",
+        "grid-cols-[minmax(0,1fr)_auto_auto]",
+        "md:grid-cols-[minmax(0,1fr)_9rem_8rem_4.5rem_10.5rem_2rem]",
+        tone === "attention" && "shadow-[inset_3px_0_var(--attention)]",
+        tone === "error" && "shadow-[inset_3px_0_var(--destructive)]"
+      )}
+    >
+      <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-2">
           <StatusDot tone={tone} />
+          {/* Stretched over the row, so the whole row opens the project. */}
           <Link
             to={to}
-            className="truncate font-semibold hover:underline"
-            onClick={(e) => e.stopPropagation()}
+            className="truncate font-semibold after:absolute after:inset-0 hover:underline"
           >
             {view.project.name}
           </Link>
-          <span
-            className={cn("ml-auto text-xs whitespace-nowrap", TONE_TEXT[tone])}
-          >
-            {status}
-          </span>
         </div>
         <p
-          className="text-muted-foreground truncate font-mono text-xs"
+          className="text-muted-foreground truncate pl-4 text-xs"
           title={view.project.path}
         >
-          {view.project.path}
-        </p>
-        <div className="text-muted-foreground flex min-h-5 flex-wrap items-center gap-x-3.5 gap-y-1 text-xs">
-          {c.attention > 0 && (
-            <span className="text-attention font-semibold">
-              {c.attention} need you
+          {view.runtime.error ? (
+            <span
+              className="text-destructive relative"
+              title={view.runtime.error}
+            >
+              {view.runtime.error}
             </span>
-          )}
-          {running ? (
-            <>
-              <span>{c.running} working</span>
-              <span>{c.idle} idle</span>
-              <span>
-                {c.ports} {c.ports === 1 ? "port" : "ports"}
-              </span>
-            </>
           ) : (
-            view.runtime.containerState === "stopped" && (
-              <span>Container not running</span>
-            )
+            view.project.path
           )}
-          {resources && <ResourceStat {...resources} className="ml-auto" />}
-        </div>
-        {view.runtime.error && (
-          <p
-            className="text-destructive truncate text-xs"
-            title={view.runtime.error}
-          >
-            {view.runtime.error}
-          </p>
+        </p>
+      </div>
+      <div className="relative max-md:order-last max-md:col-span-full max-md:pl-4">
+        <AgentLights view={view} counts={counts} />
+      </div>
+      <span
+        className={cn(
+          "text-sm whitespace-nowrap max-md:col-start-2 max-md:row-start-1 max-md:justify-self-end",
+          TONE_TEXT[tone]
         )}
-        <div
-          role="presentation"
-          className="mt-auto flex cursor-default items-center gap-2 pt-1"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="ml-auto">
-            <AllContainersMenu view={view} />
-          </div>
-        </div>
-      </Card>
+      >
+        {status}
+      </span>
+      <span className="text-muted-foreground text-xs whitespace-nowrap tabular-nums max-md:hidden">
+        {counts.ports > 0 && plural(counts.ports, "port")}
+      </span>
+      <span className="relative justify-self-end max-md:hidden">
+        {resources && <ResourceStat {...resources} />}
+      </span>
+      <div className="relative justify-self-end max-md:col-start-3 max-md:row-start-1">
+        <AllContainersMenu view={view} />
+      </div>
     </li>
   );
 };
