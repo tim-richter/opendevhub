@@ -348,4 +348,28 @@ export class Containers {
       ...(opts.onLine ? { onLine: opts.onLine } : {}),
     });
   }
+
+  /**
+   * The environment `devcontainer exec` gives a process (remoteEnv, user env probe) that plain `docker exec` doesn't:
+   * the entries where the two differ. Empty when either probe fails.
+   */
+  async remoteEnv(target: ExecTarget, containerId: string, user?: string): Promise<Record<string, string>> {
+    const parse = (out: string) => {
+      const env: Record<string, string> = {};
+      for (const entry of out.split("\0")) {
+        const eq = entry.indexOf("=");
+        if (eq > 0) env[entry.slice(0, eq)] = entry.slice(eq + 1);
+      }
+      return env;
+    };
+    const [viaCli, viaDocker] = await Promise.all([
+      this.exec(target, ["env", "-0"]),
+      this.run("docker", ["exec", ...(user ? ["-u", user] : []), containerId, "env", "-0"], { timeoutMs: EXEC_TIMEOUT_MS }),
+    ]);
+    if (viaCli.exitCode !== 0 || viaDocker.exitCode !== 0) return {};
+    const base = parse(viaDocker.stdout);
+    return Object.fromEntries(
+      Object.entries(parse(viaCli.stdout)).filter(([k, v]) => base[k] !== v && !["PWD", "OLDPWD", "SHLVL", "_"].includes(k)),
+    );
+  }
 }

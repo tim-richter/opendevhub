@@ -273,8 +273,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     port: config.port,
     app,
     resolveTarget: proxyTargets(store, orchestrator),
-    terminalTarget: (id, directory) => {
-      const target = orchestrator.terminalTarget(id, directory);
+    terminalTarget: async (id, directory) => {
+      const target = await orchestrator.terminalTarget(id, directory);
       const remote = target.node && target.node !== LOCAL_NODE ? target.node : undefined;
       const conn = remote ? nodes.connection(remote) : undefined;
       if (remote && (!conn?.online || !conn.target)) throw new Error("The node is offline");

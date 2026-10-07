@@ -19,7 +19,7 @@ export async function startServer(opts: {
   port: number;
   app: FetchApp;
   resolveTarget: ResolveTarget;
-  terminalTarget?: (project: string, directory: string) => TerminalTarget;
+  terminalTarget?: (project: string, directory: string) => TerminalTarget | Promise<TerminalTarget>;
 }): Promise<ServerHandle> {
   const terminals = opts.terminalTarget ? new Terminals(opts.terminalTarget) : undefined;
   const dashboard = getRequestListener(opts.app.fetch);

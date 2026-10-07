@@ -112,7 +112,8 @@ const DECISIONS: readonly string[] = ["once", "always", "reject"] satisfies Perm
 export type ContainersPort = Pick<
   Containers,
   "up" | "inspect" | "listManaged" | "stop" | "readConfiguration" | "workspaceFolder" | "readConfig" | "remove" | "removeImage"
->;
+> &
+  Partial<Pick<Containers, "remoteEnv">>;
 export type ImagesPort = Pick<Images, "ensureBase">;
 export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
 export type GitPort = Pick<
@@ -1145,14 +1146,23 @@ export class Orchestrator {
     });
   }
 
+  /** What `devcontainer exec` adds to `docker exec`'s environment, probed once per container id. */
+  private readonly terminalEnvs = new Map<string, Promise<Record<string, string>>>();
+
   /** Only known checkouts in running environments may open a terminal. */
-  terminalTarget(id: ProjectId, directory: string) {
+  async terminalTarget(id: ProjectId, directory: string) {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
     const env = this.envForDirectory(project, directory);
     const rt = this.deps.store.runtime(env.id);
     if (rt.containerState !== "running" || !rt.containerId) throw new UnavailableError("Start this checkout's container to open a terminal");
-    return { containerId: rt.containerId, user: rt.remoteUser, node: env.node };
+    const containerId = rt.containerId;
+    let probe = this.terminalEnvs.get(containerId);
+    if (!probe) {
+      probe = (this.kit(env).containers.remoteEnv?.(env.target, containerId, rt.remoteUser) ?? Promise.resolve({})).catch(() => ({}));
+      this.terminalEnvs.set(containerId, probe);
+    }
+    return { containerId, user: rt.remoteUser, node: env.node, env: await probe };
   }
 
   /** A checkout as checks run it: its environment (and whether it runs) and its host folder. */

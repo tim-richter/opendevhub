@@ -7,12 +7,15 @@ import { clientArgs, remoteCommand, type SshTarget } from "./ssh";
 export interface TerminalTarget {
   containerId: string;
   user?: string;
+  /** The devcontainer's `remoteEnv`, which `docker exec` doesn't apply by itself. */
+  env?: Record<string, string>;
   ssh?: SshTarget;
 }
 
 export function terminalCommand(target: TerminalTarget, directory: string, shell: string) {
   if (!["bash", "zsh", "sh", "fish"].includes(shell)) throw new Error("Unsupported shell");
   const args = ["exec", "-it", "-e", "TERM=xterm-256color", "-w", directory];
+  for (const [k, v] of Object.entries(target.env ?? {})) args.push("-e", `${k}=${v}`);
   if (target.user) args.push("-u", target.user);
   args.push(target.containerId, shell, "-i");
   return target.ssh
@@ -31,7 +34,7 @@ interface Session {
 export class Terminals {
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   private readonly sessions = new Map<string, Session>();
-  constructor(private readonly target: (project: string, directory: string) => TerminalTarget) {}
+  constructor(private readonly target: (project: string, directory: string) => TerminalTarget | Promise<TerminalTarget>) {}
 
   upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     // Browsers must originate on the dashboard; reject cross-site shell access.
@@ -45,12 +48,12 @@ export class Terminals {
     const project = url.searchParams.get("project") ?? "";
     const directory = url.searchParams.get("directory") ?? "";
     const shell = url.searchParams.get("shell") ?? "bash";
-    this.wss.handleUpgrade(req, socket, head, (ws) => {
+    this.wss.handleUpgrade(req, socket, head, async (ws) => {
       const send = (value: unknown) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
       };
       try {
-        const target = this.target(project, directory);
+        const target = await this.target(project, directory);
         const command = terminalCommand(target, directory, shell);
         const key = JSON.stringify([project, directory, shell, target]);
         let session = this.sessions.get(key);
