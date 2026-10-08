@@ -1,5 +1,11 @@
 # opendevhub
 
+## 0.2.2
+
+### Patch Changes
+
+- [#12](https://github.com/tim-richter/opendevhub/pull/12) [`fc4493f`](https://github.com/tim-richter/opendevhub/commit/fc4493f7453dd78c078aa4a1d73b4d4ad303d746) Thanks [@tim-richter](https://github.com/tim-richter)! - Fix Forgejo and Jira tokens getting stuck behind "The OS credential store is unavailable or locked": replacing or clearing a token no longer fails when the old keychain entry can't be read or deleted (for example after denying the macOS keychain prompt). Credential store errors now say whether access was denied, no prompt could be shown, or the native module failed to load, and the underlying cause is logged with the secret redacted.
+
 ## 0.2.1
 
 ### Patch Changes
