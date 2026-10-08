@@ -12,11 +12,11 @@ By default a task creates a [worktree](/docs/worktrees) on a branch named after 
 
 ## Compare models
 
-**Compare with another model** runs the same prompt on up to four models, each in its own worktree (`<branch>-<model>`). The task page shows each variant's status, cost, tokens and changes, with a Review link. Each variant's cost and tokens include its subagents, and the task's total above the cards includes discarded variants.
+**Compare with another model** runs the same prompt on up to four models, each in its own worktree (`<branch>-<model>`). The task page compares the variants side by side: status, branch, checks, changes, cost and tokens, with Review and Open links. Below it, **Files** lines up every file the variants change, the ones they disagree on first. Each variant's cost and tokens include its subagents, and the task's total in the heading includes discarded variants.
 
 ![A task page comparing two variants side by side, each with its branch, cost, tokens and changes](./images/task-variants.webp)
 
-**Pick this one** hides the other variants. It can also remove their worktrees and branches, after a confirmation that lists any uncommitted changes.
+**Pick this one** hides the other variants (it's the primary button once a variant has finished; picking one that's still working stops the others). It can also remove their worktrees and branches, after a confirmation that lists any uncommitted changes.
 
 ## Where tasks are stored
 

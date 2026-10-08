@@ -104,7 +104,7 @@ The commands a change must pass before it's published (tests, lint, a Docker bui
 
 **New task** (on the Overview and project pages, in `⌘K`, or press `n`) starts agent work from a prompt, without opening the opencode tab. By default it creates a worktree on a branch named after the prompt's first line (`-2`, `-3`… when taken), starts a session there and sends the prompt. **Main checkout** runs it in the project folder instead.
 
-**Compare with another model** runs the same prompt on up to four models, each in its own worktree (`<branch>-<model>`). The task page shows each variant's status, cost, tokens and changes, with a Review link. **Pick this one** hides the other variants and can remove their worktrees and branches (after a confirmation that lists uncommitted changes).
+**Compare with another model** runs the same prompt on up to four models, each in its own worktree (`<branch>-<model>`). The task page compares the variants side by side: status, branch, checks, changes, cost and tokens, plus a table of the files each one changes, the ones they disagree on first. **Pick this one** hides the other variants and can remove their worktrees and branches (after a confirmation that lists uncommitted changes).
 
 A task is stored in its sessions' opencode metadata (`metadata.opendevhub`), so it survives restarts of opendevhub and of the container.
 
@@ -193,7 +193,7 @@ TanStack Query caches PR data in memory, retains content during refresh, and ref
 
 Settings survive restarts in `$XDG_CONFIG_HOME/opendevhub/integrations/forgejo.json` (default `~/.config/opendevhub/integrations/forgejo.json`). This separate file has mode `0600` inside a `0700` directory. It contains the URL, enabled state, and an opaque credential reference. The token is stored in your OS credential store: macOS Keychain, Windows Credential Manager, or Secret Service on Linux (such as GNOME Keyring or KWallet). Linux needs an unlocked, persistent Secret Service in your desktop session. An unavailable or locked credential store produces an error; there is no plaintext or volatile-keyring fallback.
 
-Existing plaintext tokens are migrated into the credential store before use and removed from the settings file only after credential storage succeeds. The saved token is never returned by the API, put in browser storage, or injected into task containers. Changing the instance URL requires a new token. Disabling keeps the credential for later; **Remove token and disable** deletes it from the OS store.
+Existing plaintext tokens are migrated into the credential store before use and removed from the settings file only after credential storage succeeds. The saved token is never returned by the API, put in browser storage, or injected into task containers. Changing the instance URL requires a new token. Disabling keeps the credential for later; **Remove token…** deletes it from the OS store.
 
 **Write review** preserves inline review submission (with `write:repository` and `write:issue` scopes) and creating a PR worktree from its verified head commit. Read scopes suffice for browsing and agent handoff. Merging remains on Forgejo. Agent handoff uses the existing task/session APIs without exposing the token to containers. It uses the Forgejo REST API independently of the existing git-based Publish action. Responses larger than 20 MiB show an error and can be opened on Forgejo instead.
 
@@ -205,7 +205,7 @@ The **Jira** sidebar link opens tickets assigned to you, most recently updated f
 
 Each variant remembers the Jira instance, key, title, and original description in its opencode session metadata, surviving restarts with the session. Task and checkout review pages show the ticket link and original requirements, even when Jira is unavailable. The ticket page links to its tasks among the dashboard's listed sessions.
 
-Credentials use the same protection as Forgejo, with a separate OS credential-store service. `$XDG_CONFIG_HOME/opendevhub/integrations/jira.json` contains only the enabled state, URL, and opaque credential reference. The token never reaches the browser or task containers. Leave the token blank to keep it; changing the URL requires a new token. **Remove token and disable** deletes the stored credential. Jira access is read-only. See the [Jira documentation](apps/docs/content/docs/jira.mdx) for details.
+Credentials use the same protection as Forgejo, with a separate OS credential-store service. `$XDG_CONFIG_HOME/opendevhub/integrations/jira.json` contains only the enabled state, URL, and opaque credential reference. The token never reaches the browser or task containers. **Replace** swaps in a new token; changing the URL requires a new token. **Remove token…** deletes the stored credential. Jira access is read-only. See the [Jira documentation](apps/docs/content/docs/jira.mdx) for details.
 
 ## Remote nodes (preview)
 
