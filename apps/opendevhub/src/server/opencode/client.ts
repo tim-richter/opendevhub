@@ -93,17 +93,18 @@ export interface OpencodeEvent {
 }
 
 export class OpencodeHttpError extends Error {
-  constructor(
-    readonly status: number,
-    path: string,
-    /** opencode's error `_tag`, e.g. "FormNotFound", when the body was JSON. */
-    readonly tag?: string,
-    /** opencode's error message, when it sent one. */
-    readonly detail?: string
-  ) {
+  readonly status: number;
+  /** opencode's error `_tag`, e.g. "FormNotFound", when the body was JSON. */
+  readonly tag?: string;
+  /** opencode's error message, when it sent one. */
+  readonly detail?: string;
+  constructor(status: number, path: string, tag?: string, detail?: string) {
     super(
       `opencode ${path} responded ${status}${tag ? ` ${tag}` : ""}${detail ? `: ${detail}` : ""}`
     );
+    this.status = status;
+    this.tag = tag;
+    this.detail = detail;
     this.name = "OpencodeHttpError";
   }
 }
@@ -140,10 +141,12 @@ const DIFF_TIMEOUT_MS = 30_000;
 const GENERATE_TIMEOUT_MS = 60_000;
 
 export class OpencodeClient {
-  constructor(
-    private readonly ep: OpencodeEndpoint,
-    private readonly fetchImpl: typeof fetch = fetch
-  ) {}
+  private readonly ep: OpencodeEndpoint;
+  private readonly fetchImpl: typeof fetch;
+  constructor(ep: OpencodeEndpoint, fetchImpl: typeof fetch = fetch) {
+    this.ep = ep;
+    this.fetchImpl = fetchImpl;
+  }
 
   private async get<T>(
     path: string,

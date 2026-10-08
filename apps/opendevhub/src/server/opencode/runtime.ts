@@ -111,7 +111,10 @@ export interface RuntimeDeps {
 }
 
 export class OpencodeRuntime {
-  constructor(private readonly deps: RuntimeDeps) {}
+  private readonly deps: RuntimeDeps;
+  constructor(deps: RuntimeDeps) {
+    this.deps = deps;
+  }
 
   /** `address` is where the host reaches opencode (see Route), not necessarily the container port. */
   endpoint(address: HostPort, password: string): OpencodeEndpoint {

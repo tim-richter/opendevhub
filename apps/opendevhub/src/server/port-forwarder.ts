@@ -64,7 +64,10 @@ const listen = (
 export class PortForwarder {
   private readonly forwards = new Map<string, Forward[]>();
 
-  constructor(private readonly opts: PortForwarderOptions = {}) {}
+  private readonly opts: PortForwarderOptions;
+  constructor(opts: PortForwarderOptions = {}) {
+    this.opts = opts;
+  }
 
   async open(
     projectId: string,

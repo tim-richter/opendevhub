@@ -68,7 +68,10 @@ export class Gateway implements GatewayPort {
   private readonly networks = new Set<string>();
   private lastRecovery = -Infinity;
 
-  constructor(private readonly deps: GatewayDeps) {}
+  private readonly deps: GatewayDeps;
+  constructor(deps: GatewayDeps) {
+    this.deps = deps;
+  }
 
   private get image(): string {
     return this.deps.image ?? DEFAULT_GATEWAY_IMAGE;

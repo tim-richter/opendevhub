@@ -36,7 +36,10 @@ export interface RelayRuntimeDeps {
 }
 
 export class RelayRuntime {
-  constructor(private readonly deps: RelayRuntimeDeps) {}
+  private readonly deps: RelayRuntimeDeps;
+  constructor(deps: RelayRuntimeDeps) {
+    this.deps = deps;
+  }
 
   async ensureRunning(
     execTarget: ExecTarget,

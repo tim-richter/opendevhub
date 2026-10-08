@@ -116,13 +116,17 @@ export class Push {
   private readonly sendFn: PushSender;
   private readonly log: (line: string) => void;
 
-  constructor(
-    private readonly opts: {
-      file: string;
-      send?: PushSender;
-      log?: (line: string) => void;
-    }
-  ) {
+  private readonly opts: {
+    file: string;
+    send?: PushSender;
+    log?: (line: string) => void;
+  };
+  constructor(opts: {
+    file: string;
+    send?: PushSender;
+    log?: (line: string) => void;
+  }) {
+    this.opts = opts;
     this.sendFn =
       opts.send ??
       ((sub, payload, options) =>

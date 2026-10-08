@@ -59,10 +59,12 @@ const PAGE_SIZE = 50;
 
 /** Jira Server/Data Center REST v2 with a personal access token (Bearer authentication). */
 export class Jira {
-  constructor(
-    private readonly settings: FileJiraSettings,
-    private readonly fetcher: typeof fetch = fetch
-  ) {}
+  private readonly settings: FileJiraSettings;
+  private readonly fetcher: typeof fetch;
+  constructor(settings: FileJiraSettings, fetcher: typeof fetch = fetch) {
+    this.settings = settings;
+    this.fetcher = fetcher;
+  }
 
   view(): Promise<JiraSettings> {
     return this.settings.view();

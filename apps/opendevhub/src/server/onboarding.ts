@@ -22,7 +22,10 @@ export interface OnboardingDeps {
 
 /** Add project: lists repos without a devcontainer and writes one into a repo the user picks. */
 export class Onboarding {
-  constructor(private readonly deps: OnboardingDeps) {}
+  private readonly deps: OnboardingDeps;
+  constructor(deps: OnboardingDeps) {
+    this.deps = deps;
+  }
 
   private scan(): Promise<Candidate[]> {
     return (this.deps.scan ?? ((roots) => scanCandidates(roots)))(

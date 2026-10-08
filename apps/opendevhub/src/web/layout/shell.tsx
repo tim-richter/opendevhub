@@ -54,12 +54,12 @@ import {
   checkouts,
   checkoutTone,
 } from "../checkouts";
-import { AddProjectDialog } from "../components/AddProjectDialog";
-import { CommandPalette } from "../components/CommandPalette";
-import { Logo } from "../components/Logo";
-import { NewTaskDialog } from "../components/NewTaskDialog";
-import { Count, StatusDot, TONE_LABEL } from "../components/Status";
-import { useDash } from "../DashboardContext";
+import { AddProjectDialog } from "../components/add-project-dialog";
+import { CommandPalette } from "../components/command-palette";
+import { Logo } from "../components/logo";
+import { NewTaskDialog } from "../components/new-task-dialog";
+import { Count, StatusDot, TONE_LABEL } from "../components/status";
+import { useDash } from "../dashboard-context";
 import {
   attentionCounts,
   matches,

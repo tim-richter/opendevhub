@@ -7,11 +7,10 @@ import { OsSecretStore } from "./secrets";
 import type { SecretStore } from "./secrets";
 
 export class IntegrationError extends Error {
-  constructor(
-    message: string,
-    readonly status: 400 | 404 | 412 | 502 = 400
-  ) {
+  readonly status: 400 | 404 | 412 | 502;
+  constructor(message: string, status: 400 | 404 | 412 | 502 = 400) {
     super(message);
+    this.status = status;
     this.name = "IntegrationError";
   }
 }
@@ -69,15 +68,24 @@ export class FileIntegrationSettings {
   private readonly file: string;
   private pending: Promise<void> = Promise.resolve();
 
+  private readonly name: string;
+  private readonly validateUrl: (raw: string) => string;
+  private readonly ErrorType: typeof IntegrationError;
+  private readonly secrets: SecretStore;
+  private readonly warn: (message: string) => void;
   constructor(
     configDir: string,
-    private readonly name: string,
-    private readonly validateUrl: (raw: string) => string,
-    private readonly ErrorType: typeof IntegrationError = IntegrationError,
-    private readonly secrets: SecretStore = new OsSecretStore(),
-    private readonly warn: (message: string) => void = (message) =>
-      console.warn(message)
+    name: string,
+    validateUrl: (raw: string) => string,
+    ErrorType: typeof IntegrationError = IntegrationError,
+    secrets: SecretStore = new OsSecretStore(),
+    warn: (message: string) => void = (message) => console.warn(message)
   ) {
+    this.name = name;
+    this.validateUrl = validateUrl;
+    this.ErrorType = ErrorType;
+    this.secrets = secrets;
+    this.warn = warn;
     this.dir = path.join(configDir, "integrations");
     this.file = path.join(this.dir, `${name.toLowerCase()}.json`);
   }

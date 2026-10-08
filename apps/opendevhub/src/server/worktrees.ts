@@ -137,14 +137,20 @@ export interface AddWorktreeArgs {
 export class Worktrees {
   private hostVersion?: Promise<[number, number] | undefined>;
 
-  constructor(
-    private readonly deps: {
-      containers: Pick<Containers, "exec">;
-      run: Runner;
-      /** false forces absolute links, for repos also opened by libgit2-based tools that reject relative ones. */
-      relativeLinks?: boolean;
-    }
-  ) {}
+  private readonly deps: {
+    containers: Pick<Containers, "exec">;
+    run: Runner;
+    /** false forces absolute links, for repos also opened by libgit2-based tools that reject relative ones. */
+    relativeLinks?: boolean;
+  };
+  constructor(deps: {
+    containers: Pick<Containers, "exec">;
+    run: Runner;
+    /** false forces absolute links, for repos also opened by libgit2-based tools that reject relative ones. */
+    relativeLinks?: boolean;
+  }) {
+    this.deps = deps;
+  }
 
   async list(
     project: Project,

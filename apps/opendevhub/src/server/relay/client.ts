@@ -7,8 +7,10 @@ export interface RelayTarget {
 }
 
 export class RelayError extends Error {
-  constructor(readonly code: string) {
+  readonly code: string;
+  constructor(code: string) {
     super(`relay: ${code}`);
+    this.code = code;
     this.name = "RelayError";
   }
 }

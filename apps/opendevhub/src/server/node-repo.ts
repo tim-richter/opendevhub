@@ -58,14 +58,20 @@ const lastLine = (r: RunResult): string =>
  * worktrees next to it. The hub's git reaches it through the node's ControlMaster.
  */
 export class NodeRepo implements NodeRepoPort {
-  constructor(
-    private readonly deps: {
-      node: NodeId;
-      host: Pick<Host, "run" | "home">;
-      target: SshTarget;
-      local: Runner;
-    }
-  ) {}
+  private readonly deps: {
+    node: NodeId;
+    host: Pick<Host, "run" | "home">;
+    target: SshTarget;
+    local: Runner;
+  };
+  constructor(deps: {
+    node: NodeId;
+    host: Pick<Host, "run" | "home">;
+    target: SshTarget;
+    local: Runner;
+  }) {
+    this.deps = deps;
+  }
 
   /** Named after the workspace folder, so links git writes relative to the node's layout resolve in containers too. */
   layout(project: Project, workspaceFolder: string): NodeRepoLayout {

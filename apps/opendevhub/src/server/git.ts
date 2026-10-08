@@ -91,9 +91,10 @@ export const hostHeadObjects = async (
 
 /** Local git work for review, run in the project's container on one checkout. Callers validate refs and paths. */
 export class GitOps {
-  constructor(
-    private readonly deps: { containers: Pick<Containers, "exec"> }
-  ) {}
+  private readonly deps: { containers: Pick<Containers, "exec"> };
+  constructor(deps: { containers: Pick<Containers, "exec"> }) {
+    this.deps = deps;
+  }
 
   /** The object id of each path at HEAD (a tree for folders, a blob for files); undefined where it doesn't exist. */
   async headObjects(

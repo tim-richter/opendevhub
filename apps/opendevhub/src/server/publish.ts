@@ -114,7 +114,10 @@ interface Location {
 }
 
 export class Publisher {
-  constructor(private readonly deps: PublisherDeps) {}
+  private readonly deps: PublisherDeps;
+  constructor(deps: PublisherDeps) {
+    this.deps = deps;
+  }
 
   /** Push from the host when the checkout works there, so your own ssh-agent and credential helpers apply. */
   async location(p: Project, checkout: Checkout): Promise<Location> {

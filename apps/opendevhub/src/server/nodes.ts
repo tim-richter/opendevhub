@@ -54,7 +54,9 @@ export class Nodes {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = false;
 
-  constructor(private readonly opts: NodesOptions) {
+  private readonly opts: NodesOptions;
+  constructor(opts: NodesOptions) {
+    this.opts = opts;
     this.local = opts.local ?? localHost();
   }
 

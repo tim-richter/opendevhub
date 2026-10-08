@@ -22,12 +22,16 @@ export class NodeKits implements NodeKitsPort {
     { conn: NodeConnectionPort; kit: NodeKit }
   >();
 
-  constructor(
-    private readonly opts: {
-      nodes: Pick<Nodes, "connection">;
-      build: (conn: NodeConnectionPort) => NodeKit;
-    }
-  ) {}
+  private readonly opts: {
+    nodes: Pick<Nodes, "connection">;
+    build: (conn: NodeConnectionPort) => NodeKit;
+  };
+  constructor(opts: {
+    nodes: Pick<Nodes, "connection">;
+    build: (conn: NodeConnectionPort) => NodeKit;
+  }) {
+    this.opts = opts;
+  }
 
   known(node: NodeId): boolean {
     return this.opts.nodes.connection(node) !== undefined;

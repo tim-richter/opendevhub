@@ -186,11 +186,18 @@ export class Forgejo {
     { at: number; pulls: Promise<RepoPull[]> }
   >();
 
+  private readonly settings: FileForgejoSettings;
+  private readonly fetcher: typeof fetch;
+  private readonly now: () => number;
   constructor(
-    private readonly settings: FileForgejoSettings,
-    private readonly fetcher: typeof fetch = fetch,
-    private readonly now: () => number = Date.now
-  ) {}
+    settings: FileForgejoSettings,
+    fetcher: typeof fetch = fetch,
+    now: () => number = Date.now
+  ) {
+    this.settings = settings;
+    this.fetcher = fetcher;
+    this.now = now;
+  }
 
   view(): Promise<ForgejoSettings> {
     return this.settings.view();

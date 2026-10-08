@@ -233,7 +233,10 @@ export class Checks {
   private readonly runs = new Map<string, CheckRun>();
   private readonly running = new Set<string>();
 
-  constructor(private readonly deps: ChecksDeps) {}
+  private readonly deps: ChecksDeps;
+  constructor(deps: ChecksDeps) {
+    this.deps = deps;
+  }
 
   private now(): number {
     return (this.deps.now ?? Date.now)();

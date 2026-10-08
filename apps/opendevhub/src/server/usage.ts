@@ -138,10 +138,11 @@ export class UsageStore {
   private readonly putSeen: StatementSync;
   private readonly addUsage: StatementSync;
 
-  private constructor(
-    private readonly db: DatabaseSync,
-    private readonly log: (message: string) => void
-  ) {
+  private readonly db: DatabaseSync;
+  private readonly log: (message: string) => void;
+  private constructor(db: DatabaseSync, log: (message: string) => void) {
+    this.db = db;
+    this.log = log;
     this.getSeen = db.prepare(
       "SELECT cost, tokens FROM seen WHERE session_id = ?"
     );

@@ -1,0 +1,17 @@
+import { lazy, Suspense } from "react";
+
+import type PatchViewComponent from "./patch-view";
+import { DiffLinesSkeleton } from "./skeletons";
+
+// @pierre/diffs and Shiki are large; load them with the first diff on screen rather than with the dashboard.
+const Loaded = lazy(
+  () => import("./patch-view")
+) as unknown as typeof PatchViewComponent;
+
+export const PatchView = <A = undefined,>(
+  props: Parameters<typeof PatchViewComponent<A>>[0]
+) => (
+  <Suspense fallback={<DiffLinesSkeleton />}>
+    <Loaded<A> {...props} />
+  </Suspense>
+);

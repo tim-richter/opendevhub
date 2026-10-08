@@ -259,7 +259,10 @@ export interface ForgeStore {
 
 /** Forges in `config.json`; remembering re-reads the file so settings changed meanwhile aren't lost. */
 export class FileForgeStore implements ForgeStore {
-  constructor(private readonly dir: string) {}
+  private readonly dir: string;
+  constructor(dir: string) {
+    this.dir = dir;
+  }
 
   all(): Record<string, ForgeEntry> {
     return loadConfig(this.dir).forges ?? {};
@@ -279,7 +282,10 @@ export interface ProjectSettingsStore {
 
 /** A project's entry in `config.json` `projects`; updating re-reads the file so settings changed meanwhile aren't lost. */
 export class FileProjectSettings implements ProjectSettingsStore {
-  constructor(private readonly dir: string) {}
+  private readonly dir: string;
+  constructor(dir: string) {
+    this.dir = dir;
+  }
 
   get(projectPath: string): Record<string, unknown> {
     const entry = loadConfig(this.dir).projects?.[projectPath];

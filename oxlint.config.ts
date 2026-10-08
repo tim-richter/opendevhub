@@ -22,8 +22,6 @@ export default defineConfig({
     "promise/prefer-await-to-then": "off",
     "promise/prefer-await-to-callbacks": "off",
     "promise/avoid-new": "off",
-    "typescript/parameter-properties": "off",
-    "unicorn/filename-case": "off",
     // Cards are focusable regions with their own shortcut keys; datalist options have no visible label.
     "jsx-a11y/no-noninteractive-tabindex": "off",
     "jsx-a11y/no-noninteractive-element-interactions": "off",

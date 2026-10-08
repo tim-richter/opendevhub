@@ -240,11 +240,14 @@ export type Spawner = (
 
 /** Starts editors on this machine; opendevhub runs where the browser does, so it can launch them directly. */
 export class EditorLauncher {
-  constructor(
-    private readonly editors: EditorDef[],
-    private readonly spawner: Spawner = spawn,
-    private readonly settleMs = 1500
-  ) {}
+  private readonly editors: EditorDef[];
+  private readonly spawner: Spawner;
+  private readonly settleMs: number;
+  constructor(editors: EditorDef[], spawner: Spawner = spawn, settleMs = 1500) {
+    this.editors = editors;
+    this.spawner = spawner;
+    this.settleMs = settleMs;
+  }
 
   list(): EditorInfo[] {
     return this.editors.map(({ id, label, target }) => ({ id, label, target }));

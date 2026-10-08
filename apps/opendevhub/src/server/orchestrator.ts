@@ -343,7 +343,10 @@ export class Orchestrator {
     { at: number; value: Promise<ModelsInfo> }
   >();
 
-  constructor(private readonly deps: OrchestratorDeps) {}
+  private readonly deps: OrchestratorDeps;
+  constructor(deps: OrchestratorDeps) {
+    this.deps = deps;
+  }
 
   async rescan(): Promise<void> {
     this.deps.store.setProjects(await this.deps.scan(this.deps.roots()));

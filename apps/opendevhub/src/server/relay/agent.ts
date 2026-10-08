@@ -77,10 +77,11 @@ export class AgentTunnel {
   private lastWarn = -Infinity;
   private status?: string;
 
-  constructor(
-    private readonly target: RelayTarget,
-    private readonly opts: AgentTunnelOptions
-  ) {
+  private readonly target: RelayTarget;
+  private readonly opts: AgentTunnelOptions;
+  constructor(target: RelayTarget, opts: AgentTunnelOptions) {
+    this.target = target;
+    this.opts = opts;
     this.delay = opts.retryMinMs ?? 1000;
   }
 

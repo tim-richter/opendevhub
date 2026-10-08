@@ -57,7 +57,9 @@ export class NodeConnection {
   private delay: number;
   private closed = false;
 
-  constructor(private readonly opts: NodeConnectionOptions) {
+  private readonly opts: NodeConnectionOptions;
+  constructor(opts: NodeConnectionOptions) {
+    this.opts = opts;
     this.target = {
       control: path.join(opts.controlDir, `${opts.node.id}.sock`),
       dest: opts.node.ssh,

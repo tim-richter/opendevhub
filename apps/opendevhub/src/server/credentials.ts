@@ -106,7 +106,10 @@ export interface CredentialsDeps {
 
 /** Git identity, known_hosts and git's ssh command in a container, from this machine's git and ssh setup. */
 export class Credentials {
-  constructor(private readonly deps: CredentialsDeps) {}
+  private readonly deps: CredentialsDeps;
+  constructor(deps: CredentialsDeps) {
+    this.deps = deps;
+  }
 
   /** Never throws: each step logs what it did, or why it couldn't. */
   async prepare(

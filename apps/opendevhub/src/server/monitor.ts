@@ -58,7 +58,10 @@ export class Monitor {
   private rerun = false;
   private readonly firstSeen = new Map<string, number>();
 
-  constructor(private readonly opts: MonitorOptions) {}
+  private readonly opts: MonitorOptions;
+  constructor(opts: MonitorOptions) {
+    this.opts = opts;
+  }
 
   start(): void {
     void this.reconcile();

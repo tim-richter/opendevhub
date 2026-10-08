@@ -53,24 +53,24 @@ import {
   updateFromBase,
 } from "../api";
 import { fixPrompt, publishWarning, STATE_LABEL } from "../checks";
-import { ChecksIcon, ChecksPanel, useChecks } from "../components/ChecksPanel";
-import { JiraSourceCard } from "../components/JiraSourceCard";
-import { Empty, muted } from "../components/Page";
-import { PublishDialog, usePublishInfo } from "../components/PublishDialog";
+import { ChecksIcon, ChecksPanel, useChecks } from "../components/checks-panel";
+import { JiraSourceCard } from "../components/jira-source-card";
+import { Empty, muted } from "../components/page";
+import { PublishDialog, usePublishInfo } from "../components/publish-dialog";
 import {
   BaseDialog,
   CommentsDialog,
   CommitDialog,
   MergeDialog,
-} from "../components/ReviewDialogs";
+} from "../components/review-dialogs";
 import {
   checkedItem,
   FilesToggle,
   LayoutToggle,
   ReviewDiffs,
-} from "../components/ReviewDiffs";
-import { ReviewSkeleton } from "../components/Skeletons";
-import { Tip } from "../components/Tip";
+} from "../components/review-diffs";
+import { ReviewSkeleton } from "../components/skeletons";
+import { Tip } from "../components/tip";
 import { workspaceFolderOf } from "../derive";
 import {
   aheadHint,
@@ -87,7 +87,7 @@ import {
   writeReviewMode,
 } from "../review";
 import type { DiffView, LineAnchor, ReviewComment } from "../review";
-import { useCheckout } from "./CheckoutPage";
+import { useCheckout } from "./checkout-page";
 
 // oxlint-disable-next-line complexity
 const ReviewTarget = ({

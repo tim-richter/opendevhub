@@ -43,7 +43,10 @@ export class Images {
   private readonly building = new Map<string, Promise<void>>();
   private readonly queues = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly deps: ImagesDeps) {}
+  private readonly deps: ImagesDeps;
+  constructor(deps: ImagesDeps) {
+    this.deps = deps;
+  }
 
   /** The image a worktree's config describes, built first when it doesn't exist yet. */
   async ensureBase(

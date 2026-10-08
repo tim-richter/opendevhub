@@ -182,7 +182,10 @@ export interface NetworkDeps {
 }
 
 export class Network {
-  constructor(private readonly deps: NetworkDeps) {}
+  private readonly deps: NetworkDeps;
+  constructor(deps: NetworkDeps) {
+    this.deps = deps;
+  }
 
   async route(
     container: RouteContainer,

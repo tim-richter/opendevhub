@@ -81,7 +81,9 @@ export class StateStore {
   private nodeViews: NodeView[] = [];
   private startingTasks = new Map<ProjectId, StartingTask[]>();
 
-  constructor(private readonly opts: StoreOptions) {
+  private readonly opts: StoreOptions;
+  constructor(opts: StoreOptions) {
+    this.opts = opts;
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
       this.runtimes.set(id, { ...defaultRuntime(id), ...saved });
     }

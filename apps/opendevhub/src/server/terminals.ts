@@ -59,12 +59,18 @@ export class Terminals {
     noServer: true,
   });
   private readonly sessions = new Map<string, Session>();
+  private readonly target: (
+    project: string,
+    directory: string
+  ) => TerminalTarget | Promise<TerminalTarget>;
   constructor(
-    private readonly target: (
+    target: (
       project: string,
       directory: string
     ) => TerminalTarget | Promise<TerminalTarget>
-  ) {}
+  ) {
+    this.target = target;
+  }
 
   upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     // Browsers must originate on the dashboard; reject cross-site shell access.

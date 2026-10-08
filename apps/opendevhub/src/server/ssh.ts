@@ -88,12 +88,21 @@ export class SshHost implements Host {
   /** Set by the NodeConnection once the node answered; empty until then. */
   home = "";
 
+  readonly id: NodeId;
+  private readonly target: SshTarget;
+  private readonly local: Runner;
+  private readonly spawn: Spawn;
   constructor(
-    readonly id: NodeId,
-    private readonly target: SshTarget,
-    private readonly local: Runner = spawnRunner,
-    private readonly spawn: Spawn = defaultSpawn
-  ) {}
+    id: NodeId,
+    target: SshTarget,
+    local: Runner = spawnRunner,
+    spawn: Spawn = defaultSpawn
+  ) {
+    this.id = id;
+    this.target = target;
+    this.local = local;
+    this.spawn = spawn;
+  }
 
   readonly run: Runner = (cmd, args, opts = {}) => {
     const { env, ...rest } = opts;

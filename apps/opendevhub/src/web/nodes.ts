@@ -1,5 +1,5 @@
 import type { NodeState, NodeStats, NodeView } from "../shared/types";
-import type { ChoiceOption } from "./components/Choice";
+import type { ChoiceOption } from "./components/choice";
 import { formatMemory } from "./resources";
 
 const LABELS: Record<NodeState, string> = {

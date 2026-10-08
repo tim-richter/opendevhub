@@ -60,11 +60,15 @@ const errorText = (error: unknown, secret?: string): string => {
 
 /** Lazy loading keeps the optional integration usable on machines without a credential store. */
 export class OsSecretStore implements SecretStore {
+  private readonly service: string;
+  private readonly log: (message: string) => void;
   constructor(
-    private readonly service = "opendevhub.forgejo",
-    private readonly log: (message: string) => void = (message) =>
-      console.warn(message)
-  ) {}
+    service = "opendevhub.forgejo",
+    log: (message: string) => void = (message) => console.warn(message)
+  ) {
+    this.service = service;
+    this.log = log;
+  }
 
   private async entry(account: string): Promise<AsyncEntry> {
     let NativeEntry: typeof AsyncEntry;

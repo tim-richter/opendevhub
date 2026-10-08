@@ -31,11 +31,10 @@ const EXEC_TIMEOUT_MS = 30_000;
 const DOCKER_TIMEOUT_MS = 15_000;
 
 export class CommandError extends Error {
-  constructor(
-    message: string,
-    readonly tail: string[] = []
-  ) {
+  readonly tail: string[];
+  constructor(message: string, tail: string[] = []) {
     super(message);
+    this.tail = tail;
     this.name = "CommandError";
   }
 }
@@ -219,7 +218,10 @@ const lastOutcome = (stdout: string): Record<string, unknown> | undefined => {
 };
 
 export class Containers {
-  constructor(private readonly run: Runner) {}
+  private readonly run: Runner;
+  constructor(run: Runner) {
+    this.run = run;
+  }
 
   private idArgs(t: ExecTarget): string[] {
     const args = ["--workspace-folder", t.path];

@@ -407,7 +407,10 @@ type DockerItem = ContainerCleanupItem | ImageCleanupItem;
 export class Cleanup {
   private applying = false;
 
-  constructor(private readonly deps: CleanupDeps) {}
+  private readonly deps: CleanupDeps;
+  constructor(deps: CleanupDeps) {
+    this.deps = deps;
+  }
 
   async scan(): Promise<CleanupPlan> {
     const scannedAt = this.now();

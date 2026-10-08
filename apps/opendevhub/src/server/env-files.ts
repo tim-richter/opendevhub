@@ -8,10 +8,12 @@ const ENV_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 
 /** The generated devcontainer.json of each task environment, one folder per environment, here or on a node. */
 export class EnvFiles {
-  constructor(
-    private readonly dir: string,
-    private readonly host?: Pick<Host, "run" | "writeFile">
-  ) {}
+  private readonly dir: string;
+  private readonly host?: Pick<Host, "run" | "writeFile">;
+  constructor(dir: string, host?: Pick<Host, "run" | "writeFile">) {
+    this.dir = dir;
+    this.host = host;
+  }
 
   path(envId: EnvId): string {
     return path.posix.join(this.folder(envId), "devcontainer.json");

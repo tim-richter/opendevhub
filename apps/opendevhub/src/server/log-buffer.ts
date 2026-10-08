@@ -19,7 +19,10 @@ export const cleanLogLine = (line: string): string => {
 export class LogBuffer {
   private buffer: string[] = [];
 
-  constructor(private readonly max = 500) {}
+  private readonly max: number;
+  constructor(max = 500) {
+    this.max = max;
+  }
 
   push(line: string): void {
     this.buffer.push(line);
