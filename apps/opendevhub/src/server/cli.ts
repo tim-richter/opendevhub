@@ -45,6 +45,7 @@ import { Orchestrator } from "./orchestrator";
 import { PortForwarder } from "./port-forwarder";
 import { preflight } from "./preflight";
 import type { ResolveTarget } from "./proxy";
+import { ensureSpawnHelperExecutable } from "./pty-helper";
 import { Publisher } from "./publish";
 import { Push } from "./push";
 import { RelayRuntime } from "./relay/runtime";
@@ -224,6 +225,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     console.log(USAGE);
     return;
   }
+  ensureSpawnHelperExecutable();
   let routeMode;
   try {
     routeMode = parseRouteMode(process.env.OPENDEVHUB_ROUTE);
