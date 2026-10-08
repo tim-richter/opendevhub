@@ -22,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
 import type { ReviewFile } from "../../shared/types";
+import { useMediaQuery } from "../hooks/use-media-query";
 import {
   annotationsFor,
   anchorFromRange,
@@ -59,6 +60,7 @@ export const FilesToggle = (props: {
       <Button
         variant="ghost"
         size="icon-sm"
+        className="max-md:hidden"
         aria-label={label}
         aria-pressed={!props.view.hideFiles}
         onClick={() => props.onChange({ hideFiles: !props.view.hideFiles })}
@@ -78,6 +80,7 @@ export const LayoutToggle = (props: {
     type="single"
     variant="outline"
     size="sm"
+    className="max-md:hidden"
     aria-label="Layout"
     value={props.view.split ? "split" : "unified"}
     onValueChange={(v) => v && props.onChange({ split: v === "split" })}
@@ -123,55 +126,73 @@ export const ReviewDiffs = (props: {
   onAdd: (file: string, anchor: LineAnchor, text: string) => void;
   onCancel: () => void;
   onDelete: (id: string) => void;
-}) => (
-  <div
-    className={cn(
-      "grid items-start gap-4",
-      !props.view.hideFiles &&
-        "md:grid-cols-[minmax(14rem,22rem)_minmax(0,1fr)]"
-    )}
-  >
-    {!props.view.hideFiles && (
-      <Card className="sticky top-16 overflow-hidden py-0 max-md:static">
-        <ChangedFilesTree
-          files={props.files}
-          onSelect={(file) => {
-            const index = props.files.findIndex((f) => f.file === file);
-            document
-              .getElementById(`review-file-${index}`)
-              ?.scrollIntoView({ block: "start" });
-          }}
-        />
-      </Card>
-    )}
-    <div className="flex min-w-0 flex-col gap-3">
-      {props.files.map((f, i) => (
-        <FileDiff
-          key={`${diffKey(f)}:${props.version ?? ""}`}
-          id={`review-file-${i}`}
-          file={f}
-          load={
-            props.load &&
-            (() => props.load?.(f.file) ?? Promise.resolve(undefined))
-          }
-          view={props.view}
-          wholeFilePatch={props.wholeFilePatches ?? false}
-          comments={props.comments}
-          notes={props.notes}
-          renderNote={props.renderNote}
-          open={props.open?.file === f.file ? props.open.anchor : undefined}
-          placeholder={props.placeholder}
-          onAnchor={
-            props.onAnchor && ((anchor) => props.onAnchor?.(f.file, anchor))
-          }
-          onAdd={props.onAdd}
-          onCancel={props.onCancel}
-          onDelete={props.onDelete}
-        />
-      ))}
+}) => {
+  const phone = useMediaQuery("(max-width: 767px)");
+  // Side-by-side diffs don't fit a phone.
+  const view = phone ? { ...props.view, split: false } : props.view;
+  const tree = (
+    <ChangedFilesTree
+      files={props.files}
+      onSelect={(file) => {
+        const index = props.files.findIndex((f) => f.file === file);
+        document
+          .getElementById(`review-file-${index}`)
+          ?.scrollIntoView({ block: "start" });
+      }}
+    />
+  );
+  return (
+    <div
+      className={cn(
+        "grid items-start gap-4",
+        !props.view.hideFiles &&
+          "md:grid-cols-[minmax(14rem,22rem)_minmax(0,1fr)]"
+      )}
+    >
+      {phone ? (
+        <Card className="overflow-hidden py-0">
+          <details>
+            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium">
+              {props.files.length} changed file
+              {props.files.length === 1 ? "" : "s"}
+            </summary>
+            <div className="border-t">{tree}</div>
+          </details>
+        </Card>
+      ) : (
+        !props.view.hideFiles && (
+          <Card className="sticky top-16 overflow-hidden py-0">{tree}</Card>
+        )
+      )}
+      <div className="flex min-w-0 flex-col gap-3">
+        {props.files.map((f, i) => (
+          <FileDiff
+            key={`${diffKey(f)}:${props.version ?? ""}`}
+            id={`review-file-${i}`}
+            file={f}
+            load={
+              props.load &&
+              (() => props.load?.(f.file) ?? Promise.resolve(undefined))
+            }
+            view={view}
+            wholeFilePatch={props.wholeFilePatches ?? false}
+            comments={props.comments}
+            notes={props.notes}
+            renderNote={props.renderNote}
+            open={props.open?.file === f.file ? props.open.anchor : undefined}
+            placeholder={props.placeholder}
+            onAnchor={
+              props.onAnchor && ((anchor) => props.onAnchor?.(f.file, anchor))
+            }
+            onAdd={props.onAdd}
+            onCancel={props.onCancel}
+            onDelete={props.onDelete}
+          />
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 class DiffBoundary extends Component<
   { patch: string; children: ReactNode },

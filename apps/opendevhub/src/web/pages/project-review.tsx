@@ -6,7 +6,6 @@ import {
   DownloadIcon,
   CircleDotIcon,
   ExternalLinkIcon,
-  FoldVerticalIcon,
   GitBranchIcon,
   GitCommitHorizontalIcon,
   GitCompareArrowsIcon,
@@ -16,7 +15,6 @@ import {
   LoaderCircleIcon,
   MessageSquareIcon,
   RefreshCwIcon,
-  UnfoldVerticalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -495,20 +493,18 @@ const ReviewTarget = ({
           >
             <Tip label="Only changes, with a few lines around them">
               <ToggleGroupItem
-                className={checkedItem}
+                className={cn(checkedItem, "px-2.5 font-normal")}
                 value="changes"
-                aria-label="Changes only"
               >
-                <FoldVerticalIcon />
+                Changes
               </ToggleGroupItem>
             </Tip>
             <Tip label="Full file">
               <ToggleGroupItem
-                className={checkedItem}
+                className={cn(checkedItem, "px-2.5 font-normal")}
                 value="full"
-                aria-label="Full file"
               >
-                <UnfoldVerticalIcon />
+                Full file
               </ToggleGroupItem>
             </Tip>
           </ToggleGroup>

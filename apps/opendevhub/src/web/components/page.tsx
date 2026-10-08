@@ -199,7 +199,8 @@ export const TabLink = (props: {
     end={props.end}
     className={({ isActive }) =>
       cn(
-        "inline-flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-sm font-medium whitespace-nowrap transition-colors",
+        // Phones drop the icons so all four checkout tabs fit.
+        "inline-flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-sm font-medium whitespace-nowrap transition-colors max-sm:[&>svg]:hidden",
         isActive
           ? "border-foreground text-foreground"
           : "text-muted-foreground hover:text-foreground border-transparent"
@@ -213,7 +214,7 @@ export const TabLink = (props: {
 export const TabBar = (props: { children: ReactNode; label?: string }) => (
   <nav
     aria-label={props.label}
-    className="-mb-2 flex gap-5 overflow-x-auto shadow-[inset_0_-1px_var(--border)]"
+    className="-mb-2 flex gap-4 overflow-x-auto shadow-[inset_0_-1px_var(--border)] sm:gap-5"
   >
     {props.children}
   </nav>
