@@ -15,7 +15,19 @@ export interface ForgejoPullQuery {
   inbox?: ForgejoInbox;
   q?: string;
   repository?: string;
+  /** Organization (or user) that owns the repositories. */
+  org?: string;
+  /** Team name within `org`: only repositories the team can access. */
+  team?: string;
   page?: number;
+}
+
+export interface ForgejoOrganizations {
+  orgs: string[];
+}
+
+export interface ForgejoTeams {
+  teams: string[];
 }
 
 export interface ForgejoPullRequest {

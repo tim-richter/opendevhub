@@ -858,6 +858,66 @@ describe("Forgejo inbox, context and connection verification", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
+  it("filters by organization and team and rejects inconsistent filters before sending a token", async () => {
+    await settings.save(configured);
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ login: "alice" }))
+      .mockResolvedValueOnce(
+        response([
+          issue(1),
+          issue(2, { repository: { full_name: "elsewhere/private" } }),
+        ])
+      );
+    const { pulls } = await new Forgejo(settings, fetcher).inbox({
+      org: "Team",
+      team: "Backend",
+    });
+    expect(pulls.map((p) => p.number)).toStrictEqual([1]);
+    const query = new URL(String(fetcher.mock.calls[1][0])).searchParams;
+    expect(query.get("owner")).toBe("Team");
+    expect(query.get("team")).toBe("Backend");
+    const calls = fetcher.mock.calls.length;
+    for (const input of [
+      { team: "Backend" },
+      { org: "../team" },
+      { org: "team", team: "a/b" },
+      { org: "other", repository: "team/private" },
+    ]) {
+      await expect(
+        new Forgejo(settings, fetcher).inbox(input)
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(calls);
+  });
+
+  it("lists organizations and teams sorted across pages", async () => {
+    await settings.save(configured);
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        response(
+          Array.from({ length: 50 }, (_, i) => ({ username: `org${i + 10}` }))
+        )
+      )
+      .mockResolvedValueOnce(response([{ username: "acme" }, {}]))
+      .mockResolvedValueOnce(response([{ name: "web" }, { name: "Owners" }]));
+    const forgejo = new Forgejo(settings, fetcher);
+    const { orgs } = await forgejo.organizations();
+    expect(orgs).toHaveLength(51);
+    expect(orgs[0]).toBe("acme");
+    expect(String(fetcher.mock.calls[1][0])).toContain("user/orgs?page=2");
+    await expect(forgejo.teams("acme")).resolves.toStrictEqual({
+      teams: ["Owners", "web"],
+    });
+    expect(String(fetcher.mock.calls[2][0])).toContain(
+      "/api/v1/orgs/acme/teams?page=1"
+    );
+    await expect(forgejo.teams("../acme")).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
   it("loads metadata independently of an oversized patch", async () => {
     await settings.save(configured);
     const sha = "a".repeat(40);

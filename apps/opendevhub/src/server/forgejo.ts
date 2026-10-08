@@ -4,6 +4,7 @@ import type {
   ForgejoComment,
   ForgejoConnection,
   ForgejoDiff,
+  ForgejoOrganizations,
   ForgejoPage,
   ForgejoPullDetails,
   ForgejoPullQuery,
@@ -14,6 +15,7 @@ import type {
   ForgejoSettings,
   ForgejoStackNode,
   ForgejoStackPull,
+  ForgejoTeams,
 } from "../shared/forgejo";
 import {
   FileIntegrationSettings,
@@ -25,6 +27,8 @@ import type { SecretStore } from "./secrets";
 
 /** Forgejo's page size for the paged lists this client reads. */
 const PAGE_SIZE = 50;
+/** Upper bound on pages read for the organization and team pickers. */
+const NAME_PAGES = 10;
 
 /**
  * Each reviewer's latest approving or change-requesting review decides their vote, as Forgejo counts them: a
@@ -439,6 +443,8 @@ export class Forgejo {
       inbox = "authored",
       q = "",
       repository = "",
+      org = "",
+      team = "",
       page = 1,
     } = input;
     if (
@@ -447,6 +453,8 @@ export class Forgejo {
       typeof q !== "string" ||
       q.length > 200 ||
       typeof repository !== "string" ||
+      typeof org !== "string" ||
+      typeof team !== "string" ||
       !Number.isSafeInteger(page) ||
       page < 1 ||
       page > 200
@@ -457,8 +465,20 @@ export class Forgejo {
     if (repository && parts.length !== 2) {
       throw new ForgejoError("Enter a repository as owner/name.");
     }
-    for (const part of parts) {
+    for (const part of [
+      ...parts,
+      ...(org ? [org] : []),
+      ...(team ? [team] : []),
+    ]) {
       segment(part);
+    }
+    if (team && !org) {
+      throw new ForgejoError("Select an organization to filter by team.");
+    }
+    if (org && repository && parts[0].toLowerCase() !== org.toLowerCase()) {
+      throw new ForgejoError(
+        `The repository ${repository} is not in the organization ${org}.`
+      );
     }
     const connection = await this.connection();
     const user = await this.json<{ login: string }>(connection, "user", signal);
@@ -497,6 +517,13 @@ export class Forgejo {
       query.set("owner", parts[0]);
       query.set("priority_repo_id", String(repo.id));
     }
+    if (org) {
+      query.set("owner", org);
+    }
+    // Forgejo resolves the team within the owner organization and limits results to the team's repositories.
+    if (team) {
+      query.set("team", team);
+    }
     const issues = await this.json<Issue[]>(
       connection,
       `repos/issues/search?${query}`,
@@ -522,8 +549,10 @@ export class Forgejo {
         throw new ForgejoError("Forgejo returned an invalid repository.", 502);
       }
       if (
-        repository &&
-        issue.repository.full_name.toLowerCase() !== repository.toLowerCase()
+        (repository &&
+          issue.repository.full_name.toLowerCase() !==
+            repository.toLowerCase()) ||
+        (org && issueParts[0].toLowerCase() !== org.toLowerCase())
       ) {
         continue;
       }
@@ -537,6 +566,54 @@ export class Forgejo {
       username: user.login,
       ...(issues.length ? { nextPage: page + 1 } : {}),
     };
+  }
+
+  /** Organizations the token's user belongs to, for the inbox's organization filter. */
+  async organizations(signal?: AbortSignal): Promise<ForgejoOrganizations> {
+    const connection = await this.connection();
+    const orgs = await this.names(connection, "user/orgs", "username", signal);
+    return { orgs };
+  }
+
+  /** Teams of an organization visible to the token's user, for the inbox's team filter. */
+  async teams(org: string, signal?: AbortSignal): Promise<ForgejoTeams> {
+    const connection = await this.connection();
+    const teams = await this.names(
+      connection,
+      `orgs/${segment(org)}/teams`,
+      "name",
+      signal
+    );
+    return { teams };
+  }
+
+  private async names(
+    connection: SavedSettings & { token: string },
+    route: string,
+    field: "name" | "username",
+    signal?: AbortSignal
+  ): Promise<string[]> {
+    const names: string[] = [];
+    for (let page = 1; page <= NAME_PAGES; page += 1) {
+      const items = await this.json<Record<string, unknown>[]>(
+        connection,
+        `${route}?page=${page}&limit=${PAGE_SIZE}`,
+        signal
+      );
+      if (!Array.isArray(items)) {
+        throw new ForgejoError("Forgejo returned an invalid list.", 502);
+      }
+      for (const item of items) {
+        const name = item?.[field];
+        if (typeof name === "string" && name) {
+          names.push(name);
+        }
+      }
+      if (items.length < PAGE_SIZE) {
+        break;
+      }
+    }
+    return names.toSorted((a, b) => a.localeCompare(b));
   }
 
   /**

@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { removeSession } from "../api";
-import { checkoutOf, checkoutPath } from "../checkouts";
 import { useDash, useNow } from "../dashboard-context";
 import { openUrlOf, relativeTime, worktreeLabel } from "../derive";
 import type { SessionEntry } from "../derive";
@@ -24,8 +23,6 @@ export const SessionRow = (props: {
   /** Set when the session works in a worktree rather than the main checkout. */
   worktree?: string;
   highlighted?: boolean;
-  /** Link to this session's checkout in the Review tab. */
-  reviewTo?: string;
   task?: { label: string; title: string; to?: string; model?: string };
   now: number;
 }) => {
@@ -111,15 +108,6 @@ export const SessionRow = (props: {
         {relativeTime(session.updatedAt, now)}
       </time>
       <span className="inline-flex items-center gap-2.5 justify-self-end">
-        {props.reviewTo && (
-          <Link
-            className="text-muted-foreground hover:text-foreground text-sm"
-            to={props.reviewTo}
-            title="Review this checkout's changes"
-          >
-            Review
-          </Link>
-        )}
         <a
           className={cn(
             "inline-flex items-center gap-1 text-sm font-medium whitespace-nowrap hover:underline",
@@ -174,10 +162,6 @@ export const SessionList = (props: {
                 : worktreeLabel(view, session.directory)
             }
             highlighted={session.id === props.highlight}
-            reviewTo={(() => {
-              const c = checkoutOf(view, session.directory);
-              return c && checkoutPath(view.project.id, c.target, "review");
-            })()}
             task={taskChip(view, session)}
             now={now}
           />

@@ -672,7 +672,7 @@ describe("dashboard API", () => {
       (await app.request("/api/forgejo/pulls/team/demo/7/patch")).json()
     ).resolves.toStrictEqual({ patch: "test diff" });
     await app.request(
-      "/api/forgejo/pulls?state=open&inbox=assigned&page=2&q=fix&repository=team%2Fdemo"
+      "/api/forgejo/pulls?state=open&inbox=assigned&page=2&q=fix&repository=team%2Fdemo&org=team&team=web"
     );
     expect(forgejo.inbox).toHaveBeenLastCalledWith(
       {
@@ -681,6 +681,8 @@ describe("dashboard API", () => {
         page: 2,
         q: "fix",
         repository: "team/demo",
+        org: "team",
+        team: "web",
       },
       expect.any(AbortSignal)
     );

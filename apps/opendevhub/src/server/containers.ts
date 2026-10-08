@@ -238,6 +238,8 @@ export class Containers {
     target: ExecTarget,
     opts: {
       rebuild: boolean;
+      /** Builds the image without Docker's layer cache. */
+      noCache?: boolean;
       onLine: (line: string) => void;
       mounts?: string[];
     }
@@ -245,6 +247,9 @@ export class Containers {
     const args = ["up", ...this.idArgs(target)];
     if (opts.rebuild) {
       args.push("--remove-existing-container");
+    }
+    if (opts.noCache) {
+      args.push("--build-no-cache");
     }
     // Only applied when the container is created; an existing container keeps its mounts.
     for (const m of opts.mounts ?? []) {
@@ -409,7 +414,8 @@ export class Containers {
     folder: string,
     imageName: string,
     onLine: (line: string) => void,
-    labels: string[] = []
+    labels: string[] = [],
+    noCache = false
   ): Promise<void> {
     const args = [
       "build",
@@ -418,6 +424,9 @@ export class Containers {
       "--image-name",
       imageName,
     ];
+    if (noCache) {
+      args.push("--no-cache");
+    }
     for (const label of labels) {
       args.push("--label", label);
     }
@@ -593,7 +602,8 @@ export class Containers {
       return env;
     };
     const [viaCli, viaDocker] = await Promise.all([
-      this.exec(target, ["env", "-0"]),
+      // Through `sh -c`: the devcontainer CLI's argument parser mangles a bare `-0` into `0`, even after `--`.
+      this.exec(target, ["sh", "-c", "exec env -0"]),
       this.run(
         "docker",
         ["exec", ...(user ? ["-u", user] : []), containerId, "env", "-0"],

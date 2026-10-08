@@ -9,10 +9,12 @@ import type {
   ForgejoPullDetails,
   ForgejoPullFilter,
   ForgejoPullQuery,
+  ForgejoOrganizations,
   ForgejoPulls,
   ForgejoReview,
   ForgejoSettings,
   ForgejoSettingsInput,
+  ForgejoTeams,
 } from "../shared/forgejo";
 import type {
   JiraSettings,
@@ -50,7 +52,12 @@ import type {
   Worktree,
 } from "../shared/types";
 
-export type Action = "start" | "stop" | "rebuild" | "restart-opencode";
+export type Action =
+  | "start"
+  | "stop"
+  | "rebuild"
+  | "rebuild-no-cache"
+  | "restart-opencode";
 
 const failure = async (res: Response, what: string): Promise<Error> => {
   const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -92,6 +99,14 @@ export const fetchForgejoPulls = (
   }
   return forgejoGet(`pulls?${query}`, signal);
 };
+export const fetchForgejoOrganizations = (
+  signal?: AbortSignal
+): Promise<ForgejoOrganizations> => forgejoGet("orgs", signal);
+export const fetchForgejoTeams = (
+  org: string,
+  signal?: AbortSignal
+): Promise<ForgejoTeams> =>
+  forgejoGet(`orgs/${encodeURIComponent(org)}/teams`, signal);
 
 const forgejoPullRoute = (owner: string, repo: string, number: string) =>
   `pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}`;
@@ -646,7 +661,7 @@ export const createEnv = (
 export const envAction = async (
   projectId: string,
   envId: string,
-  action: "start" | "stop" | "rebuild" | "restart-opencode"
+  action: Action
 ): Promise<void> => {
   const res = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/envs/${encodeURIComponent(envId)}/${action}`,

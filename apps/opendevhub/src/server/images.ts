@@ -48,12 +48,13 @@ export class Images {
     this.deps = deps;
   }
 
-  /** The image a worktree's config describes, built first when it doesn't exist yet. */
+  /** The image a worktree's config describes, built first when it doesn't exist yet — or always, without cache, with `noCache`. */
   async ensureBase(
     project: Project,
     worktree: EnvWorktree,
     keyFiles: string[],
-    onLine: (line: string) => void
+    onLine: (line: string) => void,
+    noCache = false
   ): Promise<{ key: string; ref: string }> {
     const [cliVersion, objects] = await Promise.all([
       this.cliVersion(),
@@ -64,7 +65,7 @@ export class Images {
     let pending = this.building.get(ref);
     if (!pending) {
       pending = this.enqueue(project.id, () =>
-        this.buildIfMissing(ref, worktree.hostPath, project.id, onLine)
+        this.buildIfMissing(ref, worktree.hostPath, project.id, onLine, noCache)
       ).finally(() => this.building.delete(ref));
       this.building.set(ref, pending);
     }
@@ -91,15 +92,20 @@ export class Images {
     ref: string,
     folder: string,
     projectId: string,
-    onLine: (line: string) => void
+    onLine: (line: string) => void,
+    noCache: boolean
   ): Promise<void> {
-    if (await this.deps.containers.imageExists(ref)) {
+    if (!noCache && (await this.deps.containers.imageExists(ref))) {
       return;
     }
-    onLine(`image: building ${ref}`);
-    await this.deps.containers.build(folder, ref, onLine, [
-      `${BASE_PROJECT_LABEL}=${projectId}`,
-    ]);
+    onLine(`image: building ${ref}${noCache ? " without cache" : ""}`);
+    await this.deps.containers.build(
+      folder,
+      ref,
+      onLine,
+      [`${BASE_PROJECT_LABEL}=${projectId}`],
+      noCache
+    );
     onLine(`image: built ${ref}`);
   }
 

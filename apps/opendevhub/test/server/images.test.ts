@@ -36,7 +36,8 @@ function setup(list: (string | undefined)[] = ["tree1", undefined]) {
         folder: string,
         ref: string,
         _onLine: (l: string) => void,
-        _labels?: string[]
+        _labels?: string[],
+        _noCache?: boolean
       ) => {
         const done = deferred();
         builds.push({ folder, ref, done });
@@ -156,6 +157,17 @@ describe("Images.ensureBase", () => {
     containers.imageExists.mockResolvedValue(true);
     await images.ensureBase(project, wt("a"), [], () => {});
     expect(containers.build).not.toHaveBeenCalled();
+  });
+
+  it("builds again without cache when asked, even when the image exists", async () => {
+    const { images, containers, builds } = setup();
+    containers.imageExists.mockResolvedValue(true);
+    const pending = images.ensureBase(project, wt("a"), [], () => {}, true);
+    await tick();
+    expect(containers.build).toHaveBeenCalledOnce();
+    expect(containers.build.mock.calls[0][4]).toBe(true);
+    builds[0].done.resolve();
+    await pending;
   });
 
   it("builds one image at a time per project, and other projects in parallel", async () => {

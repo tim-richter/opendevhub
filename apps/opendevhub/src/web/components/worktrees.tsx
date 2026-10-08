@@ -31,6 +31,7 @@ import {
   removeWorktree,
   startSession,
 } from "../api";
+import type { Action } from "../api";
 import { checkoutPath } from "../checkouts";
 import type { Checkout } from "../checkouts";
 import { useDash } from "../dashboard-context";
@@ -93,10 +94,8 @@ export const useCheckoutActions = (view: ProjectView) => {
 
   const ownContainer = (c: Checkout) =>
     busy(`env:${c.directory}`, () => createEnv(view.project.id, c.directory));
-  const containerAction = (
-    env: EnvironmentView,
-    action: "start" | "stop" | "rebuild" | "restart-opencode"
-  ) => busy(`env:${env.id}`, () => envAction(view.project.id, env.id, action));
+  const containerAction = (env: EnvironmentView, action: Action) =>
+    busy(`env:${env.id}`, () => envAction(view.project.id, env.id, action));
   const removeContainer = (env: EnvironmentView, label: string) => {
     const text = env.node
       ? `Remove ${label} from ${env.node}? Its container, worktree and branch there are deleted; bring the branch home first to keep its commits.`
@@ -177,6 +176,20 @@ const MainContainerMenu = ({
           Rebuild container
         </DropdownMenuItem>
         <DropdownMenuItem
+          disabled={locked}
+          onSelect={() => {
+            if (
+              confirm(
+                `Rebuild the container of ${c.label} without cache? Every image layer is built again, which can take a while. Running sessions will be interrupted.`
+              )
+            ) {
+              act(id, "rebuild-no-cache");
+            }
+          }}
+        >
+          Rebuild without cache
+        </DropdownMenuItem>
+        <DropdownMenuItem
           disabled={locked || !running}
           onSelect={() => act(id, "restart-opencode")}
         >
@@ -249,6 +262,20 @@ export const ContainerMenu = ({
               }}
             >
               Rebuild container
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={settling}
+              onSelect={() => {
+                if (
+                  confirm(
+                    `Rebuild the container of ${c.label} without cache? Every image layer is built again, which can take a while. Running sessions will be interrupted.`
+                  )
+                ) {
+                  containerAction(env, "rebuild-no-cache");
+                }
+              }}
+            >
+              Rebuild without cache
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={settling || state !== "running"}

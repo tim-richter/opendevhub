@@ -370,11 +370,12 @@ export class Orchestrator {
     return this.exclusive(id, (p) => this.bringUp(p, false));
   }
 
-  rebuild(id: ProjectId): Promise<void> {
+  /** Recreates the project's container; `noCache` also rebuilds its image without Docker's layer cache. */
+  rebuild(id: ProjectId, noCache = false): Promise<void> {
     return this.exclusive(id, async (p) => {
       this.stopMonitor(p.id);
       await this.closePorts(p.id);
-      await this.bringUp(p, true);
+      await this.bringUp(p, true, noCache);
     });
   }
 
@@ -455,14 +456,21 @@ export class Orchestrator {
     return this.exclusiveEnv(env, () => this.stopContainer(env));
   }
 
-  /** Recreates a worktree's container from its devcontainer config; running sessions are interrupted. */
-  rebuildEnv(projectId: ProjectId, envId: EnvId): Promise<void> {
+  /**
+   * Recreates a worktree's container from its devcontainer config; running sessions are interrupted.
+   * `noCache` also rebuilds its images without Docker's layer cache.
+   */
+  rebuildEnv(
+    projectId: ProjectId,
+    envId: EnvId,
+    noCache = false
+  ): Promise<void> {
     const env = this.requireTaskEnv(projectId, envId);
     this.kit(env);
     return this.exclusiveEnv(env, async () => {
       this.stopMonitor(env.id);
       await this.closePorts(env.id);
-      await this.bringUpTask(env, true);
+      await this.bringUpTask(env, true, noCache);
     });
   }
 
@@ -2522,7 +2530,11 @@ export class Orchestrator {
    * Starts a task container: the base image for the worktree's config, the override config, `up`, then
    * route, relay, ports and opencode as for the main container. Records the error and rethrows it.
    */
-  private async bringUpTask(env: TaskEnv, rebuild = false): Promise<void> {
+  private async bringUpTask(
+    env: TaskEnv,
+    rebuild = false,
+    noCache = false
+  ): Promise<void> {
     const { store } = this.deps;
     const kit = this.kit(env);
     const { containers } = kit;
@@ -2551,7 +2563,8 @@ export class Orchestrator {
         env.project,
         env.worktree,
         this.settingsOf(env.project).keyFiles,
-        (l) => this.envLog(env, l)
+        (l) => this.envLog(env, l),
+        noCache
       );
       const read = await containers.readConfig(env.worktree.hostPath);
       const blocker = isolationBlocker(
@@ -2577,7 +2590,7 @@ export class Orchestrator {
         store.putEnvironment({ ...rec, image });
       }
       this.setupStep(env, "container");
-      const up = await this.upTask(env, rebuild);
+      const up = await this.upTask(env, rebuild, noCache);
       store.updateRuntime(env.id, { containerId: up.containerId });
       const info = await containers.inspect(up.containerId);
       if (!info?.running) {
@@ -2619,13 +2632,15 @@ export class Orchestrator {
 
   private upTask(
     env: TaskEnv,
-    rebuild: boolean
+    rebuild: boolean,
+    noCache: boolean
   ): ReturnType<ContainersPort["up"]> {
     const { containers } = this.kit(env);
     const next = (this.taskUps.get(env.node) ?? Promise.resolve()).then(
       async () =>
         containers.up(env.target, {
           mounts: await this.opencodeMounts(env),
+          noCache,
           onLine: (l) => this.envLog(env, l),
           rebuild,
         })
@@ -2713,7 +2728,11 @@ export class Orchestrator {
     this.envLog(env, "environment: removed");
   }
 
-  private async bringUp(project: Project, rebuild: boolean): Promise<void> {
+  private async bringUp(
+    project: Project,
+    rebuild: boolean,
+    noCache = false
+  ): Promise<void> {
     const { store, containers } = this.deps;
     const env = this.mainEnv(project);
     store.updateRuntime(env.id, {
@@ -2728,6 +2747,7 @@ export class Orchestrator {
       ];
       const up = await containers.up(project, {
         mounts,
+        noCache,
         onLine: (l) => this.log(project.id, l),
         rebuild,
       });

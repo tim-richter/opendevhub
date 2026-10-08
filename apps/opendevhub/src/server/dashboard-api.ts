@@ -120,7 +120,7 @@ export interface DashboardDeps {
     | "checks"
     | "test"
   > &
-    Partial<Pick<Forgejo, "review">>;
+    Partial<Pick<Forgejo, "review" | "organizations" | "teams">>;
   jira?: Pick<Jira, "view" | "save" | "tickets" | "ticket">;
   webDir?: string;
 }
@@ -266,13 +266,33 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
         {
           inbox: (c.req.query("inbox") ?? "authored") as ForgejoInbox,
           page: Number(c.req.query("page") ?? 1),
+          org: c.req.query("org"),
           q: c.req.query("q"),
           repository: c.req.query("repository"),
+          team: c.req.query("team"),
           state: (c.req.query("state") ?? "all") as ForgejoPullFilter,
         },
         c.req.raw.signal
       )
     )
+  );
+  app.get("/api/forgejo/orgs", (c) =>
+    json(c, () => {
+      const forgejo = requireForgejo();
+      if (!forgejo.organizations) {
+        throw new UnavailableError("Forgejo organizations are not available");
+      }
+      return forgejo.organizations(c.req.raw.signal);
+    })
+  );
+  app.get("/api/forgejo/orgs/:org/teams", (c) =>
+    json(c, () => {
+      const forgejo = requireForgejo();
+      if (!forgejo.teams) {
+        throw new UnavailableError("Forgejo teams are not available");
+      }
+      return forgejo.teams(c.req.param("org"), c.req.raw.signal);
+    })
   );
   app.post("/api/forgejo/pulls/:owner/:repo/:number/reviews", (c) =>
     json(c, (_id, b) => {
@@ -560,6 +580,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
 
   const actions = {
     rebuild: (id: string) => orchestrator.rebuild(id),
+    "rebuild-no-cache": (id: string) => orchestrator.rebuild(id, true),
     "restart-opencode": (id: string) => orchestrator.restartOpencode(id),
     start: (id: string) => orchestrator.start(id),
     stop: (id: string) => orchestrator.stop(id),
@@ -616,6 +637,8 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
   const envActions = {
     rebuild: (id: string, envId: string) => orchestrator.rebuildEnv(id, envId),
+    "rebuild-no-cache": (id: string, envId: string) =>
+      orchestrator.rebuildEnv(id, envId, true),
     "restart-opencode": (id: string, envId: string) =>
       orchestrator.restartEnvOpencode(id, envId),
     start: (id: string, envId: string) => orchestrator.startEnv(id, envId),

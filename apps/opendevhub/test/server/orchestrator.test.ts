@@ -854,6 +854,18 @@ describe(Orchestrator, () => {
     expect(containers.removeVolume).not.toHaveBeenCalled();
   });
 
+  it("rebuilds without cache when asked", async () => {
+    const { containers, orch } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    await orch.rebuild(project.id, true);
+    expect(containers.up.mock.calls[0][1]).toMatchObject({ noCache: false });
+    expect(containers.up.mock.calls[1][1]).toMatchObject({
+      noCache: true,
+      rebuild: true,
+    });
+  });
+
   it("throws synchronously for unknown projects and concurrent actions", async () => {
     const { orch } = setup();
     await orch.rescan();
@@ -4423,7 +4435,8 @@ describe("environments on another node", () => {
       project,
       remoteFix,
       [],
-      expect.any(Function)
+      expect.any(Function),
+      false
     );
     expect(images.ensureBase).not.toHaveBeenCalled();
     expect(box.kit.containers.readConfig).toHaveBeenCalledWith(

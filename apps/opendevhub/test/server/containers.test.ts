@@ -124,6 +124,16 @@ describe(Containers, () => {
     expect(calls[0].args).toContain("--remove-existing-container");
   });
 
+  it("up without cache builds the image without the layer cache", async () => {
+    const { run, calls } = fakeRunner(() => ({ stdout: okUp }));
+    await new Containers(run).up(project, {
+      noCache: true,
+      onLine: () => {},
+      rebuild: true,
+    });
+    expect(calls[0].args).toContain("--build-no-cache");
+  });
+
   it("inspect parses state, ip and label; undefined on failure", async () => {
     const ok = fakeRunner(() => ({ stdout: `${inspectJson}\n` }));
     await expect(

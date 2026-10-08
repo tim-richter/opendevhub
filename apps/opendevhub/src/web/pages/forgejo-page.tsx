@@ -37,8 +37,11 @@ import type {
 import {
   fetchForgejoDetails,
   fetchForgejoDiff,
+  fetchForgejoOrganizations,
   fetchForgejoPulls,
+  fetchForgejoTeams,
 } from "../api";
+import { Choice } from "../components/choice";
 import {
   AiReviewPanel,
   AiSuggestionCard,
@@ -725,6 +728,67 @@ const PullView = ({
   );
 };
 
+const ALL = "";
+/** Keeps a filter from the URL selectable while its list is loading or doesn't include it. */
+const withCurrent = (names: string[] | undefined, current: string) =>
+  current && !names?.includes(current)
+    ? [current, ...(names ?? [])]
+    : (names ?? []);
+
+const OrgTeamFilter = ({
+  org,
+  team,
+  onChange,
+}: {
+  org: string;
+  team: string;
+  onChange: (org: string, team: string) => void;
+}) => {
+  const orgs = useForgejoQuery(["orgs"], fetchForgejoOrganizations);
+  const teams = useForgejoQuery(
+    ["teams", org],
+    (signal) => fetchForgejoTeams(org, signal),
+    !!org
+  );
+  return (
+    <>
+      <Choice
+        className="w-full sm:w-48"
+        label="Organization filter"
+        value={org}
+        disabled={orgs.isError && !org}
+        onChange={(value) => onChange(value, ALL)}
+        options={[
+          { label: "All organizations", value: ALL },
+          ...withCurrent(orgs.data?.orgs, org).map((name) => ({
+            label: name,
+            value: name,
+          })),
+        ]}
+      />
+      {org && (
+        <Choice
+          className="w-full sm:w-48"
+          label="Team filter"
+          value={team}
+          disabled={teams.isError && !team}
+          onChange={(value) => onChange(org, value)}
+          options={[
+            {
+              label: teams.isError ? "Teams unavailable" : "All teams",
+              value: ALL,
+            },
+            ...withCurrent(teams.data?.teams, team).map((name) => ({
+              label: name,
+              value: name,
+            })),
+          ]}
+        />
+      )}
+    </>
+  );
+};
+
 // oxlint-disable-next-line complexity
 export const ForgejoPage = () => {
   const { forgejo } = useDash();
@@ -751,6 +815,8 @@ export const ForgejoPage = () => {
   }
   const q = filters.get("q") ?? "";
   const repository = filters.get("repository") ?? "";
+  const org = filters.get("org") ?? "";
+  const team = org ? (filters.get("team") ?? "") : "";
   const [queryInput, setQueryInput] = useState(q);
   const [repoInput, setRepoInput] = useState(repository);
   const change = (key: string, value: string) => {
@@ -781,6 +847,8 @@ export const ForgejoPage = () => {
     state,
     ...(q ? { q } : {}),
     ...(repository ? { repository } : {}),
+    ...(org ? { org } : {}),
+    ...(team ? { team } : {}),
   }).toString();
   useEffect(() => {
     saveForgejoPreference("inbox", listSearch);
@@ -791,14 +859,14 @@ export const ForgejoPage = () => {
     initialPageParam: 1,
     queryFn: ({ pageParam, signal }) =>
       fetchForgejoPulls(
-        { inbox, page: pageParam, q, repository, state },
+        { inbox, org, page: pageParam, q, repository, state, team },
         signal
       ),
     queryKey: [
       "forgejo",
       forgejo?.url,
       "inbox",
-      { inbox, q, repository, state },
+      { inbox, org, q, repository, state, team },
     ],
   });
   const pulls = [
@@ -860,6 +928,16 @@ export const ForgejoPage = () => {
             placeholder="Repository: owner/name"
             value={repoInput}
             onChange={(e) => setRepoInput(e.target.value)}
+          />
+          <OrgTeamFilter
+            org={org}
+            team={team}
+            onChange={(nextOrg, nextTeam) => {
+              const next = new URLSearchParams(filters);
+              next.set("org", nextOrg);
+              next.set("team", nextTeam);
+              setSearch(next, { replace: true });
+            }}
           />
         </div>
         <RequestState query={query} />
