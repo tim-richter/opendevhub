@@ -202,20 +202,25 @@ describe("protected Forgejo settings", () => {
     );
   });
 
-  it("reports failed deletion and retains the old settings for retry", async () => {
+  it("still clears or replaces a token when the old credential cannot be deleted", async () => {
     await settings.save(configured);
-    const previous = fs.readFileSync(
-      path.join(dir, "integrations/forgejo.json"),
-      "utf-8"
+    const [oldRef] = [...secrets.values.keys()];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(secrets, "get").mockRejectedValue(new CredentialStoreError());
+    vi.spyOn(secrets, "remove").mockRejectedValue(
+      new CredentialStoreError("denied")
     );
-    vi.spyOn(secrets, "remove").mockRejectedValue(new CredentialStoreError());
+    await expect(
+      settings.save({ ...configured, token: "replacement" })
+    ).resolves.toMatchObject({ hasToken: true });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(oldRef));
     await expect(
       settings.save({ enabled: false, url: configured.url, clearToken: true })
-    ).rejects.toThrow("OS credential store");
+    ).resolves.toMatchObject({ hasToken: false });
     expect(
       fs.readFileSync(path.join(dir, "integrations/forgejo.json"), "utf-8")
-    ).toBe(previous);
-    expect((await settings.read()).token).toBe(configured.token);
+    ).not.toContain("tokenRef");
+    warn.mockRestore();
   });
 
   it("restores the previous credential if the settings file cannot be committed", async () => {
