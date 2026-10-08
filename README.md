@@ -139,7 +139,17 @@ A worktree can run in its own devcontainer, with its own opencode, processes, po
   or, for a repo you don't own, in `~/.config/opendevhub/config.json`: `"projects": { "/path/to/repo": { "isolation": "isolated" } }`.
 
 - Git commands (review, commit, merge, worktree add and remove) still run in the project's container, which has to be running.
-- Removing a worktree's container deletes the sessions that ran in it; the worktree and its files stay.
+- Removing a worktree's container deletes the sessions that ran in it (and their volume, see [Sessions survive rebuilds](#sessions-survive-rebuilds)); the worktree and its files stay.
+
+## Sessions survive rebuilds
+
+Every container opendevhub creates (the project's and each worktree's own) gets a Docker volume, `opendevhub-opencode-<environment>`, mounted at `/opendevhub/opencode`. Before it starts `opencode serve`, opendevhub links opencode's data folder (`${XDG_DATA_HOME:-~/.local/share}/opencode`: sessions, messages, provider logins) and state folder (`${XDG_STATE_HOME:-~/.local/state}/opencode`) to it, so **Rebuild** and a changed devcontainer config keep your conversations.
+
+- A fresh volume belongs to root; opendevhub gives it to the container user once (`docker exec -u root … chown`).
+- Data a container already has moves onto an empty volume. When the volume already holds data, it wins and the container's copy is kept next to it as `opencode.before-opendevhub.<time>`.
+- If your devcontainer already mounts one of these folders (or a folder above it, like a home volume), opendevhub leaves it alone.
+- Removing a worktree's own container removes its volume. The project's volume stays until you remove it: `docker volume rm opendevhub-opencode-<project id>` (with the container stopped) starts opencode from scratch.
+- Containers created before this feature have no volume: their sessions are lost on the next rebuild, which adds it.
 
 ## Git and ssh in containers
 

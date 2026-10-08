@@ -505,6 +505,41 @@ export class Containers {
     return r.exitCode === 0;
   }
 
+  /** Creates a named volume unless it exists (labels only apply on creation). Best effort: `up` creates it anyway. */
+  async ensureVolume(name: string, labels: string[] = []): Promise<boolean> {
+    const args = ["volume", "create"];
+    for (const label of labels) {
+      args.push("--label", label);
+    }
+    const r = await this.run("docker", [...args, name], {
+      timeoutMs: DOCKER_TIMEOUT_MS,
+    });
+    return r.exitCode === 0;
+  }
+
+  /** Best effort: false when the volume is in use or gone. */
+  async removeVolume(name: string): Promise<boolean> {
+    const r = await this.run("docker", ["volume", "rm", name], {
+      timeoutMs: 30_000,
+    });
+    return r.exitCode === 0;
+  }
+
+  /** Runs a command as root, for the few setup steps the remote user can't do (chown a fresh volume). */
+  execAsRoot(
+    containerId: string,
+    command: string[],
+    opts: { env?: Record<string, string> } = {}
+  ): Promise<RunResult> {
+    const args = ["exec", "-u", "root"];
+    for (const [k, v] of Object.entries(opts.env ?? {})) {
+      args.push("-e", `${k}=${v}`);
+    }
+    return this.run("docker", [...args, containerId, ...command], {
+      timeoutMs: EXEC_TIMEOUT_MS,
+    });
+  }
+
   async stop(containerId: string): Promise<void> {
     const r = await this.run("docker", ["stop", "-t", "10", containerId], {
       timeoutMs: 30_000,
