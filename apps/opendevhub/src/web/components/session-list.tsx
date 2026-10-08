@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { removeSession } from "../api";
+import { checkoutOf, checkoutPath } from "../checkouts";
 import { useDash } from "../dashboard-context";
 import { openUrlOf, worktreeLabel } from "../derive";
 import type { SessionEntry } from "../derive";
@@ -34,6 +35,8 @@ export const SessionRow = (props: {
   project?: { id: string; name: string };
   /** Set when the session works in a worktree rather than the main checkout. */
   worktree?: string;
+  /** The checkout's page, which the worktree chip links to. */
+  worktreeTo?: string;
   highlighted?: boolean;
   task?: { label: string; title: string; to?: string; model?: string };
 }) => {
@@ -104,16 +107,26 @@ export const SessionRow = (props: {
                 </Chip>
               ))}
             {props.task?.model && <Chip>{props.task.model}</Chip>}
-            {worktree && (
-              <Chip title={`Worktree ${worktree}`}>
-                <GitBranchIcon /> {worktree}
-              </Chip>
-            )}
+            {worktree &&
+              (props.worktreeTo ? (
+                <Chip
+                  asChild
+                  className="hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Link to={props.worktreeTo} title={`Open ${worktree}`}>
+                    <GitBranchIcon /> {worktree}
+                  </Link>
+                </Chip>
+              ) : (
+                <Chip title={`Worktree ${worktree}`}>
+                  <GitBranchIcon /> {worktree}
+                </Chip>
+              ))}
           </span>
         )}
       </div>
       {/* On phones the badge, project and time share one line under the title. */}
-      <span className="flex min-w-0 items-center gap-2.5 md:hidden">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 md:hidden">
         <SessionBadge status={session.status} />
         {projectLink}
         <When
@@ -162,12 +175,22 @@ export const SessionRow = (props: {
   );
 };
 
+const checkoutTo = (
+  view: SessionEntry["view"],
+  directory: string
+): string | undefined => {
+  const c = checkoutOf(view, directory);
+  return c ? checkoutPath(view.project.id, c.target) : undefined;
+};
+
 export const SessionList = (props: {
   entries: SessionEntry[];
   showProject?: boolean;
   highlight?: string;
   /** Inside a checkout's own page, where the worktree chip says nothing new. */
   hideWorktree?: boolean;
+  /** Name the main checkout too, for lists that mix it with worktrees. */
+  showMain?: boolean;
 }) => (
   <ul>
     {props.entries.map(({ session, view }) => (
@@ -183,8 +206,10 @@ export const SessionList = (props: {
           worktree={
             props.hideWorktree
               ? undefined
-              : worktreeLabel(view, session.directory)
+              : (worktreeLabel(view, session.directory) ??
+                (props.showMain ? "main" : undefined))
           }
+          worktreeTo={checkoutTo(view, session.directory)}
           highlighted={session.id === props.highlight}
           task={taskChip(view, session)}
         />
