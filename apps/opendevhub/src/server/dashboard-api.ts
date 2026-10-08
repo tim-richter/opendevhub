@@ -5,8 +5,20 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 
-import type { ForgejoInbox, ForgejoPullFilter } from "../shared/forgejo";
+import type {
+  AiReviewResult,
+  ForgejoInbox,
+  ForgejoPullFilter,
+} from "../shared/forgejo";
 import type { AddProjectResult, LogEvent } from "../shared/types";
+import {
+  AI_REVIEW_TIMEOUT_MS,
+  aiFindingsPrompt,
+  aiQuickReviewPrompt,
+  aiReviewPrompt,
+  aiReviewTitle,
+  parseAiReview,
+} from "./ai-review";
 import type { Checks } from "./checks";
 import { parseCleanupItems } from "./cleanup";
 import type { Cleanup } from "./cleanup";
@@ -48,6 +60,7 @@ export type DashboardOrchestrator = Pick<
   | "createWorktree"
   | "removeWorktree"
   | "startSession"
+  | "generateIn"
   | "openInEditor"
   | "replyPermission"
   | "replyForm"
@@ -273,6 +286,69 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
         param(c, "number"),
         b
       );
+    })
+  );
+  /** The pull request at the head commit the page shows; a moved head means the page is out of date. */
+  const pullAt = async (c: Context, commitId: unknown) => {
+    const details = await requireForgejo().details(
+      param(c, "owner"),
+      param(c, "repo"),
+      param(c, "number")
+    );
+    if (!details.headSha || details.headSha !== commitId) {
+      throw new ForgejoError(
+        "The PR changed. Refresh it before starting an AI review."
+      );
+    }
+    return details;
+  };
+  app.post("/api/forgejo/pulls/:owner/:repo/:number/ai-review/session", (c) =>
+    json(c, async (_id, b) => {
+      const details = await pullAt(c, b.commitId);
+      return {
+        sessionId: await orchestrator.startSession(
+          str(b.projectId) ?? "",
+          str(b.directory) ?? "",
+          aiReviewTitle(details),
+          aiReviewPrompt(details)
+        ),
+      };
+    })
+  );
+  app.post("/api/forgejo/pulls/:owner/:repo/:number/ai-review", (c) =>
+    json(c, async (_id, b): Promise<AiReviewResult> => {
+      const details = await pullAt(c, b.commitId);
+      const sessionId = str(b.sessionId);
+      let prompt = aiFindingsPrompt();
+      if (!sessionId) {
+        const diff = await requireForgejo().patch(
+          param(c, "owner"),
+          param(c, "repo"),
+          param(c, "number")
+        );
+        prompt = aiQuickReviewPrompt(details, diff.patch);
+      }
+      const generated = await orchestrator.generateIn(
+        str(b.projectId) ?? "",
+        str(b.directory) ?? "",
+        prompt,
+        {
+          sessionId,
+          timeoutMs: AI_REVIEW_TIMEOUT_MS,
+          title: aiReviewTitle(details),
+        }
+      );
+      try {
+        return {
+          sessionId: generated.sessionId,
+          ...parseAiReview(generated.text),
+        };
+      } catch (error) {
+        throw new ForgejoError(
+          error instanceof Error ? error.message : String(error),
+          502
+        );
+      }
     })
   );
   app.post("/api/forgejo/pulls/:owner/:repo/:number/worktree", (c) =>

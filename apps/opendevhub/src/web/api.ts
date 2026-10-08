@@ -1,4 +1,5 @@
 import type {
+  AiReviewResult,
   ForgejoApprovals,
   ForgejoReviewInput,
   ForgejoChecks,
@@ -783,6 +784,50 @@ export const createForgejoWorktree = async (
   );
   if (!res.ok) {
     throw await failure(res, "create PR worktree");
+  }
+  return res.json();
+};
+
+const aiReviewRoute = (owner: string, repo: string, number: string) =>
+  `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}/ai-review`;
+
+/** Starts a session that reviews the pull request in a checkout of it; collect its findings once it is idle. */
+export const startAiReviewSession = async (
+  owner: string,
+  repo: string,
+  number: string,
+  input: { projectId: string; directory: string; commitId: string }
+): Promise<string> => {
+  const res = await fetch(`${aiReviewRoute(owner, repo, number)}/session`, {
+    body: JSON.stringify(input),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw await failure(res, "start AI review");
+  }
+  return ((await res.json()) as { sessionId: string }).sessionId;
+};
+
+/** Findings from a finished review session, or without one, from the diff alone. */
+export const collectAiReview = async (
+  owner: string,
+  repo: string,
+  number: string,
+  input: {
+    projectId: string;
+    directory: string;
+    commitId: string;
+    sessionId?: string;
+  }
+): Promise<AiReviewResult> => {
+  const res = await fetch(aiReviewRoute(owner, repo, number), {
+    body: JSON.stringify(input),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw await failure(res, "collect AI review");
   }
   return res.json();
 };

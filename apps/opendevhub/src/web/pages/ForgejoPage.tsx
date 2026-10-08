@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
+  BotIcon,
   BoxIcon,
   CornerDownRightIcon,
   ExternalLinkIcon,
@@ -10,8 +11,17 @@ import {
   LayersIcon,
   MessageSquareIcon,
   RefreshCwIcon,
+  SparklesIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
@@ -20,6 +30,7 @@ import { Input } from "@/components/ui/input";
 
 import type {
   ForgejoInbox,
+  ForgejoPullDetails,
   ForgejoPullFilter,
   ForgejoPulls,
 } from "../../shared/forgejo";
@@ -28,9 +39,25 @@ import {
   fetchForgejoDiff,
   fetchForgejoPulls,
 } from "../api";
+import {
+  AiReviewPanel,
+  AiSuggestionCard,
+  ForgejoAiReviewDialog,
+  ForgejoCommentNote,
+  useAiReview,
+} from "../components/ForgejoAiReview";
 import { ForgejoApprovals } from "../components/ForgejoApprovals";
-import { ForgejoContext, RequestState } from "../components/ForgejoContext";
-import type { ForgejoFeedback } from "../components/ForgejoContext";
+import {
+  ForgejoContext,
+  RequestState,
+  feedbackKey,
+  selectedFeedback,
+} from "../components/ForgejoContext";
+import type {
+  FeedbackKind,
+  FeedbackSelection,
+  FeedbackValue,
+} from "../components/ForgejoContext";
 import { ForgejoHandoff } from "../components/ForgejoHandoff";
 import {
   ForgejoReviewDialog,
@@ -56,14 +83,20 @@ import { DiffLinesSkeleton } from "../components/Skeletons";
 import { Tip } from "../components/Tip";
 import { useDash } from "../DashboardContext";
 import {
+  defaultPullMode,
+  forgejoCommentNote,
   forgejoReviewFiles,
+  placeAiFindings,
   readForgejoPreference,
   saveForgejoPreference,
   stackForgejoPulls,
+  suggestionComment,
 } from "../forgejo";
+import type { AiSuggestion, PullMode } from "../forgejo";
 import { useForgejoQuery } from "../hooks/useForgejo";
+import { FAILED_CHECK, usePullFeedback } from "../hooks/usePullFeedback";
 import { newId, readDiffView, writeDiffView } from "../review";
-import type { DiffView, LineAnchor, ReviewComment } from "../review";
+import type { DiffNote, DiffView, LineAnchor, ReviewComment } from "../review";
 
 /** Extra left padding per level of a stacked pull request in the list. */
 const STACK_INDENT_REM = 1.5;
@@ -111,7 +144,21 @@ const PullStateIcon = ({ state }: { state: string }) => {
   return <GitPullRequestIcon className="text-ok mt-0.5 size-4 shrink-0" />;
 };
 
-// oxlint-disable-next-line complexity
+/** A note in the diff draws through context, so it follows the page's state without re-rendering the diff. */
+const NoteContext = createContext<(id: string) => ReactNode>(() => null);
+const NoteSlot = ({ id }: { id: string }) => useContext(NoteContext)(id);
+const renderNoteSlot = (id: string) => <NoteSlot id={id} />;
+
+const pluralize = (n: number, word: string) =>
+  `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Forgejo's own list filters, without this page's mode. */
+const listSearchOf = (search: URLSearchParams): string => {
+  const next = new URLSearchParams(search);
+  next.delete("mode");
+  return next.toString();
+};
+
 const PullDiff = ({
   owner,
   repo,
@@ -121,31 +168,103 @@ const PullDiff = ({
   repo: string;
   number: string;
 }) => {
-  const { forgejo } = useDash();
   const [search] = useSearchParams();
-  const client = useQueryClient();
-  // Draft line comments for a Forgejo review; they belong to the head commit they were written on.
-  const [comments, setComments] = useState<ReviewComment[]>([]);
-  const commentsRef = useRef(comments);
-  commentsRef.current = comments;
-  const drafting = comments.length > 0;
-  const key = ["pull", owner, repo, number];
+  const listSearch = listSearchOf(search);
+  // A refetch that finds a new head commit starts the page over, so it waits while there are drafts.
+  const [drafting, setDrafting] = useState(false);
   const details = useForgejoQuery(
-    [...key, "details"],
+    ["pull", owner, repo, number, "details"],
     (signal) => fetchForgejoDetails(owner, repo, number, signal),
     true,
     { refetchOnReconnect: !drafting, refetchOnWindowFocus: !drafting }
   );
+  if (!details.data) {
+    return (
+      <Page className="max-w-none">
+        <BackLink search={listSearch} />
+        <PageHeader
+          title={`${owner}/${repo} #${number}`}
+          description="Pull request"
+        />
+        <ForgejoGate>
+          <RequestState query={details} />
+        </ForgejoGate>
+      </Page>
+    );
+  }
+  // A new head commit starts over: drafts, picks and suggestions belong to the commit they were made on.
+  return (
+    <PullView
+      key={details.data.headSha}
+      details={details.data}
+      fetchingDetails={details.isFetching}
+      refetchDetails={() => details.refetch()}
+      onDrafting={setDrafting}
+    />
+  );
+};
+
+const BackLink = ({ search }: { search: string }) => (
+  <Link
+    to={`/forgejo?${search || readForgejoPreference("inbox")}`}
+    className="text-muted-foreground hover:text-foreground inline-flex w-fit items-center gap-1.5 text-sm"
+  >
+    <ArrowLeftIcon className="size-4" /> Pull requests
+  </Link>
+);
+
+// oxlint-disable-next-line complexity
+const PullView = ({
+  details,
+  fetchingDetails,
+  refetchDetails,
+  onDrafting,
+}: {
+  details: ForgejoPullDetails;
+  fetchingDetails: boolean;
+  refetchDetails: () => Promise<unknown>;
+  onDrafting: (drafting: boolean) => void;
+}) => {
+  const { forgejo } = useDash();
+  const [search, setSearch] = useSearchParams();
+  const listSearch = listSearchOf(search);
+  const client = useQueryClient();
+  const { owner, repo } = details.pull;
+  const number = String(details.pull.number);
+  const key = ["pull", owner, repo, number];
+  const mode: PullMode =
+    search.get("mode") === "review" || search.get("mode") === "address"
+      ? (search.get("mode") as PullMode)
+      : defaultPullMode(
+          new URLSearchParams(listSearch || readForgejoPreference("inbox")).get(
+            "inbox"
+          )
+        );
+  const setMode = (next: PullMode) => {
+    const params = new URLSearchParams(search);
+    params.set("mode", next);
+    setSearch(params, { replace: true });
+  };
+  const isOpen = details.pull.state === "open";
+  const reviewing = mode === "review";
+
+  // Review mode: your draft line comments and summary for a Forgejo review.
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [summary, setSummary] = useState("");
+  const drafting = comments.length > 0 || !!summary.trim();
+  useEffect(() => {
+    onDrafting(drafting);
+  }, [drafting, onDrafting]);
+  // Address mode: what goes to the agent.
+  const [selection, setSelection] = useState<FeedbackSelection>({});
+  const [dialog, setDialog] = useState<
+    "handoff" | "review" | "worktree" | "ai"
+  >();
+
   const patch = useForgejoQuery(
-    [
-      ...key,
-      "patch",
-      details.data?.headSha,
-      details.data?.base,
-      details.data?.pull.updatedAt,
-    ],
+    [...key, "patch", details.headSha, details.base, details.pull.updatedAt],
     (signal) => fetchForgejoDiff(owner, repo, number, signal),
-    !!details.data,
+    true,
     { refetchOnReconnect: !drafting, refetchOnWindowFocus: !drafting }
   );
   const [diffView, setDiffView] = useState(readDiffView);
@@ -155,31 +274,161 @@ const PullDiff = ({
     writeDiffView(next);
   };
   const [open, setOpen] = useState<{ file: string; anchor: LineAnchor }>();
-  const [feedback, setFeedback] = useState<ForgejoFeedback>({
-    checks: [],
-    comments: [],
-    reviews: [],
-  });
-  const [dialog, setDialog] = useState<"handoff" | "review" | "worktree">();
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setFeedback({ checks: [], comments: [], reviews: [] });
-    setComments([]);
-    setOpen(undefined);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies
-  }, [details.data?.headSha]);
   const files = useMemo(
     () => forgejoReviewFiles(patch.data?.patch ?? ""),
     [patch.data?.patch]
   );
+  const feedback = usePullFeedback(details);
+  const ai = useAiReview(details);
+
+  const run = ai.run?.stage === "done" ? ai.run : undefined;
+  const placed = useMemo(
+    () => placeAiFindings(run?.findings ?? [], files, `ai-${run?.id ?? ""}`),
+    [run?.findings, run?.id, files]
+  );
+  const handled = new Set(run?.handled);
+  const inlineAi = placed.inline.filter((s) => !handled.has(s.id));
+  const generalAi = placed.general.filter((s) => !handled.has(s.id));
+  const aiById = new Map(
+    [...inlineAi, ...generalAi].map((s) => [s.id, s] as const)
+  );
+  const inlineForgejo = feedback.inlineComments.flatMap((comment) => {
+    const note = forgejoCommentNote(comment, files);
+    return note ? [{ comment, note }] : [];
+  });
+  const commentById = new Map(
+    inlineForgejo.map(({ comment, note }) => [note.id, comment] as const)
+  );
+  const noteKey = [
+    ...inlineForgejo.map(({ note }) => note.id),
+    ...inlineAi.map((s) => s.id),
+  ].join(",");
+  // The diff re-renders when its notes change, so they only change when the ids do.
+  const notesRef = useRef<{ key: string; notes: DiffNote[] }>({
+    key: "",
+    notes: [],
+  });
+  if (notesRef.current.key !== noteKey) {
+    notesRef.current = {
+      key: noteKey,
+      notes: [
+        ...inlineForgejo.map(({ note }) => note),
+        ...inlineAi.map((s) => ({
+          file: s.file ?? "",
+          id: s.id,
+          line: s.line ?? 0,
+          side: s.side ?? "new",
+        })),
+      ],
+    };
+  }
+  const { notes } = notesRef.current;
+
+  const pick = (
+    kind: FeedbackKind,
+    value: FeedbackValue | AiSuggestion,
+    checked: boolean
+  ) =>
+    setSelection((current) => {
+      const next = { ...current };
+      const id = feedbackKey(kind, value.id);
+      if (checked) {
+        next[id] = { kind, value };
+      } else {
+        delete next[id];
+      }
+      return next;
+    });
+  const selectUnresolved = () =>
+    setSelection((current) => {
+      const next = { ...current };
+      const add = (kind: FeedbackKind, value: FeedbackValue | AiSuggestion) => {
+        next[feedbackKey(kind, value.id)] = { kind, value };
+      };
+      for (const c of [...feedback.allComments, ...feedback.inlineComments]) {
+        if (!c.resolved) {
+          add("comments", c);
+        }
+      }
+      for (const r of feedback.allReviews) {
+        const says =
+          r.state === "REQUEST_CHANGES" ||
+          (r.state === "COMMENT" && !!r.body.trim());
+        if (says && !r.dismissed && !r.stale) {
+          add("reviews", r);
+        }
+      }
+      for (const c of feedback.allChecks) {
+        if (FAILED_CHECK.has(c.status)) {
+          add("checks", c);
+        }
+      }
+      for (const s of aiById.values()) {
+        add("ai", s);
+      }
+      return next;
+    });
+  const startAi: typeof ai.start = (...args) => {
+    setSelection((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([, v]) => v.kind !== "ai")
+      )
+    );
+    ai.start(...args);
+  };
+  const dismiss = (s: AiSuggestion) => {
+    pick("ai", s, false);
+    ai.handle(s.id);
+  };
+  const accept = (s: AiSuggestion, text: string) => {
+    if (s.file && s.line !== undefined) {
+      setComments((current) => [...current, suggestionComment(s, text)]);
+    } else {
+      setSummary((current) =>
+        current.trim() ? `${current}\n\n${text}` : text
+      );
+    }
+    ai.handle(s.id);
+  };
+  const suggestionCard = (s: AiSuggestion, inDiff: boolean) => (
+    <AiSuggestionCard
+      key={s.id}
+      suggestion={s}
+      inDiff={inDiff}
+      acceptLabel={inDiff ? "Accept" : "Add to summary"}
+      onAccept={reviewing && isOpen ? (text) => accept(s, text) : undefined}
+      selected={!!selection[feedbackKey("ai", s.id)]}
+      onSelect={reviewing ? undefined : (checked) => pick("ai", s, checked)}
+      onDismiss={() => dismiss(s)}
+    />
+  );
+  const renderNote = (id: string): ReactNode => {
+    const comment = commentById.get(id);
+    if (comment) {
+      return (
+        <ForgejoCommentNote
+          comment={comment}
+          selected={!!selection[id]}
+          onSelect={
+            reviewing
+              ? undefined
+              : (checked) => pick("comments", comment, checked)
+          }
+        />
+      );
+    }
+    const suggestion = aiById.get(id);
+    return suggestion ? suggestionCard(suggestion, true) : null;
+  };
+
   const openLineComment = useCallback(
     (file: string, anchor: LineAnchor) => setOpen({ anchor, file }),
     []
   );
   const addLineComment = useCallback(
     (file: string, anchor: LineAnchor, text: string) => {
-      setComments([
-        ...commentsRef.current,
+      setComments((current) => [
+        ...current,
         {
           file,
           id: newId(),
@@ -197,10 +446,10 @@ const PullDiff = ({
   );
   const cancelLineComment = useCallback(() => setOpen(undefined), []);
   const deleteComment = useCallback(
-    (id: string) => setComments(commentsRef.current.filter((c) => c.id !== id)),
+    (id: string) =>
+      setComments((current) => current.filter((c) => c.id !== id)),
     []
   );
-  const isOpen = details.data?.pull.state === "open";
   const url = forgejo?.url
     ? `${forgejo.url}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(number)}`
     : undefined;
@@ -209,12 +458,12 @@ const PullDiff = ({
     if (
       drafting &&
       !confirm(
-        "Refresh the pull request? If it has new commits, your draft review comments are discarded."
+        "Refresh the pull request? If it has new commits, your draft review is discarded."
       )
     ) {
       return;
     }
-    await details.refetch();
+    await refetchDetails();
     await client.invalidateQueries({
       predicate: (query) => query.queryKey[6] !== "details",
       queryKey: ["forgejo", forgejo?.url, ...key],
@@ -223,21 +472,15 @@ const PullDiff = ({
       queryKey: ["forgejo", forgejo?.url, "checks", owner, repo],
     });
   };
+  const picked = Object.keys(selection).length;
+  const aiBusy =
+    !!ai.run && ai.run.stage !== "done" && ai.run.stage !== "failed";
   return (
-    <Page className="max-w-none">
-      <Link
-        to={`/forgejo?${search.size ? search.toString() : readForgejoPreference("inbox")}`}
-        className="text-muted-foreground hover:text-foreground inline-flex w-fit items-center gap-1.5 text-sm"
-      >
-        <ArrowLeftIcon className="size-4" /> Pull requests
-      </Link>
+    <Page className="max-w-none pb-0">
+      <BackLink search={listSearch} />
       <PageHeader
-        title={details.data?.pull.title ?? `${owner}/${repo} #${number}`}
-        description={
-          details.data
-            ? `${owner}/${repo} #${number} · ${details.data.head} → ${details.data.base}`
-            : "Pull request"
-        }
+        title={details.pull.title}
+        description={`${owner}/${repo} #${number} · ${details.head} → ${details.base}`}
         actions={
           <>
             {url && (
@@ -247,7 +490,7 @@ const PullDiff = ({
                 </a>
               </Button>
             )}
-            {details.data?.headSha && (
+            {details.headSha && (
               <Tip label="Check the head commit out in a worktree of a local project">
                 <Button
                   variant="outline"
@@ -258,144 +501,225 @@ const PullDiff = ({
                 </Button>
               </Tip>
             )}
-            {isOpen && details.data?.headSha && (
-              <Tip label="Send your line comments as a review">
+            {details.headSha && (
+              <Tip
+                label={
+                  reviewing
+                    ? "Have an agent review the head commit and suggest line comments"
+                    : "Have an agent review the head commit; hand its findings to the agent that fixes them"
+                }
+              >
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setDialog("review")}
+                  disabled={aiBusy}
+                  onClick={() => setDialog("ai")}
                 >
-                  <MessageSquareIcon /> Review
-                  {drafting ? ` (${comments.length})` : ""}
+                  <SparklesIcon /> {aiBusy ? "AI reviewing…" : "AI review"}
                 </Button>
               </Tip>
             )}
-            {details.data && (
-              <Button size="sm" onClick={() => setDialog("handoff")}>
-                Continue with agent
-              </Button>
-            )}
             <Refresh
-              busy={details.isFetching || patch.isFetching}
+              busy={fetchingDetails || patch.isFetching}
               onClick={() => void refresh()}
             />
           </>
         }
       />
       <ForgejoGate>
-        <RequestState query={details} />
-        {details.data && (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <Chip>{details.data.pull.state}</Chip>
-              {details.data.draft && <Chip>Draft</Chip>}
-              {details.data.mergeable === false &&
-                details.data.pull.state === "open" && (
-                  <Chip>Merge conflicts</Chip>
-                )}
-              <ForgejoApprovals pull={details.data.pull} />
-              <span className="text-muted-foreground text-sm">
-                By {details.data.author}
-              </span>
-              {details.data.labels.map((l) => (
-                <Chip key={l}>{l}</Chip>
-              ))}
-            </div>
-            <ForgejoContext
-              key={details.data.headSha}
-              details={details.data}
-              onSelection={setFeedback}
-              stack={
-                <ForgejoStack
-                  details={details.data}
-                  search={search.toString()}
-                />
-              }
-              description={
-                <Section title="Description">
-                  {details.data.body ? (
-                    <MarkdownBody className="p-4">
-                      {details.data.body}
-                    </MarkdownBody>
-                  ) : (
-                    <p className="text-muted-foreground p-4 text-sm">
-                      No description.
-                    </p>
-                  )}
-                </Section>
-              }
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip>{details.pull.state}</Chip>
+          {details.draft && <Chip>Draft</Chip>}
+          {details.mergeable === false && isOpen && (
+            <Chip>Merge conflicts</Chip>
+          )}
+          <ForgejoApprovals pull={details.pull} />
+          <span className="text-muted-foreground text-sm">
+            By {details.author}
+          </span>
+          {details.labels.map((l) => (
+            <Chip key={l}>{l}</Chip>
+          ))}
+          <div className="ml-auto">
+            <Segmented
+              label="What you're doing"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { id: "address", label: "Address feedback" },
+                { id: "review", label: "Review" },
+              ]}
             />
-            {dialog === "handoff" && (
-              <ForgejoHandoff
-                details={details.data}
-                feedback={feedback}
-                onClose={() => setDialog(undefined)}
-              />
-            )}
-            {dialog === "review" && (
-              <ForgejoReviewDialog
-                pull={details.data.pull}
-                commitId={details.data.headSha}
-                comments={comments}
-                onDelete={deleteComment}
-                onSent={() => {
-                  setComments([]);
-                  void details.refetch();
-                }}
-                onClose={() => setDialog(undefined)}
-              />
-            )}
-            {dialog === "worktree" && (
-              <ForgejoWorktreeDialog
-                pull={details.data.pull}
-                commitId={details.data.headSha}
-                onClose={() => setDialog(undefined)}
-              />
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <FilesToggle view={diffView} onChange={changeDiffView} />
-              <h2 className="font-semibold">Changes</h2>
-              {isOpen && (
-                <span className="text-muted-foreground text-sm max-sm:hidden">
-                  Click the + beside a line to comment on it.
-                </span>
+          </div>
+        </div>
+        <p className="text-muted-foreground -mt-2 text-sm">
+          {reviewing
+            ? "Write your review: comment on lines, and accept or dismiss what an AI review suggests."
+            : "Pick the feedback an agent should work on: comments, reviews, failing checks and AI findings, then hand it off."}
+        </p>
+        <AiReviewPanel
+          ai={ai}
+          general={generalAi}
+          inline={inlineAi.length}
+          renderGeneral={(s) => suggestionCard(s, false)}
+          onRerun={() => setDialog("ai")}
+        />
+        <ForgejoContext
+          key={mode}
+          details={details}
+          selected={selection}
+          onPick={reviewing ? undefined : pick}
+          collapsed={reviewing}
+          stack={<ForgejoStack details={details} search={listSearch} />}
+          description={
+            <Section title="Description">
+              {details.body ? (
+                <MarkdownBody className="p-4">{details.body}</MarkdownBody>
+              ) : (
+                <p className="text-muted-foreground p-4 text-sm">
+                  No description.
+                </p>
               )}
-              <div className="ml-auto">
-                <LayoutToggle view={diffView} onChange={changeDiffView} />
+            </Section>
+          }
+        />
+        {dialog === "handoff" && (
+          <ForgejoHandoff
+            details={details}
+            feedback={selectedFeedback(selection)}
+            onClose={() => setDialog(undefined)}
+          />
+        )}
+        {dialog === "review" && (
+          <ForgejoReviewDialog
+            pull={details.pull}
+            commitId={details.headSha}
+            comments={comments}
+            body={summary}
+            onBody={setSummary}
+            onDelete={deleteComment}
+            onSent={() => {
+              setComments([]);
+              setSummary("");
+              void refetchDetails();
+            }}
+            onClose={() => setDialog(undefined)}
+          />
+        )}
+        {dialog === "worktree" && (
+          <ForgejoWorktreeDialog
+            pull={details.pull}
+            commitId={details.headSha}
+            onClose={() => setDialog(undefined)}
+          />
+        )}
+        {dialog === "ai" && (
+          <ForgejoAiReviewDialog
+            details={details}
+            onStart={startAi}
+            onClose={() => setDialog(undefined)}
+          />
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <FilesToggle view={diffView} onChange={changeDiffView} />
+          <h2 className="font-semibold">Changes</h2>
+          <span className="text-muted-foreground text-sm max-sm:hidden">
+            {reviewing &&
+              isOpen &&
+              "Click the + beside a line to comment on it."}
+            {!reviewing &&
+              !!inlineForgejo.length &&
+              `${pluralize(inlineForgejo.length, "inline comment")} shown at their lines.`}
+          </span>
+          <div className="ml-auto">
+            <LayoutToggle view={diffView} onChange={changeDiffView} />
+          </div>
+        </div>
+        {patch.isPending && (
+          <div role="status" aria-label="Loading pull request diff">
+            <DiffLinesSkeleton />
+          </div>
+        )}
+        {patch.error && (
+          <div role="alert">
+            <Note warn>{patch.error.message}</Note>
+            <Button variant="link" onClick={() => void patch.refetch()}>
+              Retry diff
+            </Button>
+          </div>
+        )}
+        {patch.data &&
+          (files.length ? (
+            <NoteContext.Provider value={renderNote}>
+              <ReviewDiffs
+                files={files}
+                view={diffView}
+                version={details.headSha}
+                comments={reviewing ? comments : []}
+                notes={notes}
+                renderNote={renderNoteSlot}
+                open={reviewing ? open : undefined}
+                placeholder="Review comment…"
+                onAnchor={reviewing && isOpen ? openLineComment : undefined}
+                onAdd={addLineComment}
+                onCancel={cancelLineComment}
+                onDelete={deleteComment}
+              />
+            </NoteContext.Provider>
+          ) : (
+            <Empty title="No changes in this pull request" />
+          ))}
+        <div className="bg-background/95 supports-backdrop-filter:bg-background/80 sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t py-3 backdrop-blur">
+          {reviewing ? (
+            <>
+              <span className="text-sm">
+                {pluralize(comments.length, "draft comment")}
+                {!!aiById.size && (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {pluralize(aiById.size, "AI suggestion")} to go through
+                  </span>
+                )}
+              </span>
+              <div className="ml-auto flex gap-2">
+                {isOpen ? (
+                  <Button size="sm" onClick={() => setDialog("review")}>
+                    <MessageSquareIcon /> Submit review…
+                  </Button>
+                ) : (
+                  <span className="text-muted-foreground text-sm">
+                    This pull request is {details.pull.state}.
+                  </span>
+                )}
               </div>
-            </div>
-            {patch.isPending && (
-              <div role="status" aria-label="Loading pull request diff">
-                <DiffLinesSkeleton />
-              </div>
-            )}
-            {patch.error && (
-              <div role="alert">
-                <Note warn>{patch.error.message}</Note>
-                <Button variant="link" onClick={() => void patch.refetch()}>
-                  Retry diff
+            </>
+          ) : (
+            <>
+              <span className="text-sm">
+                {picked
+                  ? `${pluralize(picked, "item")} for the agent`
+                  : "Nothing picked yet; the agent gets the PR and its description."}
+              </span>
+              <div className="ml-auto flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={selectUnresolved}>
+                  Pick all open feedback
+                </Button>
+                {!!picked && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelection({})}
+                  >
+                    Clear
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => setDialog("handoff")}>
+                  <BotIcon /> Hand off to agent…
                 </Button>
               </div>
-            )}
-            {patch.data &&
-              (files.length ? (
-                <ReviewDiffs
-                  files={files}
-                  view={diffView}
-                  version={details.data.headSha}
-                  comments={comments}
-                  open={open}
-                  placeholder="Review comment…"
-                  onAnchor={isOpen ? openLineComment : undefined}
-                  onAdd={addLineComment}
-                  onCancel={cancelLineComment}
-                  onDelete={deleteComment}
-                />
-              ) : (
-                <Empty title="No changes in this pull request" />
-              ))}
-          </>
-        )}
+            </>
+          )}
+        </div>
       </ForgejoGate>
     </Page>
   );

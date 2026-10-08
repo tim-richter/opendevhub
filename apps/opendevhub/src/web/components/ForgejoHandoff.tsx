@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 import type { ForgejoPullDetails } from "../../shared/forgejo";
-import { fetchPublishInfo, sendPrompt, startSession } from "../api";
+import { sendPrompt, startSession } from "../api";
 import {
   checkouts,
   checkoutPath,
@@ -22,12 +22,8 @@ import {
   sessionPath,
 } from "../checkouts";
 import { useDash } from "../DashboardContext";
-import {
-  forgejoAgentPrompt,
-  matchesForgejoCheckout,
-  matchesForgejoPull,
-} from "../forgejo";
-import { useForgejoQuery } from "../hooks/useForgejo";
+import { forgejoAgentPrompt } from "../forgejo";
+import { useForgejoCheckouts } from "../hooks/useForgejoCheckouts";
 import { Choice } from "./Choice";
 import { RequestState } from "./ForgejoContext";
 import type { ForgejoFeedback } from "./ForgejoContext";
@@ -53,85 +49,7 @@ export const ForgejoHandoff = ({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const fingerprint = projects.map((p) => [
-    p.project.id,
-    p.runtime.containerState,
-    p.runtime.worktrees?.map((w) => [w.path, w.head, w.branch]),
-  ]);
-  const links = useForgejoQuery(
-    ["local-links", details.pull.url, details.headSha, fingerprint],
-    async (signal) => {
-      const candidates = projects
-        .filter((p) => p.runtime.containerState === "running")
-        .flatMap((view) =>
-          checkouts(view).map((checkout) => ({ checkout, view }))
-        );
-      const matches: {
-        projectId: string;
-        directory: string;
-        exact: boolean;
-      }[] = [];
-      let skipped = 0;
-      const queue = [...candidates];
-      // Bound git work to four checkouts at once; inspect all remotes so forks work too.
-      await Promise.all(
-        Array.from({ length: Math.min(4, queue.length) }, async () => {
-          while (queue.length && !signal.aborted) {
-            const item = queue.shift();
-            if (!item) {
-              break;
-            }
-            try {
-              let info = await fetchPublishInfo(
-                item.view.project.id,
-                item.checkout.directory,
-                undefined,
-                signal
-              );
-              if (!matchesForgejoPull(details, info)) {
-                for (const remote of info.remotes.filter(
-                  (r) => r !== info.remote
-                )) {
-                  info = await fetchPublishInfo(
-                    item.view.project.id,
-                    item.checkout.directory,
-                    remote,
-                    signal
-                  );
-                  if (matchesForgejoPull(details, info)) {
-                    break;
-                  }
-                }
-              }
-              if (matchesForgejoPull(details, info)) {
-                matches.push({
-                  directory: item.checkout.directory,
-                  exact: matchesForgejoCheckout(
-                    details,
-                    info,
-                    item.checkout.worktree?.head
-                  ),
-                  projectId: item.view.project.id,
-                });
-              }
-            } catch {
-              if (!signal.aborted) {
-                skipped += 1;
-              }
-            }
-          }
-        })
-      );
-      return {
-        matches: matches.toSorted(
-          (a, b) =>
-            Number(b.exact) - Number(a.exact) ||
-            a.projectId.localeCompare(b.projectId)
-        ),
-        skipped,
-      };
-    }
-  );
+  const links = useForgejoCheckouts(details);
   useEffect(() => {
     if (projectId) {
       return;
@@ -189,7 +107,7 @@ export const ForgejoHandoff = ({
         showCloseButton={!busy}
       >
         <DialogHeader>
-          <DialogTitle>Continue with agent</DialogTitle>
+          <DialogTitle>Hand off to agent</DialogTitle>
           <DialogDescription>
             Review the PR context and selected feedback, then choose where to
             continue.

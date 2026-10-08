@@ -94,6 +94,17 @@ function setup(webDir?: string) {
       async (_id: string, _dir: string, _title?: string, _prompt?: string) =>
         "ses_1"
     ),
+    generateIn: vi.fn(
+      async (
+        _id: string,
+        _dir: string,
+        _prompt: string,
+        options: { sessionId?: string; title: string; timeoutMs?: number }
+      ) => ({
+        sessionId: options.sessionId ?? "ses_ai",
+        text: '```json\n{"summary":"ok","findings":[{"file":"a.ts","line":3,"severity":"major","body":"Off by one"}]}\n```',
+      })
+    ),
     openInEditor: vi.fn(async () => {}),
     replyPermission: vi.fn(
       async (
@@ -518,6 +529,96 @@ describe("dashboard API", () => {
         commitId: sha,
       },
     });
+  });
+
+  it("runs AI reviews only for the displayed PR commit", async () => {
+    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const sha = "a".repeat(40);
+    const details = {
+      pull: {
+        owner: "team",
+        repo: "repo",
+        number: 7,
+        title: "Fix it",
+        url: "https://forge.example/team/repo/pulls/7",
+        state: "open",
+      },
+      body: "Fixes the thing",
+      base: "main",
+      head: "fix",
+      headSha: sha,
+    };
+    const forgejo = {
+      view: vi.fn(),
+      save: vi.fn(),
+      pulls: vi.fn(),
+      diff: vi.fn(),
+      test: vi.fn(),
+      inbox: vi.fn(),
+      details: vi.fn(async () => details as never),
+      patch: vi.fn(async () => ({ patch: "diff --git a/a.ts b/a.ts" })),
+      comments: vi.fn(),
+      reviews: vi.fn(),
+      reviewComments: vi.fn(),
+      approvals: vi.fn(),
+      checks: vi.fn(),
+    };
+    const app = createDashboardApp({
+      store,
+      orchestrator,
+      onboarding,
+      push,
+      cleanup,
+      checks,
+      forgejo,
+    });
+    const post = (route: string, body: unknown) =>
+      app.request(`/api/forgejo/pulls/team/repo/7/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const where = { projectId: "p", directory: "/workspaces/repo" };
+    expect(
+      (await post("ai-review/session", { ...where, commitId: "b".repeat(40) }))
+        .status
+    ).toBe(400);
+    expect(orchestrator.startSession).not.toHaveBeenCalled();
+
+    const started = await post("ai-review/session", {
+      ...where,
+      commitId: sha,
+    });
+    expect(await started.json()).toEqual({ sessionId: "ses_1" });
+    const [, , title, prompt] = orchestrator.startSession.mock.calls[0];
+    expect(title).toBe("AI review: PR #7 Fix it");
+    expect(prompt).toContain(`First check that HEAD is ${sha}`);
+
+    const collected = await post("ai-review", {
+      ...where,
+      commitId: sha,
+      sessionId: "ses_1",
+    });
+    expect(await collected.json()).toEqual({
+      sessionId: "ses_1",
+      summary: "ok",
+      findings: [
+        {
+          file: "a.ts",
+          line: 3,
+          side: "new",
+          severity: "major",
+          body: "Off by one",
+        },
+      ],
+    });
+    expect(forgejo.patch).not.toHaveBeenCalled();
+
+    const quick = await post("ai-review", { ...where, commitId: sha });
+    expect((await quick.json()).sessionId).toBe("ses_ai");
+    const [, , quickPrompt, options] = orchestrator.generateIn.mock.calls[1];
+    expect(quickPrompt).toContain("diff --git a/a.ts b/a.ts");
+    expect(options.sessionId).toBeUndefined();
   });
 
   it("routes Forgejo PR lists and selected diffs", async () => {

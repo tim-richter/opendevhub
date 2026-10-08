@@ -43,12 +43,14 @@ export const ForgejoReviewDialog = (props: {
   pull: ForgejoPullRequest;
   commitId: string;
   comments: ReviewComment[];
+  /** The summary lives with the page, so closing the dialog keeps it. */
+  body: string;
+  onBody: (body: string) => void;
   onDelete: (id: string) => void;
   onSent: () => void;
   onClose: () => void;
 }) => {
-  const { pull, comments } = props;
-  const [body, setBody] = useState("");
+  const { pull, comments, body } = props;
   const [event, setEvent] = useState<ForgejoReviewInput["event"]>("COMMENT");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -79,8 +81,9 @@ export const ForgejoReviewDialog = (props: {
           <DialogHeader>
             <DialogTitle>Review #{pull.number}</DialogTitle>
             <DialogDescription>
-              Comment on a line with the + in the diff&apos;s gutter. The
-              comments are sent with this review.
+              Your draft comments and accepted AI suggestions are sent with this
+              review. Close this to add more with the + in the diff&apos;s
+              gutter.
             </DialogDescription>
           </DialogHeader>
           {comments.length > 0 ? (
@@ -117,7 +120,7 @@ export const ForgejoReviewDialog = (props: {
             placeholder="Review summary…"
             value={body}
             disabled={busy}
-            onChange={(e) => setBody(e.target.value)}
+            onChange={(e) => props.onBody(e.target.value)}
             autoFocus
           />
           {error && (
