@@ -74,7 +74,9 @@ export class FileIntegrationSettings {
     private readonly name: string,
     private readonly validateUrl: (raw: string) => string,
     private readonly ErrorType: typeof IntegrationError = IntegrationError,
-    private readonly secrets: SecretStore = new OsSecretStore()
+    private readonly secrets: SecretStore = new OsSecretStore(),
+    private readonly warn: (message: string) => void = (message) =>
+      console.warn(message)
   ) {
     this.dir = path.join(configDir, "integrations");
     this.file = path.join(this.dir, `${name.toLowerCase()}.json`);
@@ -246,30 +248,25 @@ export class FileIntegrationSettings {
         return { enabled: input.enabled, hasToken: !!kept.tokenRef, url };
       }
       const tokenRef = supplied ? randomUUID() : undefined;
-      const previousToken = old.tokenRef
-        ? await this.secrets.get(old.tokenRef)
-        : undefined;
       if (tokenRef && supplied) {
         await this.secrets.set(tokenRef, supplied);
       }
-      let removedPrevious = false;
       try {
-        // Removing/replacing a token must really delete the old credential; failures are reported.
-        if (old.tokenRef) {
-          await this.secrets.remove(old.tokenRef);
-          removedPrevious = true;
-        }
         this.write({ enabled: input.enabled, tokenRef, url });
       } catch (error) {
-        if (removedPrevious && old.tokenRef && previousToken) {
-          await this.secrets
-            .set(old.tokenRef, previousToken)
-            .catch(() => undefined);
-        }
         if (tokenRef) {
           await this.secrets.remove(tokenRef).catch(() => undefined);
         }
         throw error;
+      }
+      // Commit first, then clean up: a stale or inaccessible old credential must never block
+      // replacing or clearing the token. A leftover stays encrypted in the OS store and is logged.
+      if (old.tokenRef) {
+        await this.secrets.remove(old.tokenRef).catch(() => {
+          this.warn(
+            `Could not delete the previous ${this.name} token (account ${old.tokenRef}) from the OS credential store; remove it manually.`
+          );
+        });
       }
       return { enabled: input.enabled, hasToken: !!tokenRef, url };
     });
