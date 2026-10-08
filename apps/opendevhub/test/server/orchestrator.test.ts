@@ -149,6 +149,8 @@ function boxKit() {
       })),
       remove: vi.fn(async (_id: string) => {}),
       removeImage: vi.fn(async (_ref: string) => true),
+      ensureVolume: vi.fn(async (_name: string, _labels?: string[]) => true),
+      removeVolume: vi.fn(async (_name: string) => true),
     },
     runtime: {
       endpoint: (a: HostPort, password: string) => ({
@@ -352,6 +354,8 @@ function setup(
     })),
     remove: vi.fn(async (_id: string) => {}),
     removeImage: vi.fn(async (_ref: string) => true),
+    ensureVolume: vi.fn(async (_name: string, _labels?: string[]) => true),
+    removeVolume: vi.fn(async (_name: string) => true),
   };
   const runtime = {
     endpoint: (a: HostPort, password: string) => ({
@@ -817,6 +821,7 @@ describe(Orchestrator, () => {
     expect(containers.up.mock.calls[0][1].rebuild).toBeFalsy();
     expect(runtime.ensureRunning.mock.calls[0][1]).toMatchObject({
       address: { host: "172.17.0.9", port: 4096 },
+      containerId: "c1",
       workspaceFolder: "/workspaces/demo",
     });
     expect(store.runtime(project.id)).toMatchObject({
@@ -830,6 +835,23 @@ describe(Orchestrator, () => {
     expect(monitors[0]).toMatchObject({ started: true });
     expect(monitors[0].opts.directory).toBe("/workspaces/demo");
     expect(orch.logLines(project.id)).toContain("building image");
+  });
+
+  it("keeps opencode's sessions on a labelled volume that survives a rebuild", async () => {
+    const { containers, orch } = setup();
+    await orch.rescan();
+    await orch.start(project.id);
+    await orch.rebuild(project.id);
+    const volume = `opendevhub-opencode-${project.id}`;
+    expect(containers.ensureVolume).toHaveBeenCalledWith(volume, [
+      "opendevhub.volume=opencode",
+      `opendevhub.project=${project.id}`,
+    ]);
+    expect(containers.up.mock.calls[1][1]).toMatchObject({ rebuild: true });
+    expect(containers.up.mock.calls[1][1].mounts).toContain(
+      `type=volume,source=${volume},target=/opendevhub/opencode`
+    );
+    expect(containers.removeVolume).not.toHaveBeenCalled();
   });
 
   it("throws synchronously for unknown projects and concurrent actions", async () => {
@@ -1574,6 +1596,7 @@ describe(Orchestrator, () => {
       expect(mkdir).toHaveBeenCalledWith("/src/demo.worktrees");
       expect(containers.up.mock.calls[0][1].mounts).toStrictEqual([
         "type=bind,source=/src/demo.worktrees,target=/workspaces/demo.worktrees",
+        `type=volume,source=opendevhub-opencode-${project.id},target=/opendevhub/opencode`,
       ]);
       expect(store.runtime(project.id)).toMatchObject({
         containerName: "demo_c1",
@@ -1602,7 +1625,9 @@ describe(Orchestrator, () => {
       containers.inspect.mockResolvedValue({ ...running, binds: {} });
       await orch.rescan();
       await orch.start(project.id);
-      expect(containers.up.mock.calls[0][1].mounts).toStrictEqual([]);
+      expect(containers.up.mock.calls[0][1].mounts).toStrictEqual([
+        `type=volume,source=opendevhub-opencode-${project.id},target=/opendevhub/opencode`,
+      ]);
       expect(store.runtime(project.id)).toMatchObject({
         containerState: "running",
         worktreeRoot: { mounted: false },
@@ -3606,8 +3631,20 @@ describe("task environments", () => {
       ],
       overrideConfig: `/state/envs/${envId}/devcontainer.json`,
     });
+    expect(containers.up.mock.calls.at(-1)![1].mounts).toStrictEqual([
+      `type=volume,source=opendevhub-opencode-${envId},target=/opendevhub/opencode`,
+    ]);
+    expect(containers.ensureVolume).toHaveBeenCalledWith(
+      `opendevhub-opencode-${envId}`,
+      [
+        "opendevhub.volume=opencode",
+        `opendevhub.env=${envId}`,
+        `opendevhub.env-project=${project.id}`,
+      ]
+    );
     expect(runtime.ensureRunning.mock.calls.at(-1)![1]).toMatchObject({
       address: { host: "172.17.0.10", port: 4096 },
+      containerId: "c2",
       workspaceFolder: feat.path,
     });
     expect(forwarder.open.mock.calls.at(-1)![0]).toBe(envId);
@@ -3737,6 +3774,9 @@ describe("task environments", () => {
     await orch.removeEnv(project.id, envId);
     expect(containers.remove).toHaveBeenLastCalledWith("c2");
     expect(containers.removeImage).toHaveBeenCalledWith("vsc-feat-1234-uid");
+    expect(containers.removeVolume).toHaveBeenCalledWith(
+      `opendevhub-opencode-${envId}`
+    );
     expect(envFiles.remove).toHaveBeenCalledWith(envId);
     expect(store.environment(envId)).toBeUndefined();
     expect(orch.opencodeAddress(envId)).toBeUndefined();

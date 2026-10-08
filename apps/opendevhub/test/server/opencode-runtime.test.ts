@@ -1,8 +1,24 @@
+import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { Containers } from "../../src/server/containers";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import {
+  LINK_STATE,
   OpencodeRuntime,
   parseBinaryPath,
   parseOpencodeVersion,
@@ -233,5 +249,140 @@ describe("OpencodeRuntime.resolveBinary", () => {
     await expect(
       missing.runtime.resolveBinary(project)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("OpencodeRuntime.persistState", () => {
+  const ROOT_EXEC = ["exec", "-u", "root"];
+  const isRoot = (c: Call) =>
+    c.cmd === "docker" && ROOT_EXEC.every((a, i) => c.args[i] === a);
+  const script = (c: Call) => c.args.at(-1) ?? "";
+
+  function persistWith(handler: (c: Call) => Output) {
+    const { run, calls } = fakeRunner(handler);
+    const runtime = new OpencodeRuntime({
+      containers: new Containers(run),
+      clientFor: (ep) => new OpencodeClient(ep),
+    });
+    const lines: string[] = [];
+    return {
+      calls,
+      lines,
+      persist: () => runtime.persistState(project, "c1", (l) => lines.push(l)),
+    };
+  }
+
+  it("says sessions die with a container that has no volume, and changes nothing", async () => {
+    const { calls, lines, persist } = persistWith(() => ({
+      stdout: "unmounted\n",
+    }));
+    await persist();
+    expect(calls).toHaveLength(1);
+    expect(lines.join("\n")).toMatch(/no sessions volume/u);
+  });
+
+  it("gives a root-owned volume to the container user before linking", async () => {
+    const { calls, lines, persist } = persistWith((c) => {
+      if (script(c).includes('echo "owner')) {
+        return { stdout: "owner 1000:1000\nreadonly\n" };
+      }
+      return script(c).includes("link data")
+        ? { stdout: "data linked\nstate kept\n" }
+        : {};
+    });
+    await persist();
+    const chown = calls.find(isRoot)!;
+    expect(chown.args).toContain("ODH_OWNER=1000:1000");
+    expect(chown.args).toContain("c1");
+    expect(script(chown)).toContain("chown -R");
+    expect(calls.indexOf(chown)).toBeLessThan(
+      calls.findIndex((c) => script(c).includes("link data"))
+    );
+    expect(lines).toStrictEqual([
+      "opencode data: now on the opendevhub volume",
+      "opencode state: on the opendevhub volume",
+    ]);
+  });
+
+  it("skips the root step when the user can already write the volume", async () => {
+    const { calls, persist } = persistWith((c) =>
+      script(c).includes('echo "owner') ? { stdout: "owner 1000:1000\n" } : {}
+    );
+    await persist();
+    expect(calls.some(isRoot)).toBeFalsy();
+  });
+
+  it("runs before opencode serve when given the container", async () => {
+    const { runtime, calls } = runtimeWith({ stdout: "opencode v2.0.20" });
+    await runtime.ensureRunning(project, { ...args(), containerId: "c1" });
+    const probe = calls.findIndex((c) => script(c).includes('echo "owner'));
+    const kill = calls.findIndex((c) => script(c).includes("pkill"));
+    const launch = calls.findIndex((c) => script(c).includes(" serve "));
+    expect(kill).toBeLessThan(probe);
+    expect(probe).toBeLessThan(launch);
+  });
+});
+
+describe("LINK_STATE", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "odh-link-"));
+    await mkdir(path.join(dir, "home"));
+    await mkdir(path.join(dir, "volume"));
+    await writeFile(path.join(dir, "mountinfo"), "");
+  });
+  afterEach(() => rm(dir, { force: true, recursive: true }));
+
+  const link = (mountinfo = "") => {
+    writeFileSync(path.join(dir, "mountinfo"), mountinfo);
+    return execFileSync("sh", ["-c", LINK_STATE], {
+      encoding: "utf8",
+      env: {
+        HOME: path.join(dir, "home"),
+        ODH_MOUNTINFO: path.join(dir, "mountinfo"),
+        ODH_STATE: path.join(dir, "volume"),
+        PATH: process.env.PATH,
+      },
+    });
+  };
+  const dataDir = () => path.join(dir, "home/.local/share/opencode");
+
+  it("links fresh folders and keeps them on the next start", async () => {
+    expect(link()).toBe("data linked\nstate linked\n");
+    expect(await readlink(dataDir())).toBe(path.join(dir, "volume/data"));
+    expect(link()).toBe("data kept\nstate kept\n");
+  });
+
+  it("moves a container's existing data onto an empty volume", async () => {
+    await mkdir(dataDir(), { recursive: true });
+    await writeFile(path.join(dataDir(), "auth.json"), "{}");
+    expect(link()).toMatch(/^data moved\ndata linked\n/u);
+    expect(
+      await readFile(path.join(dir, "volume/data/auth.json"), "utf8")
+    ).toBe("{}");
+  });
+
+  it("prefers the volume's data and sets the container's own copy aside", async () => {
+    await mkdir(path.join(dir, "volume/data"), { recursive: true });
+    await writeFile(path.join(dir, "volume/data/opencode.db"), "old sessions");
+    await mkdir(dataDir(), { recursive: true });
+    await writeFile(path.join(dataDir(), "opencode.db"), "fresh");
+    expect(link()).toMatch(/^data set-aside\ndata linked\n/u);
+    expect(await readFile(path.join(dataDir(), "opencode.db"), "utf8")).toBe(
+      "old sessions"
+    );
+    const aside = (await readdir(path.join(dir, "home/.local/share"))).find(
+      (n) => n.startsWith("opencode.before-opendevhub.")
+    );
+    expect(aside).toBeDefined();
+  });
+
+  it("leaves a folder the devcontainer already mounts alone", async () => {
+    await mkdir(dataDir(), { recursive: true });
+    const home = path.join(dir, "home");
+    expect(link(`1 0 0:1 / ${home} rw - ext4 /dev/sda rw\n`)).toBe(
+      "data own-mount\nstate own-mount\n"
+    );
+    expect((await lstat(dataDir())).isSymbolicLink()).toBeFalsy();
   });
 });

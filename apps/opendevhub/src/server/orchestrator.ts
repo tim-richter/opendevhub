@@ -41,7 +41,7 @@ import type {
 import type { CheckTarget } from "./checks";
 import { branchChanged, scanBranches, staleSessions } from "./cleanup";
 import { stateDir } from "./config";
-import { CommandError, envLabels } from "./containers";
+import { CommandError, envLabels, LABEL } from "./containers";
 import type {
   ContainerInfo,
   Containers,
@@ -75,6 +75,11 @@ import type {
   OpencodeEndpoint,
   RawSession,
 } from "./opencode/client";
+import {
+  opencodeMount,
+  opencodeVolume,
+  VOLUME_LABEL,
+} from "./opencode/runtime";
 import type { OpencodeRuntime } from "./opencode/runtime";
 import type { ForwardTarget, PortForwarder } from "./port-forwarder";
 import { parseForwardPorts } from "./ports";
@@ -164,6 +169,8 @@ export type ContainersPort = Pick<
   | "readConfig"
   | "remove"
   | "removeImage"
+  | "ensureVolume"
+  | "removeVolume"
 > &
   Partial<Pick<Containers, "remoteEnv">>;
 export type ImagesPort = Pick<Images, "ensureBase">;
@@ -2206,6 +2213,23 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * The volume that keeps an environment's opencode sessions across rebuilds. Created up front only to label it
+   * (so it can be found later); `up` creates it anyway.
+   */
+  private async opencodeMounts(env: Env): Promise<string[]> {
+    const labels = [
+      `${VOLUME_LABEL}=opencode`,
+      ...(env.worktree
+        ? envLabels(env.id, env.project.id)
+        : [`${LABEL}=${env.id}`]),
+    ];
+    await this.kit(env)
+      .containers.ensureVolume(opencodeVolume(env.id), labels)
+      .catch(() => false);
+    return [opencodeMount(env.id)];
+  }
+
   private detectWorktreeRoot(
     project: Project,
     workspaceFolder: string,
@@ -2595,8 +2619,13 @@ export class Orchestrator {
     rebuild: boolean
   ): ReturnType<ContainersPort["up"]> {
     const { containers } = this.kit(env);
-    const next = (this.taskUps.get(env.node) ?? Promise.resolve()).then(() =>
-      containers.up(env.target, { onLine: (l) => this.envLog(env, l), rebuild })
+    const next = (this.taskUps.get(env.node) ?? Promise.resolve()).then(
+      async () =>
+        containers.up(env.target, {
+          mounts: await this.opencodeMounts(env),
+          onLine: (l) => this.envLog(env, l),
+          rebuild,
+        })
     );
     this.taskUps.set(
       env.node,
@@ -2666,6 +2695,8 @@ export class Orchestrator {
         await containers.removeImage(image);
       }
     }
+    // Its sessions go with the worktree; the volume is in no other container's use.
+    await containers.removeVolume(opencodeVolume(env.id)).catch(() => false);
     await kit.envFiles.remove(env.id).catch(() => undefined);
     if (env.node !== LOCAL_NODE) {
       // The worktree and branch exist only for this environment; a branch brought home stays on this machine.
@@ -2688,7 +2719,10 @@ export class Orchestrator {
       opencode: "absent",
     });
     try {
-      const mounts = await this.worktreeMounts(project);
+      const mounts = [
+        ...(await this.worktreeMounts(project)),
+        ...(await this.opencodeMounts(env)),
+      ];
       const up = await containers.up(project, {
         mounts,
         onLine: (l) => this.log(project.id, l),
@@ -2753,6 +2787,7 @@ export class Orchestrator {
     }
     const result = await runtime.ensureRunning(env.target, {
       address: route.opencode,
+      containerId: store.runtime(env.id).containerId,
       onLine: (l) => this.envLog(env, l),
       password,
       workspaceFolder: this.envDirectory(env),
