@@ -118,7 +118,7 @@ const ForgejoGate = ({ children }: { children: ReactNode }) => {
   if (!forgejo?.enabled) {
     return (
       <Empty title="Forgejo is disabled">
-        {forgejoError && <Note warn>{forgejoError}</Note>}
+        {forgejoError && <Note error>{forgejoError}</Note>}
         <p className="text-muted-foreground text-sm">
           Connect your Forgejo account to see your pull requests.
         </p>
@@ -646,7 +646,7 @@ const PullView = ({
         )}
         {patch.error && (
           <div role="alert">
-            <Note warn>{patch.error.message}</Note>
+            <Note error>{patch.error.message}</Note>
             <Button variant="link" onClick={() => void patch.refetch()}>
               Retry diff
             </Button>

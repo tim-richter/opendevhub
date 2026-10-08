@@ -226,7 +226,7 @@ const IntegrationSettingsForm = ({
         )}
         {(error || settingsError) && (
           <div role="alert">
-            <Note warn>{error || settingsError}</Note>
+            <Note error>{error || settingsError}</Note>
           </div>
         )}
         {connection && (

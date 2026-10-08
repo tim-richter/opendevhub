@@ -75,7 +75,7 @@ export const RequestState = ({
     )}
     {query.error && (
       <div role="alert" className="p-4">
-        <Note warn>{query.error.message}</Note>
+        <Note error>{query.error.message}</Note>
         <Button variant="link" onClick={() => void query.refetch()}>
           Retry
         </Button>

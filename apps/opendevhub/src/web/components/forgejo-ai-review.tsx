@@ -577,7 +577,7 @@ export const AiReviewPanel = (props: {
         </p>
       )}
       {run.stage === "failed" && (
-        <Note warn>{run.error ?? "The AI review failed."}</Note>
+        <Note error>{run.error ?? "The AI review failed."}</Note>
       )}
       {run.stage === "done" && run.summary && (
         <MarkdownBody>{run.summary}</MarkdownBody>

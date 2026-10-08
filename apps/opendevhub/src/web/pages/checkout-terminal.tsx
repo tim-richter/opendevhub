@@ -50,7 +50,7 @@ const TerminalPanel = ({
     setStatus("Connecting…");
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: "'JetBrains Mono', monospace",
+      fontFamily: "'Geist Mono Variable', monospace",
       fontSize: 13,
       scrollback: 5000,
     });

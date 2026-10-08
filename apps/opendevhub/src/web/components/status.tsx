@@ -29,7 +29,7 @@ export const TONE_LABEL: Record<Tone, string> = {
 };
 
 const DOT: Record<Tone, string> = {
-  attention: "bg-attention ring-3 ring-attention/25 animate-pulse",
+  attention: "bg-attention ring-3 ring-attention/25",
   busy: "bg-warn animate-pulse",
   error: "bg-destructive",
   off: "bg-off",
@@ -68,8 +68,8 @@ export const StatusDot = ({
 
 const SESSION_BADGE: Record<SessionStatus, string> = {
   idle: "bg-muted text-muted-foreground",
-  "needs-answer": "bg-attention text-white",
-  "needs-permission": "bg-attention text-white",
+  "needs-answer": "bg-attention text-attention-foreground",
+  "needs-permission": "bg-attention text-attention-foreground",
   running: "bg-running/15 text-running",
 };
 
@@ -98,7 +98,7 @@ export const Count = ({
       className={cn(
         "h-5 min-w-5 rounded-full px-1.5 tabular-nums",
         tone === "attention"
-          ? "bg-attention text-white"
+          ? "bg-attention text-attention-foreground"
           : "bg-muted text-muted-foreground"
       )}
     >

@@ -54,7 +54,12 @@ const NodeRow = (props: { node: NodeView; onRemove?: () => void }) => {
         )}
       </div>
       {stats && <span className={cn(muted, "tabular-nums")}>{stats}</span>}
-      {node.reason && <Note warn>{node.reason}</Note>}
+      {node.reason &&
+        (node.state === "connecting" ? (
+          <Note>{node.reason}</Note>
+        ) : (
+          <Note error>{node.reason}</Note>
+        ))}
     </div>
   );
 };
@@ -70,6 +75,12 @@ export const NodesPage = () => {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (ssh.trim() === "") {
+      setError(
+        "Enter an ssh destination, such as tim@workstation or an alias from ~/.ssh/config."
+      );
+      return;
+    }
     setBusy(true);
     try {
       await addNode(ssh.trim(), label.trim() || undefined);
@@ -123,7 +134,11 @@ export const NodesPage = () => {
               id="node-ssh"
               placeholder="tim@workstation"
               value={ssh}
-              onChange={(e) => setSsh(e.target.value)}
+              onChange={(e) => {
+                setSsh(e.target.value);
+                setError(undefined);
+              }}
+              aria-invalid={!!error}
               autoComplete="off"
               spellCheck={false}
             />
@@ -137,12 +152,12 @@ export const NodesPage = () => {
               onChange={(e) => setLabel(e.target.value)}
             />
           </div>
-          <Button type="submit" disabled={busy || ssh.trim() === ""}>
-            Add node
+          <Button type="submit" disabled={busy}>
+            {busy ? "Connecting…" : "Add node"}
           </Button>
         </form>
         {error && (
-          <Note warn className="mx-4 mb-3">
+          <Note error className="mx-4 mb-3">
             {error}
           </Note>
         )}

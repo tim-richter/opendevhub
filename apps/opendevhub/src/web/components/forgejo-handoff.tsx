@@ -241,7 +241,7 @@ export const ForgejoHandoff = ({
         </Note>
         {error && (
           <div role="alert">
-            <Note warn>{error}</Note>
+            <Note error>{error}</Note>
           </div>
         )}
         <DialogFooter className="flex-wrap">

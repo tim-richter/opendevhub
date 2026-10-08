@@ -90,7 +90,7 @@ const JiraGate = ({ children }: { children: ReactNode }) => {
   if (!jira?.enabled) {
     return (
       <Empty title="Jira is disabled">
-        {jiraError && <Note warn>{jiraError}</Note>}
+        {jiraError && <Note error>{jiraError}</Note>}
         <p className="text-muted-foreground text-sm">
           Connect your Jira instance to browse tickets and create tasks.
         </p>
@@ -169,7 +169,7 @@ export const JiraPage = () => {
         )}
         {error && (
           <div role="alert">
-            <Note warn>{error}</Note>
+            <Note error>{error}</Note>
           </div>
         )}
         {data?.tickets.length === 0 && (
@@ -324,7 +324,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {error && (
           <div role="alert">
-            <Note warn>{error}</Note>
+            <Note error>{error}</Note>
           </div>
         )}
         {tooLarge && (
