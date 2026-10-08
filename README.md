@@ -239,8 +239,13 @@ OPENDEVHUB_ROUTE=gateway pnpm test:e2e   # the same, through the gateway (the ma
 pnpm dev                # API server on :7777
 pnpm dev:web            # Vite dev server that proxies /api to :7777
 pnpm dev:docs           # docs site
+pnpm storybook          # dashboard pages and components on :6006, API mocked with MSW
 pnpm build              # apps/opendevhub/dist (bin.js + web) and apps/docs/dist
 ```
+
+### Storybook
+
+Stories live next to the code (`*.stories.tsx`, CSF Next). Page stories render the whole app at a route (`parameters: { route: "/p/acme-web" }`) against [MSW](https://mswjs.io) mocks of every `/api` route, the `/api/events` snapshot stream included. The fixtures are in `src/web/mocks/fixtures.ts`; a story swaps them or fails a route with `beforeEach: mockApi({ snapshot: emptySnapshot }, failing("get", "/api/usage", "..."))`.
 
 ### Releasing
 

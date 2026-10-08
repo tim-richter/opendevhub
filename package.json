@@ -6,6 +6,8 @@
     "dev": "pnpm --filter opendevhub dev",
     "dev:web": "pnpm --filter opendevhub dev:web",
     "dev:docs": "pnpm --filter docs dev",
+    "storybook": "pnpm --filter opendevhub storybook",
+    "build-storybook": "pnpm --filter opendevhub build-storybook",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter opendevhub test",
