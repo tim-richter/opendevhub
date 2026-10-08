@@ -2,6 +2,7 @@ import { modelShortName } from "../shared/tasks";
 import type {
   ProjectView,
   ReviewData,
+  ReviewFile,
   SessionSummary,
   StartStep,
   TaskResult,
@@ -249,3 +250,47 @@ export const startStepLabel = (step: StartStep): string => STEP_LABELS[step];
 /** A task's page: its variants, and while they're set up, their progress. */
 export const taskPath = (projectId: string, task: string): string =>
   `/p/${encodeURIComponent(projectId)}/t/${encodeURIComponent(task)}`;
+
+export interface FileCell {
+  status: ReviewFile["status"];
+  additions: number;
+  deletions: number;
+}
+
+export interface FileRow {
+  file: string;
+  /** One per variant, in order; undefined when that variant leaves the file alone. */
+  cells: (FileCell | undefined)[];
+  /** Every variant changes the file the same way (by line counts). */
+  same: boolean;
+}
+
+/** The files the variants touch, side by side: files they disagree on first, then by path. */
+export const fileMatrix = (
+  reviews: readonly (ReviewData | null | undefined)[]
+): FileRow[] => {
+  const files = new Set<string>();
+  for (const r of reviews) {
+    for (const f of r?.files ?? []) {
+      files.add(f.file);
+    }
+  }
+  const rows = [...files].map((file): FileRow => {
+    const cells = reviews.map((r) => {
+      const f = r?.files.find((x) => x.file === file);
+      return f
+        ? { additions: f.additions, deletions: f.deletions, status: f.status }
+        : undefined;
+    });
+    const key = (c: FileCell | undefined) =>
+      c ? `${c.status}:${c.additions}:${c.deletions}` : "-";
+    return {
+      cells,
+      file,
+      same: cells.every((c) => key(c) === key(cells[0])),
+    };
+  });
+  return rows.toSorted(
+    (a, b) => Number(a.same) - Number(b.same) || a.file.localeCompare(b.file)
+  );
+};

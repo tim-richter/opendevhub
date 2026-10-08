@@ -12,6 +12,8 @@ import { useDash } from "../dashboard-context";
 import { useForgejoCheckouts } from "../hooks/use-forgejo-checkouts";
 import { StatusDot, TONE_LABEL } from "./status";
 
+const LIMIT = 3;
+
 /** The running local checkouts of a pull request's own branch, so the PR page leads to the agents on it. */
 export const LocalCheckouts = ({
   details,
@@ -32,7 +34,7 @@ export const LocalCheckouts = ({
   return (
     <p className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       <span>Checked out here:</span>
-      {rows.map(({ view, checkout }) => {
+      {rows.slice(0, LIMIT).map(({ view, checkout }) => {
         const n = checkoutCounts(view, checkout.directory);
         const tone = checkoutTone(view, checkout.directory);
         return (
@@ -58,6 +60,7 @@ export const LocalCheckouts = ({
           </Link>
         );
       })}
+      {rows.length > LIMIT && <span>+{rows.length - LIMIT} more</span>}
     </p>
   );
 };
