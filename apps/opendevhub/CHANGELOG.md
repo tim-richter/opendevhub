@@ -1,5 +1,11 @@
 # opendevhub
 
+## 0.2.1
+
+### Patch Changes
+
+- [#10](https://github.com/tim-richter/opendevhub/pull/10) [`45293ed`](https://github.com/tim-richter/opendevhub/commit/45293edab71cbb3a3292d43bcaae664982c61c06) Thanks [@tim-richter](https://github.com/tim-richter)! - Fix `devcontainer up` and terminals failing with `posix_spawnp failed` on macOS: node-pty 1.1.0's `spawn-helper` ships without its execute bit, so opendevhub now restores it on startup.
+
 ## 0.2.0
 
 ### Minor Changes
