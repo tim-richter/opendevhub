@@ -12,5 +12,5 @@
     "types": ["node"],
     "paths": { "@/*": ["./src/web/*"] }
   },
-  "include": ["src", "test", "*.config.ts"]
+  "include": ["src", "test", "*.config.ts", ".storybook"]
 }
