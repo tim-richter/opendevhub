@@ -20,6 +20,30 @@ Your agent (`SSH_AUTH_SOCK`) is forwarded into the container at `/tmp/opendevhub
 
 The checkout page shows whether the agent is forwarded.
 
+### Load your key into the agent
+
+The forwarded agent is the container's only way to your key, so the agent on your machine has to hold it. ssh on your machine can read `~/.ssh/id_ed25519` from disk and work with an empty agent; the container can't. Check with:
+
+```bash
+ssh-add -l          # "The agent has no identities." means it's empty
+ssh-add ~/.ssh/id_ed25519
+```
+
+gpg-agent keeps keys added this way across restarts (they're listed in `~/.gnupg/sshcontrol`). OpenSSH's `ssh-agent` forgets them when it exits; set `AddKeysToAgent yes` in `~/.ssh/config` so the first `ssh` you run loads the key again:
+
+```
+Host *
+  AddKeysToAgent yes
+```
+
+With home-manager, that's `programs.ssh.settings."*".AddKeysToAgent = "yes";` (with `enableDefaultConfig = false`, the `"*"` block isn't there unless you add it).
+
+When the agent holds no keys, the checkout page shows **ssh-agent has no keys** and the log says `ssh-agent: forwarded, but the ssh-agent on this machine holds no keys`. It clears by itself after `ssh-add`; nothing needs restarting.
+
+### Your ssh config stays on your machine
+
+`~/.ssh/config` isn't copied into containers. User, port and host from the remote URL are what the container uses (`ssh://git@forge.example.com:2222/team/app.git` says all three), so a `Host` entry that sets `User` or `Port` only helps on your machine. Remotes that rely on an alias don't resolve in containers; see [Known limitations](/docs/known-limitations).
+
 ## known_hosts
 
 For each ssh remote of the project, the matching entries from your `~/.ssh/known_hosts` are added to the container's. Hosts you haven't connected to from your machine are skipped; the log says to `ssh` to them once.
@@ -39,3 +63,14 @@ or in `~/.config/opendevhub/config.json`:
 ```
 
 It takes effect the next time the container starts or opendevhub restarts. An opencode server started before forwarding was set up picks up `SSH_AUTH_SOCK` after **Restart opencode**.
+
+## Troubleshooting
+
+`git@host: Permission denied (publickey)` in a container means ssh reached the server but had no key it accepted:
+
+1. Check the badge on the checkout page. **ssh-agent unavailable** names the reason; **ssh-agent has no keys** means `ssh-add` on your machine (see above).
+2. Run `ssh-add -l` on your machine and make sure the key the forge knows is listed.
+3. In the container, `SSH_AUTH_SOCK=/tmp/opendevhub-ssh-agent.sock ssh-add -l` should list the same keys. If it can't reach the agent, opendevhub isn't running or the container was started before forwarding was set up; restart it from the dashboard.
+4. Check `git config --global core.sshCommand` in the container. If the container sets its own, opendevhub leaves it alone and it must use the forwarded agent itself.
+
+`Host key verification failed` means the host isn't in the container's `known_hosts`: `ssh` to it once from your machine, then restart the container.

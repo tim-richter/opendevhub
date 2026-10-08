@@ -353,6 +353,18 @@ describe(sshAgentBadge, () => {
     });
   });
 
+  it("warns when the forwarded agent holds no keys", () => {
+    expect(
+      sshAgentBadge(
+        rt({ sshAgent: "forwarded", sshAgentReason: "holds no keys" })
+      )
+    ).toStrictEqual({
+      label: "ssh-agent has no keys",
+      warn: true,
+      title: "holds no keys",
+    });
+  });
+
   it("shows nothing when off, unknown or the container isn't running", () => {
     expect(sshAgentBadge(rt({ sshAgent: "off" }))).toBeUndefined();
     expect(sshAgentBadge(rt({}))).toBeUndefined();

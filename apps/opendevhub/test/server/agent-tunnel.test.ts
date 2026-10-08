@@ -5,7 +5,12 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentTunnel, hostAgentProblem } from "../../src/server/relay/agent";
+import {
+  AgentTunnel,
+  hostAgentKeyCount,
+  hostAgentProblem,
+  NO_KEYS_REASON,
+} from "../../src/server/relay/agent";
 import type { AgentStatus } from "../../src/server/relay/agent";
 import { startRelay } from "../helpers/relay";
 
@@ -42,9 +47,24 @@ afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+/** Answers REQUEST_IDENTITIES like ssh-agent, claiming `keys` keys. */
+function startKeyAgent(socketPath: string, keys: number): Promise<net.Server> {
+  const s = net.createServer((c) =>
+    c.on("data", () => {
+      const answer = Buffer.alloc(9);
+      answer.writeUInt32BE(5, 0);
+      answer.writeUInt8(12, 4);
+      answer.writeUInt32BE(keys, 5);
+      c.write(answer);
+    })
+  );
+  return new Promise((r) => s.listen(socketPath, () => r(s)));
+}
+
 function tunnel(
   port = relay.port,
-  hostSocket: () => string | undefined = () => hostSock
+  hostSocket: () => string | undefined = () => hostSock,
+  keyCount?: (socketPath: string) => Promise<number | undefined>
 ) {
   const statuses: AgentStatus[] = [];
   const logs: string[] = [];
@@ -56,6 +76,7 @@ function tunnel(
       onStatus: (s) => statuses.push(s),
       onRelayLost,
       hostSocket,
+      keyCount,
       retryMinMs: 50,
       retryMaxMs: 200,
     }
@@ -89,7 +110,50 @@ describe(hostAgentProblem, () => {
   });
 });
 
+describe(hostAgentKeyCount, () => {
+  it("counts the keys an ssh-agent holds", async () => {
+    const empty = path.join(dir, "empty.sock");
+    const full = path.join(dir, "full.sock");
+    const servers = [
+      await startKeyAgent(empty, 0),
+      await startKeyAgent(full, 2),
+    ];
+    await expect(hostAgentKeyCount(empty)).resolves.toBe(0);
+    await expect(hostAgentKeyCount(full)).resolves.toBe(2);
+    await Promise.all(servers.map((s) => new Promise((r) => s.close(r))));
+  });
+
+  it("is undefined when the socket is not an ssh-agent or not there", async () => {
+    await expect(hostAgentKeyCount(hostSock)).resolves.toBeUndefined();
+    await expect(
+      hostAgentKeyCount(path.join(dir, "nope"))
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe(AgentTunnel, () => {
+  it("warns when the host agent holds no keys, and clears it once keys show up", async () => {
+    let keys = 0;
+    const { t, last, logs } = tunnel(
+      relay.port,
+      () => hostSock,
+      async () => keys
+    );
+    t.start();
+    await vi.waitFor(() =>
+      expect(last()).toStrictEqual({
+        reason: NO_KEYS_REASON,
+        state: "forwarded",
+      })
+    );
+    expect(logs).toContain(`ssh-agent: forwarded, but ${NO_KEYS_REASON}`);
+    keys = 1;
+    await expect(ask("list")).resolves.toBe("agent:list");
+    await vi.waitFor(() =>
+      expect(last()).toStrictEqual({ state: "forwarded" })
+    );
+  });
+
   it("forwards a container client to the host agent", async () => {
     const { t, last, logs } = tunnel();
     t.start();

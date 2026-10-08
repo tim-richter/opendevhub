@@ -240,6 +240,13 @@ export const sshAgentBadge = (
   if (runtime.containerState !== "running") {
     return undefined;
   }
+  if (runtime.sshAgent === "forwarded" && runtime.sshAgentReason) {
+    return {
+      label: "ssh-agent has no keys",
+      title: runtime.sshAgentReason,
+      warn: true,
+    };
+  }
   if (runtime.sshAgent === "forwarded") {
     return {
       label: "ssh-agent forwarded",

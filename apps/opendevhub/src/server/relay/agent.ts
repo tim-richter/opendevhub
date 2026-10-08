@@ -26,6 +26,8 @@ export interface AgentTunnelOptions {
   onStatus: (status: AgentStatus) => void;
   /** The control connection couldn't be opened: the relay may be gone. */
   onRelayLost?: () => void;
+  /** Counts the host agent's keys; defaults to asking it over the socket. */
+  keyCount?: (socketPath: string) => Promise<number | undefined>;
   /** The host agent's socket, read on every use; defaults to SSH_AUTH_SOCK. */
   hostSocket?: () => string | undefined;
   retryMinMs?: number;
@@ -34,6 +36,13 @@ export interface AgentTunnelOptions {
 }
 
 const WARN_INTERVAL_MS = 60_000;
+const KEY_COUNT_TIMEOUT_MS = 2000;
+const SSH_AGENTC_REQUEST_IDENTITIES = 11;
+const SSH_AGENT_IDENTITIES_ANSWER = 12;
+/** uint32 length + type byte + uint32 key count. */
+const IDENTITIES_HEADER_BYTES = 9;
+export const NO_KEYS_REASON =
+  "the ssh-agent on this machine holds no keys; run ssh-add there";
 
 /** Why the host's agent can't be forwarded; undefined when SSH_AUTH_SOCK is a socket. */
 export const hostAgentProblem = (
@@ -50,6 +59,40 @@ export const hostAgentProblem = (
     return `SSH_AUTH_SOCK (${socketPath}) does not exist`;
   }
 };
+
+/** How many keys the agent at `socketPath` holds; undefined when it doesn't answer like an ssh-agent. */
+export const hostAgentKeyCount = (
+  socketPath: string,
+  timeoutMs = KEY_COUNT_TIMEOUT_MS
+): Promise<number | undefined> =>
+  new Promise((resolve) => {
+    let buf = Buffer.alloc(0);
+    const s = net.connect(socketPath);
+    const done = (count: number | undefined) => {
+      s.destroy();
+      resolve(count);
+    };
+    s.setTimeout(timeoutMs, () => done(undefined));
+    s.on("error", () => done(undefined));
+    s.on("close", () => done(undefined));
+    s.on("connect", () => {
+      const request = Buffer.alloc(5);
+      request.writeUInt32BE(1, 0);
+      request.writeUInt8(SSH_AGENTC_REQUEST_IDENTITIES, 4);
+      s.write(request);
+    });
+    s.on("data", (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      if (buf.length < IDENTITIES_HEADER_BYTES) {
+        return;
+      }
+      done(
+        buf.readUInt8(4) === SSH_AGENT_IDENTITIES_ANSWER
+          ? buf.readUInt32BE(5)
+          : undefined
+      );
+    });
+  });
 
 const message = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
@@ -125,10 +168,31 @@ export class AgentTunnel {
     }
     this.status = key;
     this.opts.onStatus(status);
-    this.opts.onLog(
-      status.state === "forwarded"
-        ? "ssh-agent: forwarded"
-        : `ssh-agent: unavailable (${status.reason})`
+    if (status.state === "unavailable") {
+      this.opts.onLog(`ssh-agent: unavailable (${status.reason})`);
+    } else {
+      this.opts.onLog(
+        status.reason
+          ? `ssh-agent: forwarded, but ${status.reason}`
+          : "ssh-agent: forwarded"
+      );
+    }
+  }
+
+  /** Marks the forwarded agent as keyless, or clears that once keys show up. Unknown counts change nothing. */
+  private async checkKeys(): Promise<void> {
+    const socketPath = this.hostSocket();
+    if (!socketPath) {
+      return;
+    }
+    const count = await (this.opts.keyCount ?? hostAgentKeyCount)(socketPath);
+    if (count === undefined || !this.control) {
+      return;
+    }
+    this.setStatus(
+      count === 0
+        ? { reason: NO_KEYS_REASON, state: "forwarded" }
+        : { state: "forwarded" }
     );
   }
 
@@ -156,6 +220,7 @@ export class AgentTunnel {
     this.control = socket;
     this.delay = this.opts.retryMinMs ?? 1000;
     this.setStatus({ state: "forwarded" });
+    void this.checkKeys();
     let buf = "";
     const onData = (chunk: Buffer) => {
       buf += chunk.toString("utf-8");
@@ -243,6 +308,7 @@ export class AgentTunnel {
     local.pipe(remote);
     remote.pipe(local);
     remote.resume();
+    void this.checkKeys();
   }
 
   private warn(line: string): void {
