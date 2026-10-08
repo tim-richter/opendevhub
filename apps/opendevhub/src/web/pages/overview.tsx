@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import type { ProjectView, SessionStatus } from "../../shared/types";
+import { checkoutPath } from "../checkouts";
 import { Empty, muted, Page, Section, Segmented } from "../components/page";
 import { AllContainersMenu } from "../components/project-actions";
 import { ResourceStat } from "../components/resource-stat";
@@ -220,13 +221,29 @@ const ProjectRack = ({ views }: { views: ProjectView[] }) => {
     return <p className={muted}>No projects match.</p>;
   }
   return (
-    <ul className="bg-card overflow-hidden rounded-xl border">
+    <ul className="bg-card overflow-hidden rounded-lg border">
+      <li
+        aria-hidden
+        className={cn(
+          "text-muted-foreground grid items-center gap-x-5 border-b px-4 py-2 text-xs max-md:hidden",
+          RACK_COLUMNS
+        )}
+      >
+        <span>Project</span>
+        <span>Sessions</span>
+        <span>Status</span>
+        <span>Ports</span>
+        <span className="justify-self-end">Usage</span>
+        <span />
+      </li>
       {views.map((v) => (
         <ProjectRow key={v.project.id} view={v} />
       ))}
     </ul>
   );
 };
+
+const RACK_COLUMNS = "md:grid-cols-[minmax(0,1fr)_9rem_8rem_4.5rem_11rem_2rem]";
 
 const LIGHT: Record<SessionStatus, string> = {
   idle: "bg-muted-foreground/30",
@@ -293,7 +310,7 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
       className={cn(
         "hover:bg-muted/50 relative grid items-center gap-x-5 gap-y-1.5 border-t px-4 py-3 first:border-t-0",
         "grid-cols-[minmax(0,1fr)_auto_auto]",
-        "md:grid-cols-[minmax(0,1fr)_9rem_8rem_4.5rem_10.5rem_2rem]",
+        RACK_COLUMNS,
         tone === "attention" && "shadow-[inset_3px_0_var(--attention)]",
         tone === "error" && "shadow-[inset_3px_0_var(--destructive)]"
       )}
@@ -337,7 +354,14 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
         {status}
       </span>
       <span className="text-muted-foreground text-xs whitespace-nowrap tabular-nums max-md:hidden">
-        {counts.ports > 0 && plural(counts.ports, "port")}
+        {counts.ports > 0 && (
+          <Link
+            to={checkoutPath(view.project.id, "", "runtime")}
+            className="hover:text-foreground relative hover:underline"
+          >
+            {plural(counts.ports, "port")}
+          </Link>
+        )}
       </span>
       <span className="relative justify-self-end max-md:hidden">
         {resources && <ResourceStat {...resources} />}

@@ -505,11 +505,8 @@ const PortRow = ({ port: p }: { port: ForwardedPort }) => {
         localhost:{p.hostPort} <ExternalLinkIcon className="size-3" />
       </a>
       {moved && (
-        <span
-          className="text-muted-foreground"
-          title={`Port ${p.containerPort} was taken on this machine`}
-        >
-          moved
+        <span className="text-muted-foreground truncate text-xs">
+          ({p.containerPort} was taken here)
         </span>
       )}
       <span className="text-muted-foreground ml-auto truncate">{p.label}</span>

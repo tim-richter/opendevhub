@@ -142,7 +142,6 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
   const { setOpenMobile } = useSidebar();
   const [filter, setFilter] = useState("");
   const location = useLocation();
-  const settingsActive = useMatch("/settings") !== null;
 
   // oxlint-disable-next-line react/exhaustive-effect-dependencies
   useEffect(() => setOpenMobile(false), [location.pathname, setOpenMobile]);
@@ -190,47 +189,14 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
             >
               <ListIcon /> Sessions
             </NavItem>
-            <NavItem
-              to="/usage"
-              title={
-                snapshot.usage
-                  ? `Spent today: ${formatUsage(snapshot.usage.today)}`
-                  : "Usage"
-              }
-              badge={
-                snapshot.usage && (
-                  <span className="text-muted-foreground text-xs tabular-nums">
-                    {formatCost(snapshot.usage.today.cost)}
-                  </span>
-                )
-              }
-            >
-              <CircleDollarSignIcon /> Usage
-            </NavItem>
-            <NavItem to="/cleanup">
-              <EraserIcon /> Cleanup
-            </NavItem>
-            <NavItem
-              to="/nodes"
-              badge={
-                nodesNeedingAttention(snapshot.nodes) > 0 && (
-                  <Count
-                    n={nodesNeedingAttention(snapshot.nodes)}
-                    tone="attention"
-                  />
-                )
-              }
-            >
-              <ServerIcon /> Nodes
-            </NavItem>
-            {jira?.enabled && (
-              <NavItem to="/jira">
-                <TicketIcon /> Jira
-              </NavItem>
-            )}
             {forgejo?.enabled && (
               <NavItem to="/forgejo">
-                <GitPullRequestIcon /> Forgejo
+                <GitPullRequestIcon /> Pull requests
+              </NavItem>
+            )}
+            {jira?.enabled && (
+              <NavItem to="/jira">
+                <TicketIcon /> Tickets
               </NavItem>
             )}
           </SidebarMenu>
@@ -288,28 +254,51 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
             )}
           </SidebarMenu>
         </SidebarGroup>
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupLabel>This machine</SidebarGroupLabel>
+          <SidebarMenu>
+            <NavItem
+              to="/usage"
+              title={
+                snapshot.usage
+                  ? `Spent today: ${formatUsage(snapshot.usage.today)}`
+                  : "Usage"
+              }
+              badge={
+                snapshot.usage && (
+                  <span className="text-muted-foreground text-xs tabular-nums">
+                    {formatCost(snapshot.usage.today.cost)}
+                  </span>
+                )
+              }
+            >
+              <CircleDollarSignIcon /> Usage
+            </NavItem>
+            <NavItem
+              to="/nodes"
+              badge={
+                nodesNeedingAttention(snapshot.nodes) > 0 && (
+                  <Count
+                    n={nodesNeedingAttention(snapshot.nodes)}
+                    tone="attention"
+                  />
+                )
+              }
+            >
+              <ServerIcon /> Nodes
+            </NavItem>
+            <NavItem to="/cleanup">
+              <EraserIcon /> Cleanup
+            </NavItem>
+            <NavItem to="/settings">
+              <SettingsIcon /> Settings
+            </NavItem>
+          </SidebarMenu>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t">
         <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                asChild
-                variant="ghost"
-                size="icon-sm"
-                className={cn(
-                  settingsActive &&
-                    "bg-sidebar-accent text-sidebar-accent-foreground"
-                )}
-              >
-                <NavLink to="/settings" aria-label="Settings">
-                  <SettingsIcon />
-                </NavLink>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Settings</TooltipContent>
-          </Tooltip>
           {permission === "default" && (
             <Tooltip>
               <TooltipTrigger asChild>

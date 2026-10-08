@@ -123,11 +123,11 @@ export const JiraPage = () => {
   return (
     <Page>
       <PageHeader
-        title="Jira"
+        title="Tickets"
         description={
           search
-            ? `Tickets matching “${search}”.`
-            : "Tickets assigned to you, most recently updated first."
+            ? `Jira tickets matching “${search}”.`
+            : "Jira tickets assigned to you, most recently updated first."
         }
         actions={
           <Button variant="outline" size="sm" disabled={busy} onClick={refresh}>
@@ -183,7 +183,7 @@ export const JiraPage = () => {
         )}
         {!!data?.tickets.length && (
           <Section
-            title="Tickets"
+            title={search ? "Results" : "Assigned to you"}
             hint={`${startAt + 1}–${startAt + data.tickets.length} of ${data.total}`}
           >
             <ul className="divide-y">

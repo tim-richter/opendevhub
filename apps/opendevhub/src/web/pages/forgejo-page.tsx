@@ -882,11 +882,11 @@ export const ForgejoPage = () => {
   return (
     <Page>
       <PageHeader
-        title="Forgejo"
+        title="Pull requests"
         description={
           username
-            ? `Pull requests for ${username}.`
-            : "Your pull requests and review inbox."
+            ? `On Forgejo, for ${username}.`
+            : "Your Forgejo pull requests and review inbox."
         }
         actions={
           <Refresh busy={query.isFetching} onClick={() => query.refetch()} />

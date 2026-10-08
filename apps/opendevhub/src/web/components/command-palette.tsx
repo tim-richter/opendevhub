@@ -36,8 +36,16 @@ export const CommandPalette = ({
   open: boolean;
   onClose: () => void;
 }) => {
-  const { snapshot, rescan, newTask, openAddProject, permission, report } =
-    useDash();
+  const {
+    snapshot,
+    rescan,
+    newTask,
+    openAddProject,
+    permission,
+    report,
+    forgejo,
+    jira,
+  } = useDash();
   const navigate = useNavigate();
   const location = useLocation();
   const [query, setQuery] = useState("");
@@ -54,13 +62,24 @@ export const CommandPalette = ({
     }
     const go = (to: string) => () => void navigate(to);
     const list: Item[] = [
-      { group: "Go to", key: "nav-overview", label: "Overview", run: go("/") },
-      {
-        group: "Go to",
-        key: "nav-sessions",
-        label: "All sessions",
-        run: go("/sessions"),
-      },
+      ...[
+        { key: "nav-overview", label: "Overview", run: go("/") },
+        {
+          key: "nav-sessions",
+          label: "All sessions",
+          run: go("/sessions"),
+        },
+        ...(forgejo?.enabled
+          ? [{ key: "nav-pulls", label: "Pull requests", run: go("/forgejo") }]
+          : []),
+        ...(jira?.enabled
+          ? [{ key: "nav-tickets", label: "Tickets", run: go("/jira") }]
+          : []),
+        { key: "nav-usage", label: "Usage", run: go("/usage") },
+        { key: "nav-nodes", label: "Nodes", run: go("/nodes") },
+        { key: "nav-cleanup", label: "Cleanup", run: go("/cleanup") },
+        { key: "nav-settings", label: "Settings", run: go("/settings") },
+      ].map((item): Item => ({ group: "Go to", ...item })),
       {
         group: "Actions",
         hint: "n",
@@ -136,6 +155,8 @@ export const CommandPalette = ({
     permission,
     report,
     location.pathname,
+    forgejo?.enabled,
+    jira?.enabled,
   ]);
 
   // Filtering stays ours (substring match, capped) rather than cmdk's fuzzy ranking.
