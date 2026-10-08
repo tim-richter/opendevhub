@@ -9,7 +9,6 @@ import {
   PlusIcon,
   ServerIcon,
   TerminalIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -210,25 +209,17 @@ export const CheckoutPage = () => {
                 view={view}
                 directory={checkout.directory}
                 hostPath={checkout.hostPath}
-                icon
               />
             )}
-            <ContainerMenu view={view} checkout={checkout} />
-            {checkout.worktree && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground"
-                aria-label={`Remove worktree ${checkout.label}`}
-                title="Remove worktree"
-                disabled={!running || !!pending}
-                onClick={() =>
-                  remove(checkout, () => void navigate(projectPath))
-                }
-              >
-                <XIcon />
-              </Button>
-            )}
+            <ContainerMenu
+              view={view}
+              checkout={checkout}
+              onRemoveWorktree={
+                checkout.worktree && !pending
+                  ? () => remove(checkout, () => void navigate(projectPath))
+                  : undefined
+              }
+            />
           </>
         }
       />

@@ -1,6 +1,6 @@
-import { BoxIcon, PlusIcon } from "lucide-react";
+import { BoxIcon, ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useState } from "react";
-import type { FormEvent } from "react";
+import type { ComponentProps, FormEvent } from "react";
 import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -126,6 +127,27 @@ export const checkoutReady = (view: ProjectView, c: Checkout): boolean => {
 };
 
 /** The main checkout's container: it is the project's own, so start, stop, rebuild and restart go through the project. */
+/** The labelled trigger of a checkout's container menu. */
+const ContainerTrigger = ({
+  label,
+  compact,
+  disabled,
+  ...props
+}: ComponentProps<typeof Button> & {
+  label: string;
+  compact?: boolean;
+}) => (
+  <Button
+    variant="outline"
+    size={compact ? "sm" : "default"}
+    aria-label={`Container of ${label}`}
+    disabled={disabled}
+    {...props}
+  >
+    <BoxIcon /> Container <ChevronDownIcon />
+  </Button>
+);
+
 const MainContainerMenu = ({
   view,
   checkout: c,
@@ -144,15 +166,7 @@ const MainContainerMenu = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size={compact ? "icon-sm" : "icon"}
-          className="text-muted-foreground"
-          aria-label={`Container of ${c.label}`}
-          title="Container"
-        >
-          <BoxIcon />
-        </Button>
+        <ContainerTrigger label={c.label} compact={compact} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
@@ -205,10 +219,13 @@ export const ContainerMenu = ({
   view,
   checkout: c,
   compact,
+  onRemoveWorktree,
 }: {
   view: ProjectView;
   checkout: Checkout;
   compact?: boolean;
+  /** Adds "Remove worktree…" at the end of a worktree's menu. */
+  onRemoveWorktree?: () => void;
 }) => {
   const { running } = projectFlags(view, false);
   const { pending, ownContainer, containerAction, removeContainer } =
@@ -223,16 +240,11 @@ export const ContainerMenu = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size={compact ? "icon-sm" : "icon"}
-          className="text-muted-foreground"
-          aria-label={`Container of ${c.label}`}
-          title="Container"
+        <ContainerTrigger
+          label={c.label}
+          compact={compact}
           disabled={!!pending}
-        >
-          <BoxIcon />
-        </Button>
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {env ? (
@@ -310,6 +322,19 @@ export const ContainerMenu = ({
               )}
             </span>
           </DropdownMenuItem>
+        )}
+        {onRemoveWorktree && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={!running}
+              title={running ? undefined : "Start the project first"}
+              onSelect={onRemoveWorktree}
+            >
+              <Trash2Icon /> Remove worktree…
+            </DropdownMenuItem>
+          </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

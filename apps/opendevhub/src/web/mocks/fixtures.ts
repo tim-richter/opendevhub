@@ -504,9 +504,13 @@ export const usageReport: UsageReport = {
   days: Array.from({ length: USAGE_DAYS }, (_, i) => {
     const offset = USAGE_DAYS - 1 - i;
     const weekend = new Date(ago(offset * DAY)).getDay() % 6 === 0;
-    const cost = weekend
+    let cost = weekend
       ? 0
       : Math.round((2 + Math.sin(i / 3) * 1.5 + (i % 5)) * 100) / 100;
+    // Today's bar matches the "Today" total.
+    if (offset === 0) {
+      cost = 3.88;
+    }
     return {
       cost,
       day: localDay(ago(offset * DAY)),

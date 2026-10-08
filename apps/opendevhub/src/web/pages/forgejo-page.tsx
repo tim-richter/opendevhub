@@ -84,6 +84,7 @@ import {
 } from "../components/review-diffs";
 import { DiffLinesSkeleton } from "../components/skeletons";
 import { Tip } from "../components/tip";
+import { When } from "../components/when";
 import { useDash } from "../dashboard-context";
 import {
   defaultPullMode,
@@ -672,7 +673,7 @@ const PullView = ({
           ) : (
             <Empty title="No changes in this pull request" />
           ))}
-        <div className="bg-background/95 supports-backdrop-filter:bg-background/80 sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t py-3 backdrop-blur">
+        <div className="bg-background sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t px-4 py-3 md:-mx-8 md:px-8">
           {reviewing ? (
             <>
               <span className="text-sm">
@@ -988,7 +989,7 @@ export const ForgejoPage = () => {
                             <code className="text-xs">{pull.stack.base}</code>
                           </>
                         )}{" "}
-                        · Updated {new Date(pull.updatedAt).toLocaleString()}
+                        · Updated <When at={pull.updatedAt} />
                       </p>
                       {depth === 0 && pull.stack?.parent && (
                         <p className="text-muted-foreground flex items-center gap-1 text-sm">
@@ -1020,7 +1021,7 @@ export const ForgejoPage = () => {
         )}
         {query.dataUpdatedAt > 0 && (
           <p className="text-muted-foreground text-xs">
-            Last refreshed {new Date(query.dataUpdatedAt).toLocaleTimeString()}
+            Last refreshed <When at={query.dataUpdatedAt} />
             {query.isFetching && " · Refreshing…"}
           </p>
         )}

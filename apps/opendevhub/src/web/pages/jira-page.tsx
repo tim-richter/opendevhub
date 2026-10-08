@@ -30,6 +30,7 @@ import {
   PageHeader,
   Section,
 } from "../components/page";
+import { When } from "../components/when";
 import { useDash } from "../dashboard-context";
 import { taskPath } from "../tasks";
 
@@ -345,7 +346,9 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                 <dt>Labels</dt>
                 <dd className="break-words">{data.labels.join(", ") || "—"}</dd>
                 <dt>Updated</dt>
-                <dd>{data.updatedAt}</dd>
+                <dd>
+                  <When at={data.updatedAt} />
+                </dd>
               </dl>
             </Section>
             <Section title="Description">

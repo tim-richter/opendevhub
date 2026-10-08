@@ -1,4 +1,4 @@
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 
@@ -33,6 +33,12 @@ import { formatCost } from "../tasks";
 import { formatUsage } from "../usage";
 
 type Filter = "all" | "running" | "stopped";
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "running", label: "Running" },
+  // Stopped, starting and broken containers alike.
+  { id: "stopped", label: "Not running" },
+];
 const ACTIVE_LIMIT = 6;
 const FILTER_THRESHOLD = 6;
 /** More sessions than this and a project's lights end in a "+n". */
@@ -42,7 +48,7 @@ const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
 export const Overview = () => {
-  const { snapshot, newTask } = useDash();
+  const { snapshot, newTask, openAddProject, rescan, scanning } = useDash();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   if (!snapshot) {
@@ -57,7 +63,7 @@ export const Overview = () => {
     (v) => v.runtime.containerState === "running"
   ).length;
 
-  const isUp = (v: ProjectView) => v.runtime.containerState !== "stopped";
+  const isUp = (v: ProjectView) => v.runtime.containerState === "running";
   const rows = [...snapshot.projects]
     .toSorted((a, b) => a.project.name.localeCompare(b.project.name))
     .filter((v) => {
@@ -85,12 +91,15 @@ export const Overview = () => {
         <div className="flex min-w-0 flex-col gap-2">
           <h1 className="sr-only">Overview</h1>
           <p
-            className={cn(
-              "text-2xl font-semibold tracking-tight text-balance",
-              attention.length > 0 && "text-attention"
-            )}
+            className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-balance"
             aria-live="polite"
           >
+            {attention.length > 0 && (
+              <span
+                className="bg-attention inline-block size-2.5 shrink-0 rounded-full"
+                aria-hidden
+              />
+            )}
             {headline}
           </p>
           {hasProjects && (
@@ -116,13 +125,15 @@ export const Overview = () => {
             </p>
           )}
         </div>
-        <Button
-          onClick={() => newTask()}
-          title="New task (n)"
-          className="max-md:w-full"
-        >
-          <PlusIcon /> New task
-        </Button>
+        {hasProjects && (
+          <Button
+            onClick={() => newTask()}
+            title="New task (n)"
+            className="max-md:w-full"
+          >
+            <PlusIcon /> New task
+          </Button>
+        )}
       </header>
 
       {attention.length > 0 && (
@@ -145,10 +156,7 @@ export const Overview = () => {
               label="Show projects"
               value={filter}
               onChange={setFilter}
-              options={(["all", "running", "stopped"] as const).map((f) => ({
-                id: f,
-                label: f.charAt(0).toUpperCase() + f.slice(1),
-              }))}
+              options={FILTERS}
             />
           )}
           {snapshot.projects.length > FILTER_THRESHOLD && (
@@ -164,11 +172,24 @@ export const Overview = () => {
         {hasProjects ? (
           <ProjectRack views={rows} />
         ) : (
-          <Empty title="No projects found">
-            <p className={muted}>
+          <Empty title="Add your first project">
+            <p className={cn(muted, "max-w-md text-balance")}>
               No folder with a devcontainer was found under{" "}
-              {snapshot.roots.join(", ") || "the configured roots"}.
+              <code className="font-mono text-xs">
+                {snapshot.roots.join(", ") || "the configured roots"}
+              </code>
+              . Add a git repo and opendevhub sets up its devcontainer, or start
+              opendevhub with <code className="font-mono text-xs">--root</code>{" "}
+              pointing at your code.
             </p>
+            <div className="mt-2 flex flex-wrap justify-center gap-2">
+              <Button onClick={openAddProject}>
+                <PlusIcon /> Add project
+              </Button>
+              <Button variant="outline" disabled={scanning} onClick={rescan}>
+                <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan"}
+              </Button>
+            </div>
           </Empty>
         )}
       </section>

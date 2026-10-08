@@ -1,10 +1,4 @@
-import {
-  GitBranchIcon,
-  InfoIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  XIcon,
-} from "lucide-react";
+import { GitBranchIcon, InfoIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 
@@ -272,7 +266,6 @@ const CheckoutCard = ({
   checkout: Checkout;
 }) => {
   const navigate = useNavigate();
-  const { running } = projectFlags(view, false);
   const { pending, newSession, remove } = useCheckoutActions(view);
   const env = envOfDirectory(view, c.directory);
   const tone = checkoutTone(view, c.directory);
@@ -322,7 +315,7 @@ const CheckoutCard = ({
         <div className="text-muted-foreground flex min-h-5 flex-wrap items-center gap-x-3.5 gap-y-1 text-xs">
           {n.attention > 0 && (
             <span className="text-attention font-semibold">
-              {n.attention} need you
+              {n.attention} {n.attention === 1 ? "needs" : "need"} you
             </span>
           )}
           {n.running > 0 && <span>{n.running} working</span>}
@@ -354,20 +347,14 @@ const CheckoutCard = ({
             hostPath={c.hostPath}
             compact
           />
-          <ContainerMenu view={view} checkout={c} compact />
-          {c.worktree && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground ml-auto"
-              aria-label={`Remove worktree ${c.label}`}
-              title="Remove worktree"
-              disabled={!running || !!pending}
-              onClick={() => remove(c)}
-            >
-              <XIcon />
-            </Button>
-          )}
+          <ContainerMenu
+            view={view}
+            checkout={c}
+            compact
+            onRemoveWorktree={
+              c.worktree && !pending ? () => remove(c) : undefined
+            }
+          />
         </div>
       </Card>
     </li>
