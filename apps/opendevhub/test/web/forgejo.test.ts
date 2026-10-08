@@ -5,6 +5,7 @@ import type { PublishInfo } from "../../src/shared/types";
 import {
   defaultPullMode,
   forgejoAgentPrompt,
+  forgejoRoute,
   forgejoCommentNote,
   placeAiFindings,
   suggestionComment,
@@ -458,5 +459,40 @@ describe("forgejoAgentPrompt with AI findings", () => {
     });
     expect(prompt).toContain("AI review finding (major) on a.ts:7-9:\nNull");
     expect(prompt).toContain("AI review finding (minor):\nDocs");
+  });
+});
+
+describe("forgejoRoute", () => {
+  it("maps a pull request on the configured instance to its dashboard page", () => {
+    expect(
+      forgejoRoute(
+        "https://git.acme.dev/acme/web/pulls/42",
+        "https://git.acme.dev/"
+      )
+    ).toBe("/forgejo/acme/web/42");
+    expect(
+      forgejoRoute(
+        "https://acme.dev/forgejo/acme/web/pulls/7",
+        "https://acme.dev/forgejo"
+      )
+    ).toBe("/forgejo/acme/web/7");
+  });
+
+  it("leaves other hosts and non-PR URLs alone", () => {
+    expect(
+      forgejoRoute(
+        "https://github.com/acme/web/pull/42",
+        "https://git.acme.dev"
+      )
+    ).toBeUndefined();
+    expect(
+      forgejoRoute(
+        "https://git.acme.dev/acme/web/compare/main...x",
+        "https://git.acme.dev"
+      )
+    ).toBeUndefined();
+    expect(
+      forgejoRoute("https://git.acme.dev/a/b/pulls/1", undefined)
+    ).toBeUndefined();
   });
 });

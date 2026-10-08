@@ -50,6 +50,7 @@ import {
   TabLink,
 } from "../components/page";
 import { projectFlags, StartStopButton } from "../components/project-actions";
+import { PublishedPr } from "../components/published-pr";
 import { ResourceStat } from "../components/resource-stat";
 import { SessionList } from "../components/session-list";
 import { Count, StatusDot } from "../components/status";
@@ -174,6 +175,11 @@ export const CheckoutPage = () => {
               </span>
             )}
             {env && <EnvBadge env={env} />}
+            <PublishedPr
+              projectId={view.project.id}
+              directory={checkout.directory}
+              enabled={running}
+            />
             {agent && (
               <Badge
                 variant="outline"

@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  ArrowRightIcon,
   ExternalLinkIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -269,6 +270,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
       }
     }
   }
+  const [firstTask] = linked.keys();
   const tooLarge =
     source &&
     (jiraTaskPrompt(source).length > 100_000 || source.title.length > 1000);
@@ -296,13 +298,21 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                 </a>
               </Button>
             )}
+            {firstTask && (
+              <Button asChild size="sm">
+                <Link to={firstTask}>
+                  <ArrowRightIcon /> Open task
+                </Link>
+              </Button>
+            )}
             {source && (
               <Button
                 size="sm"
+                variant={firstTask ? "outline" : "default"}
                 disabled={!!tooLarge}
                 onClick={() => newTask(undefined, { jira: source })}
               >
-                <PlusIcon /> Create task
+                <PlusIcon /> {firstTask ? "Another task" : "Create task"}
               </Button>
             )}
             <Button
@@ -335,6 +345,22 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {data && (
           <>
+            {linked.size > 0 && (
+              <Section title="Tasks from this ticket" hint={linked.size}>
+                <ul className="divide-y">
+                  {[...linked].map(([url, task]) => (
+                    <li key={url}>
+                      <Link
+                        className="hover:bg-muted/50 block px-4 py-3 text-sm"
+                        to={url}
+                      >
+                        {task.projectId} · {task.title}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            )}
             <Section title="Details">
               <dl className="[&_dt]:text-muted-foreground grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 px-4 py-4 text-sm">
                 <dt>Assignee</dt>
@@ -360,22 +386,6 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                 <p className="px-4 py-4 text-sm">No description provided.</p>
               )}
             </Section>
-            {linked.size > 0 && (
-              <Section title="Tasks created from this ticket">
-                <ul className="divide-y">
-                  {[...linked].map(([url, task]) => (
-                    <li key={url}>
-                      <Link
-                        className="hover:bg-muted/50 block px-4 py-3 text-sm"
-                        to={url}
-                      >
-                        {task.projectId} · {task.title}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </Section>
-            )}
           </>
         )}
       </JiraGate>

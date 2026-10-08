@@ -67,6 +67,7 @@ import {
   ForgejoWorktreeDialog,
 } from "../components/forgejo-review-dialogs";
 import { ForgejoStack } from "../components/forgejo-stack";
+import { LocalCheckouts } from "../components/local-checkouts";
 import { MarkdownBody } from "../components/markdown-body";
 import {
   Chip,
@@ -556,6 +557,7 @@ const PullView = ({
             />
           </div>
         </div>
+        <LocalCheckouts details={details} />
         <p className="text-muted-foreground -mt-2 text-sm">
           {reviewing
             ? "Write your review: comment on lines, and accept or dismiss what an AI review suggests."
