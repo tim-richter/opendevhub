@@ -8,6 +8,7 @@
     "dev:docs": "pnpm --filter docs dev",
     "storybook": "pnpm --filter opendevhub storybook",
     "build-storybook": "pnpm --filter opendevhub build-storybook",
+    "screenshots": "pnpm --filter opendevhub screenshots",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter opendevhub test",

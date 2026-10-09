@@ -14,6 +14,8 @@ opendevhub nodes add tim@workstation --label Workstation
 
 The Nodes page shows whether each node is reachable and ready, and how much CPU and memory it has free.
 
+![The Nodes page: this machine and a build box online, an old laptop unreachable over ssh, and the form to add a node](./images/nodes.webp)
+
 ## Run a task on a node
 
 Pick the node in the [New task](/docs/tasks) form. The task gets a new worktree with its own container on that node: opendevhub pushes the base branch (the one you choose, or the main checkout's current branch) into a repository it keeps under `~/.opendevhub/repos` on the node, creates the worktree there, and starts the container with the node's Docker. Uncommitted changes in your main checkout stay behind.

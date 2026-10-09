@@ -8,7 +8,7 @@ When opendevhub starts a container it bind-mounts `<project>.worktrees` (created
 
 **New worktree** in the project's **Worktrees** section creates a branch and worktree there with `git worktree add` inside the container, and can start an opencode session in it straight away. The ⓘ next to the heading shows where the folder is on your machine and in the container.
 
-![A project's worktrees: the main checkout and two task branches, each with its own sessions and Open in… menu](./images/worktrees.webp)
+![A project's worktrees: the main checkout and two branches, one in its own container, each with its sessions and Open in… and Container menus](./images/worktrees.webp)
 
 - Because the folder sits next to the checkout on both sides, worktrees are created with `--relative-paths`, so git works in them on your machine too. This needs git 2.48 or newer on your machine and in the container, and the workspace folder must have the same name as the project folder (the default `/workspaces/<name>`). Otherwise opendevhub falls back to absolute links: the files are still on your machine, but git commands in the worktree only work inside the container.
 - Relative links set `extensions.relativeWorktrees` in the repository. Tools built on libgit2 (some git GUIs and editor git integrations) can't open such a repository yet. Set `OPENDEVHUB_RELATIVE_WORKTREES=0` to always use absolute links.

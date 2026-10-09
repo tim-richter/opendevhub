@@ -10,9 +10,13 @@ Use **Test connection** before saving to verify the API, authenticated account, 
 
 **Pull requests** in the sidebar opens an inbox with **Authored by me**, **Review requested**, and **Assigned to me** views. Filter by **All**, **Open**, or **Closed / merged**, search PR text, or enter an exact repository as `owner/name`. Repositories do not need to be local projects. Use **Load more pull requests** to fetch additional pages. Your selected view and filters are remembered, and returning from a PR preserves them.
 
+![The Pull requests inbox: authored-by-me pull requests with their approval state, one stacked under its parent](./images/forgejo-inbox.webp)
+
 ## Pull request context
 
 Open a PR to see its description, labels, draft/merge status, requested reviewers, discussion, reviews, and CI checks for its head commit. Other people's inline comments appear in the diff at their lines, as long as those lines are still in it. Comments and reviews load in pages; checks link to their upstream details when available.
+
+![A pull request in Address feedback mode: its description, conversation, stack, checks and reviewers, with the handoff bar at the bottom](./images/forgejo-pull-request.webp)
 
 A PR page has two modes, switched at the top right and kept in the URL (`?mode=address` or `?mode=review`):
 

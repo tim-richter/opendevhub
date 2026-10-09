@@ -10,7 +10,7 @@
 
 [Documentation](https://tim-richter.github.io/opendevhub/docs) · [Getting started](https://tim-richter.github.io/opendevhub/docs/getting-started) · [Contributing](CONTRIBUTING.md)
 
-<img src="apps/docs/content/docs/images/overview.webp" alt="The opendevhub Overview page, listing sessions that need you above the running projects" width="860">
+<img src="apps/docs/content/docs/images/overview.webp" alt="The opendevhub Overview page, listing sessions that need you above the projects" width="860">
 
 </div>
 
