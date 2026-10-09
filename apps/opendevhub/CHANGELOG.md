@@ -1,5 +1,17 @@
 # opendevhub
 
+## 0.3.0
+
+### Minor Changes
+
+- [#16](https://github.com/tim-richter/opendevhub/pull/16) [`0acd4d7`](https://github.com/tim-richter/opendevhub/commit/0acd4d7a996a7f6e3d33289aec724a10757d2614) Thanks [@tim-richter](https://github.com/tim-richter)! - Dashboard design pass: neutral theme with Geist, a task-first sidebar, a side-by-side comparison for task variants, links between pull requests, checkouts and tickets, a flat Settings page, relative timestamps everywhere, folded question forms, and a phone-friendly Review tab.
+
+### Patch Changes
+
+- [`85e96f2`](https://github.com/tim-richter/opendevhub/commit/85e96f277d0eaf9b41f138771c22369c677d467d) Thanks [@tim-richter](https://github.com/tim-richter)! - Filter the Forgejo inbox by organization and team. Add "Rebuild without cache" to container menus, which rebuilds the image without Docker's layer cache. Fix reading a container's environment through the devcontainer CLI, which mangled `env -0`. Remove the Review link from session rows.
+
+- [`ebed09e`](https://github.com/tim-richter/opendevhub/commit/ebed09e241da10b5e52f3425ebdfab52d7619441) Thanks [@tim-richter](https://github.com/tim-richter)! - Warn when the forwarded ssh-agent holds no keys: the checkout page shows "ssh-agent has no keys" and the log says to run `ssh-add` on this machine, instead of git in the container failing with "Permission denied (publickey)" while the agent shows as forwarded. The warning clears by itself once a key is added. The Git and ssh docs now explain loading your key into the agent and how to troubleshoot ssh in containers.
+
 ## 0.2.2
 
 ### Patch Changes
