@@ -82,6 +82,7 @@ export class Checkouts {
           : base,
         branch,
         onLine: (l) => this.envs.log(id, l),
+        origin: req.pull?.url,
         root,
         workspaceFolder: ws,
       });

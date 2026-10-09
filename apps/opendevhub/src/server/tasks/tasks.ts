@@ -1,3 +1,4 @@
+import { jiraTicketUrl } from "../../shared/jira";
 import {
   deriveTitle,
   taskBranches,
@@ -241,6 +242,7 @@ export class Tasks {
               base: req.base,
               branch,
               onLine,
+              origin: req.jira ? jiraTicketUrl(req.jira) : undefined,
               root,
               workspaceFolder: ws,
             });

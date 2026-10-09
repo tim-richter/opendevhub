@@ -50,6 +50,8 @@ export interface Worktree {
   node?: NodeId;
   branch?: string;
   head?: string;
+  /** The pull request or Jira ticket (its web URL) the worktree was created for, when opendevhub made it for one. */
+  origin?: string;
 }
 
 /** Where opendevhub keeps worktrees: a host folder next to the project, mounted next to the workspace. */

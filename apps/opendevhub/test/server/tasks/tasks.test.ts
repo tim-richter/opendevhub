@@ -36,7 +36,7 @@ describe("tasks", () => {
   }
 
   it("associates each created worktree and session with its Jira ticket", async () => {
-    const { hub, client, store } = await started();
+    const { hub, client, store, worktrees } = await started();
     const jira = {
       key: "APP-12",
       instanceUrl: "https://jira.example.com",
@@ -61,6 +61,10 @@ describe("tasks", () => {
     expect(store.startingTask(project.id, result.task)?.jira).toStrictEqual(
       jira
     );
+    expect(worktrees.add.mock.calls.map(([, a]) => a.origin)).toStrictEqual([
+      "https://jira.example.com/browse/APP-12",
+      "https://jira.example.com/browse/APP-12",
+    ]);
     expect(
       client.prompt.mock.calls.every(([, text]) => text === prompt)
     ).toBeTruthy();

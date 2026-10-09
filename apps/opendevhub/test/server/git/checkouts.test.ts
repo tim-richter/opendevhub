@@ -95,6 +95,7 @@ describe("worktrees", () => {
     expect(worktrees.add.mock.calls[0][1]).toMatchObject({
       branch: "feature/x",
       base: undefined,
+      origin: undefined,
       workspaceFolder: "/workspaces/demo",
     });
     expect(client.createSession).toHaveBeenCalledWith(res.worktree.path, {
@@ -102,6 +103,21 @@ describe("worktrees", () => {
     });
     expect(res.sessionId).toBe("ses_new");
     expect(store.runtime(project.id).worktrees).toStrictEqual([known]);
+  });
+
+  it("remembers the pull request a worktree checks out", async () => {
+    const { worktrees, hub } = setup();
+    await hub.environments.rescan();
+    await hub.environments.start(project.id);
+    const url = "https://forge.example/o/r/pulls/5";
+    await hub.checkouts.createWorktree(project.id, {
+      branch: "review/pr-5",
+      pull: { commitId: "a".repeat(40), number: 5, url },
+    });
+    expect(worktrees.add.mock.calls[0][1]).toMatchObject({
+      base: "a".repeat(40),
+      origin: url,
+    });
   });
 
   it("validates input and needs a running container", async () => {

@@ -59,6 +59,7 @@ import {
 import type { Checkout } from "./checkouts";
 import { LogPanel } from "./log-panel";
 import { OpenInMenu } from "./open-in-menu";
+import { WorktreeOrigin } from "./worktree-origin";
 import {
   checkoutReady,
   ContainerMenu,
@@ -179,6 +180,9 @@ export const CheckoutPage = () => {
               </span>
             )}
             {env && <EnvBadge env={env} />}
+            {checkout.worktree?.origin && (
+              <WorktreeOrigin origin={checkout.worktree.origin} />
+            )}
             <PublishedPr
               projectId={view.project.id}
               directory={checkout.directory}

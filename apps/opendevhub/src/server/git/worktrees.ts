@@ -85,6 +85,26 @@ export const worktreeDirName = (branch: string): string =>
 export const baseKey = (branch: string): string =>
   `branch.${branch}.opendevhubBase`;
 
+/** What opendevhub created a branch's worktree for (a pull request or ticket URL): `branch.<b>.opendevhubOrigin`. */
+export const originKey = (branch: string): string =>
+  `branch.${branch}.opendevhubOrigin`;
+
+const ORIGIN_KEY = /^branch\.(?<branch>.+)\.opendevhuborigin$/u;
+
+/** Branch → origin from `git config --get-regexp` output (git prints the key lowercased, the branch as is). */
+export const parseOrigins = (output: string): Map<string, string> => {
+  const out = new Map<string, string>();
+  for (const line of output.split("\n")) {
+    const space = line.indexOf(" ");
+    const branch = ORIGIN_KEY.exec(line.slice(0, space))?.groups?.branch;
+    const url = line.slice(space + 1).trim();
+    if (space > 0 && branch && url) {
+      out.set(branch, url);
+    }
+  }
+  return out;
+};
+
 /** Linked worktrees from `git worktree list --porcelain` (the main checkout, bare and prunable entries are dropped). */
 export const parseWorktreeList = (
   porcelain: string,
@@ -131,6 +151,8 @@ export interface AddWorktreeArgs {
   root: WorktreeRoot;
   branch: string;
   base?: string;
+  /** Recorded as the worktree's origin (see originKey). */
+  origin?: string;
   onLine: (line: string) => void;
 }
 
@@ -163,11 +185,16 @@ export class Worktrees {
       "list",
       "--porcelain",
     ]);
-    return parseWorktreeList(r.stdout, root);
+    const worktrees = parseWorktreeList(r.stdout, root);
+    const origins = await this.origins(project, workspaceFolder);
+    return worktrees.map((w) => {
+      const origin = w.branch ? origins.get(w.branch) : undefined;
+      return origin ? { ...w, origin } : w;
+    });
   }
 
   async add(project: Project, args: AddWorktreeArgs): Promise<Worktree> {
-    const { workspaceFolder: ws, root, branch, base, onLine } = args;
+    const { workspaceFolder: ws, root, branch, base, origin, onLine } = args;
     if (
       base !== undefined &&
       (base.startsWith("-") || /\s/u.test(base) || base === "")
@@ -225,13 +252,21 @@ export class Worktrees {
         `worktree: could not record the base of ${branch}: ${error instanceof Error ? error.message : String(error)}`
       )
     );
+    if (origin) {
+      await this.git(project, ws, ["config", originKey(branch), origin]).catch(
+        (error: unknown) =>
+          onLine(
+            `worktree: could not record what ${branch} was made for: ${error instanceof Error ? error.message : String(error)}`
+          )
+      );
+    }
     onLine(
       `worktree: added ${target} (${exists ? "existing" : "new"} branch ${branch}${relative ? "" : ", absolute links"})`
     );
     const hostPath = root.mounted
       ? path.join(root.host, worktreeDirName(branch))
       : undefined;
-    return { branch, hostPath, path: target };
+    return { branch, hostPath, path: target, ...(origin ? { origin } : {}) };
   }
 
   async remove(
@@ -245,6 +280,22 @@ export class Worktrees {
       cmd.push("--force");
     }
     await this.git(project, workspaceFolder, [...cmd, "--", worktreePath]);
+  }
+
+  /** Every branch's recorded origin; none when git has none set (exit 1) or can't tell. */
+  private async origins(
+    project: Project,
+    ws: string
+  ): Promise<Map<string, string>> {
+    const r = await this.deps.containers.exec(project, [
+      "git",
+      "-C",
+      ws,
+      "config",
+      "--get-regexp",
+      String.raw`^branch\..*\.opendevhuborigin$`,
+    ]);
+    return r.exitCode === 0 ? parseOrigins(r.stdout) : new Map();
   }
 
   /**

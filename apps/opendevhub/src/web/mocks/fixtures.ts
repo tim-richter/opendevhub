@@ -334,6 +334,7 @@ export const apiProject: ProjectView = {
       {
         branch: "fix/invoice-rounding",
         head: "9f8e7d6",
+        origin: "https://git.acme.dev/acme/billing/pulls/31",
         path: "/workspaces/.worktrees/billing-api/v1",
       },
       {

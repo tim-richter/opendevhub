@@ -35,6 +35,7 @@ import {
 } from "../checkouts/checkouts";
 import type { Checkout } from "../checkouts/checkouts";
 import { OpenInMenu } from "../checkouts/open-in-menu";
+import { WorktreeOrigin } from "../checkouts/worktree-origin";
 import {
   checkoutReady,
   ContainerMenu,
@@ -295,6 +296,11 @@ const CheckoutRow = ({
           {env && (
             <span className="relative">
               <EnvBadge env={env} />
+            </span>
+          )}
+          {c.worktree?.origin && (
+            <span className="relative">
+              <WorktreeOrigin origin={c.worktree.origin} />
             </span>
           )}
         </div>
