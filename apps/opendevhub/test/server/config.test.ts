@@ -58,6 +58,22 @@ describe("config", () => {
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
   });
+
+  it.each(["null", "[]", '"invalid"', "42", "true"])(
+    "backs up an invalid top-level config value %j and uses defaults",
+    (text) => {
+      const file = path.join(dir, "config.json");
+      fs.writeFileSync(file, text);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        expect(loadConfig(dir)).toStrictEqual({ port: DEFAULT_PORT });
+        expect(fs.readFileSync(`${file}.bak`, "utf-8")).toBe(text);
+        expect(warn).toHaveBeenCalledOnce();
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
 });
 
 describe("state", () => {
@@ -78,6 +94,22 @@ describe("state", () => {
   it("defaults when missing", () => {
     expect(loadState(dir)).toStrictEqual({ projects: {} });
   });
+
+  it.each(["null", "[]", '"invalid"', "42", "true"])(
+    "backs up an invalid top-level state value %j and uses defaults",
+    (text) => {
+      const file = path.join(dir, "state.json");
+      fs.writeFileSync(file, text);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        expect(loadState(dir)).toStrictEqual({ projects: {} });
+        expect(fs.readFileSync(`${file}.bak`, "utf-8")).toBe(text);
+        expect(warn).toHaveBeenCalledOnce();
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
 });
 
 describe(resolveRoots, () => {

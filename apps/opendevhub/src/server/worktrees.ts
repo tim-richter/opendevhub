@@ -66,8 +66,9 @@ export const validateBranch = (name: string): string => {
     branch.includes("//") ||
     branch.endsWith("/") ||
     branch.endsWith(".") ||
-    branch.endsWith(".lock") ||
-    branch.split("/").some((part) => part.startsWith("."))
+    branch
+      .split("/")
+      .some((part) => part.startsWith(".") || part.endsWith(".lock"))
   ) {
     throw new InvalidRequestError(
       `invalid branch name "${name}": use letters, digits, ".", "_", "-" and "/" (not leading, trailing or doubled)`

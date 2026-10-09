@@ -63,7 +63,7 @@ export const stateDir = (env: NodeJS.ProcessEnv = process.env): string => {
   return path.join(base, "opendevhub");
 };
 
-const readJson = <T>(file: string, fallback: T): T => {
+const readJson = <T extends object>(file: string, fallback: T): T => {
   let text: string;
   try {
     text = fs.readFileSync(file, "utf-8");
@@ -74,7 +74,11 @@ const readJson = <T>(file: string, fallback: T): T => {
     throw error;
   }
   try {
-    return JSON.parse(text) as T;
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Expected a JSON object");
+    }
+    return value as T;
   } catch {
     fs.renameSync(file, `${file}.bak`);
     console.warn(

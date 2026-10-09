@@ -37,7 +37,7 @@ export const diffMode = (
 
 export const isBinaryPatch = (patch: string): boolean =>
   /^Binary files .* differ$/mu.test(patch) ||
-  patch.includes("GIT binary patch");
+  /^GIT binary patch$/mu.test(patch);
 
 export interface PatchLimits {
   /** Bytes of patches in one response. */

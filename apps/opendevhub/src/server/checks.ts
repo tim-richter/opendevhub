@@ -110,6 +110,9 @@ export const parseChecks = (
 export const hostCheckHash = (command: string): string =>
   createHash("sha256").update(`host\0${command}`).digest("hex");
 
+// Match strings first so literal comma/bracket sequences are left intact.
+const JSONC_STRING_OR_TRAILING_COMMA = /"(?:\\.|[^"\\])*"|,(?<g1>\s*[}\]])/gu;
+
 /** JSON with `//` and block comments and trailing commas, as devcontainer.json allows. */
 export const parseJsonc = (text: string): unknown => {
   let out = "";
@@ -129,13 +132,22 @@ export const parseJsonc = (text: string): unknown => {
       }
     } else if (c === "/" && text[i + 1] === "*") {
       const end = text.indexOf("*/", i + 2);
-      i = end === -1 ? text.length : end + 2;
+      if (end === -1) {
+        throw new SyntaxError("Unterminated JSONC block comment");
+      }
+      out += " ";
+      i = end + 2;
     } else {
       out += c;
       i += 1;
     }
   }
-  return JSON.parse(out.replaceAll(/,(?<g1>\s*[}\]])/gu, "$1"));
+  return JSON.parse(
+    out.replaceAll(
+      JSONC_STRING_OR_TRAILING_COMMA,
+      (match, closing: string | undefined) => closing ?? match
+    )
+  );
 };
 
 /**

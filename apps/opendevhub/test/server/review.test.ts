@@ -116,6 +116,18 @@ describe(toReviewFiles, () => {
     });
   });
 
+  it.each(["+", "-", " "])(
+    "keeps text patches containing a %j line mentioning the binary marker",
+    (prefix) => {
+      const patch = `@@ -1 +1 @@\n${prefix}GIT binary patch\n`;
+      expect(isBinaryPatch(patch)).toBeFalsy();
+      expect(toReviewFiles([diff("notes.txt", patch)])).toStrictEqual({
+        files: [diff("notes.txt", patch)],
+        truncated: false,
+      });
+    }
+  );
+
   it("leaves out the patch of a large diff, by changed lines or by size, without spending budget on it", () => {
     const out = toReviewFiles(
       [

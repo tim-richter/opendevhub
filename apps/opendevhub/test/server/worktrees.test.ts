@@ -60,12 +60,15 @@ describe("git versions", () => {
 });
 
 describe(validateBranch, () => {
-  it.each(["feature/login", "fix-1", "a.b_c", "user/x/y"])(
-    "accepts %s",
-    (name) => {
-      expect(validateBranch(` ${name} `)).toBe(name);
-    }
-  );
+  it.each([
+    "feature/login",
+    "fix-1",
+    "a.b_c",
+    "user/x/y",
+    "topic.lock-file/feature",
+  ])("accepts %s", (name) => {
+    expect(validateBranch(` ${name} `)).toBe(name);
+  });
 
   it.each([
     "",
@@ -75,6 +78,8 @@ describe(validateBranch, () => {
     "a/",
     "a//b",
     "x.lock",
+    "topic.lock/feature",
+    "topic/feature.lock/nested",
     "a/.b",
     "a.",
     "$(rm)",

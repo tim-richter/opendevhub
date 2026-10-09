@@ -81,6 +81,30 @@ describe(parseJsonc, () => {
       s: 'a " // b',
     });
   });
+
+  it("preserves comma and closing-bracket sequences inside strings", () => {
+    const value = {
+      command: `printf ',}' && printf ', ]'`,
+      escaped: 'a "quoted,}" value',
+      nested: [",\n}", ",]"],
+    };
+    expect(parseJsonc(JSON.stringify(value))).toStrictEqual(value);
+  });
+
+  it("removes trailing commas separated from the closing bracket by comments", () => {
+    expect(
+      parseJsonc('{"list": [1, /* comment */], // comment\n}')
+    ).toStrictEqual({
+      list: [1],
+    });
+  });
+
+  it.each(['{"n": 1/* comment */2}', "{} /* unfinished"])(
+    "rejects invalid JSONC %j",
+    (text) => {
+      expect(() => parseJsonc(text)).toThrow(SyntaxError);
+    }
+  );
 });
 
 describe(resolveChecks, () => {
