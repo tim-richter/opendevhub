@@ -61,6 +61,21 @@ const failure = (args: string[], r: RunResult): CommandError => {
 const HEAD_OBJECTS =
   'd="$1"; shift; for p in "$@"; do git -C "$d" rev-parse --verify --quiet "HEAD:$p" || echo -; done';
 
+const MISSING_EXIT = 3;
+const TOO_LARGE_EXIT = 4;
+
+/** Prints a file as base64: the blob at "$2" (a commit), or the working copy's file (not a symlink) when "$2" is empty. */
+const READ_FILE = `d="$1"; rev="$2"; p="$3"; max="$4"
+if [ -n "$rev" ]; then
+  [ "$(git -C "$d" cat-file -t "$rev:$p" 2>/dev/null)" = blob ] || exit ${MISSING_EXIT}
+  [ "$(git -C "$d" cat-file -s "$rev:$p")" -le "$max" ] || exit ${TOO_LARGE_EXIT}
+  git -C "$d" cat-file blob "$rev:$p" | base64
+else
+  [ -f "$d/$p" ] && [ ! -L "$d/$p" ] || exit ${MISSING_EXIT}
+  [ "$(wc -c < "$d/$p")" -le "$max" ] || exit ${TOO_LARGE_EXIT}
+  base64 < "$d/$p"
+fi`;
+
 const parseHeadObjects = (
   stdout: string,
   paths: string[]
@@ -301,6 +316,52 @@ export class GitOps {
   ): Promise<string | undefined> {
     const r = await this.exec(p, dir, ["config", "--get", baseKey(branch)]);
     return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
+  }
+
+  /** The commit `base` and HEAD branched from; undefined when they share no history. */
+  async mergeBase(
+    p: ExecTarget,
+    dir: string,
+    base: string
+  ): Promise<string | undefined> {
+    const r = await this.exec(p, dir, ["merge-base", base, "HEAD"]);
+    return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
+  }
+
+  /**
+   * A file's bytes at `rev`, or in the working copy without one; undefined where it doesn't exist. Exec output
+   * is text, so the bytes travel as base64.
+   */
+  async fileBytes(
+    p: ExecTarget,
+    dir: string,
+    file: string,
+    opts: { rev?: string; maxBytes: number }
+  ): Promise<Buffer | undefined> {
+    const r = await this.deps.containers.exec(
+      p,
+      [
+        "sh",
+        "-c",
+        READ_FILE,
+        "sh",
+        dir,
+        opts.rev ?? "",
+        file,
+        String(opts.maxBytes),
+      ],
+      { timeoutMs: GIT_TIMEOUT_MS }
+    );
+    if (r.exitCode === MISSING_EXIT) {
+      return undefined;
+    }
+    if (r.exitCode === TOO_LARGE_EXIT) {
+      throw new CommandError(`${file} is larger than ${opts.maxBytes} bytes`);
+    }
+    if (r.exitCode !== 0) {
+      throw failure(["cat-file"], r);
+    }
+    return Buffer.from(r.stdout, "base64");
   }
 
   async aheadBehind(

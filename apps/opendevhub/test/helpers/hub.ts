@@ -473,6 +473,21 @@ export function setup(
     isAncestor: vi.fn(
       async (_p: Project, _dir: string, _b: string, _base: string) => true
     ),
+    mergeBase: vi.fn(
+      async (
+        _p: Project,
+        _dir: string,
+        _base: string
+      ): Promise<string | undefined> => "c0ffee"
+    ),
+    fileBytes: vi.fn(
+      async (
+        _p: Project,
+        _dir: string,
+        file: string,
+        _o: { rev?: string; maxBytes: number }
+      ): Promise<Buffer | undefined> => Buffer.from(file)
+    ),
   };
   const client = {
     createSession: vi.fn(async (directory: string, _o?: NewSession) => ({

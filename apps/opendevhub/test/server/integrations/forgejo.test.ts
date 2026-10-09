@@ -382,6 +382,42 @@ describe("Forgejo API client", () => {
     });
   });
 
+  it("loads an image's versions at the merge-base and at the head of a fork", async () => {
+    await settings.save(configured);
+    const pull = {
+      base: { sha: "b".repeat(40) },
+      head: { repo: { full_name: "fork/private" }, sha: "a".repeat(40) },
+      merge_base: "c".repeat(40),
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(pull))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2])))
+      .mockResolvedValueOnce(response(pull))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+    const forgejo = new Forgejo(settings, fetcher);
+    await expect(
+      forgejo.image("team", "private", "1", "img/a b.png", "new")
+    ).resolves.toStrictEqual({
+      bytes: Buffer.from([1, 2]),
+      type: "image/png",
+    });
+    expect(fetcher.mock.calls[1][0]).toBe(
+      `${configured.url}/api/v1/repos/fork/private/media/img/a%20b.png?ref=${"a".repeat(40)}`
+    );
+    await expect(
+      forgejo.image("team", "private", "1", "img/a b.png", "old")
+    ).resolves.toBeUndefined();
+    expect(fetcher.mock.calls[3][0]).toBe(
+      `${configured.url}/api/v1/repos/team/private/media/img/a%20b.png?ref=${"c".repeat(40)}`
+    );
+    for (const file of ["../a.png", "a.ts", "img//a.png"]) {
+      await expect(
+        forgejo.image("team", "private", "1", file, "new")
+      ).rejects.toThrow("Not an image");
+    }
+  });
+
   it("reads required approvals from the base branch's protection", async () => {
     await settings.save(configured);
     const details = {

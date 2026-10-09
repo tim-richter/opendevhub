@@ -318,6 +318,66 @@ describe("git", () => {
     });
   });
 
+  describe("fileBytes", () => {
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0,
+    ]);
+
+    it("reads a file's bytes at a commit and in the working copy", async () => {
+      fs.writeFileSync(path.join(repo, "logo.png"), png);
+      commitAll(repo, "logo");
+      fs.writeFileSync(path.join(repo, "logo.png"), Buffer.from([1, 2, 255]));
+      await expect(
+        ops.fileBytes(project, repo, "logo.png", { maxBytes: 100, rev: "HEAD" })
+      ).resolves.toStrictEqual(png);
+      await expect(
+        ops.fileBytes(project, repo, "logo.png", { maxBytes: 100 })
+      ).resolves.toStrictEqual(Buffer.from([1, 2, 255]));
+    });
+
+    it("is undefined for a file missing there, a folder or a symlink", async () => {
+      fs.mkdirSync(path.join(repo, "dir"));
+      fs.symlinkSync(path.join(repo, "a.txt"), path.join(repo, "link.png"));
+      for (const [file, rev] of [
+        ["new.png", "HEAD"],
+        ["new.png", undefined],
+        ["dir", undefined],
+        ["link.png", undefined],
+      ] as const) {
+        await expect(
+          ops.fileBytes(project, repo, file, {
+            maxBytes: 100,
+            ...(rev ? { rev } : {}),
+          })
+        ).resolves.toBeUndefined();
+      }
+    });
+
+    it("refuses a file larger than the limit", async () => {
+      fs.writeFileSync(path.join(repo, "logo.png"), png);
+      commitAll(repo, "logo");
+      for (const rev of ["HEAD", undefined]) {
+        await expect(
+          ops.fileBytes(project, repo, "logo.png", {
+            maxBytes: 4,
+            ...(rev ? { rev } : {}),
+          })
+        ).rejects.toThrow("larger than 4 bytes");
+      }
+    });
+
+    it("finds the merge-base with a base", async () => {
+      const main = git(repo, "rev-parse", "HEAD").trim();
+      git(repo, "checkout", "-q", "-b", "feature");
+      write(repo, "b.txt", "b\n");
+      commitAll(repo, "b");
+      await expect(ops.mergeBase(project, repo, "main")).resolves.toBe(main);
+      await expect(
+        ops.mergeBase(project, repo, "missing")
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe("headObjects", () => {
     it("returns the object id of each path at HEAD, undefined where it is missing", async () => {
       const exec = vi.fn<

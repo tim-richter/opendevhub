@@ -78,6 +78,13 @@ export const toTurnPrompts = (raw: RawUserMessage[]): ReviewTurnPrompt[] =>
     text: preview(m.text),
   }));
 
+/** A relative path that stays inside the checkout: no "..", no leading "-" or "/", no control characters. */
+export const isRepoPath = (file: string): boolean =>
+  // oxlint-disable-next-line no-control-regex
+  !/[\u0000-\u001F]/u.test(file) &&
+  !/^[-/]/u.test(file) &&
+  !file.split("/").some((part) => part === ".." || part === "" || part === ".");
+
 export const isBinaryPatch = (patch: string): boolean =>
   /^Binary files .* differ$/mu.test(patch) ||
   /^GIT binary patch$/mu.test(patch);

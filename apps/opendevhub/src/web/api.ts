@@ -16,6 +16,7 @@ import type {
   ForgejoSettingsInput,
   ForgejoTeams,
 } from "../shared/forgejo";
+import type { ImageSide } from "../shared/images";
 import type {
   JiraSettings,
   JiraSettingsInput,
@@ -467,6 +468,22 @@ export const fetchReview = async (
   return (await res.json()) as ReviewData;
 };
 
+/** Where the review loads one version of a changed image in a checkout. */
+export const reviewImageUrl = (
+  projectId: string,
+  directory: string,
+  opts: { file: string; side: ImageSide; mode?: ReviewMode; base?: string }
+): string => {
+  const query = new URLSearchParams({
+    directory,
+    file: opts.file,
+    side: opts.side,
+    ...(opts.base ? { base: opts.base } : {}),
+    ...(opts.mode ? { mode: opts.mode } : {}),
+  });
+  return `/api/projects/${encodeURIComponent(projectId)}/review/image?${query}`;
+};
+
 export const suggestCommitMessage = async (
   projectId: string,
   directory: string
@@ -841,6 +858,16 @@ export const createForgejoWorktree = async (
   }
   return res.json();
 };
+
+/** Where a pull request's review loads one version of a changed image. */
+export const forgejoImageUrl = (
+  owner: string,
+  repo: string,
+  number: string,
+  file: string,
+  side: ImageSide
+): string =>
+  `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}/image?${new URLSearchParams({ file, side })}`;
 
 const aiReviewRoute = (owner: string, repo: string, number: string) =>
   `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}/ai-review`;
