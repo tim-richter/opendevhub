@@ -8,6 +8,7 @@ import type { DashboardSnapshot } from "../../shared/types";
 import {
   candidates,
   checksView,
+  specView,
   cleanupPlan,
   forgejoApprovals,
   forgejoChecks,
@@ -290,6 +291,7 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
       })
     ),
     http.get("/api/projects/:id/checks", () => HttpResponse.json(checksView)),
+    http.get("/api/projects/:id/spec", () => HttpResponse.json(specView)),
     http.get("/api/projects/:id/checks/run", () =>
       HttpResponse.json({ run: checksView.run })
     ),

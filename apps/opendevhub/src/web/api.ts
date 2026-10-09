@@ -35,6 +35,7 @@ import type {
   CheckRun,
   ChecksConfig,
   ChecksView,
+  SpecView,
   CleanupItem,
   CleanupPlan,
   CleanupResult,
@@ -693,6 +694,27 @@ export const fetchChecks = async (
     throw await failure(res, "checks");
   }
   return (await res.json()) as ChecksView;
+};
+
+/** A checkout's OpenSpec changes, showing `change` or the one the server picks. */
+export const fetchSpec = async (
+  projectId: string,
+  directory: string,
+  change?: string,
+  signal?: AbortSignal
+): Promise<SpecView> => {
+  const query = new URLSearchParams({
+    directory,
+    ...(change ? { change } : {}),
+  });
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/spec?${query}`,
+    signal ? { signal } : undefined
+  );
+  if (!res.ok) {
+    throw await failure(res, "spec");
+  }
+  return (await res.json()) as SpecView;
 };
 
 export const fetchCheckRun = async (

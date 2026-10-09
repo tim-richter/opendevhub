@@ -4,8 +4,10 @@ import { MAX_VARIANTS } from "../../shared/tasks";
 import type {
   ModelRef,
   ModelsInfo,
+  SpecPhase,
   TaskMeta,
   TaskRequest,
+  TaskSpec,
   TaskVariantSpec,
 } from "../../shared/types";
 import { InvalidRequestError, validateBranch } from "../git/worktrees";
@@ -178,6 +180,26 @@ export const parseTaskRequest = (
   };
 };
 
+const SPEC_PHASES = new Set<string>(["propose", "implement", "archived"]);
+
+/** A spec-first task's phase; tasks from before phases wrote `spec: true`, which meant proposing. */
+const parseTaskSpec = (spec: unknown): TaskSpec | undefined => {
+  if (spec === true) {
+    return { phase: "propose" };
+  }
+  if (!spec || typeof spec !== "object") {
+    return undefined;
+  }
+  const { phase, change } = spec as Record<string, unknown>;
+  if (typeof phase !== "string" || !SPEC_PHASES.has(phase)) {
+    return undefined;
+  }
+  return {
+    phase: phase as SpecPhase,
+    ...(typeof change === "string" && change ? { change } : {}),
+  };
+};
+
 /** The task a session belongs to, from `metadata.opendevhub`; undefined when it has none or it is malformed. */
 export const parseTaskMeta = (metadata: unknown): TaskMeta | undefined => {
   if (!metadata || typeof metadata !== "object") {
@@ -219,6 +241,7 @@ export const parseTaskMeta = (metadata: unknown): TaskMeta | undefined => {
   } catch {
     /* Keep older task metadata usable. */
   }
+  const taskSpec = parseTaskSpec(spec);
   return {
     task,
     variant,
@@ -226,24 +249,30 @@ export const parseTaskMeta = (metadata: unknown): TaskMeta | undefined => {
     ...(jira ? { jira } : {}),
     title: typeof title === "string" ? title : "",
     ...(typeof branch === "string" ? { branch } : {}),
-    ...(spec === true ? { spec: true } : {}),
+    ...(taskSpec ? { spec: taskSpec } : {}),
     ...(discarded === true ? { discarded: true } : {}),
   };
 };
 
-/** The session's metadata with `opendevhub.discarded` set. opencode's PATCH replaces metadata, so keep every key. */
-export const discardMetadata = (
-  metadata: Record<string, unknown> | undefined
+/** The session's metadata with `patch` merged into `opendevhub`. opencode's PATCH replaces metadata, so keep every key. */
+export const patchTaskMetadata = (
+  metadata: Record<string, unknown> | undefined,
+  patch: Partial<TaskMeta>
 ): Record<string, unknown> => {
   const own = metadata?.opendevhub;
   return {
     ...metadata,
     opendevhub: {
       ...(own && typeof own === "object" ? own : {}),
-      discarded: true,
+      ...patch,
     },
   };
 };
+
+/** The session's metadata with `opendevhub.discarded` set. */
+export const discardMetadata = (
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> => patchTaskMetadata(metadata, { discarded: true });
 
 /** What the New task dialog may show. Copies named fields only: opencode's model info holds API keys. */
 export const toModelsInfo = (

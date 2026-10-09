@@ -261,7 +261,7 @@ export class Tasks {
             variant: i + 1,
             ...(req.jira ? { jira: req.jira } : {}),
             ...(branch ? { branch } : {}),
-            ...(req.spec ? { spec: true } : {}),
+            ...(req.spec ? { spec: { phase: "propose" as const } } : {}),
           };
           await this.startVariant(
             client,
@@ -321,7 +321,7 @@ export class Tasks {
             title,
             ...(req.jira ? { jira: req.jira } : {}),
             branch: worktree.branch,
-            ...(req.spec ? { spec: true } : {}),
+            ...(req.spec ? { spec: { phase: "propose" as const } } : {}),
           };
           await this.startVariant(
             this.envs.opencodeClient(env.id),

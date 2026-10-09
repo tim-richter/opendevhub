@@ -18,6 +18,7 @@ import type {
 import type {
   CandidateList,
   ChecksView,
+  SpecView,
   CleanupPlan,
   DashboardSnapshot,
   EnvironmentView,
@@ -760,6 +761,81 @@ export const sessionDetail = (sessionId: string): SessionDetail | undefined => {
       },
     ],
   };
+};
+
+/** A spec-first task's change, as `openspec` reports it in the task's worktree. */
+export const specView: SpecView = {
+  change: {
+    artifacts: [
+      { id: "proposal", outputPath: "proposal.md", status: "done" },
+      { id: "design", outputPath: "design.md", status: "done" },
+      { id: "specs", outputPath: "specs/**/*.md", status: "done" },
+      { id: "tasks", outputPath: "tasks.md", status: "done" },
+    ],
+    documents: [
+      {
+        content:
+          "## Why\n\nA script can try passwords against `/login` as fast as it likes.\n\n## What Changes\n\n- Limit login attempts to **5 per minute** per IP and account\n- Answer over-limit attempts with `429` and `Retry-After`\n\n## Impact\n\n- `src/server/rate-limit.ts`, `src/server/routes.ts`",
+        path: "proposal.md",
+      },
+      {
+        content:
+          "## Context\n\nThe limiter keeps hits in memory per key.\n\n## Decisions\n\n- A sliding window per IP **and** per account, so one IP can't spread guesses across accounts.",
+        path: "design.md",
+      },
+      {
+        content:
+          "## 1. Limiter\n\n- [x] 1.1 Add a burst window to `RateLimiter`\n- [ ] 1.2 Prune old hits for other keys\n\n## 2. Login route\n\n- [ ] 2.1 Apply the limiter to `/login`\n- [ ] 2.2 Send `Retry-After`",
+        path: "tasks.md",
+      },
+    ],
+    name: "add-login-burst-limit",
+    planningComplete: true,
+    requirements: [
+      {
+        capability: "auth",
+        delta:
+          "### Requirement: Login attempt limit\nThe system SHALL reject more than 5 login attempts per minute from one IP or for one account with `429`.\n\n#### Scenario: Burst from one IP\n- **WHEN** an IP sends a 6th attempt within a minute\n- **THEN** the response is `429` with `Retry-After`",
+        name: "Login attempt limit",
+        operation: "ADDED",
+      },
+      {
+        before:
+          "### Requirement: Failed login response\nThe system SHALL answer a failed login with `401` after 1 second.\n\n#### Scenario: Wrong password\n- **WHEN** the password is wrong\n- **THEN** the response is `401`",
+        capability: "auth",
+        delta:
+          "### Requirement: Failed login response\nThe system SHALL answer a failed login with `401` after 1 second, and count it towards the attempt limit.\n\n#### Scenario: Wrong password\n- **WHEN** the password is wrong\n- **THEN** the response is `401`\n- **AND** the attempt counts towards the limit",
+        name: "Failed login response",
+        operation: "MODIFIED",
+      },
+      {
+        before:
+          "### Requirement: Captcha after failures\nThe system SHALL ask for a captcha after 3 failed logins.",
+        capability: "auth",
+        delta:
+          "### Requirement: Captcha after failures\n**Reason**: The attempt limit replaces it.\n**Migration**: None.",
+        name: "Captcha after failures",
+        operation: "REMOVED",
+      },
+    ],
+    validation: { issues: [], valid: true },
+  },
+  changes: [
+    {
+      completedTasks: 1,
+      isNew: true,
+      lastModified: "2026-10-09T09:12:00Z",
+      name: "add-login-burst-limit",
+      totalTasks: 4,
+    },
+    {
+      completedTasks: 0,
+      isNew: false,
+      lastModified: "2026-09-30T14:00:00Z",
+      name: "add-sso",
+      totalTasks: 7,
+    },
+  ],
 };
 
 export const checksView: ChecksView = {

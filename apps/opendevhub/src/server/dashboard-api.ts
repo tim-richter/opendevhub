@@ -50,6 +50,7 @@ import type { StateStore } from "./projects/state";
 import type { Sessions } from "./sessions/sessions";
 import { localDay } from "./sessions/usage";
 import type { UsageStore } from "./sessions/usage";
+import type { Specs } from "./specs/specs";
 import type { Tasks } from "./tasks/tasks";
 
 /** The Hub modules the dashboard routes call. */
@@ -119,6 +120,8 @@ export interface DashboardDeps {
   push: PushPort;
   cleanup: Pick<Cleanup, "scan" | "apply">;
   checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;
+  /** Absent in tests that don't need it. */
+  specs?: Pick<Specs, "view">;
   /** Absent when the usage ledger couldn't be opened. */
   usage?: Pick<UsageStore, "report">;
   /** Absent in tests that don't need it. */
@@ -986,6 +989,27 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     try {
       return c.json(
         checks.latest(c.req.param("id"), c.req.query("directory") ?? "")
+      );
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        errorStatus(error)
+      );
+    }
+  });
+
+  // Spec: a checkout's OpenSpec changes, for spec-first tasks.
+  app.get("/api/projects/:id/spec", async (c) => {
+    try {
+      if (!deps.specs) {
+        throw new UnavailableError("the spec view isn't set up");
+      }
+      return c.json(
+        await deps.specs.view(
+          c.req.param("id"),
+          c.req.query("directory") ?? "",
+          c.req.query("change") || undefined
+        )
       );
     } catch (error) {
       return c.json(

@@ -59,6 +59,7 @@ import { Onboarding } from "./projects/onboarding";
 import { StateStore } from "./projects/state";
 import { startServer } from "./server";
 import { UsageStore, trackUsage } from "./sessions/usage";
+import { Specs } from "./specs/specs";
 import { startDevUi } from "./vite-dev";
 
 const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
@@ -329,6 +330,15 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     target: (id, directory) => hub.checkouts.checkTarget(id, directory),
   });
 
+  const specs = new Specs({
+    client: (envId) => hub.environments.opencodeClient(envId),
+    containers,
+    log: (id, line) => hub.environments.note(id, line),
+    reconcile: (envId) => hub.environments.reconcile(envId),
+    sessions: (id) => store.sessionsOf(id),
+    target: (id, directory) => hub.checkouts.checkTarget(id, directory),
+  });
+
   store.setPreflight(await preflight(spawnRunner));
   await hub.environments.rescan();
   if (store.preflight().errors.length === 0) {
@@ -344,6 +354,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     hub,
     cleanup,
     checks,
+    specs,
     push,
     nodes,
     onboarding: new Onboarding({ roots: () => roots }),

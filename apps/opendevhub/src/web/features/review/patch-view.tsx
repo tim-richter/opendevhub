@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { fileVersions } from "./review";
 
 /** Diffs with syntax highlighting that follow the system's light or dark scheme, like the rest of the UI. */
-const BASE_OPTIONS = {
+export const BASE_OPTIONS = {
   theme: { dark: "pierre-dark", light: "pierre-light" },
   themeType: "system",
   hunkSeparators: "line-info",

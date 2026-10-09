@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import type { DashboardSnapshot, ReviewMode } from "../../../shared/types";
 import { fetchPublishInfo, fetchReview } from "../../api";
 import { checksKey } from "../checks/checks-queries";
+import { specKey } from "../specs/spec-queries";
 
 const DIFF_GC_MS = 5 * 60_000;
 
@@ -50,7 +51,7 @@ export const publishInfoQuery = (
     staleTime: 60_000,
   });
 
-/** Reads a checkout's changes and checks again, wherever they are shown. */
+/** Reads a checkout's changes, checks and spec again, wherever they are shown. */
 export const refreshCheckout = (
   queryClient: QueryClient,
   projectId: string,
@@ -64,6 +65,7 @@ export const refreshCheckout = (
     queryClient.invalidateQueries({
       queryKey: checksKey(projectId, directory),
     }),
+    queryClient.invalidateQueries({ queryKey: specKey(projectId, directory) }),
   ]);
 
 /** Refreshes a checkout when an agent working there stops, e.g. at the end of its turn. */

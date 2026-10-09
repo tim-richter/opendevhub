@@ -5,6 +5,7 @@ import type { RawAgent, RawModel } from "../../../src/server/opencode/client";
 import {
   discardMetadata,
   parseTaskMeta,
+  patchTaskMetadata,
   parseTaskRequest,
   toModelsInfo,
 } from "../../../src/server/tasks/request";
@@ -185,9 +186,6 @@ describe("task metadata", () => {
       parseTaskMeta({ opendevhub: { ...meta, branch: "fix-a" } })
     ).toStrictEqual({ ...meta, branch: "fix-a" });
     expect(
-      parseTaskMeta({ opendevhub: { ...meta, spec: true } })
-    ).toStrictEqual({ ...meta, spec: true });
-    expect(
       parseTaskMeta({ opendevhub: { ...meta, spec: "yes" } })
     ).toStrictEqual(meta);
     expect(parseTaskMeta({ opendevhub: { ...meta, branch: 5 } })).toStrictEqual(
@@ -280,6 +278,43 @@ describe(toModelsInfo, () => {
     expect(toModelsInfo([], undefined, [])).toStrictEqual({
       models: [],
       agents: [],
+    });
+  });
+});
+
+describe("spec-first task metadata", () => {
+  const meta = { of: 1, task: "tsk_1", title: "t", variant: 1 };
+
+  it("reads the phase and change, and the older spec: true as proposing", () => {
+    expect(
+      parseTaskMeta({ opendevhub: { ...meta, spec: true } })?.spec
+    ).toStrictEqual({ phase: "propose" });
+    expect(
+      parseTaskMeta({
+        opendevhub: {
+          ...meta,
+          spec: { change: "add-login", phase: "implement" },
+        },
+      })?.spec
+    ).toStrictEqual({ change: "add-login", phase: "implement" });
+    expect(
+      parseTaskMeta({ opendevhub: { ...meta, spec: { phase: "done" } } })
+    ).not.toHaveProperty("spec");
+    expect(
+      parseTaskMeta({
+        opendevhub: { ...meta, spec: { change: 3, phase: "archived" } },
+      })?.spec
+    ).toStrictEqual({ phase: "archived" });
+  });
+
+  it("patches the task's metadata, keeping every other key", () => {
+    const patched = patchTaskMetadata(
+      { opendevhub: { ...meta, spec: { phase: "propose" } }, other: 1 },
+      { spec: { change: "add-login", phase: "propose" } }
+    );
+    expect(patched).toStrictEqual({
+      opendevhub: { ...meta, spec: { change: "add-login", phase: "propose" } },
+      other: 1,
     });
   });
 });

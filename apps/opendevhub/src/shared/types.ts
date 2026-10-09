@@ -392,8 +392,69 @@ export interface TaskMeta {
   /** The branch the task created for this variant's worktree; absent for the main checkout and for older tasks. */
   branch?: string;
   /** Started with OpenSpec's `opsx-propose`: the agent writes a change proposal before any code. */
-  spec?: true;
+  spec?: TaskSpec;
   discarded?: boolean;
+}
+
+/** Where a spec-first task is: proposing (no code yet), implementing the approved change, or archived. */
+export type SpecPhase = "propose" | "implement" | "archived";
+
+export interface TaskSpec {
+  phase: SpecPhase;
+  /** The OpenSpec change the task works on, once the Spec view found it. */
+  change?: string;
+}
+
+/** A change in `openspec list`; `isNew` when the checkout's base doesn't have it, so the task made it. */
+export interface SpecChangeSummary {
+  name: string;
+  completedTasks: number;
+  totalTasks: number;
+  lastModified?: string;
+  isNew: boolean;
+}
+
+/** One artifact of the change's schema (proposal, specs, design, tasks) as `openspec status` reports it. */
+export interface SpecArtifact {
+  id: string;
+  outputPath: string;
+  /** `done`, `ready` (its dependencies are done) or `blocked`. */
+  status: string;
+  missingDeps?: string[];
+}
+
+export type RequirementOperation = "ADDED" | "MODIFIED" | "REMOVED" | "RENAMED";
+
+/** One requirement a change's delta spec touches, with its current text where the capability's spec has it. */
+export interface RequirementChange {
+  capability: string;
+  operation: RequirementOperation;
+  name: string;
+  /** RENAMED: the requirement's old name. */
+  from?: string;
+  /** The requirement as `openspec/specs/<capability>/spec.md` has it now. */
+  before?: string;
+  /** The block as the delta writes it: the new text, or for REMOVED its reason. Empty for a bare rename. */
+  delta: string;
+}
+
+export interface SpecChange {
+  name: string;
+  artifacts: SpecArtifact[];
+  /** Every artifact implementing needs is done. */
+  planningComplete: boolean;
+  /** The change's markdown files, relative to its folder. */
+  documents: { path: string; content: string }[];
+  requirements: RequirementChange[];
+  validation: { valid: boolean; issues: string[] };
+}
+
+/** A checkout's OpenSpec changes and the one shown. */
+export interface SpecView {
+  changes: SpecChangeSummary[];
+  change?: SpecChange;
+  /** Why the view can't be read, e.g. a stopped container or no CLI. */
+  unavailable?: string;
 }
 
 export type TaskWhere = "worktree" | "workspace";

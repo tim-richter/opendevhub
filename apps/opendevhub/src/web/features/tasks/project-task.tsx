@@ -37,6 +37,8 @@ import { checksQuery } from "../checks/checks-queries";
 import { JiraSourceCard } from "../jira/jira-source-card";
 import { useProjectView } from "../projects/project-layout";
 import { reviewQuery } from "../review/review-queries";
+import { SpecSection } from "../specs/spec-panel";
+import { specSessions } from "../specs/specs";
 import { formatUsage, taskUsage } from "../usage/usage";
 import {
   diffStats,
@@ -125,6 +127,7 @@ export const ProjectTask = () => {
     starting?.jira ?? sessions.find((s) => s.task?.jira)?.task?.jira;
   const queryClient = useQueryClient();
   const directories = [...new Set(sessions.map((s) => s.directory))];
+  const specVariants = specSessions(sessions);
   // Shared with each checkout's Review, and refreshed when an agent there finishes a turn.
   const reviews = byDirectory(
     directories,
@@ -288,6 +291,9 @@ export const ProjectTask = () => {
             />
           ))}
         </div>
+      )}
+      {specVariants.length > 0 && (
+        <SpecSection projectId={view.project.id} sessions={specVariants} />
       )}
       {sessions.length > 0 && (
         <Compare

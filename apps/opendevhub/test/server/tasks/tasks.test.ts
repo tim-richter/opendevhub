@@ -417,7 +417,7 @@ describe("tasks", () => {
     );
     expect(client.prompt).not.toHaveBeenCalled();
     expect(client.createSession.mock.calls[0][1]?.metadata).toMatchObject({
-      opendevhub: { spec: true },
+      opendevhub: { spec: { phase: "propose" } },
     });
   });
 
