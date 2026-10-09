@@ -1,4 +1,6 @@
+import { TanStackDevtools } from "@tanstack/react-devtools";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
@@ -34,6 +36,11 @@ createRoot(rootElement).render(
           </TooltipProvider>
         </DashboardProvider>
       </BrowserRouter>
+      <TanStackDevtools
+        plugins={[
+          { name: "TanStack Query", render: <ReactQueryDevtoolsPanel /> },
+        ]}
+      />
     </QueryClientProvider>
   </StrictMode>
 );

@@ -10,8 +10,8 @@ pnpm install
 pnpm test               # unit + integration tests
 pnpm test:e2e           # real devcontainer + opencode (slow, needs Docker)
 OPENDEVHUB_ROUTE=gateway pnpm test:e2e   # the same, through the gateway (the macOS path)
-pnpm dev                # API server on :7777
-pnpm dev:web            # Vite dev server that proxies /api to :7777
+pnpm dev                # API server + live UI (Vite HMR, TanStack devtools) on :7777
+pnpm dev:web            # standalone Vite dev server that proxies /api to :7777
 pnpm dev:docs           # docs site
 pnpm storybook          # dashboard pages and components on :6006, API mocked with MSW
 pnpm build              # apps/opendevhub/dist (bin.js + web) and apps/docs/dist

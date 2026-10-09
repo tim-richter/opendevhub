@@ -53,6 +53,7 @@ import { startResourceSampler } from "./resources";
 import { startServer } from "./server";
 import { StateStore } from "./state";
 import { UsageStore, trackUsage } from "./usage";
+import { startDevUi } from "./vite-dev";
 import { Worktrees } from "./worktrees";
 
 const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
@@ -348,6 +349,9 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   });
   const server = await startServer({
     app,
+    ...(process.env.OPENDEVHUB_DEV === "1"
+      ? { devUi: await startDevUi() }
+      : {}),
     port: config.port,
     resolveTarget: proxyTargets(store, orchestrator),
     terminalTarget: async (id, directory) => {

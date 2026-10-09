@@ -8,6 +8,7 @@ import { proxyRequest, proxyUpgrade } from "./proxy";
 import type { ResolveTarget } from "./proxy";
 import { Terminals } from "./terminals";
 import type { TerminalTarget } from "./terminals";
+import type { DevUi } from "./vite-dev";
 
 export interface ServerHandle {
   url: string;
@@ -23,6 +24,8 @@ export const startServer = async (opts: {
   port: number;
   app: FetchApp;
   resolveTarget: ResolveTarget;
+  /** Serves every non-API dashboard request in development; see `startDevUi`. */
+  devUi?: DevUi;
   terminalTarget?: (
     project: string,
     directory: string
@@ -38,6 +41,9 @@ export const startServer = async (opts: {
   const server = http.createServer((req, res) => {
     const route = classifyHost(req.headers.host, port);
     if (route.kind === "dashboard") {
+      if (opts.devUi && !req.url?.startsWith("/api/")) {
+        return opts.devUi.handle(req, res, () => void dashboard(req, res));
+      }
       return void dashboard(req, res);
     }
     if (route.kind === "env") {
@@ -80,12 +86,14 @@ export const startServer = async (opts: {
   ({ port } = server.address() as AddressInfo);
 
   return {
-    close: () =>
-      new Promise<void>((resolve) => {
-        terminals?.close();
+    close: async () => {
+      terminals?.close();
+      await opts.devUi?.close();
+      await new Promise<void>((resolve) => {
         server.closeAllConnections();
         server.close(() => resolve());
-      }),
+      });
+    },
     port,
     url: dashboardUrl(),
   };
