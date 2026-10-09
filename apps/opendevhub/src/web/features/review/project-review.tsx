@@ -43,6 +43,7 @@ import type {
 import {
   bringHome,
   fetchReview,
+  reviewImageUrl,
   mergeIntoBase,
   removeWorktree,
   sendPrompt,
@@ -797,6 +798,17 @@ const ReviewTarget = ({
               file,
               mode,
             }).then((d) => d.files[0]?.patch)
+          }
+          imageUrl={(file, side) =>
+            // A turn's earlier versions aren't in git; only the newest turn's result is still in the working copy.
+            data.mode === "turn" && (side === "old" || !data.turn?.latest)
+              ? undefined
+              : reviewImageUrl(projectId, directory, {
+                  base: baseOverride,
+                  file,
+                  mode: data.mode,
+                  side,
+                })
           }
           comments={comments}
           open={open}

@@ -5,7 +5,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 import type { ReviewData, SessionTurn } from "../../../shared/types";
-import { fetchReview, sendPrompt } from "../../api";
+import { fetchReview, reviewImageUrl, sendPrompt } from "../../api";
 import { muted } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import {
@@ -185,6 +185,12 @@ export const TurnChanges = (props: {
             mode: "turn",
             session: sessionId,
           }).then((d) => d.files[0]?.patch)
+        }
+        imageUrl={(file, side) =>
+          // Only the newest turn's result is still in the working copy; what came before it isn't in git.
+          props.latest && side === "new"
+            ? reviewImageUrl(projectId, directory, { file, side })
+            : undefined
         }
         comments={comments}
         open={open}

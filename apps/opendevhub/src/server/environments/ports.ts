@@ -59,6 +59,8 @@ export type GitPort = Pick<
   | "branchRefs"
   | "remoteHead"
   | "isAncestor"
+  | "mergeBase"
+  | "fileBytes"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;

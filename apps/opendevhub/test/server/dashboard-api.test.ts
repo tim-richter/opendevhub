@@ -158,6 +158,16 @@ function setup(webDir?: string) {
           files: [],
         })
       ),
+      reviewImage: vi.fn(
+        async (
+          _id: string,
+          _directory: string,
+          o: { file: string; side: "old" | "new" }
+        ): Promise<{ bytes: Buffer; type: string } | undefined> =>
+          o.side === "old"
+            ? undefined
+            : { bytes: Buffer.from([0x89, 0x50]), type: "image/png" }
+      ),
       commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
       commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
       updateFromBase: vi.fn(
@@ -1273,6 +1283,39 @@ describe("dashboard API", () => {
             `/api/projects/${project.id}/review?directory=%2Fetc`
           )
         ).status
+      ).toBe(400);
+    });
+
+    it("serves one version of a changed image", async () => {
+      const { app, hub } = setup();
+      const res = await app.request(
+        `/api/projects/${project.id}/review/image?directory=%2Fw%2Fx&file=img%2Flogo.png&side=new&mode=branch&base=main`
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/png");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(new Uint8Array(await res.arrayBuffer())).toStrictEqual(
+        new Uint8Array([0x89, 0x50])
+      );
+      expect(hub.reviews.reviewImage).toHaveBeenCalledWith(project.id, "/w/x", {
+        base: "main",
+        file: "img/logo.png",
+        mode: "branch",
+        side: "new",
+      });
+      const image = (query: string) =>
+        app.request(`/api/projects/${project.id}/review/image?${query}`);
+      expect(
+        (await image("directory=%2Fw%2Fx&file=logo.png&side=old")).status
+      ).toBe(404);
+      expect(
+        (await image("directory=%2Fw%2Fx&file=logo.png&side=both")).status
+      ).toBe(400);
+      hub.reviews.reviewImage.mockRejectedValueOnce(
+        new InvalidRequestError("not an image in the checkout: a.ts")
+      );
+      expect(
+        (await image("directory=%2Fw%2Fx&file=a.ts&side=new")).status
       ).toBe(400);
     });
 

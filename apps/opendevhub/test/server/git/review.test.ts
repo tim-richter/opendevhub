@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   diffMode,
   isBinaryPatch,
+  isRepoPath,
   isMessageId,
   NO_LIMITS,
   resolveBase,
@@ -125,6 +126,23 @@ describe(toReviewFiles, () => {
       additions: 1,
       deletions: 0,
     });
+  });
+
+  it("accepts only relative paths inside the checkout", () => {
+    expect(isRepoPath("img/logo.png")).toBeTruthy();
+    expect(isRepoPath("a b/ü.png")).toBeTruthy();
+    for (const bad of [
+      "../x.png",
+      "img/../../x.png",
+      "/etc/x.png",
+      "-x.png",
+      "./x.png",
+      "img//x.png",
+      "x\n.png",
+      "",
+    ]) {
+      expect(isRepoPath(bad)).toBeFalsy();
+    }
   });
 
   it("marks binary files and leaves their patch out", () => {

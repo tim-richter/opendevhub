@@ -18,6 +18,7 @@ import {
   forgejoReviews,
   forgejoSettings,
   jiraSettings,
+  reviewImage,
   jiraTicket,
   jiraTickets,
   logLines,
@@ -234,6 +235,13 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
         );
       }
       return HttpResponse.json(reviewData(directory));
+    }),
+    http.get("/api/projects/:id/review/image", ({ request }) => {
+      const query = new URL(request.url).searchParams;
+      return new HttpResponse(
+        reviewImage(query.get("file") ?? "", query.get("side") === "old"),
+        { headers: { "content-type": "image/svg+xml" } }
+      );
     }),
     http.post("/api/projects/:id/review/commit-message", () =>
       HttpResponse.json({

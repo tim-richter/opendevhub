@@ -1,7 +1,11 @@
+import { imageType, MAX_IMAGE_BYTES } from "../../shared/images";
+import type { ImageSide } from "../../shared/images";
 import type {
+  Project,
   ProjectId,
   PublishInfo,
   PublishResult,
+  ReviewBase,
   ReviewData,
   ReviewMode,
   ReviewTurn,
@@ -20,6 +24,7 @@ import { splitTitleBody } from "./forge";
 import {
   diffMode,
   isMessageId,
+  isRepoPath,
   NO_LIMITS,
   resolveBase,
   toReviewFiles,
@@ -82,18 +87,7 @@ export class ReviewActions {
     const { git } = this.deps;
     const ws = this.envs.workspaceFolder(project);
     const on = this.checkouts.gitFor(project, directory);
-    const branch = await on.git.currentBranch(on.target, directory);
-    const [config, opencodeBase, info] = await Promise.all([
-      branch ? on.git.recordedBase(on.target, directory, branch) : undefined,
-      client.vcsBase(directory).catch(() => undefined),
-      client.vcsInfo(directory).catch((): { default?: string } => ({})),
-    ]);
-    const base = resolveBase({
-      config,
-      defaultBranch: info.default,
-      opencode: opencodeBase,
-      request,
-    });
+    const { branch, base } = await this.reviewBase(project, directory, request);
     const mode = diffMode(opts.mode, base, session !== undefined);
     const [[raw, turn], status, counts, pushed, wsBranch, wsClean] =
       await Promise.all([
@@ -135,6 +129,68 @@ export class ReviewActions {
       files,
       ...(truncated ? { truncated } : {}),
     };
+  }
+
+  /** The checkout's branch and the base a review compares it with. */
+  private async reviewBase(
+    project: Project,
+    directory: string,
+    request: string | undefined
+  ): Promise<{ branch?: string; base?: ReviewBase }> {
+    const client = this.envs.opencodeClient(
+      this.envs.envForDirectory(project, directory).id
+    );
+    const on = this.checkouts.gitFor(project, directory);
+    const branch = await on.git.currentBranch(on.target, directory);
+    const [config, opencodeBase, info] = await Promise.all([
+      branch ? on.git.recordedBase(on.target, directory, branch) : undefined,
+      client.vcsBase(directory).catch(() => undefined),
+      client.vcsInfo(directory).catch((): { default?: string } => ({})),
+    ]);
+    const base = resolveBase({
+      config,
+      defaultBranch: info.default,
+      opencode: opencodeBase,
+      request,
+    });
+    return { ...(branch ? { branch } : {}), ...(base ? { base } : {}) };
+  }
+
+  /**
+   * One version of a changed image for the Review tab: `old` from the commit the diff compares with (HEAD, or the
+   * merge-base with the base), `new` from the working copy. Undefined where that version doesn't exist.
+   */
+  async reviewImage(
+    id: ProjectId,
+    directory: string,
+    opts: { file: string; side: ImageSide; mode?: ReviewMode; base?: string }
+  ): Promise<{ bytes: Buffer; type: string } | undefined> {
+    const project = this.envs.requireProject(id);
+    this.envs.checkDirectory(id, directory);
+    const type = imageType(opts.file);
+    if (!type || !isRepoPath(opts.file)) {
+      throw new InvalidRequestError(
+        `not an image in the checkout: ${opts.file}`
+      );
+    }
+    const on = this.checkouts.gitFor(project, directory);
+    let rev: string | undefined;
+    if (opts.side === "old") {
+      const request = opts.base?.trim() ? validateBranch(opts.base) : undefined;
+      const { base } = await this.reviewBase(project, directory, request);
+      rev =
+        diffMode(opts.mode, base) === "branch" && base
+          ? await on.git.mergeBase(on.target, directory, base.name)
+          : "HEAD";
+      if (!rev) {
+        return undefined;
+      }
+    }
+    const bytes = await on.git.fileBytes(on.target, directory, opts.file, {
+      maxBytes: MAX_IMAGE_BYTES,
+      ...(rev ? { rev } : {}),
+    });
+    return bytes && { bytes, type };
   }
 
   /** The session whose turns a review shows: the one asked for, which must work in `directory`, or the latest there. */

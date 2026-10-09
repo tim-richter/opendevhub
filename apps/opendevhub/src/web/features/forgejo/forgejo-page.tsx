@@ -38,6 +38,7 @@ import type {
 import {
   fetchForgejoDetails,
   fetchForgejoDiff,
+  forgejoImageUrl,
   fetchForgejoOrganizations,
   fetchForgejoPulls,
   fetchForgejoTeams,
@@ -666,6 +667,9 @@ const PullView = ({
                 files={files}
                 view={diffView}
                 version={details.headSha}
+                imageUrl={(file, side) =>
+                  forgejoImageUrl(owner, repo, number, file, side)
+                }
                 comments={reviewing ? comments : []}
                 notes={notes}
                 renderNote={renderNoteSlot}

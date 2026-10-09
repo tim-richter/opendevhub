@@ -17,6 +17,8 @@ import type {
   ForgejoStackPull,
   ForgejoTeams,
 } from "../../shared/forgejo";
+import { imageType, MAX_IMAGE_BYTES } from "../../shared/images";
+import type { ImageSide } from "../../shared/images";
 import { OsSecretStore } from "./secrets";
 import type { SecretStore } from "./secrets";
 import {
@@ -242,6 +244,24 @@ export class Forgejo {
     signal?: AbortSignal,
     body?: unknown
   ): Promise<string> {
+    const bytes = await this.requestBytes(
+      connection,
+      route,
+      accept,
+      signal,
+      body
+    );
+    return bytes.toString("utf-8");
+  }
+
+  private async requestBytes(
+    connection: SavedSettings & { token: string },
+    route: string,
+    accept: string,
+    signal?: AbortSignal,
+    body?: unknown,
+    maxBytes = 20 * 1024 * 1024
+  ): Promise<Buffer> {
     try {
       const response = await this.fetcher(`${connection.url}/api/v1/${route}`, {
         headers: {
@@ -284,7 +304,7 @@ export class Forgejo {
       // Bound memory consumption even when a remote server omits Content-Length.
       const reader = response.body?.getReader();
       if (!reader) {
-        return "";
+        return Buffer.alloc(0);
       }
       const chunks: Uint8Array[] = [];
       let bytes = 0;
@@ -294,16 +314,16 @@ export class Forgejo {
           break;
         }
         bytes += value.byteLength;
-        if (bytes > 20 * 1024 * 1024) {
+        if (bytes > maxBytes) {
           await reader.cancel();
           throw new ForgejoError(
-            "The Forgejo response exceeds the 20 MiB display limit.",
+            `The Forgejo response exceeds the ${maxBytes / 1024 / 1024} MiB display limit.`,
             502
           );
         }
         chunks.push(value);
       }
-      return Buffer.concat(chunks).toString("utf-8");
+      return Buffer.concat(chunks);
     } catch (error) {
       if (signal?.aborted) {
         throw new ForgejoError("Forgejo request cancelled.", 502);
@@ -893,6 +913,63 @@ export class Forgejo {
         signal
       ),
     };
+  }
+
+  /**
+   * One version of an image a pull request changes (Git LFS resolved): `old` at the merge-base in the base repository, `new` at the
+   * head commit in the head repository (a fork's, maybe). Undefined where that version doesn't exist.
+   */
+  async image(
+    owner: string,
+    repo: string,
+    number: string,
+    file: string,
+    side: ImageSide,
+    signal?: AbortSignal
+  ): Promise<{ bytes: Buffer; type: string } | undefined> {
+    const type = imageType(file);
+    const parts = file.split("/");
+    if (
+      !type ||
+      parts.some(
+        (p) => !p || p === "." || p === ".." || /[\u0000-\u001F]/u.test(p)
+      )
+    ) {
+      throw new ForgejoError("Not an image in the pull request.");
+    }
+    const connection = await this.connection();
+    const value = await this.json<{
+      merge_base?: string;
+      base?: { sha?: string };
+      head?: { sha?: string; repo?: { full_name?: string } };
+    }>(connection, this.route(owner, repo, number), signal);
+    const [headOwner, headRepo] = value.head?.repo?.full_name?.split("/") ?? [
+      owner,
+      repo,
+    ];
+    const at =
+      side === "old"
+        ? { owner, ref: value.merge_base ?? value.base?.sha, repo }
+        : { owner: headOwner, ref: value.head?.sha, repo: headRepo };
+    if (!at.ref || !/^[0-9a-f]{7,64}$/u.test(at.ref)) {
+      return undefined;
+    }
+    try {
+      const bytes = await this.requestBytes(
+        connection,
+        `repos/${segment(at.owner)}/${segment(at.repo ?? "")}/media/${parts.map(encodeURIComponent).join("/")}?ref=${at.ref}`,
+        "application/octet-stream",
+        signal,
+        undefined,
+        MAX_IMAGE_BYTES
+      );
+      return { bytes, type };
+    } catch (error) {
+      if (error instanceof ForgejoError && error.status === 404) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   private page(value: number): string {

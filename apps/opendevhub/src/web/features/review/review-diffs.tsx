@@ -21,11 +21,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
+import { imageType } from "../../../shared/images";
 import type { ReviewFile } from "../../../shared/types";
 import { Note, diffFont } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import { Tip } from "../../components/tip";
 import { useMediaQuery } from "../../hooks/use-media-query";
+import { ImageDiff } from "./image-diff";
+import type { ImageUrl } from "./image-diff";
 import { ChangedFilesTree } from "./lazy-changed-files-tree";
 import { PatchView } from "./lazy-patch-view";
 import {
@@ -115,6 +118,8 @@ export const ReviewDiffs = (props: {
   wholeFilePatches?: boolean;
   /** Loads a diff that didn't come with the others. */
   load?: (file: string) => Promise<string | undefined>;
+  /** Shows binary images as their before and after versions. */
+  imageUrl?: ImageUrl;
   comments: ReviewComment[];
   /** Other people's comments or suggestions shown in the diff, drawn by `renderNote`. */
   notes?: DiffNote[];
@@ -165,30 +170,39 @@ export const ReviewDiffs = (props: {
         )
       )}
       <div className="flex min-w-0 flex-col gap-3">
-        {props.files.map((f, i) => (
-          <FileDiff
-            key={`${diffKey(f)}:${props.version ?? ""}`}
-            id={`review-file-${i}`}
-            file={f}
-            load={
-              props.load &&
-              (() => props.load?.(f.file) ?? Promise.resolve(undefined))
-            }
-            view={view}
-            wholeFilePatch={props.wholeFilePatches ?? false}
-            comments={props.comments}
-            notes={props.notes}
-            renderNote={props.renderNote}
-            open={props.open?.file === f.file ? props.open.anchor : undefined}
-            placeholder={props.placeholder}
-            onAnchor={
-              props.onAnchor && ((anchor) => props.onAnchor?.(f.file, anchor))
-            }
-            onAdd={props.onAdd}
-            onCancel={props.onCancel}
-            onDelete={props.onDelete}
-          />
-        ))}
+        {props.files.map((f, i) =>
+          props.imageUrl && f.binary && imageType(f.file) ? (
+            <ImageDiff
+              key={`${diffKey(f)}:${props.version ?? ""}`}
+              id={`review-file-${i}`}
+              file={f}
+              imageUrl={props.imageUrl}
+            />
+          ) : (
+            <FileDiff
+              key={`${diffKey(f)}:${props.version ?? ""}`}
+              id={`review-file-${i}`}
+              file={f}
+              load={
+                props.load &&
+                (() => props.load?.(f.file) ?? Promise.resolve(undefined))
+              }
+              view={view}
+              wholeFilePatch={props.wholeFilePatches ?? false}
+              comments={props.comments}
+              notes={props.notes}
+              renderNote={props.renderNote}
+              open={props.open?.file === f.file ? props.open.anchor : undefined}
+              placeholder={props.placeholder}
+              onAnchor={
+                props.onAnchor && ((anchor) => props.onAnchor?.(f.file, anchor))
+              }
+              onAdd={props.onAdd}
+              onCancel={props.onCancel}
+              onDelete={props.onDelete}
+            />
+          )
+        )}
       </div>
     </div>
   );

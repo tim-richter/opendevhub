@@ -561,6 +561,21 @@ const branchAt = (directory: string): string =>
     .flatMap((v) => v.runtime.worktrees ?? [])
     .find((w) => w.path === directory)?.branch ?? "main";
 
+/** A stand-in for a changed image: requests per minute before and after the limit, or the old and new logo. */
+export const reviewImage = (file: string, old: boolean): string => {
+  if (file.endsWith("logo.png")) {
+    const color = old ? "#64748b" : "#7c3aed";
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><rect x="${old ? 20 : 30}" y="${old ? 20 : 30}" width="${old ? 120 : 100}" height="${old ? 120 : 100}" rx="${old ? 12 : 50}" fill="${color}"/><text x="80" y="92" font-family="sans-serif" font-size="28" font-weight="700" fill="#fff" text-anchor="middle">odh</text></svg>`;
+  }
+  const bars = [12, 18, 35, 64, 20, 20, 20, 19, 20, 14]
+    .map(
+      (v, i) =>
+        `<rect x="${24 + i * 34}" y="${180 - v * 2}" width="24" height="${v * 2}" rx="3" fill="${v > 20 ? "#dc2626" : "#16a34a"}"/>`
+    )
+    .join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="200" viewBox="0 0 380 200"><rect width="380" height="200" fill="#fff"/><line x1="16" y1="140" x2="364" y2="140" stroke="#94a3b8" stroke-dasharray="4 4"/>${bars}</svg>`;
+};
+
 export const reviewData = (directory: string): ReviewData => ({
   ahead: 2,
   base: { name: "main", source: "default" },
@@ -597,6 +612,13 @@ export const reviewData = (directory: string): ReviewData => ({
       binary: true,
       file: "docs/rate-limit.png",
       status: "added",
+    },
+    {
+      additions: 0,
+      deletions: 0,
+      binary: true,
+      file: "public/logo.png",
+      status: "modified",
     },
   ],
   mode: "branch",

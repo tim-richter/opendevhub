@@ -129,6 +129,68 @@ describe("review", () => {
     expect(r.files.map((f) => f.file)).toStrictEqual(["a.ts", "b.ts"]);
   });
 
+  it("reads an image's old version at HEAD or the merge-base, and its new one from the working copy", async () => {
+    const { hub, git } = await running();
+    const max = { maxBytes: 10 * 1024 * 1024 };
+    await expect(
+      hub.reviews.reviewImage(project.id, wt, {
+        file: "img/a.png",
+        side: "new",
+      })
+    ).resolves.toStrictEqual({
+      bytes: Buffer.from("img/a.png"),
+      type: "image/png",
+    });
+    expect(git.fileBytes).toHaveBeenLastCalledWith(
+      project,
+      wt,
+      "img/a.png",
+      max
+    );
+    await hub.reviews.reviewImage(project.id, wt, {
+      file: "a.png",
+      side: "old",
+    });
+    expect(git.fileBytes).toHaveBeenLastCalledWith(project, wt, "a.png", {
+      ...max,
+      rev: "HEAD",
+    });
+    await hub.reviews.reviewImage(project.id, wt, {
+      base: "develop",
+      file: "a.jpg",
+      mode: "branch",
+      side: "old",
+    });
+    expect(git.mergeBase).toHaveBeenLastCalledWith(project, wt, "develop");
+    expect(git.fileBytes).toHaveBeenLastCalledWith(project, wt, "a.jpg", {
+      ...max,
+      rev: "c0ffee",
+    });
+    git.mergeBase.mockResolvedValueOnce(undefined);
+    await expect(
+      hub.reviews.reviewImage(project.id, wt, {
+        file: "a.png",
+        mode: "branch",
+        side: "old",
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses an image path outside the checkout or a file that isn't an image", async () => {
+    const { hub } = await running();
+    for (const file of ["../a.png", "/etc/a.png", "a.ts", "-a.png"]) {
+      await expect(
+        hub.reviews.reviewImage(project.id, wt, { file, side: "new" })
+      ).rejects.toThrow(InvalidRequestError);
+    }
+    await expect(
+      hub.reviews.reviewImage(project.id, "/etc", {
+        file: "a.png",
+        side: "new",
+      })
+    ).rejects.toThrow(InvalidRequestError);
+  });
+
   it("shows uncommitted changes by default, still resolving the base", async () => {
     const { hub, client, git } = await running();
     git.recordedBase.mockResolvedValue(undefined);

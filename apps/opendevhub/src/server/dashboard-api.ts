@@ -10,7 +10,7 @@ import type {
   ForgejoInbox,
   ForgejoPullFilter,
 } from "../shared/forgejo";
-import type { AddProjectResult, LogEvent } from "../shared/types";
+import type { AddProjectResult, LogEvent, ReviewMode } from "../shared/types";
 import { InvalidNodeError, InvalidRootError } from "./config";
 import type { Checks } from "./environments/checks";
 import { CommandError } from "./environments/containers";
@@ -92,6 +92,7 @@ export interface DashboardHub {
   reviews: Pick<
     ReviewActions,
     | "review"
+    | "reviewImage"
     | "commitMessage"
     | "commit"
     | "updateFromBase"
@@ -137,7 +138,7 @@ export interface DashboardDeps {
     | "checks"
     | "test"
   > &
-    Partial<Pick<Forgejo, "review" | "organizations" | "teams">>;
+    Partial<Pick<Forgejo, "review" | "organizations" | "teams" | "image">>;
   jira?: Pick<Jira, "view" | "save" | "tickets" | "ticket">;
   webDir?: string;
 }
@@ -199,6 +200,22 @@ const param = (c: Context, name: string): string => c.req.param(name) ?? "";
 
 const str = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
+
+const reviewMode = (c: Context): ReviewMode => {
+  const mode = c.req.query("mode") ?? "working";
+  if (mode !== "working" && mode !== "branch" && mode !== "turn") {
+    throw new InvalidRequestError(`unknown review mode ${mode}`);
+  }
+  return mode;
+};
+
+/** Image bytes from a repository; `nosniff` keeps the browser from reading them as anything but the image type. */
+const imageResponse = (c: Context, image: { bytes: Buffer; type: string }) =>
+  c.body(new Uint8Array(image.bytes), 200, {
+    "cache-control": "no-store",
+    "content-type": image.type,
+    "x-content-type-options": "nosniff",
+  });
 
 export const createDashboardApp = (deps: DashboardDeps): Hono => {
   const { store, hub, onboarding, push, usage, cleanup, checks, nodes } = deps;
@@ -425,6 +442,35 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
       )
     )
   );
+  app.get("/api/forgejo/pulls/:owner/:repo/:number/image", async (c) => {
+    try {
+      const side = c.req.query("side");
+      if (side !== "old" && side !== "new") {
+        throw new InvalidRequestError(`unknown image side ${side}`);
+      }
+      const forgejo = requireForgejo();
+      if (!forgejo.image) {
+        throw new UnavailableError("Forgejo images are not available");
+      }
+      const image = await forgejo.image(
+        param(c, "owner"),
+        param(c, "repo"),
+        param(c, "number"),
+        c.req.query("file") ?? "",
+        side,
+        c.req.raw.signal
+      );
+      if (!image) {
+        return c.json({ error: "no such version of the image" }, 404);
+      }
+      return imageResponse(c, image);
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        errorStatus(error)
+      );
+    }
+  });
   for (const resource of ["patch", "comments", "reviews"] as const) {
     app.get(`/api/forgejo/pulls/:owner/:repo/:number/${resource}`, (c) =>
       json(c, () => {
@@ -781,10 +827,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   // Review: what a checkout changed, and the local git actions on it.
   app.get("/api/projects/:id/review", async (c) => {
     try {
-      const mode = c.req.query("mode") ?? "working";
-      if (mode !== "working" && mode !== "branch" && mode !== "turn") {
-        throw new InvalidRequestError(`unknown review mode ${mode}`);
-      }
+      const mode = reviewMode(c);
       const data = await hub.reviews.review(
         c.req.param("id"),
         c.req.query("directory") ?? "",
@@ -797,6 +840,34 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
         }
       );
       return c.json(data);
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        errorStatus(error)
+      );
+    }
+  });
+  // One version of a changed image, for showing it in the review instead of "binary".
+  app.get("/api/projects/:id/review/image", async (c) => {
+    try {
+      const side = c.req.query("side");
+      if (side !== "old" && side !== "new") {
+        throw new InvalidRequestError(`unknown image side ${side}`);
+      }
+      const image = await hub.reviews.reviewImage(
+        c.req.param("id"),
+        c.req.query("directory") ?? "",
+        {
+          base: c.req.query("base"),
+          file: c.req.query("file") ?? "",
+          mode: reviewMode(c),
+          side,
+        }
+      );
+      if (!image) {
+        return c.json({ error: "no such version of the image" }, 404);
+      }
+      return imageResponse(c, image);
     } catch (error) {
       return c.json(
         { error: error instanceof Error ? error.message : String(error) },
