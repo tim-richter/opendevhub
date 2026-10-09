@@ -1,7 +1,6 @@
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -27,6 +26,7 @@ import { useDash } from "../dashboard-context";
 import { forgejoReviewComments } from "../forgejo";
 import { linesLabel } from "../review";
 import type { ReviewComment } from "../review";
+import { useNavigate } from "../routing";
 import { Choice } from "./choice";
 
 const message = (err: unknown) =>

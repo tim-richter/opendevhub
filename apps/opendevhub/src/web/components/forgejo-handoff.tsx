@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +23,7 @@ import {
 import { useDash } from "../dashboard-context";
 import { forgejoAgentPrompt } from "../forgejo";
 import { useForgejoCheckouts } from "../hooks/use-forgejo-checkouts";
+import { Link, useNavigate } from "../routing";
 import { Choice } from "./choice";
 import { RequestState } from "./forgejo-context";
 import type { ForgejoFeedback } from "./forgejo-context";

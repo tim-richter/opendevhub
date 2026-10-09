@@ -1,6 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +19,7 @@ import { fetchUsage } from "../api";
 import { UsageChart } from "../components/lazy-usage-chart";
 import { Empty, muted, Page, PageHeader, Segmented } from "../components/page";
 import { useDash } from "../dashboard-context";
+import { useSearchParams } from "../routing";
 import { formatCost, formatTokens } from "../tasks";
 import { dayLabel, projectName, share, shiftDay } from "../usage";
 

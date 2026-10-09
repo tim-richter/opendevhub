@@ -1,3 +1,4 @@
+import { useParams } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
   ExternalLinkIcon,
@@ -5,7 +6,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -31,6 +31,7 @@ import { Empty, muted, Section } from "../components/page";
 import { SessionBadge } from "../components/status";
 import { useDash } from "../dashboard-context";
 import { envOfDirectory, sessionHref } from "../derive";
+import { Link } from "../routing";
 import {
   diffStats,
   fileMatrix,
@@ -95,7 +96,7 @@ const StartingCard = (props: {
 
 export const ProjectTask = () => {
   const view = useProjectView();
-  const { task = "" } = useParams();
+  const { task = "" } = useParams({ strict: false });
   const { report, snapshot } = useDash();
   const total = taskUsage(snapshot, task);
   const sessions = taskSessions(view, task);

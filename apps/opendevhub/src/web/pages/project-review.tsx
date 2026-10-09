@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -85,6 +84,7 @@ import {
   writeReviewMode,
 } from "../review";
 import type { DiffView, LineAnchor, ReviewComment } from "../review";
+import { useNavigate } from "../routing";
 import { useCheckout } from "./checkout-page";
 
 // oxlint-disable-next-line complexity

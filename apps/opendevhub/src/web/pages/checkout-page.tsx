@@ -1,3 +1,4 @@
+import { Outlet, useLocation, useParams } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
   ExternalLinkIcon,
@@ -10,16 +11,7 @@ import {
   ServerIcon,
   TerminalIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import {
-  Link,
-  Outlet,
-  useLocation,
-  useNavigate,
-  useOutletContext,
-  useParams,
-  useSearchParams,
-} from "react-router";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +63,7 @@ import {
 } from "../derive";
 import type { SessionEntry } from "../derive";
 import { checkoutResources } from "../resources";
+import { Link, useNavigate, useSearchParams } from "../routing";
 import { useProjectView } from "./project-layout";
 
 const IDLE_LIMIT = 8;
@@ -80,12 +73,20 @@ export interface CheckoutContext {
   checkout: Checkout;
 }
 
-export const useCheckout = () => useOutletContext<CheckoutContext>();
+const CheckoutCtx = createContext<CheckoutContext | undefined>(undefined);
+
+export const useCheckout = (): CheckoutContext => {
+  const value = useContext(CheckoutCtx);
+  if (!value) {
+    throw new Error("useCheckout must be used inside CheckoutPage");
+  }
+  return value;
+};
 
 /** One checkout (the main one or a worktree) and its tabs. */
 export const CheckoutPage = () => {
   const view = useProjectView();
-  const { worktree = "" } = useParams();
+  const { worktree = "" } = useParams({ strict: false });
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { running } = projectFlags(view, false);
@@ -256,7 +257,9 @@ export const CheckoutPage = () => {
         </TabLink>
       </TabBar>
 
-      <Outlet context={{ checkout, view } satisfies CheckoutContext} />
+      <CheckoutCtx value={{ checkout, view }}>
+        <Outlet />
+      </CheckoutCtx>
     </>
   );
 };

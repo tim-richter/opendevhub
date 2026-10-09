@@ -1,3 +1,4 @@
+import { useLocation } from "@tanstack/react-router";
 import {
   BookOpenIcon,
   CircleCheckIcon,
@@ -7,7 +8,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { useLocation } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -372,7 +372,7 @@ const GeneralSection = () => {
               disabled={busy}
               autoComplete="off"
               spellCheck={false}
-              autoFocus={location.hash === "#roots"}
+              autoFocus={location.hash === "roots"}
             />
             <Button type="submit" disabled={busy || !draft.trim()}>
               <PlusIcon /> Add

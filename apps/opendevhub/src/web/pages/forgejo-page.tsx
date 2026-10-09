@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -23,7 +24,6 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -103,6 +103,7 @@ import { useForgejoQuery } from "../hooks/use-forgejo";
 import { FAILED_CHECK, usePullFeedback } from "../hooks/use-pull-feedback";
 import { newId, readDiffView, writeDiffView } from "../review";
 import type { DiffNote, DiffView, LineAnchor, ReviewComment } from "../review";
+import { Link, useSearchParams } from "../routing";
 
 /** Extra left padding per level of a stacked pull request in the list. */
 const STACK_INDENT_REM = 1.5;
@@ -1035,7 +1036,7 @@ export const ForgejoPage = () => {
   );
 };
 export const ForgejoPullPage = () => {
-  const { owner = "", repo = "", number = "" } = useParams();
+  const { owner = "", repo = "", number = "" } = useParams({ strict: false });
   return (
     <PullDiff
       key={`${owner}/${repo}/${number}`}

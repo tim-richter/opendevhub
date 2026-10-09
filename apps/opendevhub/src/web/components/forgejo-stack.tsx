@@ -1,11 +1,11 @@
 import { ChevronDownIcon } from "lucide-react";
-import { Link } from "react-router";
 
 import type { ForgejoPullDetails } from "../../shared/forgejo";
 import { forgejoStackGraph } from "../forgejo";
 import type { ForgejoStackRow } from "../forgejo";
 import { useMediaQuery } from "../hooks/use-media-query";
 import { cn } from "../lib/utils";
+import { Link } from "../routing";
 import { PanelSection } from "./page";
 import {
   Collapsible,

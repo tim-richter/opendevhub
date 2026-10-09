@@ -1,7 +1,6 @@
 import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -40,6 +39,7 @@ import { createTask, fetchModels } from "../api";
 import { useDash } from "../dashboard-context";
 import type { NewTaskDraft } from "../dashboard-context";
 import { nodeChoices } from "../nodes";
+import { useNavigate } from "../routing";
 import { modelFromKey, modelKey, taskPath } from "../tasks";
 import { Choice } from "./choice";
 import { projectFlags } from "./project-actions";

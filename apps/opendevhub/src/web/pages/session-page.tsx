@@ -1,3 +1,4 @@
+import { useParams } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ChevronDownIcon,
@@ -8,7 +9,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import { Tip } from "../components/tip";
 import { TurnChanges } from "../components/turn-changes";
 import { When } from "../components/when";
 import { needsAttention, openUrlOf, sessionHref } from "../derive";
+import { Link } from "../routing";
 import {
   breakdownLabel,
   contextShare,
@@ -47,7 +48,7 @@ import { useCheckout } from "./checkout-page";
 /** One session of a checkout: its usage, its turns with what each changed, and a box to prompt it. */
 export const SessionPage = () => {
   const { view, checkout } = useCheckout();
-  const { sessionId = "" } = useParams();
+  const { sessionId = "" } = useParams({ strict: false });
   const session = view.sessions.find(
     (s) => s.id === sessionId && s.directory === checkout.directory
   );

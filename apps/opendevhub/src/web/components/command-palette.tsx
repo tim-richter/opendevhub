@@ -1,5 +1,5 @@
+import { useLocation } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
 
 import {
   CommandDialog,
@@ -15,6 +15,7 @@ import { checkoutPath, checkouts, checkoutTone } from "../checkouts";
 import { useDash } from "../dashboard-context";
 import { allSessions, matches, projectTone, sessionHref } from "../derive";
 import { sendTestNotification } from "../push";
+import { useNavigate } from "../routing";
 import { projectIdFromPath } from "../tasks";
 import { SESSION_LABEL, StatusDot } from "./status";
 

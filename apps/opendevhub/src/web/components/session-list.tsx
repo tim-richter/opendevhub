@@ -5,7 +5,6 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { Fragment, useState } from "react";
-import { Link } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,7 @@ import { checkoutOf, checkoutPath, sessionPagePath } from "../checkouts";
 import { useDash } from "../dashboard-context";
 import { openUrlOf, worktreeLabel } from "../derive";
 import type { SessionEntry } from "../derive";
+import { Link } from "../routing";
 import { taskChip } from "../tasks";
 import { Chip } from "./page";
 import { PendingStack } from "./pending-cards";

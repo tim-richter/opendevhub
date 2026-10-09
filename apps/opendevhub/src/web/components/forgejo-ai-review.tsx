@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Link } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -48,6 +47,7 @@ import { readAiRun, saveAiRun } from "../forgejo";
 import type { AiReviewRun, AiSuggestion } from "../forgejo";
 import { useForgejoCheckouts } from "../hooks/use-forgejo-checkouts";
 import { linesLabel, newId } from "../review";
+import { Link } from "../routing";
 import { Choice } from "./choice";
 import { RequestState } from "./forgejo-context";
 import { MarkdownBody } from "./markdown-body";

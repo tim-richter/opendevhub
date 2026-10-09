@@ -1,3 +1,4 @@
+import { Outlet, useLocation } from "@tanstack/react-router";
 import {
   BellIcon,
   CircleDollarSignIcon,
@@ -14,7 +15,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useMatch } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,7 @@ import {
   projectTone,
 } from "../derive";
 import { nodesNeedingAttention } from "../nodes";
+import { Link, useIsActive } from "../routing";
 import { formatCost, opensNewTask, projectIdFromPath } from "../tasks";
 import { formatUsage } from "../usage";
 
@@ -80,13 +81,13 @@ const NavItem = (props: {
   badge?: ReactNode;
   sub?: ReactNode;
 }) => {
-  const active = useMatch({ end: props.end ?? false, path: props.to }) !== null;
+  const active = useIsActive(props.to, props.end);
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={active} title={props.title}>
-        <NavLink to={props.to} end={props.end}>
+        <Link to={props.to} activeOptions={{ exact: props.end }}>
           {props.children}
-        </NavLink>
+        </Link>
       </SidebarMenuButton>
       {props.badge && <SidebarMenuBadge>{props.badge}</SidebarMenuBadge>}
       {props.sub}
@@ -112,7 +113,7 @@ const CheckoutItems = ({ view }: { view: ProjectView }) => {
               isActive={active}
               title={`${c.label} — ${TONE_LABEL[tone]}`}
             >
-              <NavLink to={to}>
+              <Link to={to}>
                 <StatusDot tone={tone} />
                 <span className="min-w-0 flex-1 truncate">{c.label}</span>
                 {n.attention > 0 ? (
@@ -120,7 +121,7 @@ const CheckoutItems = ({ view }: { view: ProjectView }) => {
                 ) : (
                   <Count n={n.running} tone="muted" />
                 )}
-              </NavLink>
+              </Link>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>
         );

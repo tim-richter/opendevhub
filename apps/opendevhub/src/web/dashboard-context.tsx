@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router";
 
 import type { ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
 import type {
@@ -28,6 +27,7 @@ import {
 import type { Action } from "./api";
 import { attentionCounts } from "./derive";
 import { enablePush, pushSupported, syncPush } from "./push";
+import { useNavigate } from "./routing";
 import { useDashboard } from "./use-dashboard";
 
 type Permission = NotificationPermission | "unsupported";

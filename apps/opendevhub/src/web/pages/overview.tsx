@@ -1,6 +1,5 @@
 import { FolderPlusIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +29,7 @@ import {
 } from "../derive";
 import type { ProjectCounts } from "../derive";
 import { projectResources } from "../resources";
+import { Link } from "../routing";
 import { formatCost } from "../tasks";
 import { formatUsage } from "../usage";
 

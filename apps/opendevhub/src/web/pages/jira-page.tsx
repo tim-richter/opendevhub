@@ -1,3 +1,4 @@
+import { useParams } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -9,7 +10,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ import {
 } from "../components/page";
 import { When } from "../components/when";
 import { useDash } from "../dashboard-context";
+import { Link, useSearchParams } from "../routing";
 import { taskPath } from "../tasks";
 
 const useJiraResource = <T,>(load: (signal: AbortSignal) => Promise<T>) => {
@@ -232,7 +233,7 @@ export const JiraPage = () => {
 };
 
 export const JiraTicketPage = () => {
-  const { key = "" } = useParams();
+  const { key = "" } = useParams({ strict: false });
   return <TicketDetails key={key} ticketKey={key} />;
 };
 

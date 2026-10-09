@@ -1,12 +1,13 @@
 import type { InfoIcon } from "lucide-react";
 import { CircleAlertIcon, TriangleAlertIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { NavLink } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+
+import { Link, useIsActive } from "../routing";
 
 export const Page = ({ className, ...props }: ComponentProps<"div">) => (
   <div className={cn("flex flex-col gap-6", className)} {...props} />
@@ -192,24 +193,24 @@ export const TabLink = (props: {
   /** Marks the tab active on pages under it that `end` would leave out. */
   active?: boolean;
   children: ReactNode;
-}) => (
-  <NavLink
-    to={props.to}
-    end={props.end}
-    className={({ isActive: matched }) => {
-      const isActive = matched || props.active;
-      return cn(
+}) => {
+  const isActive = useIsActive(props.to, props.end) || props.active;
+  return (
+    <Link
+      to={props.to}
+      activeOptions={{ exact: props.end }}
+      className={cn(
         // Phones drop the icons so all four checkout tabs fit.
         "inline-flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-sm font-medium whitespace-nowrap transition-colors max-sm:[&>svg]:hidden",
         isActive
           ? "border-foreground text-foreground"
           : "text-muted-foreground hover:text-foreground border-transparent"
-      );
-    }}
-  >
-    {props.children}
-  </NavLink>
-);
+      )}
+    >
+      {props.children}
+    </Link>
+  );
+};
 
 export const TabBar = (props: { children: ReactNode; label?: string }) => (
   <nav

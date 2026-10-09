@@ -1,5 +1,3 @@
-import { useSearchParams } from "react-router";
-
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
@@ -9,6 +7,7 @@ import { Empty, muted, Page, PageHeader, Segmented } from "../components/page";
 import { SessionList } from "../components/session-list";
 import { useDash } from "../dashboard-context";
 import { allSessions, matches, needsAttention } from "../derive";
+import { useSearchParams } from "../routing";
 
 type StatusFilter = "all" | "attention" | SessionStatus;
 const CHIPS: { id: StatusFilter; label: string }[] = [

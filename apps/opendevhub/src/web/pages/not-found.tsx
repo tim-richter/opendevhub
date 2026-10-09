@@ -1,8 +1,7 @@
-import { Link } from "react-router";
-
 import { Button } from "@/components/ui/button";
 
 import { Empty, muted } from "../components/page";
+import { Link } from "../routing";
 
 export const NotFound = ({ what = "Page" }: { what?: string }) => (
   <Empty title={`${what} not found`}>

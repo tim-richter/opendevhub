@@ -1,6 +1,5 @@
 import { PlayIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -28,6 +27,7 @@ import type { Candidate, CandidateList } from "../../shared/types";
 import { addProject, fetchCandidates } from "../api";
 import { useDash } from "../dashboard-context";
 import { addedDestination, candidateLabel } from "../onboarding";
+import { useNavigate } from "../routing";
 import { Choice } from "./choice";
 
 export const AddProjectDialog = () => {

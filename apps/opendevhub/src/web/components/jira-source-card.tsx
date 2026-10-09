@@ -1,9 +1,9 @@
 import { ExternalLinkIcon, TicketIcon } from "lucide-react";
-import { Link } from "react-router";
 
 import { jiraTicketUrl } from "../../shared/jira";
 import type { JiraTaskSource } from "../../shared/jira";
 import { useDash } from "../dashboard-context";
+import { Link } from "../routing";
 import { MarkdownBody } from "./markdown-body";
 
 /** Keep the original requirements available even when Jira is disabled or unreachable. */

@@ -1,6 +1,5 @@
 import { GitBranchIcon, InfoIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect } from "react";
-import { Link, Navigate, useSearchParams } from "react-router";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +43,7 @@ import {
   workspaceFolderOf,
 } from "../derive";
 import { checkoutResources } from "../resources";
+import { Link, Navigate, useSearchParams } from "../routing";
 import { formatCost, formatTokens } from "../tasks";
 import { projectUsage } from "../usage";
 import { useProjectView } from "./project-layout";

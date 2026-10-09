@@ -2,14 +2,18 @@ import addonA11y from "@storybook/addon-a11y";
 import addonDocs from "@storybook/addon-docs";
 import { definePreview } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  RouterContextProvider,
+} from "@tanstack/react-router";
 import addonMsw from "msw-storybook-addon";
 import { setupWorker } from "msw/browser";
 import { useState } from "react";
-import { MemoryRouter } from "react-router";
 
 import { ConfirmDialogHost } from "@/components/confirm-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+import { createAppRouter } from "../src/web/app";
 import { DashboardProvider } from "../src/web/dashboard-context";
 import { createHandlers } from "../src/web/mocks/handlers";
 
@@ -50,16 +54,21 @@ export default definePreview({
             defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
           })
       );
+      const [router] = useState(() =>
+        createAppRouter(
+          createMemoryHistory({ initialEntries: [parameters.route ?? "/"] })
+        )
+      );
       return (
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={[parameters.route ?? "/"]}>
+          <RouterContextProvider router={router}>
             <DashboardProvider>
               <TooltipProvider>
                 <Story />
                 <ConfirmDialogHost />
               </TooltipProvider>
             </DashboardProvider>
-          </MemoryRouter>
+          </RouterContextProvider>
         </QueryClientProvider>
       );
     },

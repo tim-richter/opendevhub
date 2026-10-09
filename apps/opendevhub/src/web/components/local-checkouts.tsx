@@ -1,5 +1,4 @@
 import { GitBranchIcon } from "lucide-react";
-import { Link } from "react-router";
 
 import type { ForgejoPullDetails } from "../../shared/forgejo";
 import {
@@ -10,6 +9,7 @@ import {
 } from "../checkouts";
 import { useDash } from "../dashboard-context";
 import { useForgejoCheckouts } from "../hooks/use-forgejo-checkouts";
+import { Link } from "../routing";
 import { StatusDot, TONE_LABEL } from "./status";
 
 const LIMIT = 3;

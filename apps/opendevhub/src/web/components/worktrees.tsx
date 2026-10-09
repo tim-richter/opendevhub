@@ -1,7 +1,6 @@
 import { BoxIcon, ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useState } from "react";
 import type { ComponentProps, FormEvent } from "react";
-import { useNavigate } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -38,6 +37,7 @@ import { checkoutPath } from "../checkouts";
 import type { Checkout } from "../checkouts";
 import { useDash } from "../dashboard-context";
 import { envOfDirectory } from "../derive";
+import { useNavigate } from "../routing";
 import { openSessionTab, projectFlags } from "./project-actions";
 import { Tip } from "./tip";
 

@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLinkIcon, GitPullRequestIcon } from "lucide-react";
-import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 
 import { fetchPublishInfo } from "../api";
 import { useDash } from "../dashboard-context";
 import { forgejoRoute } from "../forgejo";
+import { Link } from "../routing";
 
 const PR_NUMBER = /\/(?:pulls|pull|merge_requests)\/(?<n>\d+)\/?$/u;
 
