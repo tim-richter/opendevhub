@@ -4,8 +4,6 @@ import { parseArgs } from "node:util";
 
 import open from "open";
 
-import { Checks } from "./checks";
-import { Cleanup } from "./cleanup";
 import {
   FileForgeStore,
   FileProjectSettings,
@@ -21,40 +19,47 @@ import {
   validateRoots,
 } from "./config";
 import type { Config } from "./config";
-import { Containers } from "./containers";
-import { Credentials } from "./credentials";
 import { createDashboardApp } from "./dashboard-api";
-import { scanRoots } from "./discovery";
-import { EditorLauncher, detectEditors, pathWhich } from "./editors";
-import { EnvFiles } from "./env-files";
-import { spawnRunner } from "./exec";
-import { FileForgejoSettings, Forgejo } from "./forgejo";
-import { Gateway } from "./gateway";
-import { GitOps } from "./git";
-import { LOCAL_NODE } from "./host";
-import { Images } from "./images";
-import { FileJiraSettings, Jira } from "./jira";
-import { Network, parseRouteMode } from "./network";
-import { NodeKits, buildNodeKit } from "./node-kits";
-import { Nodes } from "./nodes";
-import { startNotifier } from "./notifier";
-import { Onboarding } from "./onboarding";
+import { Checks } from "./environments/checks";
+import { Containers } from "./environments/containers";
+import { Credentials } from "./environments/credentials";
+import {
+  EditorLauncher,
+  detectEditors,
+  pathWhich,
+} from "./environments/editors";
+import type { Environments } from "./environments/environments";
+import { EnvFiles } from "./environments/files";
+import { Images } from "./environments/images";
+import { ensureSpawnHelperExecutable } from "./environments/pty-helper";
+import { startResourceSampler } from "./environments/resources";
+import { Cleanup } from "./git/cleanup";
+import { GitOps } from "./git/ops";
+import { Publisher } from "./git/publish";
+import { Worktrees } from "./git/worktrees";
+import { createHub } from "./hub";
+import { FileForgejoSettings, Forgejo } from "./integrations/forgejo";
+import { FileJiraSettings, Jira } from "./integrations/jira";
+import { Gateway } from "./network/gateway";
+import { PortForwarder } from "./network/port-forwarder";
+import type { ResolveTarget } from "./network/proxy";
+import { RelayRuntime } from "./network/relay/runtime";
+import { Network, parseRouteMode } from "./network/routes";
+import { spawnRunner } from "./nodes/exec";
+import { LOCAL_NODE } from "./nodes/host";
+import { NodeKits, buildNodeKit } from "./nodes/kits";
+import { Nodes } from "./nodes/registry";
+import { startNotifier } from "./notifications/notifier";
+import { Push } from "./notifications/push";
 import { OpencodeClient } from "./opencode/client";
 import { OpencodeRuntime } from "./opencode/runtime";
-import { Orchestrator } from "./orchestrator";
-import { PortForwarder } from "./port-forwarder";
 import { preflight } from "./preflight";
-import type { ResolveTarget } from "./proxy";
-import { ensureSpawnHelperExecutable } from "./pty-helper";
-import { Publisher } from "./publish";
-import { Push } from "./push";
-import { RelayRuntime } from "./relay/runtime";
-import { startResourceSampler } from "./resources";
+import { scanRoots } from "./projects/discovery";
+import { Onboarding } from "./projects/onboarding";
+import { StateStore } from "./projects/state";
 import { startServer } from "./server";
-import { StateStore } from "./state";
-import { UsageStore, trackUsage } from "./usage";
+import { UsageStore, trackUsage } from "./sessions/usage";
 import { startDevUi } from "./vite-dev";
-import { Worktrees } from "./worktrees";
 
 const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
 
@@ -106,11 +111,11 @@ export const parseCli = (argv: string[]): CliOptions => {
 export const proxyTargets =
   (
     store: Pick<StateStore, "runtime">,
-    orchestrator: Pick<Orchestrator, "opencodeAddress">
+    environments: Pick<Environments, "opencodeAddress">
   ): ResolveTarget =>
   (envId) => {
     const rt = store.runtime(envId);
-    const address = orchestrator.opencodeAddress(envId);
+    const address = environments.opencodeAddress(envId);
     if (rt.containerState !== "running" || !address || !rt.password) {
       return;
     }
@@ -250,8 +255,10 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
         .projects()
         .flatMap((p) => store.environments(p.id))
         .filter((e) => e.node === id).length,
-    onOffline: (id) => void orchestrator.nodeOffline(id).catch(() => undefined),
-    onOnline: (id) => void orchestrator.nodeOnline(id).catch(() => undefined),
+    onOffline: (id) =>
+      void hub.environments.nodeOffline(id).catch(() => undefined),
+    onOnline: (id) =>
+      void hub.environments.nodeOnline(id).catch(() => undefined),
     store,
   });
   const usage = UsageStore.open(path.join(dir, "usage.db"));
@@ -267,7 +274,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const editors = new EditorLauncher(await detectEditors(pathWhich()));
   store.setEditors(editors.list());
   const git = new GitOps({ containers });
-  const orchestrator = new Orchestrator({
+  const hub = createHub({
     store,
     containers,
     runtime,
@@ -306,21 +313,26 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     roots: () => roots,
     scan: (toScan) => scanRoots(toScan),
   });
-  const cleanup = new Cleanup({ branches: orchestrator, containers, store });
+  const cleanup = new Cleanup({
+    branches: hub.cleanupTargets,
+    containers,
+    log: (id, line) => hub.environments.note(id, line),
+    store,
+  });
   const checks = new Checks({
     containers,
     git,
-    log: (id, line) => orchestrator.note(id, line),
+    log: (id, line) => hub.environments.note(id, line),
     project: (id) => store.project(id),
     run: spawnRunner,
     settings: new FileProjectSettings(dir),
-    target: (id, directory) => orchestrator.checkTarget(id, directory),
+    target: (id, directory) => hub.checkouts.checkTarget(id, directory),
   });
 
   store.setPreflight(await preflight(spawnRunner));
-  await orchestrator.rescan();
+  await hub.environments.rescan();
   if (store.preflight().errors.length === 0) {
-    await orchestrator.adopt();
+    await hub.environments.adopt();
   }
   // After the local containers, so a node coming online adopts into a settled store.
   nodes.start();
@@ -329,7 +341,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const stopNotifier = startNotifier(store, push);
   const app = createDashboardApp({
     store,
-    orchestrator,
+    hub,
     cleanup,
     checks,
     push,
@@ -353,9 +365,9 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
       ? { devUi: await startDevUi() }
       : {}),
     port: config.port,
-    resolveTarget: proxyTargets(store, orchestrator),
+    resolveTarget: proxyTargets(store, hub.environments),
     terminalTarget: async (id, directory) => {
-      const target = await orchestrator.terminalTarget(id, directory);
+      const target = await hub.environments.terminalTarget(id, directory);
       const remote =
         target.node && target.node !== LOCAL_NODE ? target.node : undefined;
       const conn = remote ? nodes.connection(remote) : undefined;
@@ -366,7 +378,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     },
   });
   const refresh = setInterval(
-    () => void orchestrator.refreshContainers().catch(() => undefined),
+    () => void hub.environments.refreshContainers().catch(() => undefined),
     10_000
   );
   const sampler = startResourceSampler({ run: spawnRunner, store });
@@ -384,7 +396,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     sampler.stop();
     stopNotifier();
     usageTracker?.stop();
-    await orchestrator.shutdown();
+    await hub.environments.shutdown();
     await nodes.close();
     usage?.close();
     await server.close();

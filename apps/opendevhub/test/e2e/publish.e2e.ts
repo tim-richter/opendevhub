@@ -5,21 +5,21 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { Containers } from "../../src/server/containers";
-import { EditorLauncher } from "../../src/server/editors";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { projectId } from "../../src/server/ids";
-import { Network, parseRouteMode } from "../../src/server/network";
+import { Containers } from "../../src/server/environments/containers";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { RelayRuntime } from "../../src/server/relay/runtime";
-import { StateStore } from "../../src/server/state";
-import { Worktrees } from "../../src/server/worktrees";
+import { projectId } from "../../src/server/projects/ids";
+import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
 
 describe.skipIf(!process.env.OPENDEVHUB_E2E)(
@@ -69,7 +69,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE),
         gateway: new Gateway({ run: spawnRunner }),
       });
-      const orch = new Orchestrator({
+      const hub = createHub({
         store,
         containers,
         runtime,
@@ -88,13 +88,15 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         roots: () => [],
         scan: async () => [project],
       });
-      orch.onLog((_id, line) => console.log(`[e2e publish] ${line}`));
+      hub.environments.onLog((_id, line) =>
+        console.log(`[e2e publish] ${line}`)
+      );
 
       try {
-        await orch.rescan();
-        await orch.start(project.id);
+        await hub.environments.rescan();
+        await hub.environments.start(project.id);
         const ws = store.runtime(project.id).workspaceFolder!;
-        const info = await orch.publishInfo(project.id, ws);
+        const info = await hub.reviews.publishInfo(project.id, ws);
         expect(info).toMatchObject({
           branch: "feature/pub",
           remotes: ["origin"],
@@ -103,7 +105,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           strategy: "branch",
           pushFrom: "host",
         });
-        const result = await orch.publish(project.id, ws, {
+        const result = await hub.reviews.publish(project.id, ws, {
           remote: "origin",
           base: "main",
           strategy: "branch",
@@ -120,10 +122,10 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         expect(
           git(repo, "config", "branch.feature/pub.opendevhubPublished").trim()
         ).toBe("origin");
-        expect((await orch.review(project.id, ws)).pushed).toBe(true);
+        expect((await hub.reviews.review(project.id, ws)).pushed).toBe(true);
       } finally {
-        await orch.stop(project.id).catch(() => undefined);
-        await orch.shutdown();
+        await hub.environments.stop(project.id).catch(() => undefined);
+        await hub.environments.shutdown();
         fs.rmSync(tmp, { recursive: true, force: true });
       }
     });

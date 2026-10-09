@@ -3,11 +3,11 @@ import type { AddressInfo } from "node:net";
 
 import { getRequestListener } from "@hono/node-server";
 
-import { classifyHost } from "./hosts";
-import { proxyRequest, proxyUpgrade } from "./proxy";
-import type { ResolveTarget } from "./proxy";
-import { Terminals } from "./terminals";
-import type { TerminalTarget } from "./terminals";
+import { Terminals } from "./environments/terminals";
+import type { TerminalTarget } from "./environments/terminals";
+import { classifyHost } from "./network/hosts";
+import { proxyRequest, proxyUpgrade } from "./network/proxy";
+import type { ResolveTarget } from "./network/proxy";
 import type { DevUi } from "./vite-dev";
 
 export interface ServerHandle {

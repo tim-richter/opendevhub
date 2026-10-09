@@ -5,23 +5,26 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Containers, envLabels } from "../../src/server/containers";
-import { EditorLauncher } from "../../src/server/editors";
-import { EnvFiles } from "../../src/server/env-files";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { projectId } from "../../src/server/ids";
-import { Images } from "../../src/server/images";
-import { Network, parseRouteMode } from "../../src/server/network";
+import {
+  Containers,
+  envLabels,
+} from "../../src/server/environments/containers";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { EnvFiles } from "../../src/server/environments/files";
+import { Images } from "../../src/server/environments/images";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { RelayRuntime } from "../../src/server/relay/runtime";
-import { StateStore } from "../../src/server/state";
-import { Worktrees } from "../../src/server/worktrees";
+import { projectId } from "../../src/server/projects/ids";
+import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
 
 const PROMPT = "Reply with the word ok. Do not change any files.";
@@ -83,7 +86,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const clientFor = (ep: { baseUrl: string; password: string }) =>
         new OpencodeClient(ep);
       const runtime = new OpencodeRuntime({ containers, clientFor });
-      const orch = new Orchestrator({
+      const hub = createHub({
         store,
         containers,
         runtime,
@@ -111,7 +114,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         roots: () => [],
         scan: async () => [project],
       });
-      orch.onLog((_id, line) => console.log(`[e2e envs] ${line}`));
+      hub.environments.onLog((_id, line) => console.log(`[e2e envs] ${line}`));
       const targetOf = (envId: string) => {
         const rec = store.environment(envId)!;
         return {
@@ -129,8 +132,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           .filter(Boolean);
 
       try {
-        await orch.rescan();
-        await orch.start(project.id);
+        await hub.environments.rescan();
+        await hub.environments.start(project.id);
         expect(store.runtime(project.id)).toMatchObject({
           containerState: "running",
           opencode: "healthy",
@@ -143,7 +146,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           await containers.exec(project, ["cat", "/tmp/lifecycle.log"])
         ).stdout;
 
-        const two = await orch.createTask(project.id, {
+        const two = await hub.tasks.createTask(project.id, {
           prompt: PROMPT,
           title: "e2e iso",
           variants: [{}, {}],
@@ -206,7 +209,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         }
 
         // A branch that changes .devcontainer gets its own image.
-        const { worktree } = await orch.createWorktree(project.id, {
+        const { worktree } = await hub.checkouts.createWorktree(project.id, {
           branch: "devc",
         });
         fs.writeFileSync(
@@ -221,7 +224,10 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           "-qam",
           "change the devcontainer",
         ]);
-        const { envId: devc } = await orch.createEnv(project.id, worktree.path);
+        const { envId: devc } = await hub.environments.createEnv(
+          project.id,
+          worktree.path
+        );
         await vi.waitFor(
           () => expect(store.runtime(devc).opencode).toBe("healthy"),
           { timeout: 10 * 60_000, interval: 1000 }
@@ -231,11 +237,17 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         );
 
         // A warm environment (image already built) starts in under 10 s.
-        const { worktree: warm } = await orch.createWorktree(project.id, {
-          branch: "warm",
-        });
+        const { worktree: warm } = await hub.checkouts.createWorktree(
+          project.id,
+          {
+            branch: "warm",
+          }
+        );
         const t0 = Date.now();
-        const { envId: warmId } = await orch.createEnv(project.id, warm.path);
+        const { envId: warmId } = await hub.environments.createEnv(
+          project.id,
+          warm.path
+        );
         await vi.waitFor(
           () => expect(store.runtime(warmId).opencode).toBe("healthy"),
           { timeout: 60_000, interval: 200 }
@@ -245,7 +257,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         // Picking one variant removes the other's container with its worktree.
         const [keep, drop] = two.variants;
         const dropContainer = store.runtime(drop.envId!).containerId!;
-        const picked = await orch.pickVariant(
+        const picked = await hub.tasks.pickVariant(
           project.id,
           two.task,
           keep.sessionId!,
@@ -263,10 +275,12 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         ).toBe(mainLog);
       } finally {
         for (const e of store.environments(project.id)) {
-          await orch.removeEnv(project.id, e.id).catch(() => undefined);
+          await hub.environments
+            .removeEnv(project.id, e.id)
+            .catch(() => undefined);
         }
-        await orch.stop(project.id).catch(() => undefined);
-        await orch.shutdown();
+        await hub.environments.stop(project.id).catch(() => undefined);
+        await hub.environments.shutdown();
         const images = execFileSync(
           "docker",
           ["images", "-q", `opendevhub/${project.id}`],

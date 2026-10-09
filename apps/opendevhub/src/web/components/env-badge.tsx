@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import type { EnvironmentView } from "../../shared/types";
 import { useDash } from "../dashboard-context";
 import { envTone } from "../derive";
-import { envNode } from "../nodes";
+import { envNode } from "../features/nodes/nodes";
 import { STATE_LABEL, StatusDot } from "./status";
 
 /** A worktree's own container: a dot and its state, and its node when that's another machine. */

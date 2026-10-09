@@ -5,9 +5,12 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { spawnRunner } from "../../src/server/exec";
-import { FileForgejoSettings, Forgejo } from "../../src/server/forgejo";
-import { Publisher } from "../../src/server/publish";
+import { Publisher } from "../../src/server/git/publish";
+import {
+  FileForgejoSettings,
+  Forgejo,
+} from "../../src/server/integrations/forgejo";
+import { spawnRunner } from "../../src/server/nodes/exec";
 import type { Project } from "../../src/shared/types";
 import { MemorySecretStore } from "../helpers/secrets";
 

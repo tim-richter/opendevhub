@@ -11,7 +11,7 @@ import {
   runNodesCommand,
 } from "../../src/server/cli";
 import { loadConfig, saveConfig, saveState } from "../../src/server/config";
-import { StateStore } from "../../src/server/state";
+import { StateStore } from "../../src/server/projects/state";
 
 describe(parseCli, () => {
   it("parses port and --no-open", () => {

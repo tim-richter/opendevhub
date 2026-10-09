@@ -5,28 +5,28 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Checks } from "../../src/server/checks";
-import { Cleanup } from "../../src/server/cleanup";
 import { FileProjectSettings } from "../../src/server/config";
-import { Containers } from "../../src/server/containers";
-import { Credentials } from "../../src/server/credentials";
 import { createDashboardApp } from "../../src/server/dashboard-api";
-import { scanRoots } from "../../src/server/discovery";
-import { EditorLauncher } from "../../src/server/editors";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { Network, parseRouteMode } from "../../src/server/network";
-import { Onboarding } from "../../src/server/onboarding";
+import { Checks } from "../../src/server/environments/checks";
+import { Containers } from "../../src/server/environments/containers";
+import { Credentials } from "../../src/server/environments/credentials";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { Cleanup } from "../../src/server/git/cleanup";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
+import { Push } from "../../src/server/notifications/push";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { Push } from "../../src/server/push";
-import { RelayRuntime } from "../../src/server/relay/runtime";
-import { StateStore } from "../../src/server/state";
-import { Worktrees } from "../../src/server/worktrees";
+import { scanRoots } from "../../src/server/projects/discovery";
+import { Onboarding } from "../../src/server/projects/onboarding";
+import { StateStore } from "../../src/server/projects/state";
 
 describe.skipIf(!process.env.OPENDEVHUB_E2E)(
   "e2e: add a repo without a devcontainer",
@@ -47,7 +47,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const containers = new Containers(spawnRunner);
       const clientFor = (ep: { baseUrl: string; password: string }) =>
         new OpencodeClient(ep);
-      const orch = new Orchestrator({
+      const hub = createHub({
         store,
         containers,
         runtime: new OpencodeRuntime({ containers, clientFor }),
@@ -70,19 +70,24 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         roots,
         scan: (r) => scanRoots(r),
       });
-      orch.onLog((_id, line) => console.log(`[e2e add] ${line}`));
+      hub.environments.onLog((_id, line) => console.log(`[e2e add] ${line}`));
       const app = createDashboardApp({
         store,
-        orchestrator: orch,
-        cleanup: new Cleanup({ store, containers, branches: orch }),
+        hub,
+        cleanup: new Cleanup({
+          store,
+          containers,
+          branches: hub.cleanupTargets,
+          log: (id, line) => hub.environments.note(id, line),
+        }),
         checks: new Checks({
-          target: (id, dir) => orch.checkTarget(id, dir),
+          target: (id, dir) => hub.checkouts.checkTarget(id, dir),
           project: (id) => store.project(id),
           containers,
           run: spawnRunner,
           git: new GitOps({ containers }),
           settings: new FileProjectSettings(root),
-          log: (id, line) => orch.note(id, line),
+          log: (id, line) => hub.environments.note(id, line),
         }),
         onboarding: new Onboarding({ roots }),
         push: new Push({ file: path.join(root, "push.json") }),
@@ -121,7 +126,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         expect(store.runtime(projectId).opencodeVersion).toMatch(/^2\./u);
       } finally {
         if (projectId) {
-          await orch.stop(projectId).catch(() => undefined);
+          await hub.environments.stop(projectId).catch(() => undefined);
           const id = execFileSync("docker", [
             "ps",
             "-aq",

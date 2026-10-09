@@ -1,0 +1,253 @@
+import {
+  EllipsisIcon,
+  ExternalLinkIcon,
+  GitBranchIcon,
+  Trash2Icon,
+} from "lucide-react";
+import { Fragment, useState } from "react";
+
+import { confirm } from "@/components/confirm-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+
+import type { SessionSummary } from "../../../shared/types";
+import { sessionUrl } from "../../../shared/urls";
+import { removeSession } from "../../api";
+import { Chip } from "../../components/page";
+import { SessionBadge } from "../../components/status";
+import { When } from "../../components/when";
+import { useDash } from "../../dashboard-context";
+import { openUrlOf, worktreeLabel } from "../../derive";
+import type { SessionEntry } from "../../derive";
+import { Link } from "../../routing";
+import {
+  checkoutOf,
+  checkoutPath,
+  sessionPagePath,
+} from "../checkouts/checkouts";
+import { taskChip } from "../tasks/tasks";
+import { PendingStack } from "./pending-cards";
+
+export const SessionRow = (props: {
+  session: SessionSummary;
+  openUrl: string;
+  project?: { id: string; name: string };
+  /** Set when the session works in a worktree rather than the main checkout. */
+  worktree?: string;
+  /** The checkout's page, which the worktree chip links to. */
+  worktreeTo?: string;
+  /** The session's own page, which its title links to. */
+  to?: string;
+  highlighted?: boolean;
+  task?: { label: string; title: string; to?: string; model?: string };
+}) => {
+  const { session, openUrl, project, worktree, highlighted } = props;
+  const { report } = useDash();
+  const [removing, setRemoving] = useState(false);
+  const waiting =
+    session.status === "needs-permission" || session.status === "needs-answer";
+  const remove = async () => {
+    const title = session.title || "Untitled session";
+    const stop = session.status === "idle" ? "" : " It is stopped first.";
+    if (
+      !(await confirm({
+        confirmLabel: "Remove",
+        description: `It is deleted in opencode with its subagents.${stop} This can't be undone.`,
+        destructive: true,
+        title: `Remove the session ${title}?`,
+      }))
+    ) {
+      return;
+    }
+    setRemoving(true);
+    removeSession(session.projectId, session.id)
+      .catch(report)
+      .finally(() => setRemoving(false));
+  };
+  const title = session.title || "Untitled session";
+  const chips = props.task || worktree;
+  const projectLink = project && (
+    <Link
+      className="text-muted-foreground hover:text-foreground truncate text-sm"
+      to={`/p/${encodeURIComponent(project.id)}`}
+    >
+      {project.name}
+    </Link>
+  );
+  return (
+    <li
+      className={cn(
+        "hover:bg-muted/50 grid items-center gap-x-3.5 gap-y-1 border-t px-4 py-2 first:border-t-0",
+        "max-md:grid-cols-[minmax(0,1fr)_auto]",
+        project
+          ? "md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,10rem)_6rem_auto]"
+          : "md:grid-cols-[8.5rem_minmax(0,1fr)_6rem_auto]",
+        highlighted && "bg-attention/10 shadow-[inset_3px_0_var(--attention)]"
+      )}
+      id={`session-${session.id}`}
+    >
+      <span className="justify-self-start max-md:hidden">
+        <SessionBadge status={session.status} />
+      </span>
+      <div className="flex min-w-0 flex-col gap-0.5 max-md:col-span-full">
+        {props.to ? (
+          <Link
+            className="truncate hover:underline"
+            title={title}
+            to={props.to}
+          >
+            {title}
+          </Link>
+        ) : (
+          <span className="truncate" title={title}>
+            {title}
+          </span>
+        )}
+        {chips && (
+          <span className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+            {props.task &&
+              (props.task.to ? (
+                <Chip
+                  asChild
+                  className="text-foreground hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Link to={props.task.to} title={props.task.title}>
+                    {props.task.label}
+                  </Link>
+                </Chip>
+              ) : (
+                <Chip className="text-foreground" title={props.task.title}>
+                  {props.task.label}
+                </Chip>
+              ))}
+            {props.task?.model && <Chip>{props.task.model}</Chip>}
+            {worktree &&
+              (props.worktreeTo ? (
+                <Chip
+                  asChild
+                  className="hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Link to={props.worktreeTo} title={`Open ${worktree}`}>
+                    <GitBranchIcon /> {worktree}
+                  </Link>
+                </Chip>
+              ) : (
+                <Chip title={`Worktree ${worktree}`}>
+                  <GitBranchIcon /> {worktree}
+                </Chip>
+              ))}
+          </span>
+        )}
+      </div>
+      {/* On phones the badge, project and time share one line under the title. */}
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 md:hidden">
+        <SessionBadge status={session.status} />
+        {projectLink}
+        <When
+          at={session.updatedAt}
+          className="text-muted-foreground text-xs whitespace-nowrap"
+        />
+      </span>
+      {project && <span className="min-w-0 max-md:hidden">{projectLink}</span>}
+      <When
+        at={session.updatedAt}
+        className="text-muted-foreground text-right text-xs whitespace-nowrap max-md:hidden"
+      />
+      <span className="inline-flex items-center gap-1 justify-self-end">
+        <a
+          className={cn(
+            "inline-flex items-center gap-1 px-1 text-sm font-medium whitespace-nowrap hover:underline",
+            waiting && !session.pending && "text-attention"
+          )}
+          href={sessionUrl(openUrl, session.id)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {waiting && !session.pending ? "Respond" : "Open"}{" "}
+          <ExternalLinkIcon className="size-3.5" />
+        </a>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground"
+              aria-label={`More for ${title}`}
+              disabled={removing}
+            >
+              <EllipsisIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem variant="destructive" onSelect={remove}>
+              <Trash2Icon /> Remove session…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
+    </li>
+  );
+};
+
+const checkoutTo = (
+  view: SessionEntry["view"],
+  directory: string
+): string | undefined => {
+  const c = checkoutOf(view, directory);
+  return c ? checkoutPath(view.project.id, c.target) : undefined;
+};
+
+const sessionTo = (
+  view: SessionEntry["view"],
+  session: SessionSummary
+): string | undefined => {
+  const c = checkoutOf(view, session.directory);
+  return c ? sessionPagePath(view.project.id, c.target, session.id) : undefined;
+};
+
+export const SessionList = (props: {
+  entries: SessionEntry[];
+  showProject?: boolean;
+  highlight?: string;
+  /** Inside a checkout's own page, where the worktree chip says nothing new. */
+  hideWorktree?: boolean;
+  /** Name the main checkout too, for lists that mix it with worktrees. */
+  showMain?: boolean;
+}) => (
+  <ul>
+    {props.entries.map(({ session, view }) => (
+      <Fragment key={session.id}>
+        <SessionRow
+          session={session}
+          openUrl={openUrlOf(view, session.envId)}
+          project={
+            props.showProject
+              ? { id: view.project.id, name: view.project.name }
+              : undefined
+          }
+          worktree={
+            props.hideWorktree
+              ? undefined
+              : (worktreeLabel(view, session.directory) ??
+                (props.showMain ? "main" : undefined))
+          }
+          worktreeTo={checkoutTo(view, session.directory)}
+          to={sessionTo(view, session)}
+          highlighted={session.id === props.highlight}
+          task={taskChip(view, session)}
+        />
+        {session.pending && (
+          <li className="px-4 pb-3" id={`pending-${session.id}`}>
+            <PendingStack session={session} view={view} />
+          </li>
+        )}
+      </Fragment>
+    ))}
+  </ul>
+);

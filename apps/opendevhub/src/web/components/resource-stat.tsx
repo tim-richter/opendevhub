@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-import { formatCpu, formatMemory } from "../resources";
+import { formatCpu, formatMemory } from "../lib/resources";
 import { Tip } from "./tip";
 
 /** Two tags, CPU and memory; the tooltips have the container count and the memory limit. */

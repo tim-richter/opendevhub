@@ -11,6 +11,22 @@ import type {
   ForgejoPullFilter,
 } from "../shared/forgejo";
 import type { AddProjectResult, LogEvent } from "../shared/types";
+import { InvalidNodeError, InvalidRootError } from "./config";
+import type { Checks } from "./environments/checks";
+import { CommandError } from "./environments/containers";
+import { EditorUnavailableError } from "./environments/editors";
+import type { Environments } from "./environments/environments";
+import {
+  AlreadyAnsweredError,
+  BusyError,
+  NotFoundError,
+  UnavailableError,
+} from "./errors";
+import type { Checkouts } from "./git/checkouts";
+import { parseCleanupItems } from "./git/cleanup";
+import type { Cleanup } from "./git/cleanup";
+import type { ReviewActions } from "./git/review-actions";
+import { InvalidRequestError } from "./git/worktrees";
 import {
   AI_REVIEW_TIMEOUT_MS,
   aiFindingsPrompt,
@@ -18,76 +34,74 @@ import {
   aiReviewPrompt,
   aiReviewTitle,
   parseAiReview,
-} from "./ai-review";
-import type { Checks } from "./checks";
-import { parseCleanupItems } from "./cleanup";
-import type { Cleanup } from "./cleanup";
-import { InvalidNodeError, InvalidRootError } from "./config";
-import { CommandError } from "./containers";
-import { EditorUnavailableError } from "./editors";
-import { ForgejoError } from "./forgejo";
-import type { Forgejo } from "./forgejo";
-import { IntegrationError } from "./integration-settings";
-import type { Jira } from "./jira";
-import type { Nodes } from "./nodes";
-import { DevcontainerExistsError } from "./onboarding";
-import type { OnboardingPort } from "./onboarding";
-import {
-  AlreadyAnsweredError,
-  BusyError,
-  NotFoundError,
-  UnavailableError,
-} from "./orchestrator";
-import type { Orchestrator } from "./orchestrator";
-import { InvalidSubscriptionError } from "./push";
-import type { Push } from "./push";
-import { CredentialStoreError } from "./secrets";
-import type { StateStore } from "./state";
-import { localDay } from "./usage";
-import type { UsageStore } from "./usage";
-import { InvalidRequestError } from "./worktrees";
+} from "./integrations/ai-review";
+import { ForgejoError } from "./integrations/forgejo";
+import type { Forgejo } from "./integrations/forgejo";
+import type { Jira } from "./integrations/jira";
+import { CredentialStoreError } from "./integrations/secrets";
+import { IntegrationError } from "./integrations/settings";
+import type { Nodes } from "./nodes/registry";
+import { InvalidSubscriptionError } from "./notifications/push";
+import type { Push } from "./notifications/push";
+import { DevcontainerExistsError } from "./projects/onboarding";
+import type { OnboardingPort } from "./projects/onboarding";
+import type { StateStore } from "./projects/state";
+import type { Sessions } from "./sessions/sessions";
+import { localDay } from "./sessions/usage";
+import type { UsageStore } from "./sessions/usage";
+import type { Tasks } from "./tasks/tasks";
 
-export type DashboardOrchestrator = Pick<
-  Orchestrator,
-  | "start"
-  | "stop"
-  | "rebuild"
-  | "restartOpencode"
-  | "rescan"
-  | "logLines"
-  | "onLog"
-  | "refreshWorktrees"
-  | "createWorktree"
-  | "removeWorktree"
-  | "startSession"
-  | "generateIn"
-  | "openInEditor"
-  | "replyPermission"
-  | "replyForm"
-  | "cancelForm"
-  | "review"
-  | "promptSession"
-  | "sessionDetail"
-  | "removeSession"
-  | "commitMessage"
-  | "commit"
-  | "updateFromBase"
-  | "mergeIntoBase"
-  | "bringHome"
-  | "publishInfo"
-  | "publishSuggestion"
-  | "publish"
-  | "models"
-  | "startTask"
-  | "dismissStarting"
-  | "pickVariant"
-  | "createEnv"
-  | "startEnv"
-  | "stopEnv"
-  | "rebuildEnv"
-  | "restartEnvOpencode"
-  | "removeEnv"
->;
+/** The Hub modules the dashboard routes call. */
+export interface DashboardHub {
+  environments: Pick<
+    Environments,
+    | "start"
+    | "stop"
+    | "rebuild"
+    | "restartOpencode"
+    | "rescan"
+    | "logLines"
+    | "onLog"
+    | "createEnv"
+    | "startEnv"
+    | "stopEnv"
+    | "rebuildEnv"
+    | "restartEnvOpencode"
+    | "removeEnv"
+  >;
+  checkouts: Pick<
+    Checkouts,
+    | "refreshWorktrees"
+    | "createWorktree"
+    | "removeWorktree"
+    | "openInEditor"
+    | "bringHome"
+  >;
+  sessions: Pick<
+    Sessions,
+    | "startSession"
+    | "generateIn"
+    | "replyPermission"
+    | "replyForm"
+    | "cancelForm"
+    | "promptSession"
+    | "sessionDetail"
+    | "removeSession"
+    | "models"
+  >;
+  reviews: Pick<
+    ReviewActions,
+    | "review"
+    | "commitMessage"
+    | "commit"
+    | "updateFromBase"
+    | "mergeIntoBase"
+    | "publishInfo"
+    | "publishSuggestion"
+    | "publish"
+  >;
+  tasks: Pick<Tasks, "startTask" | "dismissStarting" | "pickVariant">;
+}
 
 export type PushPort = Pick<
   Push,
@@ -96,7 +110,7 @@ export type PushPort = Pick<
 
 export interface DashboardDeps {
   store: StateStore;
-  orchestrator: DashboardOrchestrator;
+  hub: DashboardHub;
   onboarding: OnboardingPort;
   /** Validates and persists the scan roots; throws InvalidRootError for a bad list. */
   saveRoots?: (input: unknown) => void;
@@ -187,16 +201,7 @@ const str = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
 export const createDashboardApp = (deps: DashboardDeps): Hono => {
-  const {
-    store,
-    orchestrator,
-    onboarding,
-    push,
-    usage,
-    cleanup,
-    checks,
-    nodes,
-  } = deps;
+  const { store, hub, onboarding, push, usage, cleanup, checks, nodes } = deps;
   const app = new Hono();
 
   // X-Frame-Options blocks the dashboard from being framed by another site. The Origin check
@@ -330,7 +335,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     json(c, async (_id, b) => {
       const details = await pullAt(c, b.commitId);
       return {
-        sessionId: await orchestrator.startSession(
+        sessionId: await hub.sessions.startSession(
           str(b.projectId) ?? "",
           str(b.directory) ?? "",
           aiReviewTitle(details),
@@ -352,7 +357,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
         );
         prompt = aiQuickReviewPrompt(details, diff.patch);
       }
-      const generated = await orchestrator.generateIn(
+      const generated = await hub.sessions.generateIn(
         str(b.projectId) ?? "",
         str(b.directory) ?? "",
         prompt,
@@ -390,7 +395,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
           "The PR changed. Refresh its diff before creating a worktree."
         );
       }
-      return orchestrator.createWorktree(str(b.projectId) ?? "", {
+      return hub.checkouts.createWorktree(str(b.projectId) ?? "", {
         branch: str(b.branch) ?? "",
         pull: {
           commitId: diff.commitId ?? "",
@@ -492,7 +497,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
 
   app.post("/api/projects/rescan", async (c) => {
-    await orchestrator.rescan();
+    await hub.environments.rescan();
     return c.json(store.snapshot());
   });
 
@@ -502,7 +507,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
         throw new UnavailableError("Saving roots is not available");
       }
       deps.saveRoots(b.roots);
-      await orchestrator.rescan();
+      await hub.environments.rescan();
       return store.snapshot();
     })
   );
@@ -514,7 +519,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   app.post("/api/onboarding", (c) =>
     json(c, async (_id, b): Promise<AddProjectResult> => {
       const added = await onboarding.add(str(b.path) ?? "", b.stack);
-      await orchestrator.rescan();
+      await hub.environments.rescan();
       const project = store.projects().find((p) => p.path === added.path);
       if (!project) {
         throw new Error(
@@ -529,7 +534,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
           started: false,
         };
       }
-      orchestrator.start(project.id).catch(() => undefined);
+      hub.environments.start(project.id).catch(() => undefined);
       return { projectId: project.id, started: true };
     })
   );
@@ -594,11 +599,11 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
 
   const actions = {
-    rebuild: (id: string) => orchestrator.rebuild(id),
-    "rebuild-no-cache": (id: string) => orchestrator.rebuild(id, true),
-    "restart-opencode": (id: string) => orchestrator.restartOpencode(id),
-    start: (id: string) => orchestrator.start(id),
-    stop: (id: string) => orchestrator.stop(id),
+    rebuild: (id: string) => hub.environments.rebuild(id),
+    "rebuild-no-cache": (id: string) => hub.environments.rebuild(id, true),
+    "restart-opencode": (id: string) => hub.environments.restartOpencode(id),
+    start: (id: string) => hub.environments.start(id),
+    stop: (id: string) => hub.environments.stop(id),
   } as const;
 
   for (const [route, run] of Object.entries(actions)) {
@@ -623,12 +628,12 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
 
   app.post("/api/projects/:id/worktrees/refresh", (c) =>
     json(c, async (id) => ({
-      worktrees: await orchestrator.refreshWorktrees(id),
+      worktrees: await hub.checkouts.refreshWorktrees(id),
     }))
   );
   app.post("/api/projects/:id/worktrees", (c) =>
     json(c, (id, b) =>
-      orchestrator.createWorktree(id, {
+      hub.checkouts.createWorktree(id, {
         base: str(b.base),
         branch: str(b.branch) ?? "",
         prompt: str(b.prompt),
@@ -638,7 +643,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
   app.post("/api/projects/:id/worktrees/remove", (c) =>
     json(c, (id, b) =>
-      orchestrator.removeWorktree(
+      hub.checkouts.removeWorktree(
         id,
         str(b.path) ?? "",
         b.force === true,
@@ -648,16 +653,17 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
   // A worktree's own container.
   app.post("/api/projects/:id/envs", (c) =>
-    json(c, (id, b) => orchestrator.createEnv(id, str(b.path) ?? ""))
+    json(c, (id, b) => hub.environments.createEnv(id, str(b.path) ?? ""))
   );
   const envActions = {
-    rebuild: (id: string, envId: string) => orchestrator.rebuildEnv(id, envId),
+    rebuild: (id: string, envId: string) =>
+      hub.environments.rebuildEnv(id, envId),
     "rebuild-no-cache": (id: string, envId: string) =>
-      orchestrator.rebuildEnv(id, envId, true),
+      hub.environments.rebuildEnv(id, envId, true),
     "restart-opencode": (id: string, envId: string) =>
-      orchestrator.restartEnvOpencode(id, envId),
-    start: (id: string, envId: string) => orchestrator.startEnv(id, envId),
-    stop: (id: string, envId: string) => orchestrator.stopEnv(id, envId),
+      hub.environments.restartEnvOpencode(id, envId),
+    start: (id: string, envId: string) => hub.environments.startEnv(id, envId),
+    stop: (id: string, envId: string) => hub.environments.stopEnv(id, envId),
   } as const;
   for (const [route, run] of Object.entries(envActions)) {
     app.post(`/api/projects/:id/envs/:env/${route}`, (c) => {
@@ -676,11 +682,11 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     });
   }
   app.post("/api/projects/:id/envs/:env/remove", (c) =>
-    json(c, (id) => orchestrator.removeEnv(id, c.req.param("env") ?? ""))
+    json(c, (id) => hub.environments.removeEnv(id, c.req.param("env") ?? ""))
   );
   app.post("/api/projects/:id/sessions", (c) =>
     json(c, async (id, b) => ({
-      sessionId: await orchestrator.startSession(
+      sessionId: await hub.sessions.startSession(
         id,
         str(b.directory) ?? "",
         str(b.title),
@@ -691,7 +697,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   app.get("/api/projects/:id/sessions/:sid", async (c) => {
     try {
       return c.json(
-        await orchestrator.sessionDetail(
+        await hub.sessions.sessionDetail(
           c.req.param("id"),
           c.req.param("sid") ?? ""
         )
@@ -704,11 +710,11 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     }
   });
   app.delete("/api/projects/:id/sessions/:sid", (c) =>
-    json(c, (id) => orchestrator.removeSession(id, c.req.param("sid") ?? ""))
+    json(c, (id) => hub.sessions.removeSession(id, c.req.param("sid") ?? ""))
   );
   app.post("/api/projects/:id/sessions/:sid/prompt", (c) =>
     json(c, (id, b) =>
-      orchestrator.promptSession(
+      hub.sessions.promptSession(
         id,
         c.req.param("sid") ?? "",
         str(b.text) ?? ""
@@ -717,14 +723,18 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
   app.post("/api/projects/:id/open", (c) =>
     json(c, (id, b) =>
-      orchestrator.openInEditor(id, str(b.editor) ?? "", str(b.directory) ?? "")
+      hub.checkouts.openInEditor(
+        id,
+        str(b.editor) ?? "",
+        str(b.directory) ?? ""
+      )
     )
   );
 
   // Tasks: one prompt run in one or more sessions, each usually in its own worktree.
   app.get("/api/projects/:id/models", async (c) => {
     try {
-      return c.json(await orchestrator.models(c.req.param("id")));
+      return c.json(await hub.sessions.models(c.req.param("id")));
     } catch (error) {
       return c.json(
         { error: error instanceof Error ? error.message : String(error) },
@@ -734,14 +744,14 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   });
   // Answers once the request is checked; the snapshot's `starting` shows the setup.
   app.post("/api/projects/:id/tasks", (c) =>
-    json(c, (id, b) => orchestrator.startTask(id, b))
+    json(c, (id, b) => hub.tasks.startTask(id, b))
   );
   app.delete("/api/projects/:id/tasks/:task/starting", (c) =>
-    json(c, (id) => orchestrator.dismissStarting(id, c.req.param("task") ?? ""))
+    json(c, (id) => hub.tasks.dismissStarting(id, c.req.param("task") ?? ""))
   );
   app.post("/api/projects/:id/tasks/:task/pick", (c) =>
     json(c, (id, b) =>
-      orchestrator.pickVariant(
+      hub.tasks.pickVariant(
         id,
         c.req.param("task") ?? "",
         str(b.sessionId) ?? "",
@@ -750,10 +760,10 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     )
   );
 
-  // Answers to what an agent is waiting on. The orchestrator only forwards ids it listed itself.
+  // Answers to what an agent is waiting on. Sessions only forwards ids it listed itself.
   app.post("/api/projects/:id/permissions/:rid", (c) =>
     json(c, (id, b) =>
-      orchestrator.replyPermission(id, c.req.param("rid") ?? "", {
+      hub.sessions.replyPermission(id, c.req.param("rid") ?? "", {
         decision: str(b.decision) ?? "",
         ...(str(b.message) ? { message: str(b.message) } : {}),
       })
@@ -761,11 +771,11 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
   app.post("/api/projects/:id/forms/:fid", (c) =>
     json(c, (id, b) =>
-      orchestrator.replyForm(id, c.req.param("fid") ?? "", b.answer)
+      hub.sessions.replyForm(id, c.req.param("fid") ?? "", b.answer)
     )
   );
   app.delete("/api/projects/:id/forms/:fid", (c) =>
-    json(c, (id) => orchestrator.cancelForm(id, c.req.param("fid") ?? ""))
+    json(c, (id) => hub.sessions.cancelForm(id, c.req.param("fid") ?? ""))
   );
 
   // Review: what a checkout changed, and the local git actions on it.
@@ -775,7 +785,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
       if (mode !== "working" && mode !== "branch" && mode !== "turn") {
         throw new InvalidRequestError(`unknown review mode ${mode}`);
       }
-      const data = await orchestrator.review(
+      const data = await hub.reviews.review(
         c.req.param("id"),
         c.req.query("directory") ?? "",
         {
@@ -796,22 +806,22 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   });
   app.post("/api/projects/:id/review/commit-message", (c) =>
     json(c, async (id, b) => ({
-      message: await orchestrator.commitMessage(id, str(b.directory) ?? ""),
+      message: await hub.reviews.commitMessage(id, str(b.directory) ?? ""),
     }))
   );
   app.post("/api/projects/:id/review/commit", (c) =>
     json(c, (id, b) =>
-      orchestrator.commit(id, str(b.directory) ?? "", str(b.message) ?? "")
+      hub.reviews.commit(id, str(b.directory) ?? "", str(b.message) ?? "")
     )
   );
   app.post("/api/projects/:id/review/update", (c) =>
     json(c, (id, b) =>
-      orchestrator.updateFromBase(id, str(b.directory) ?? "", str(b.base) ?? "")
+      hub.reviews.updateFromBase(id, str(b.directory) ?? "", str(b.base) ?? "")
     )
   );
   app.post("/api/projects/:id/review/merge", (c) =>
     json(c, (id, b) =>
-      orchestrator.mergeIntoBase(
+      hub.reviews.mergeIntoBase(
         id,
         str(b.directory) ?? "",
         str(b.base) ?? "",
@@ -820,14 +830,14 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     )
   );
   app.post("/api/projects/:id/review/bring-home", (c) =>
-    json(c, (id, b) => orchestrator.bringHome(id, str(b.directory) ?? ""))
+    json(c, (id, b) => hub.checkouts.bringHome(id, str(b.directory) ?? ""))
   );
 
   // Publish: push the branch and open its pull request.
   app.get("/api/projects/:id/publish", async (c) => {
     try {
       return c.json(
-        await orchestrator.publishInfo(
+        await hub.reviews.publishInfo(
           c.req.param("id"),
           c.req.query("directory") ?? "",
           c.req.query("remote")
@@ -842,12 +852,12 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   });
   app.post("/api/projects/:id/publish/suggest", (c) =>
     json(c, (id, b) =>
-      orchestrator.publishSuggestion(id, str(b.directory) ?? "")
+      hub.reviews.publishSuggestion(id, str(b.directory) ?? "")
     )
   );
   app.post("/api/projects/:id/publish", (c) =>
     json(c, (id, b) =>
-      orchestrator.publish(id, str(b.directory) ?? "", {
+      hub.reviews.publish(id, str(b.directory) ?? "", {
         base: str(b.base) ?? "",
         description: str(b.description) ?? "",
         remote: str(b.remote) ?? "",
@@ -901,7 +911,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   });
 
   app.get("/api/projects/:id/logs", (c) =>
-    c.json({ lines: orchestrator.logLines(c.req.param("id")) })
+    c.json({ lines: hub.environments.logLines(c.req.param("id")) })
   );
 
   app.get("/api/events", (c) =>
@@ -922,7 +932,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
           void sendSnapshot();
         }, 50);
       });
-      const unlisten = orchestrator.onLog((projectId, line) => {
+      const unlisten = hub.environments.onLog((projectId, line) => {
         const event: LogEvent = { line, projectId };
         void stream.writeSSE({ data: JSON.stringify(event), event: "log" });
       });

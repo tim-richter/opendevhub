@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 
-import { CommandError, tailLines } from "../containers";
-import type { Containers, ExecTarget } from "../containers";
-import type { HostPort } from "../network";
+import { CommandError, tailLines } from "../environments/containers";
+import type { Containers, ExecTarget } from "../environments/containers";
+import type { HostPort } from "../network/routes";
 import type { OpencodeClient, OpencodeEndpoint } from "./client";
 
 export const OPENCODE_PORT = 4096;

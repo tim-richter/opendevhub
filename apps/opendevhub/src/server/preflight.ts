@@ -1,5 +1,5 @@
 import type { Preflight } from "../shared/types";
-import type { Runner } from "./exec";
+import type { Runner } from "./nodes/exec";
 
 export const preflight = async (run: Runner): Promise<Preflight> => {
   const errors: string[] = [];

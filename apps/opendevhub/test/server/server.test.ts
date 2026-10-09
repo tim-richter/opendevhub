@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ProxyTarget } from "../../src/server/proxy";
+import type { ProxyTarget } from "../../src/server/network/proxy";
 import { startServer } from "../../src/server/server";
 
 let upstream: http.Server;

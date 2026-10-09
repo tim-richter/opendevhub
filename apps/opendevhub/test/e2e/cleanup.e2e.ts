@@ -5,24 +5,24 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Cleanup } from "../../src/server/cleanup";
-import { Containers } from "../../src/server/containers";
-import { EditorLauncher } from "../../src/server/editors";
-import { EnvFiles } from "../../src/server/env-files";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { projectId } from "../../src/server/ids";
-import { Images } from "../../src/server/images";
-import { Network, parseRouteMode } from "../../src/server/network";
+import { Containers } from "../../src/server/environments/containers";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { EnvFiles } from "../../src/server/environments/files";
+import { Images } from "../../src/server/environments/images";
+import { Cleanup } from "../../src/server/git/cleanup";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { RelayRuntime } from "../../src/server/relay/runtime";
-import { StateStore } from "../../src/server/state";
-import { Worktrees } from "../../src/server/worktrees";
+import { projectId } from "../../src/server/projects/ids";
+import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
 
 const devcontainer = (extra: Record<string, unknown> = {}) =>
@@ -79,7 +79,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
     const clientFor = (ep: { baseUrl: string; password: string }) =>
       new OpencodeClient(ep);
     const runtime = new OpencodeRuntime({ containers, clientFor });
-    const orch = new Orchestrator({
+    const hub = createHub({
       store,
       containers,
       runtime,
@@ -107,33 +107,37 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       roots: () => [],
       scan: async () => [project],
     });
-    orch.onLog((_id, line) => console.log(`[e2e cleanup] ${line}`));
+    hub.environments.onLog((_id, line) => console.log(`[e2e cleanup] ${line}`));
     // The superseded image below is brand new, so look at it from an hour ahead.
     const cleanup = new Cleanup({
       store,
       containers,
-      branches: orch,
+      branches: hub.cleanupTargets,
+      log: (id, line) => hub.environments.note(id, line),
       now: () => Date.now() + 60 * 60_000,
     });
     const oldBase = `opendevhub/${project.id}:000000000000-base`;
     try {
-      await orch.rescan();
-      await orch.start(project.id);
+      await hub.environments.rescan();
+      await hub.environments.start(project.id);
       const ws = store.runtime(project.id).workspaceFolder!;
       const inContainer = (...args: string[]) =>
         containers.exec(project, ["git", "-C", ws, ...args]);
 
       // merged: a worktree with its own container, its commit merged into main
-      const { worktree: done } = await orch.createWorktree(project.id, {
-        branch: "done",
-      });
+      const { worktree: done } = await hub.checkouts.createWorktree(
+        project.id,
+        {
+          branch: "done",
+        }
+      );
       await containers.exec(project, [
         "sh",
         "-c",
         `cd ${done.path} && echo x > done.txt && git add . && git commit -qm done`,
       ]);
       await inContainer("merge", "--ff-only", "done");
-      const { envId } = await orch.createEnv(project.id, done.path);
+      const { envId } = await hub.environments.createEnv(project.id, done.path);
       await vi.waitFor(
         () => expect(store.runtime(envId).opencode).toBe("healthy"),
         { timeout: 10 * 60_000, interval: 1000 }
@@ -141,7 +145,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       const envContainer = store.runtime(envId).containerId!;
 
       // unmerged: a worktree with a commit main doesn't have
-      const { worktree: wip } = await orch.createWorktree(project.id, {
+      const { worktree: wip } = await hub.checkouts.createWorktree(project.id, {
         branch: "wip",
       });
       await containers.exec(project, [
@@ -197,16 +201,16 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       const client = () =>
         clientFor(
           runtime.endpoint(
-            orch.opencodeAddress(project.id)!,
+            hub.environments.opencodeAddress(project.id)!,
             store.runtime(project.id).password!
           )
         );
-      const orphaned = await orch.startSession(
+      const orphaned = await hub.sessions.startSession(
         project.id,
         wip.path,
         "wip notes"
       );
-      await orch.removeWorktree(project.id, wip.path, true);
+      await hub.checkouts.removeWorktree(project.id, wip.path, true);
       const sessionPlan = await cleanup.scan();
       expect(
         sessionPlan.items.find(
@@ -226,7 +230,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       );
 
       // The per-row button: removes a session the dashboard lists.
-      const listed = await orch.startSession(project.id, ws, "scratch");
+      const listed = await hub.sessions.startSession(project.id, ws, "scratch");
       await vi.waitFor(
         () =>
           expect(store.sessionsOf(project.id).map((s) => s.id)).toContain(
@@ -234,16 +238,18 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
           ),
         { timeout: 30_000, interval: 500 }
       );
-      await orch.removeSession(project.id, listed);
+      await hub.sessions.removeSession(project.id, listed);
       expect((await client().sessions()).map((s) => s.id)).not.toContain(
         listed
       );
     } finally {
       for (const e of store.environments(project.id)) {
-        await orch.removeEnv(project.id, e.id).catch(() => undefined);
+        await hub.environments
+          .removeEnv(project.id, e.id)
+          .catch(() => undefined);
       }
-      await orch.stop(project.id).catch(() => undefined);
-      await orch.shutdown();
+      await hub.environments.stop(project.id).catch(() => undefined);
+      await hub.environments.shutdown();
       const images = execFileSync(
         "docker",
         ["images", "-q", `opendevhub/${project.id}`],

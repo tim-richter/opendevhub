@@ -7,20 +7,26 @@ import path from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
-import { Checks } from "../../src/server/checks";
-import { Cleanup } from "../../src/server/cleanup";
 import { FileProjectSettings } from "../../src/server/config";
-import { Containers } from "../../src/server/containers";
-import { Credentials } from "../../src/server/credentials";
 import { createDashboardApp } from "../../src/server/dashboard-api";
-import { EditorLauncher } from "../../src/server/editors";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { projectId } from "../../src/server/ids";
-import { Network, parseRouteMode } from "../../src/server/network";
-import { startNotifier } from "../../src/server/notifier";
-import { Onboarding } from "../../src/server/onboarding";
+import { Checks } from "../../src/server/environments/checks";
+import { Containers } from "../../src/server/environments/containers";
+import { Credentials } from "../../src/server/environments/credentials";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { Cleanup } from "../../src/server/git/cleanup";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { AGENT_SSH_COMMAND } from "../../src/server/network/relay/agent";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
+import { startNotifier } from "../../src/server/notifications/notifier";
+import { Push } from "../../src/server/notifications/push";
+import type { PushSender } from "../../src/server/notifications/push";
 import {
   OpencodeClient,
   basicAuth,
@@ -28,17 +34,11 @@ import {
   isInvalidAnswer,
 } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { Push } from "../../src/server/push";
-import type { PushSender } from "../../src/server/push";
-import { AGENT_SSH_COMMAND } from "../../src/server/relay/agent";
-import { RelayRuntime } from "../../src/server/relay/runtime";
+import { projectId } from "../../src/server/projects/ids";
+import { Onboarding } from "../../src/server/projects/onboarding";
+import { StateStore } from "../../src/server/projects/state";
 import { startServer } from "../../src/server/server";
-import { StateStore } from "../../src/server/state";
-import { UsageStore, trackUsage } from "../../src/server/usage";
-import { Worktrees } from "../../src/server/worktrees";
+import { UsageStore, trackUsage } from "../../src/server/sessions/usage";
 import type { CheckRun, Project } from "../../src/shared/types";
 
 const fixture = path.resolve("test/e2e/fixture");
@@ -114,7 +114,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       });
       const usage = UsageStore.open(":memory:")!;
       const usageTracker = trackUsage(usage, store);
-      const orch = new Orchestrator({
+      const hub = createHub({
         store,
         containers,
         runtime,
@@ -135,10 +135,10 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         roots: () => [],
         scan: async () => [project],
       });
-      orch.onLog((_id, line) => console.log(`[e2e] ${line}`));
+      hub.environments.onLog((_id, line) => console.log(`[e2e] ${line}`));
 
-      await orch.rescan();
-      await orch.start(project.id);
+      await hub.environments.rescan();
+      await hub.environments.start(project.id);
       const rt = store.runtime(project.id);
       expect(rt.error).toBeUndefined();
       expect(rt).toMatchObject({
@@ -223,7 +223,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         { timeout: 15_000, interval: 500 }
       );
 
-      const address = orch.opencodeAddress(project.id)!;
+      const address = hub.environments.opencodeAddress(project.id)!;
       const ep = runtime.endpoint(address, rt.password!);
       const created = await fetch(`${ep.baseUrl}/api/session`, {
         method: "POST",
@@ -287,18 +287,23 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       });
       const stopNotifier = startNotifier(store, push);
       const checks = new Checks({
-        target: (id, dir) => orch.checkTarget(id, dir),
+        target: (id, dir) => hub.checkouts.checkTarget(id, dir),
         project: (id) => store.project(id),
         containers,
         run: spawnRunner,
         git: new GitOps({ containers }),
         settings: new FileProjectSettings(agentDir),
-        log: (id, line) => orch.note(id, line),
+        log: (id, line) => hub.environments.note(id, line),
       });
       const dashboard = createDashboardApp({
         store,
-        orchestrator: orch,
-        cleanup: new Cleanup({ store, containers, branches: orch }),
+        hub,
+        cleanup: new Cleanup({
+          store,
+          containers,
+          branches: hub.cleanupTargets,
+          log: (id, line) => hub.environments.note(id, line),
+        }),
         checks,
         onboarding: new Onboarding({ roots: () => [] }),
         push,
@@ -377,7 +382,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         .catch((error: unknown) => error);
       console.log("[e2e] invalid form answer:", invalid);
       expect(isInvalidAnswer(invalid)).toBe(true);
-      await orch.replyForm(project.id, fid, { color: "red" });
+      await hub.sessions.replyForm(project.id, fid, { color: "red" });
       await vi.waitFor(() => expect(pendingOf()?.forms ?? []).toHaveLength(0), {
         timeout: 15_000,
       });
@@ -393,7 +398,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       await vi.waitFor(() => expect(pendingOf()?.forms).toHaveLength(1), {
         timeout: 15_000,
       });
-      await orch.cancelForm(project.id, pendingOf()!.forms[0].id);
+      await hub.sessions.cancelForm(project.id, pendingOf()!.forms[0].id);
       await vi.waitFor(() => expect(pendingOf()).toBeUndefined(), {
         timeout: 15_000,
       });
@@ -475,11 +480,11 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       expect(html).toContain("<html");
       await server.close();
 
-      await orch.stop(project.id);
+      await hub.environments.stop(project.id);
       expect(store.runtime(project.id).ports).toBeUndefined();
       await expect(fetch(`http://127.0.0.1:${webPort}/`)).rejects.toThrow();
       expect(store.runtime(project.id).containerState).toBe("stopped");
-      await orch.shutdown();
+      await hub.environments.shutdown();
       usageTracker.stop();
       usage.close();
       sshAgent.kill();

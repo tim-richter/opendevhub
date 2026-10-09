@@ -9,8 +9,8 @@ import type {
   NodeId,
   ProjectId,
 } from "../shared/types";
-import type { ForgeEntry } from "./forge";
-import { LOCAL_NODE } from "./host";
+import type { ForgeEntry } from "./git/forge";
+import { LOCAL_NODE } from "./nodes/host";
 
 export interface Config {
   port: number;

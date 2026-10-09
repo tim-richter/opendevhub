@@ -5,21 +5,21 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Containers } from "../../src/server/containers";
-import { EditorLauncher } from "../../src/server/editors";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { projectId } from "../../src/server/ids";
-import { Network, parseRouteMode } from "../../src/server/network";
+import { Containers } from "../../src/server/environments/containers";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { RelayRuntime } from "../../src/server/relay/runtime";
-import { StateStore } from "../../src/server/state";
-import { Worktrees } from "../../src/server/worktrees";
+import { projectId } from "../../src/server/projects/ids";
+import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
 
 const PROMPT = "Reply with the word ok. Do not change any files.";
@@ -63,7 +63,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE),
         gateway: new Gateway({ run: spawnRunner }),
       });
-      const orch = new Orchestrator({
+      const hub = createHub({
         store,
         containers,
         runtime,
@@ -82,23 +82,23 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         roots: () => [],
         scan: async () => [project],
       });
-      orch.onLog((_id, line) => console.log(`[e2e tasks] ${line}`));
+      hub.environments.onLog((_id, line) => console.log(`[e2e tasks] ${line}`));
       const sessionOf = (id: string | undefined) =>
         store.sessionsOf(project.id).find((s) => s.id === id);
 
       try {
-        await orch.rescan();
-        await orch.start(project.id);
+        await hub.environments.rescan();
+        await hub.environments.start(project.id);
         expect(store.runtime(project.id)).toMatchObject({
           containerState: "running",
           opencode: "healthy",
         });
 
-        const info = await orch.models(project.id);
+        const info = await hub.sessions.models(project.id);
         expect(info.agents.map((a) => a.id)).toContain("build");
         expect(JSON.stringify(info)).not.toMatch(/apiKey/u);
 
-        const one = await orch.createTask(project.id, {
+        const one = await hub.tasks.createTask(project.id, {
           prompt: PROMPT,
           title: "e2e task",
           variants: [{}],
@@ -126,7 +126,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           { timeout: 20_000, interval: 500 }
         );
 
-        const two = await orch.createTask(project.id, {
+        const two = await hub.tasks.createTask(project.id, {
           prompt: PROMPT,
           title: "e2e compare",
           variants: [{}, {}],
@@ -145,7 +145,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           { timeout: 20_000, interval: 500 }
         );
 
-        const picked = await orch.pickVariant(
+        const picked = await hub.tasks.pickVariant(
           project.id,
           two.task,
           keep.sessionId!,
@@ -165,8 +165,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           of: 2,
         });
       } finally {
-        await orch.stop(project.id).catch(() => undefined);
-        await orch.shutdown();
+        await hub.environments.stop(project.id).catch(() => undefined);
+        await hub.environments.shutdown();
         fs.rmSync(tmp, { recursive: true, force: true });
       }
     });

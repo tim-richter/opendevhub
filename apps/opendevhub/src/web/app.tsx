@@ -9,31 +9,31 @@ import type { AnyRoute, RouterHistory } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
-import { legacyPath } from "./checkouts";
-import { Shell } from "./layout/shell";
 import {
   CheckoutPage,
   CheckoutRuntime,
   CheckoutSessions,
-} from "./pages/checkout-page";
-import { CleanupPage } from "./pages/cleanup-page";
-import { ForgejoPage, ForgejoPullPage } from "./pages/forgejo-page";
-import { JiraPage, JiraTicketPage } from "./pages/jira-page";
-import { NodesPage } from "./pages/nodes-page";
-import { NotFound } from "./pages/not-found";
-import { Overview } from "./pages/overview";
-import { ProjectLayout } from "./pages/project-layout";
-import { ProjectOverview } from "./pages/project-overview";
-import { ProjectReview } from "./pages/project-review";
-import { ProjectTask } from "./pages/project-task";
-import { SessionPage } from "./pages/session-page";
-import { SessionsPage } from "./pages/sessions-page";
-import { SettingsPage } from "./pages/settings-page";
-import { UsagePage } from "./pages/usage-page";
+} from "./features/checkouts/checkout-page";
+import { legacyPath } from "./features/checkouts/checkouts";
+import { CleanupPage } from "./features/cleanup/cleanup-page";
+import { ForgejoPage, ForgejoPullPage } from "./features/forgejo/forgejo-page";
+import { JiraPage, JiraTicketPage } from "./features/jira/jira-page";
+import { NodesPage } from "./features/nodes/nodes-page";
+import { Overview } from "./features/projects/overview";
+import { ProjectLayout } from "./features/projects/project-layout";
+import { ProjectOverview } from "./features/projects/project-overview";
+import { ProjectReview } from "./features/review/project-review";
+import { SessionPage } from "./features/sessions/session-page";
+import { SessionsPage } from "./features/sessions/sessions-page";
+import { SettingsPage } from "./features/settings/settings-page";
+import { ProjectTask } from "./features/tasks/project-task";
+import { UsagePage } from "./features/usage/usage-page";
 import { parseSearch, stringifySearch } from "./routing";
+import { NotFound } from "./shell/not-found";
+import { Shell } from "./shell/shell";
 
 const CheckoutTerminal = lazy(() =>
-  import("./pages/checkout-terminal").then((module) => ({
+  import("./features/checkouts/checkout-terminal").then((module) => ({
     default: module.CheckoutTerminal,
   }))
 );

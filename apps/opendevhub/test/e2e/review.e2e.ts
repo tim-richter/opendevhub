@@ -5,21 +5,21 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { Containers } from "../../src/server/containers";
-import { EditorLauncher } from "../../src/server/editors";
-import { spawnRunner } from "../../src/server/exec";
-import { Gateway } from "../../src/server/gateway";
-import { GitOps } from "../../src/server/git";
-import { projectId } from "../../src/server/ids";
-import { Network, parseRouteMode } from "../../src/server/network";
+import { Containers } from "../../src/server/environments/containers";
+import { EditorLauncher } from "../../src/server/environments/editors";
+import { GitOps } from "../../src/server/git/ops";
+import { Publisher } from "../../src/server/git/publish";
+import { Worktrees } from "../../src/server/git/worktrees";
+import { createHub } from "../../src/server/hub";
+import { Gateway } from "../../src/server/network/gateway";
+import { PortForwarder } from "../../src/server/network/port-forwarder";
+import { RelayRuntime } from "../../src/server/network/relay/runtime";
+import { Network, parseRouteMode } from "../../src/server/network/routes";
+import { spawnRunner } from "../../src/server/nodes/exec";
 import { OpencodeClient } from "../../src/server/opencode/client";
 import { OpencodeRuntime } from "../../src/server/opencode/runtime";
-import { Orchestrator } from "../../src/server/orchestrator";
-import { PortForwarder } from "../../src/server/port-forwarder";
-import { Publisher } from "../../src/server/publish";
-import { RelayRuntime } from "../../src/server/relay/runtime";
-import { StateStore } from "../../src/server/state";
-import { Worktrees } from "../../src/server/worktrees";
+import { projectId } from "../../src/server/projects/ids";
+import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
 
 describe.skipIf(!process.env.OPENDEVHUB_E2E)(
@@ -62,7 +62,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         mode: parseRouteMode(process.env.OPENDEVHUB_ROUTE),
         gateway: new Gateway({ run: spawnRunner }),
       });
-      const orch = new Orchestrator({
+      const hub = createHub({
         store,
         containers,
         runtime,
@@ -81,23 +81,25 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         roots: () => [],
         scan: async () => [project],
       });
-      orch.onLog((_id, line) => console.log(`[e2e review] ${line}`));
+      hub.environments.onLog((_id, line) =>
+        console.log(`[e2e review] ${line}`)
+      );
 
       try {
-        await orch.rescan();
-        await orch.start(project.id);
+        await hub.environments.rescan();
+        await hub.environments.start(project.id);
         expect(store.runtime(project.id)).toMatchObject({
           containerState: "running",
           opencode: "healthy",
         });
 
-        const { worktree } = await orch.createWorktree(project.id, {
+        const { worktree } = await hub.checkouts.createWorktree(project.id, {
           branch: "feature/x",
         });
         expect(worktree.hostPath).toBeDefined();
         fs.writeFileSync(path.join(worktree.hostPath!, "b.txt"), "new file\n");
 
-        let r = await orch.review(project.id, worktree.path, {
+        let r = await hub.reviews.review(project.id, worktree.path, {
           mode: "branch",
         });
         expect(r).toMatchObject({
@@ -110,57 +112,73 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         });
         expect(r.files.map((f) => f.file)).toContain("b.txt");
 
-        await orch.commit(project.id, worktree.path, "feat: add b");
-        r = await orch.review(project.id, worktree.path);
+        await hub.reviews.commit(project.id, worktree.path, "feat: add b");
+        r = await hub.reviews.review(project.id, worktree.path);
         expect(r).toMatchObject({ dirty: false, ahead: 1, behind: 0 });
 
         fs.writeFileSync(path.join(repo, "c.txt"), "on main\n");
         hostGit("add", "-A");
         hostGit("commit", "-q", "-m", "main: add c");
-        expect((await orch.review(project.id, worktree.path)).behind).toBe(1);
         expect(
-          await orch.updateFromBase(project.id, worktree.path, "main")
+          (await hub.reviews.review(project.id, worktree.path)).behind
+        ).toBe(1);
+        expect(
+          await hub.reviews.updateFromBase(project.id, worktree.path, "main")
         ).toEqual({ strategy: "rebase" });
-        expect(await orch.review(project.id, worktree.path)).toMatchObject({
+        expect(
+          await hub.reviews.review(project.id, worktree.path)
+        ).toMatchObject({
           ahead: 1,
           behind: 0,
         });
 
         expect(
-          await orch.mergeIntoBase(project.id, worktree.path, "main", false)
+          await hub.reviews.mergeIntoBase(
+            project.id,
+            worktree.path,
+            "main",
+            false
+          )
         ).toEqual({ branch: "feature/x" });
         expect(fs.existsSync(path.join(repo, "b.txt"))).toBe(true);
         expect(hostGit("log", "-1", "--format=%s").trim()).toMatch(
           /^Merge branch 'feature\/x'/u
         );
-        await orch.removeWorktree(project.id, worktree.path, false, true);
+        await hub.checkouts.removeWorktree(
+          project.id,
+          worktree.path,
+          false,
+          true
+        );
         expect(hostGit("branch", "--list", "feature/x").trim()).toBe("");
 
-        const { worktree: y } = await orch.createWorktree(project.id, {
+        const { worktree: y } = await hub.checkouts.createWorktree(project.id, {
           branch: "feature/y",
         });
         fs.writeFileSync(
           path.join(y.hostPath!, "a.txt"),
           "one\nTWO from y\nthree\n"
         );
-        await orch.commit(project.id, y.path, "feat: change two");
+        await hub.reviews.commit(project.id, y.path, "feat: change two");
         fs.writeFileSync(
           path.join(repo, "a.txt"),
           "one\nTWO from main\nthree\n"
         );
         hostGit("commit", "-q", "-am", "main: change two");
-        expect(await orch.updateFromBase(project.id, y.path, "main")).toEqual({
+        expect(
+          await hub.reviews.updateFromBase(project.id, y.path, "main")
+        ).toEqual({
           strategy: "rebase",
           conflicts: ["a.txt"],
         });
-        expect(await orch.review(project.id, y.path)).toMatchObject({
+        expect(await hub.reviews.review(project.id, y.path)).toMatchObject({
           ahead: 1,
           behind: 1,
           dirty: false,
         });
       } finally {
-        await orch.stop(project.id).catch(() => undefined);
-        await orch.shutdown();
+        await hub.environments.stop(project.id).catch(() => undefined);
+        await hub.environments.shutdown();
         fs.rmSync(tmp, { recursive: true, force: true });
       }
     });

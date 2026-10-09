@@ -1,4 +1,4 @@
-import type { SecretStore } from "../../src/server/secrets";
+import type { SecretStore } from "../../src/server/integrations/secrets";
 
 /** Test double only. Production always uses the operating system credential store. */
 export class MemorySecretStore implements SecretStore {

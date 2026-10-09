@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import net from "node:net";
 
-import { RELAY_SCRIPT } from "../../src/server/relay/script";
+import { RELAY_SCRIPT } from "../../src/server/network/relay/script";
 
 export function freePort(host = "127.0.0.1"): Promise<number> {
   return new Promise((resolve, reject) => {

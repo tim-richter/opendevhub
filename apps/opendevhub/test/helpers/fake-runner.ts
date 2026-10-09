@@ -1,4 +1,8 @@
-import type { RunOptions, RunResult, Runner } from "../../src/server/exec";
+import type {
+  RunOptions,
+  RunResult,
+  Runner,
+} from "../../src/server/nodes/exec";
 
 export interface Call {
   cmd: string;

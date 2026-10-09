@@ -5,27 +5,27 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { InvalidNodeError, InvalidRootError } from "../../src/server/config";
-import { CommandError } from "../../src/server/containers";
 import { createDashboardApp } from "../../src/server/dashboard-api";
-import type {
-  DashboardOrchestrator,
-  PushPort,
-} from "../../src/server/dashboard-api";
-import { EditorUnavailableError } from "../../src/server/editors";
-import { FileForgejoSettings, Forgejo } from "../../src/server/forgejo";
-import { FileJiraSettings, Jira } from "../../src/server/jira";
-import { DevcontainerExistsError } from "../../src/server/onboarding";
-import type { OnboardingPort } from "../../src/server/onboarding";
+import type { DashboardHub, PushPort } from "../../src/server/dashboard-api";
+import { CommandError } from "../../src/server/environments/containers";
+import { EditorUnavailableError } from "../../src/server/environments/editors";
 import {
   AlreadyAnsweredError,
   BusyError,
   NotFoundError,
   UnavailableError,
-} from "../../src/server/orchestrator";
-import { InvalidSubscriptionError } from "../../src/server/push";
-import type { PushMessage } from "../../src/server/push";
-import { StateStore } from "../../src/server/state";
-import { InvalidRequestError } from "../../src/server/worktrees";
+} from "../../src/server/errors";
+import { InvalidRequestError } from "../../src/server/git/worktrees";
+import {
+  FileForgejoSettings,
+  Forgejo,
+} from "../../src/server/integrations/forgejo";
+import { FileJiraSettings, Jira } from "../../src/server/integrations/jira";
+import { InvalidSubscriptionError } from "../../src/server/notifications/push";
+import type { PushMessage } from "../../src/server/notifications/push";
+import { DevcontainerExistsError } from "../../src/server/projects/onboarding";
+import type { OnboardingPort } from "../../src/server/projects/onboarding";
+import { StateStore } from "../../src/server/projects/state";
 import type {
   Candidate,
   CheckRun,
@@ -69,129 +69,149 @@ function setup(webDir?: string) {
   });
   store.setProjects([project]);
   store.updateRuntime(project.id, { password: "secret" });
-  const orchestrator = {
-    createEnv: vi.fn(async (_id: string, _path: string) => ({
-      envId: "demo-abc123-x-0a1b",
-    })),
-    startEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
-    stopEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
-    rebuildEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
-    restartEnvOpencode: vi.fn((_id: string, _env: string) => Promise.resolve()),
-    removeEnv: vi.fn(async (_id: string, _env: string) => {}),
-    bringHome: vi.fn(async (_id: string, _dir: string) => ({ branch: "fix" })),
-    start: vi.fn(() => Promise.resolve()),
-    stop: vi.fn(() => Promise.resolve()),
-    rebuild: vi.fn(() => Promise.resolve()),
-    restartOpencode: vi.fn(() => Promise.resolve()),
-    rescan: vi.fn(async () => {}),
-    logLines: vi.fn(() => ["a", "b"]),
-    onLog: vi.fn(() => () => {}),
-    refreshWorktrees: vi.fn(async () => []),
-    createWorktree: vi.fn(async () => ({
-      worktree: { path: "/workspaces/demo.worktrees/x", branch: "x" },
-    })),
-    removeWorktree: vi.fn(async () => {}),
-    startSession: vi.fn(
-      async (_id: string, _dir: string, _title?: string, _prompt?: string) =>
-        "ses_1"
-    ),
-    generateIn: vi.fn(
-      async (
-        _id: string,
-        _dir: string,
-        _prompt: string,
-        options: { sessionId?: string; title: string; timeoutMs?: number }
-      ) => ({
-        sessionId: options.sessionId ?? "ses_ai",
-        text: '```json\n{"summary":"ok","findings":[{"file":"a.ts","line":3,"severity":"major","body":"Off by one"}]}\n```',
-      })
-    ),
-    openInEditor: vi.fn(async () => {}),
-    replyPermission: vi.fn(
-      async (
-        _id: string,
-        _rid: string,
-        _reply: { decision: string; message?: string }
-      ) => {}
-    ),
-    replyForm: vi.fn(async (_id: string, _fid: string, _answer: unknown) => {}),
-    cancelForm: vi.fn(async (_id: string, _fid: string) => {}),
-    review: vi.fn(
-      async (
-        _id: string,
-        directory: string,
-        _o?: { base?: string; file?: string }
-      ) => ({
-        directory,
-        mode: "branch" as const,
-        ahead: 0,
-        behind: 0,
-        dirty: false,
-        pushed: false,
-        workspace: { clean: true },
-        files: [],
-      })
-    ),
-    promptSession: vi.fn(
-      async (_id: string, _sid: string, _text: string) => {}
-    ),
-    removeSession: vi.fn(async (_id: string, _sid: string) => {}),
-    sessionDetail: vi.fn(
-      async (_id: string, _sid: string): Promise<SessionDetail> => {
-        throw new NotFoundError(_sid, "session");
-      }
-    ),
-    commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
-    commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
-    updateFromBase: vi.fn(async (_id: string, _dir: string, _base: string) => ({
-      strategy: "rebase" as const,
-    })),
-    mergeIntoBase: vi.fn(
-      async (_id: string, _dir: string, _base: string, _ff: boolean) => ({
-        branch: "x",
-      })
-    ),
-    publishInfo: vi.fn(async (_id: string, _dir: string, _remote?: string) => ({
-      remotes: ["origin"],
-      remote: "origin",
-      forge: { kind: "unknown" as const },
-      strategies: ["branch" as const],
-      strategy: "branch" as const,
-      pushFrom: "host" as const,
-    })),
-    publishSuggestion: vi.fn(async (_id: string, _dir: string) => ({
-      title: "t",
-      description: "d",
-    })),
-    publish: vi.fn(async (_id: string, _dir: string, _req: unknown) => ({
-      strategy: "branch" as const,
-      pushedFrom: "host" as const,
-      output: [],
-    })),
-    models: vi.fn(async (_id: string): Promise<ModelsInfo> => ({
-      models: [],
-      agents: [],
-    })),
-    startTask: vi.fn(
-      async (
-        _id: string,
-        _b: Record<string, unknown>
-      ): Promise<TaskResult> => ({ task: "tsk_1", variants: [] })
-    ),
-    dismissStarting: vi.fn((_id: string, _task: string) => {}),
-    pickVariant: vi.fn(
-      async (
-        _id: string,
-        _t: string,
-        _s: string,
-        _r: boolean
-      ): Promise<PickResult> => ({
-        discarded: ["ses_2"],
-        removed: [],
-        errors: [],
-      })
-    ),
-  } satisfies DashboardOrchestrator;
+  const hub = {
+    environments: {
+      createEnv: vi.fn(async (_id: string, _path: string) => ({
+        envId: "demo-abc123-x-0a1b",
+      })),
+      startEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+      stopEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+      rebuildEnv: vi.fn((_id: string, _env: string) => Promise.resolve()),
+      restartEnvOpencode: vi.fn((_id: string, _env: string) =>
+        Promise.resolve()
+      ),
+      removeEnv: vi.fn(async (_id: string, _env: string) => {}),
+      start: vi.fn(() => Promise.resolve()),
+      stop: vi.fn(() => Promise.resolve()),
+      rebuild: vi.fn(() => Promise.resolve()),
+      restartOpencode: vi.fn(() => Promise.resolve()),
+      rescan: vi.fn(async () => {}),
+      logLines: vi.fn(() => ["a", "b"]),
+      onLog: vi.fn(() => () => {}),
+    },
+    checkouts: {
+      bringHome: vi.fn(async (_id: string, _dir: string) => ({
+        branch: "fix",
+      })),
+      refreshWorktrees: vi.fn(async () => []),
+      createWorktree: vi.fn(async () => ({
+        worktree: { path: "/workspaces/demo.worktrees/x", branch: "x" },
+      })),
+      removeWorktree: vi.fn(async () => {}),
+      openInEditor: vi.fn(async () => {}),
+    },
+    sessions: {
+      startSession: vi.fn(
+        async (_id: string, _dir: string, _title?: string, _prompt?: string) =>
+          "ses_1"
+      ),
+      generateIn: vi.fn(
+        async (
+          _id: string,
+          _dir: string,
+          _prompt: string,
+          options: { sessionId?: string; title: string; timeoutMs?: number }
+        ) => ({
+          sessionId: options.sessionId ?? "ses_ai",
+          text: '```json\n{"summary":"ok","findings":[{"file":"a.ts","line":3,"severity":"major","body":"Off by one"}]}\n```',
+        })
+      ),
+      replyPermission: vi.fn(
+        async (
+          _id: string,
+          _rid: string,
+          _reply: { decision: string; message?: string }
+        ) => {}
+      ),
+      replyForm: vi.fn(
+        async (_id: string, _fid: string, _answer: unknown) => {}
+      ),
+      cancelForm: vi.fn(async (_id: string, _fid: string) => {}),
+      promptSession: vi.fn(
+        async (_id: string, _sid: string, _text: string) => {}
+      ),
+      removeSession: vi.fn(async (_id: string, _sid: string) => {}),
+      sessionDetail: vi.fn(
+        async (_id: string, _sid: string): Promise<SessionDetail> => {
+          throw new NotFoundError(_sid, "session");
+        }
+      ),
+      models: vi.fn(async (_id: string): Promise<ModelsInfo> => ({
+        models: [],
+        agents: [],
+      })),
+    },
+    reviews: {
+      review: vi.fn(
+        async (
+          _id: string,
+          directory: string,
+          _o?: { base?: string; file?: string }
+        ) => ({
+          directory,
+          mode: "branch" as const,
+          ahead: 0,
+          behind: 0,
+          dirty: false,
+          pushed: false,
+          workspace: { clean: true },
+          files: [],
+        })
+      ),
+      commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
+      commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
+      updateFromBase: vi.fn(
+        async (_id: string, _dir: string, _base: string) => ({
+          strategy: "rebase" as const,
+        })
+      ),
+      mergeIntoBase: vi.fn(
+        async (_id: string, _dir: string, _base: string, _ff: boolean) => ({
+          branch: "x",
+        })
+      ),
+      publishInfo: vi.fn(
+        async (_id: string, _dir: string, _remote?: string) => ({
+          remotes: ["origin"],
+          remote: "origin",
+          forge: { kind: "unknown" as const },
+          strategies: ["branch" as const],
+          strategy: "branch" as const,
+          pushFrom: "host" as const,
+        })
+      ),
+      publishSuggestion: vi.fn(async (_id: string, _dir: string) => ({
+        title: "t",
+        description: "d",
+      })),
+      publish: vi.fn(async (_id: string, _dir: string, _req: unknown) => ({
+        strategy: "branch" as const,
+        pushedFrom: "host" as const,
+        output: [],
+      })),
+    },
+    tasks: {
+      startTask: vi.fn(
+        async (
+          _id: string,
+          _b: Record<string, unknown>
+        ): Promise<TaskResult> => ({ task: "tsk_1", variants: [] })
+      ),
+      dismissStarting: vi.fn((_id: string, _task: string) => {}),
+      pickVariant: vi.fn(
+        async (
+          _id: string,
+          _t: string,
+          _s: string,
+          _r: boolean
+        ): Promise<PickResult> => ({
+          discarded: ["ses_2"],
+          removed: [],
+          errors: [],
+        })
+      ),
+    },
+  } satisfies DashboardHub;
   const onboarding = {
     list: vi.fn(async () => ({ roots: ["/src"], candidates: [added] })),
     add: vi.fn(async (_path: string, _stack: unknown) => added),
@@ -207,7 +227,7 @@ function setup(webDir?: string) {
     send: vi.fn(async (_m: PushMessage) => 2),
   } satisfies PushPort;
   // Rescanning after a write discovers the new project.
-  orchestrator.rescan.mockImplementation(async () =>
+  hub.environments.rescan.mockImplementation(async () =>
     store.setProjects([project, newProject])
   );
   const cleanup = {
@@ -247,14 +267,14 @@ function setup(webDir?: string) {
   };
   return {
     store,
-    orchestrator,
+    hub,
     onboarding,
     push,
     cleanup,
     checks,
     app: createDashboardApp({
       store,
-      orchestrator,
+      hub,
       onboarding,
       push,
       cleanup,
@@ -350,10 +370,7 @@ describe("dashboard API", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      expect(deps.orchestrator.startTask).toHaveBeenCalledWith(
-        project.id,
-        body
-      );
+      expect(deps.hub.tasks.startTask).toHaveBeenCalledWith(project.id, body);
       await expect(
         (await app.request("/api/projects")).text()
       ).resolves.not.toContain("secret-token");
@@ -375,8 +392,7 @@ describe("dashboard API", () => {
   it("persists private Forgejo settings through the API without exposing the token", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-forgejo-api-"));
     try {
-      const { store, orchestrator, onboarding, push, cleanup, checks } =
-        setup();
+      const { store, hub, onboarding, push, cleanup, checks } = setup();
       const fetcher = vi
         .fn<typeof fetch>()
         .mockResolvedValue(
@@ -389,7 +405,7 @@ describe("dashboard API", () => {
       );
       const app = createDashboardApp({
         store,
-        orchestrator,
+        hub,
         onboarding,
         push,
         cleanup,
@@ -457,7 +473,7 @@ describe("dashboard API", () => {
   });
 
   it("routes reviews and creates worktrees only for the displayed open PR commit", async () => {
-    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const { store, hub, onboarding, push, cleanup, checks } = setup();
     const sha = "a".repeat(40);
     const forgejo = {
       view: vi.fn(),
@@ -487,7 +503,7 @@ describe("dashboard API", () => {
     };
     const app = createDashboardApp({
       store,
-      orchestrator,
+      hub,
       onboarding,
       push,
       cleanup,
@@ -517,7 +533,7 @@ describe("dashboard API", () => {
         })
       ).status
     ).toBe(400);
-    expect(orchestrator.createWorktree).not.toHaveBeenCalled();
+    expect(hub.checkouts.createWorktree).not.toHaveBeenCalled();
     expect(
       (
         await post("worktree", {
@@ -527,7 +543,7 @@ describe("dashboard API", () => {
         })
       ).status
     ).toBe(200);
-    expect(orchestrator.createWorktree).toHaveBeenCalledWith("p", {
+    expect(hub.checkouts.createWorktree).toHaveBeenCalledWith("p", {
       branch: "review/pr-7",
       pull: {
         url: "https://forge.example/team/repo/pulls/7",
@@ -538,7 +554,7 @@ describe("dashboard API", () => {
   });
 
   it("runs AI reviews only for the displayed PR commit", async () => {
-    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const { store, hub, onboarding, push, cleanup, checks } = setup();
     const sha = "a".repeat(40);
     const details = {
       pull: {
@@ -571,7 +587,7 @@ describe("dashboard API", () => {
     };
     const app = createDashboardApp({
       store,
-      orchestrator,
+      hub,
       onboarding,
       push,
       cleanup,
@@ -589,14 +605,14 @@ describe("dashboard API", () => {
       (await post("ai-review/session", { ...where, commitId: "b".repeat(40) }))
         .status
     ).toBe(400);
-    expect(orchestrator.startSession).not.toHaveBeenCalled();
+    expect(hub.sessions.startSession).not.toHaveBeenCalled();
 
     const started = await post("ai-review/session", {
       ...where,
       commitId: sha,
     });
     expect(await started.json()).toEqual({ sessionId: "ses_1" });
-    const [, , title, prompt] = orchestrator.startSession.mock.calls[0];
+    const [, , title, prompt] = hub.sessions.startSession.mock.calls[0];
     expect(title).toBe("AI review: PR #7 Fix it");
     expect(prompt).toContain(`First check that HEAD is ${sha}`);
 
@@ -622,13 +638,13 @@ describe("dashboard API", () => {
 
     const quick = await post("ai-review", { ...where, commitId: sha });
     expect((await quick.json()).sessionId).toBe("ses_ai");
-    const [, , quickPrompt, options] = orchestrator.generateIn.mock.calls[1];
+    const [, , quickPrompt, options] = hub.sessions.generateIn.mock.calls[1];
     expect(quickPrompt).toContain("diff --git a/a.ts b/a.ts");
     expect(options.sessionId).toBeUndefined();
   });
 
   it("routes Forgejo PR lists and selected diffs", async () => {
-    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const { store, hub, onboarding, push, cleanup, checks } = setup();
     const forgejo = {
       view: vi.fn(),
       save: vi.fn(),
@@ -655,7 +671,7 @@ describe("dashboard API", () => {
     };
     const app = createDashboardApp({
       store,
-      orchestrator,
+      hub,
       onboarding,
       push,
       cleanup,
@@ -771,10 +787,10 @@ describe("dashboard API", () => {
       days: [],
     };
     const usage = { report: vi.fn((_day: string, _today: string) => report) };
-    const { store, orchestrator, onboarding, push, cleanup, checks } = setup();
+    const { store, hub, onboarding, push, cleanup, checks } = setup();
     const app = createDashboardApp({
       store,
-      orchestrator,
+      hub,
       onboarding,
       push,
       cleanup,
@@ -852,18 +868,18 @@ describe("dashboard API", () => {
     ["stop", "stop"],
     ["rebuild", "rebuild"],
     ["restart-opencode", "restartOpencode"],
-  ] as const)("POST %s triggers orchestrator.%s", async (route, method) => {
-    const { app, orchestrator } = setup();
+  ] as const)("POST %s triggers environments.%s", async (route, method) => {
+    const { app, hub } = setup();
     const res = await app.request(`/api/projects/${project.id}/${route}`, {
       method: "POST",
     });
     expect(res.status).toBe(202);
-    expect(orchestrator[method]).toHaveBeenCalledWith(project.id);
+    expect(hub.environments[method]).toHaveBeenCalledWith(project.id);
   });
 
   it("maps BusyError to 409 and NotFoundError to 404", async () => {
-    const { app, orchestrator } = setup();
-    orchestrator.start.mockImplementationOnce(() => {
+    const { app, hub } = setup();
+    hub.environments.start.mockImplementationOnce(() => {
       throw new BusyError(project.id);
     });
     expect(
@@ -873,7 +889,7 @@ describe("dashboard API", () => {
         })
       ).status
     ).toBe(409);
-    orchestrator.start.mockImplementationOnce(() => {
+    hub.environments.start.mockImplementationOnce(() => {
       throw new NotFoundError("x");
     });
     expect(
@@ -882,7 +898,7 @@ describe("dashboard API", () => {
   });
 
   it("creates, starts, stops and removes a worktree's own container", async () => {
-    const { app, orchestrator } = setup();
+    const { app, hub } = setup();
     const post = (url: string, body?: unknown) =>
       app.request(url, {
         method: "POST",
@@ -895,20 +911,20 @@ describe("dashboard API", () => {
     await expect(created.json()).resolves.toStrictEqual({
       envId: "demo-abc123-x-0a1b",
     });
-    expect(orchestrator.createEnv).toHaveBeenCalledWith(project.id, "/w/x");
+    expect(hub.environments.createEnv).toHaveBeenCalledWith(project.id, "/w/x");
     expect(
       (await post(`/api/projects/${project.id}/envs/e1/start`)).status
     ).toBe(202);
-    expect(orchestrator.startEnv).toHaveBeenCalledWith(project.id, "e1");
+    expect(hub.environments.startEnv).toHaveBeenCalledWith(project.id, "e1");
     expect(
       (await post(`/api/projects/${project.id}/envs/e1/stop`)).status
     ).toBe(202);
-    expect(orchestrator.stopEnv).toHaveBeenCalledWith(project.id, "e1");
+    expect(hub.environments.stopEnv).toHaveBeenCalledWith(project.id, "e1");
     expect(
       (await post(`/api/projects/${project.id}/envs/e1/remove`)).status
     ).toBe(200);
-    expect(orchestrator.removeEnv).toHaveBeenCalledWith(project.id, "e1");
-    orchestrator.startEnv.mockImplementationOnce(() => {
+    expect(hub.environments.removeEnv).toHaveBeenCalledWith(project.id, "e1");
+    hub.environments.startEnv.mockImplementationOnce(() => {
       throw new NotFoundError("e9", "environment");
     });
     expect(
@@ -917,7 +933,7 @@ describe("dashboard API", () => {
   });
 
   it("worktree routes pass the JSON body and return the result", async () => {
-    const { app, orchestrator } = setup();
+    const { app, hub } = setup();
     const post = (route: string, body: unknown) =>
       app.request(`/api/projects/${project.id}/${route}`, {
         method: "POST",
@@ -930,7 +946,7 @@ describe("dashboard API", () => {
       startSession: true,
     });
     expect(created.status).toBe(200);
-    expect(orchestrator.createWorktree).toHaveBeenCalledWith(project.id, {
+    expect(hub.checkouts.createWorktree).toHaveBeenCalledWith(project.id, {
       branch: "x",
       base: "main",
       startSession: true,
@@ -939,7 +955,7 @@ describe("dashboard API", () => {
       worktree: { branch: "x" },
     });
     await post("worktrees/remove", { path: "/p", force: "yes" });
-    expect(orchestrator.removeWorktree).toHaveBeenCalledWith(
+    expect(hub.checkouts.removeWorktree).toHaveBeenCalledWith(
       project.id,
       "/p",
       false,
@@ -951,7 +967,7 @@ describe("dashboard API", () => {
     await expect(
       (await post("open", { editor: "zed", directory: "/d" })).json()
     ).resolves.toStrictEqual({ ok: true });
-    expect(orchestrator.openInEditor).toHaveBeenCalledWith(
+    expect(hub.checkouts.openInEditor).toHaveBeenCalledWith(
       project.id,
       "zed",
       "/d"
@@ -968,8 +984,8 @@ describe("dashboard API", () => {
     [new CommandError("git worktree failed: fatal"), 422],
     [new Error("boom"), 500],
   ])("maps %s to %i with its message", async (err, status) => {
-    const { app, orchestrator } = setup();
-    orchestrator.openInEditor.mockImplementationOnce(() => {
+    const { app, hub } = setup();
+    hub.checkouts.openInEditor.mockImplementationOnce(() => {
       throw err;
     });
     const res = await app.request(`/api/projects/${project.id}/open`, {
@@ -980,23 +996,23 @@ describe("dashboard API", () => {
   });
 
   it("rejects cross-site POST actions with a mismatched Origin", async () => {
-    const { app, orchestrator } = setup();
+    const { app, hub } = setup();
     const res = await app.request(`/api/projects/${project.id}/start`, {
       method: "POST",
       headers: { origin: "http://evil.example", host: "localhost:7777" },
     });
     expect(res.status).toBe(403);
-    expect(orchestrator.start).not.toHaveBeenCalled();
+    expect(hub.environments.start).not.toHaveBeenCalled();
   });
 
   it("allows same-origin POST actions (Origin matches Host)", async () => {
-    const { app, orchestrator } = setup();
+    const { app, hub } = setup();
     const res = await app.request(`/api/projects/${project.id}/start`, {
       method: "POST",
       headers: { origin: "http://localhost:7777", host: "localhost:7777" },
     });
     expect(res.status).toBe(202);
-    expect(orchestrator.start).toHaveBeenCalledWith(project.id);
+    expect(hub.environments.start).toHaveBeenCalledWith(project.id);
   });
 
   it("sets X-Frame-Options: DENY on responses", async () => {
@@ -1006,20 +1022,20 @@ describe("dashboard API", () => {
   });
 
   it("refuses actions while preflight has errors", async () => {
-    const { app, store, orchestrator } = setup();
+    const { app, store, hub } = setup();
     store.setPreflight({ errors: ["Docker daemon is not reachable"] });
     const res = await app.request(`/api/projects/${project.id}/start`, {
       method: "POST",
     });
     expect(res.status).toBe(412);
-    expect(orchestrator.start).not.toHaveBeenCalled();
+    expect(hub.environments.start).not.toHaveBeenCalled();
   });
 
   it("rescan re-runs discovery and returns the snapshot", async () => {
-    const { app, orchestrator } = setup();
+    const { app, hub } = setup();
     const res = await app.request("/api/projects/rescan", { method: "POST" });
     expect(res.status).toBe(200);
-    expect(orchestrator.rescan).toHaveBeenCalled();
+    expect(hub.environments.rescan).toHaveBeenCalled();
   });
 
   it("saves roots, rescans and returns the snapshot", async () => {
@@ -1042,9 +1058,9 @@ describe("dashboard API", () => {
     expect(((await res.json()) as { roots: string[] }).roots).toStrictEqual([
       "/code",
     ]);
-    expect(deps.orchestrator.rescan).toHaveBeenCalledOnce();
+    expect(deps.hub.environments.rescan).toHaveBeenCalledOnce();
     expect((await post(["rel"])).status).toBe(400);
-    expect(deps.orchestrator.rescan).toHaveBeenCalledOnce();
+    expect(deps.hub.environments.rescan).toHaveBeenCalledOnce();
   });
 
   it("GET logs returns buffered lines", async () => {
@@ -1105,7 +1121,7 @@ describe("dashboard API", () => {
       });
 
     it("forwards permission replies, form answers and dismissals", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       expect(
         (
           await send(app, "POST", "permissions/per_1", {
@@ -1114,7 +1130,7 @@ describe("dashboard API", () => {
           })
         ).status
       ).toBe(200);
-      expect(orchestrator.replyPermission).toHaveBeenCalledWith(
+      expect(hub.sessions.replyPermission).toHaveBeenCalledWith(
         project.id,
         "per_1",
         { decision: "reject", message: "no" }
@@ -1123,25 +1139,25 @@ describe("dashboard API", () => {
         (await send(app, "POST", "forms/frm_1", { answer: { db: "pg" } }))
           .status
       ).toBe(200);
-      expect(orchestrator.replyForm).toHaveBeenCalledWith(project.id, "frm_1", {
+      expect(hub.sessions.replyForm).toHaveBeenCalledWith(project.id, "frm_1", {
         db: "pg",
       });
       expect((await send(app, "DELETE", "forms/frm_1", undefined)).status).toBe(
         200
       );
-      expect(orchestrator.cancelForm).toHaveBeenCalledWith(project.id, "frm_1");
+      expect(hub.sessions.cancelForm).toHaveBeenCalledWith(project.id, "frm_1");
     });
 
     it("removes a session, and answers 404 for one it doesn't list", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       expect(
         (await send(app, "DELETE", "sessions/ses_1", undefined)).status
       ).toBe(200);
-      expect(orchestrator.removeSession).toHaveBeenCalledWith(
+      expect(hub.sessions.removeSession).toHaveBeenCalledWith(
         project.id,
         "ses_1"
       );
-      orchestrator.removeSession.mockRejectedValueOnce(
+      hub.sessions.removeSession.mockRejectedValueOnce(
         new NotFoundError("ses_9", "session")
       );
       expect(
@@ -1150,8 +1166,8 @@ describe("dashboard API", () => {
     });
 
     it("maps unknown ids to 404, already answered to 409 and invalid answers to 400 with the message", async () => {
-      const { app, orchestrator } = setup();
-      orchestrator.replyPermission.mockRejectedValueOnce(
+      const { app, hub } = setup();
+      hub.sessions.replyPermission.mockRejectedValueOnce(
         new NotFoundError("per_x", "permission request")
       );
       expect(
@@ -1159,7 +1175,7 @@ describe("dashboard API", () => {
           .status
       ).toBe(404);
 
-      orchestrator.replyPermission.mockRejectedValueOnce(
+      hub.sessions.replyPermission.mockRejectedValueOnce(
         new AlreadyAnsweredError()
       );
       const gone = await send(app, "POST", "permissions/per_1", {
@@ -1170,7 +1186,7 @@ describe("dashboard API", () => {
         error: "already answered",
       });
 
-      orchestrator.replyForm.mockRejectedValueOnce(
+      hub.sessions.replyForm.mockRejectedValueOnce(
         new InvalidRequestError("db is required")
       );
       const invalid = await send(app, "POST", "forms/frm_1", { answer: {} });
@@ -1181,7 +1197,7 @@ describe("dashboard API", () => {
     });
 
     it("blocks cross-site replies", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       const res = await send(
         app,
         "POST",
@@ -1190,7 +1206,7 @@ describe("dashboard API", () => {
         "http://evil.example"
       );
       expect(res.status).toBe(403);
-      expect(orchestrator.replyPermission).not.toHaveBeenCalled();
+      expect(hub.sessions.replyPermission).not.toHaveBeenCalled();
     });
   });
   describe("review", () => {
@@ -1206,13 +1222,13 @@ describe("dashboard API", () => {
       });
 
     it("serves review data for a directory with an optional base, mode and file", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       const res = await app.request(
         `/api/projects/${project.id}/review?directory=%2Fw%2Fx&base=main&mode=branch&file=a.ts`
       );
       expect(res.status).toBe(200);
       expect((await res.json()).directory).toBe("/w/x");
-      expect(orchestrator.review).toHaveBeenCalledWith(project.id, "/w/x", {
+      expect(hub.reviews.review).toHaveBeenCalledWith(project.id, "/w/x", {
         base: "main",
         mode: "branch",
         file: "a.ts",
@@ -1222,7 +1238,7 @@ describe("dashboard API", () => {
       await app.request(
         `/api/projects/${project.id}/review?directory=%2Fw%2Fx`
       );
-      expect(orchestrator.review).toHaveBeenLastCalledWith(project.id, "/w/x", {
+      expect(hub.reviews.review).toHaveBeenLastCalledWith(project.id, "/w/x", {
         base: undefined,
         mode: "working",
         file: undefined,
@@ -1232,7 +1248,7 @@ describe("dashboard API", () => {
       await app.request(
         `/api/projects/${project.id}/review?directory=%2Fw%2Fx&mode=turn&session=ses_1&from=msg_2`
       );
-      expect(orchestrator.review).toHaveBeenLastCalledWith(project.id, "/w/x", {
+      expect(hub.reviews.review).toHaveBeenLastCalledWith(project.id, "/w/x", {
         base: undefined,
         mode: "turn",
         file: undefined,
@@ -1246,7 +1262,7 @@ describe("dashboard API", () => {
           )
         ).status
       ).toBe(400);
-      orchestrator.review.mockRejectedValueOnce(
+      hub.reviews.review.mockRejectedValueOnce(
         new InvalidRequestError(
           "/etc is neither the workspace nor a known worktree"
         )
@@ -1261,7 +1277,7 @@ describe("dashboard API", () => {
     });
 
     it("runs commit, update and merge, and suggests commit messages", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       await expect(
         (await post(app, "review/commit-message", { directory: "/w" })).json()
       ).resolves.toStrictEqual({ message: "feat: x" });
@@ -1269,7 +1285,7 @@ describe("dashboard API", () => {
         (await post(app, "review/commit", { directory: "/w", message: "m" }))
           .status
       ).toBe(200);
-      expect(orchestrator.commit).toHaveBeenCalledWith(project.id, "/w", "m");
+      expect(hub.reviews.commit).toHaveBeenCalledWith(project.id, "/w", "m");
       await expect(
         (
           await post(app, "review/update", { directory: "/w", base: "main" })
@@ -1284,13 +1300,13 @@ describe("dashboard API", () => {
           })
         ).json()
       ).resolves.toStrictEqual({ branch: "x" });
-      expect(orchestrator.mergeIntoBase).toHaveBeenCalledWith(
+      expect(hub.reviews.mergeIntoBase).toHaveBeenCalledWith(
         project.id,
         "/w",
         "main",
         true
       );
-      orchestrator.commit.mockRejectedValueOnce(
+      hub.reviews.commit.mockRejectedValueOnce(
         new CommandError("git has no user.name/user.email in the container.")
       );
       const failed = await post(app, "review/commit", {
@@ -1302,12 +1318,12 @@ describe("dashboard API", () => {
     });
 
     it("answers a session's detail, 404 for an unknown session", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       const missing = await app.request(
         `/api/projects/${project.id}/sessions/ses_x`
       );
       expect(missing.status).toBe(404);
-      orchestrator.sessionDetail.mockResolvedValueOnce({
+      hub.sessions.sessionDetail.mockResolvedValueOnce({
         createdAt: 1,
         more: false,
         session: {
@@ -1326,18 +1342,18 @@ describe("dashboard API", () => {
       );
       expect(res.status).toBe(200);
       expect((await res.json()).session.title).toBe("Fix");
-      expect(orchestrator.sessionDetail).toHaveBeenLastCalledWith(
+      expect(hub.sessions.sessionDetail).toHaveBeenLastCalledWith(
         project.id,
         "ses_1"
       );
     });
 
     it("prompts a session, starts one with a prompt, and removes a worktree with its branch", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       expect(
         (await post(app, "sessions/ses_1/prompt", { text: "fix" })).status
       ).toBe(200);
-      expect(orchestrator.promptSession).toHaveBeenCalledWith(
+      expect(hub.sessions.promptSession).toHaveBeenCalledWith(
         project.id,
         "ses_1",
         "fix"
@@ -1347,7 +1363,7 @@ describe("dashboard API", () => {
         title: "Review",
         prompt: "look",
       });
-      expect(orchestrator.startSession).toHaveBeenLastCalledWith(
+      expect(hub.sessions.startSession).toHaveBeenLastCalledWith(
         project.id,
         "/w",
         "Review",
@@ -1358,7 +1374,7 @@ describe("dashboard API", () => {
         force: false,
         deleteBranch: true,
       });
-      expect(orchestrator.removeWorktree).toHaveBeenLastCalledWith(
+      expect(hub.checkouts.removeWorktree).toHaveBeenLastCalledWith(
         project.id,
         "/w",
         false,
@@ -1379,12 +1395,12 @@ describe("dashboard API", () => {
       });
 
     it("serves publish info, suggestions and publishes", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       const info = await app.request(
         `/api/projects/${project.id}/publish?directory=%2Fw&remote=fork`
       );
       expect(info.status).toBe(200);
-      expect(orchestrator.publishInfo).toHaveBeenCalledWith(
+      expect(hub.reviews.publishInfo).toHaveBeenCalledWith(
         project.id,
         "/w",
         "fork"
@@ -1401,14 +1417,14 @@ describe("dashboard API", () => {
         description: "D",
       };
       expect((await post(app, "publish", body)).status).toBe(200);
-      expect(orchestrator.publish).toHaveBeenCalledWith(project.id, "/w", {
+      expect(hub.reviews.publish).toHaveBeenCalledWith(project.id, "/w", {
         remote: "origin",
         base: "main",
         strategy: "branch",
         title: "T",
         description: "D",
       });
-      orchestrator.publish.mockRejectedValueOnce(
+      hub.reviews.publish.mockRejectedValueOnce(
         new CommandError(
           "the branch on origin has commits this one doesn't (pushed from elsewhere, or rebased); pull them in with `git pull origin x`, then publish again"
         )
@@ -1431,7 +1447,7 @@ describe("dashboard API", () => {
       });
 
     it("starts tasks, lists models, picks a variant and passes a worktree's first prompt", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       const body = { prompt: "Fix it", variants: [{}] };
       const res = await post(app, "tasks", body);
       expect(res.status).toBe(200);
@@ -1439,13 +1455,13 @@ describe("dashboard API", () => {
         task: "tsk_1",
         variants: [],
       });
-      expect(orchestrator.startTask).toHaveBeenCalledWith(project.id, body);
+      expect(hub.tasks.startTask).toHaveBeenCalledWith(project.id, body);
       const dismissed = await app.request(
         `/api/projects/${project.id}/tasks/tsk_1/starting`,
         { method: "DELETE" }
       );
       expect(dismissed.status).toBe(200);
-      expect(orchestrator.dismissStarting).toHaveBeenCalledWith(
+      expect(hub.tasks.dismissStarting).toHaveBeenCalledWith(
         project.id,
         "tsk_1"
       );
@@ -1464,7 +1480,7 @@ describe("dashboard API", () => {
         removed: [],
         errors: [],
       });
-      expect(orchestrator.pickVariant).toHaveBeenCalledWith(
+      expect(hub.tasks.pickVariant).toHaveBeenCalledWith(
         project.id,
         "tsk_1",
         "ses_1",
@@ -1475,17 +1491,20 @@ describe("dashboard API", () => {
         startSession: true,
         prompt: "go",
       });
-      expect(orchestrator.createWorktree).toHaveBeenLastCalledWith(project.id, {
-        branch: "b",
-        base: undefined,
-        startSession: true,
-        prompt: "go",
-      });
+      expect(hub.checkouts.createWorktree).toHaveBeenLastCalledWith(
+        project.id,
+        {
+          branch: "b",
+          base: undefined,
+          startSession: true,
+          prompt: "go",
+        }
+      );
     });
 
     it("maps task errors to statuses", async () => {
-      const { app, orchestrator } = setup();
-      orchestrator.startTask.mockRejectedValueOnce(
+      const { app, hub } = setup();
+      hub.tasks.startTask.mockRejectedValueOnce(
         new InvalidRequestError("the prompt is empty")
       );
       const bad = await post(app, "tasks", { prompt: "" });
@@ -1493,15 +1512,15 @@ describe("dashboard API", () => {
       await expect(bad.json()).resolves.toStrictEqual({
         error: "the prompt is empty",
       });
-      orchestrator.startTask.mockRejectedValueOnce(new BusyError(project.id));
+      hub.tasks.startTask.mockRejectedValueOnce(new BusyError(project.id));
       expect((await post(app, "tasks", { prompt: "x" })).status).toBe(409);
-      orchestrator.pickVariant.mockRejectedValueOnce(
+      hub.tasks.pickVariant.mockRejectedValueOnce(
         new NotFoundError("ses_9", "variant")
       );
       expect(
         (await post(app, "tasks/tsk_1/pick", { sessionId: "ses_9" })).status
       ).toBe(404);
-      orchestrator.models.mockRejectedValueOnce(
+      hub.sessions.models.mockRejectedValueOnce(
         new UnavailableError(
           "opencode is not running — start the project first"
         )
@@ -1512,7 +1531,7 @@ describe("dashboard API", () => {
     });
 
     it("blocks cross-site task creation", async () => {
-      const { app, orchestrator } = setup();
+      const { app, hub } = setup();
       const res = await app.request(`/api/projects/${project.id}/tasks`, {
         method: "POST",
         headers: {
@@ -1523,7 +1542,7 @@ describe("dashboard API", () => {
         body: JSON.stringify({ prompt: "x" }),
       });
       expect(res.status).toBe(403);
-      expect(orchestrator.startTask).not.toHaveBeenCalled();
+      expect(hub.tasks.startTask).not.toHaveBeenCalled();
     });
   });
 });
@@ -1544,7 +1563,7 @@ describe("add project", () => {
   });
 
   it("writes, rescans, starts the new project and returns its id", async () => {
-    const { app, onboarding, orchestrator } = setup();
+    const { app, onboarding, hub } = setup();
     const res = await post(app, { path: "/src/new-app", stack: "node" });
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toStrictEqual({
@@ -1552,12 +1571,12 @@ describe("add project", () => {
       started: true,
     });
     expect(onboarding.add).toHaveBeenCalledWith("/src/new-app", "node");
-    expect(orchestrator.rescan).toHaveBeenCalled();
-    expect(orchestrator.start).toHaveBeenCalledWith(newProject.id);
+    expect(hub.environments.rescan).toHaveBeenCalled();
+    expect(hub.environments.start).toHaveBeenCalledWith(newProject.id);
   });
 
   it("writes but does not start while preflight has errors", async () => {
-    const { app, store, orchestrator } = setup();
+    const { app, store, hub } = setup();
     store.setPreflight({ errors: ["docker not found"] });
     const res = await post(app, { path: "/src/new-app", stack: "node" });
     await expect(res.json()).resolves.toStrictEqual({
@@ -1565,7 +1584,7 @@ describe("add project", () => {
       started: false,
       error: "docker not found",
     });
-    expect(orchestrator.start).not.toHaveBeenCalled();
+    expect(hub.environments.start).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1574,12 +1593,12 @@ describe("add project", () => {
     [new DevcontainerExistsError("/src/new-app"), 409],
     [new Error("EACCES: permission denied"), 500],
   ])("maps %s to %i without rescanning", async (err, status) => {
-    const { app, onboarding, orchestrator } = setup();
+    const { app, onboarding, hub } = setup();
     onboarding.add.mockRejectedValueOnce(err);
     const res = await post(app, { path: "/src/new-app", stack: "node" });
     expect(res.status).toBe(status);
     expect((await res.json()).error).toBe(err.message);
-    expect(orchestrator.rescan).not.toHaveBeenCalled();
+    expect(hub.environments.rescan).not.toHaveBeenCalled();
   });
 
   it("passes a missing path through as an empty string", async () => {
@@ -1744,7 +1763,7 @@ describe("node endpoints", () => {
     };
     const app = createDashboardApp({
       store: base.store,
-      orchestrator: base.orchestrator,
+      hub: base.hub,
       onboarding: base.onboarding,
       push: base.push,
       cleanup: base.cleanup,
@@ -1795,7 +1814,7 @@ describe("node endpoints", () => {
 
 describe("bring home", () => {
   it("fetches a remote checkout's branch", async () => {
-    const { app, orchestrator } = setup();
+    const { app, hub } = setup();
     const res = await app.request(
       `/api/projects/${project.id}/review/bring-home`,
       {
@@ -1805,7 +1824,7 @@ describe("bring home", () => {
       }
     );
     await expect(res.json()).resolves.toStrictEqual({ branch: "fix" });
-    expect(orchestrator.bringHome).toHaveBeenCalledWith(
+    expect(hub.checkouts.bringHome).toHaveBeenCalledWith(
       project.id,
       "/workspaces/demo.worktrees/fix"
     );
