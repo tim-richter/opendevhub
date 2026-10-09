@@ -44,7 +44,7 @@ Choose a checkout and an existing session, or start a new session there. Sending
 
 ## Refresh and caching
 
-PR data uses an in-memory TanStack Query cache. Fresh cached pages reappear immediately when navigating, and stale data refreshes when the window regains focus or the connection returns. **Refresh** keeps existing content visible during the request. Failed sections offer **Retry**; rate-limit errors ask you to wait before refreshing. Navigation cancels unused API requests, and cancellation is passed through to Forgejo. Changing saved connection settings clears the Forgejo query cache. Only UI preferences are persisted in browser storage.
+PR data uses a TanStack Query cache that is also saved in the browser's IndexedDB, so pages you visited in the last 24 hours reappear immediately, even after a reload, and refresh in the background. Diffs are kept in memory only. Stale data also refreshes when the window regains focus or the connection returns. **Refresh** keeps existing content visible during the request. Failed sections offer **Retry**; rate-limit errors ask you to wait before refreshing. Navigation cancels unused API requests, and cancellation is passed through to Forgejo. Changing saved connection settings, or upgrading opendevhub, clears the Forgejo query cache. Your token is never stored in the browser.
 
 ## Saved settings
 

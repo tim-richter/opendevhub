@@ -8,7 +8,7 @@ import {
   SearchIcon,
   TicketIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -35,48 +35,23 @@ import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { Link, useSearchParams } from "../../routing";
 import { taskPath } from "../tasks/tasks";
+import { useJiraQuery } from "./use-jira";
 
-const useJiraResource = <T,>(load: (signal: AbortSignal) => Promise<T>) => {
-  const { jira } = useDash();
-  const [data, setData] = useState<T>();
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    setData(undefined);
-    setError(undefined);
-    if (!jira?.enabled) {
-      setBusy(false);
-      return;
-    }
-    const controller = new AbortController();
-    setBusy(true);
-    void load(controller.signal)
-      .then(
-        (value) => {
-          if (!controller.signal.aborted) {
-            setData(value);
-          }
-        },
-        (err) => {
-          if (!controller.signal.aborted) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-        }
-      )
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setBusy(false);
-        }
-      });
-    return () => controller.abort();
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies
-  }, [jira, load, revision]);
+/** Shows cached data while it refreshes; "loading" only until the first result arrives. */
+const useJiraResource = <T,>(
+  key: readonly unknown[],
+  load: (signal: AbortSignal) => Promise<T>
+) => {
+  const { data, error, isFetching, isLoading, refetch } = useJiraQuery(
+    key,
+    load
+  );
   return {
-    busy,
+    busy: isFetching,
     data,
-    error,
-    refresh: () => setRevision((value) => value + 1),
+    error: error?.message,
+    loading: isLoading,
+    refresh: () => void refetch(),
   };
 };
 
@@ -112,11 +87,10 @@ export const JiraPage = () => {
   const startAt = Number.isSafeInteger(page) && page >= 0 ? page : 0;
   const [input, setInput] = useState(search);
   useEffect(() => setInput(search), [search]);
-  const load = useCallback(
-    (signal: AbortSignal) => fetchJiraTickets(search, startAt, signal),
-    [search, startAt]
+  const { data, error, busy, loading, refresh } = useJiraResource<JiraTickets>(
+    ["tickets", search, startAt],
+    (signal) => fetchJiraTickets(search, startAt, signal)
   );
-  const { data, error, busy, refresh } = useJiraResource<JiraTickets>(load);
   const change = (term: string, offset = 0) =>
     setParams({
       ...(term ? { search: term } : {}),
@@ -164,7 +138,7 @@ export const JiraPage = () => {
             </Button>
           )}
         </form>
-        {busy && (
+        {loading && (
           <p role="status" className="text-muted-foreground text-sm">
             Loading tickets…
           </p>
@@ -240,11 +214,10 @@ export const JiraTicketPage = () => {
 const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
   const { snapshot, newTask } = useDash();
   const [params] = useSearchParams();
-  const load = useCallback(
-    (signal: AbortSignal) => fetchJiraTicket(ticketKey, signal),
-    [ticketKey]
+  const { data, error, busy, loading, refresh } = useJiraResource<JiraTicket>(
+    ["ticket", ticketKey],
+    (signal) => fetchJiraTicket(ticketKey, signal)
   );
-  const { data, error, busy, refresh } = useJiraResource<JiraTicket>(load);
   const source: JiraTaskSource | undefined = data
     ? {
         description: data.description,
@@ -328,7 +301,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         }
       />
       <JiraGate>
-        {busy && (
+        {loading && (
           <p role="status" className="text-muted-foreground text-sm">
             Loading ticket…
           </p>

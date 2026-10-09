@@ -10,7 +10,7 @@ This integration uses Jira Server / Data Center's REST v2 API with Bearer authen
 
 ## Browse tickets
 
-**Tickets** appears in the sidebar when Jira is enabled. The list defaults to tickets assigned to the connected account, most recently updated first. Search by an exact key, such as `APP-123`, or a phrase in the ticket text. Searches include other assignees, limited to projects accessible to your token. **Assigned to me** restores the default list. **Next page** loads more results; **Refresh** reloads the current page.
+**Tickets** appears in the sidebar when Jira is enabled. The list defaults to tickets assigned to the connected account, most recently updated first. Search by an exact key, such as `APP-123`, or a phrase in the ticket text. Searches include other assignees, limited to projects accessible to your token. **Assigned to me** restores the default list. **Next page** loads more results. Lists and tickets you opened in the last 24 hours show immediately, even after a reload, and refresh in the background. They are cached in the browser's IndexedDB, and changing the connection settings or upgrading opendevhub clears that cache. **Refresh** reloads the current page and keeps it visible meanwhile.
 
 ![The Tickets page: Jira tickets assigned to you with their key, type, assignee and status](./images/jira-tickets.webp)
 

@@ -1,15 +1,18 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { ReactNode } from "react";
 
 import type { ForgejoSettings, ForgejoSettingsInput } from "../shared/forgejo";
+import type { IntegrationSettings } from "../shared/integrations";
 import type {
   JiraSettings,
   JiraSettingsInput,
@@ -76,6 +79,27 @@ interface DashboardContextValue {
   updateForgejo: (input: ForgejoSettingsInput) => Promise<void>;
 }
 
+const SETTINGS_KEY = ["settings"] as const;
+const JIRA_SETTINGS_KEY = [...SETTINGS_KEY, "jira"] as const;
+const FORGEJO_SETTINGS_KEY = [...SETTINGS_KEY, "forgejo"] as const;
+
+/** Drops an integration's cached data when its connection differs from the cached settings. */
+const dropIfChanged = (
+  queryClient: QueryClient,
+  key: readonly unknown[],
+  next: IntegrationSettings,
+  integration: string
+) => {
+  const previous = queryClient.getQueryData<IntegrationSettings>(key);
+  if (
+    previous?.url !== next.url ||
+    previous.enabled !== next.enabled ||
+    previous.hasToken !== next.hasToken
+  ) {
+    queryClient.removeQueries({ queryKey: [integration] });
+  }
+};
+
 const Ctx = createContext<DashboardContextValue | undefined>(undefined);
 
 export const DashboardProvider = ({ children }: { children: ReactNode }) => {
@@ -91,61 +115,63 @@ export const DashboardProvider = ({ children }: { children: ReactNode }) => {
   const [permission, setPermission] = useState<Permission>(() =>
     pushSupported() ? Notification.permission : "unsupported"
   );
-  const [jira, setJira] = useState<JiraSettings>();
-  const [jiraError, setJiraError] = useState<string>();
-  const [forgejo, setForgejo] = useState<ForgejoSettings>();
-  const [forgejoError, setForgejoError] = useState<string>();
+  // Settings load as soon as the page does, in parallel with the live connection, so integration
+  // pages can start their own requests without waiting for the socket.
+  const jiraSettings = useQuery({
+    queryFn: async () => {
+      const settings = await fetchJiraSettings();
+      // Cached tickets, restored from an earlier visit too, may belong to another connection.
+      dropIfChanged(queryClient, JIRA_SETTINGS_KEY, settings, "jira");
+      return settings;
+    },
+    queryKey: JIRA_SETTINGS_KEY,
+    // Restored settings let integration pages start at once; this confirms them in the background.
+    refetchOnMount: "always",
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const forgejoSettings = useQuery({
+    queryFn: async () => {
+      const settings = await fetchForgejoSettings();
+      dropIfChanged(queryClient, FORGEJO_SETTINGS_KEY, settings, "forgejo");
+      return settings;
+    },
+    queryKey: FORGEJO_SETTINGS_KEY,
+    refetchOnMount: "always",
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const jira = jiraSettings.data;
+  const jiraError = jiraSettings.error?.message;
+  const forgejo = forgejoSettings.data;
+  const forgejoError = forgejoSettings.error?.message;
 
+  // A reconnect may follow a server restart with different settings.
+  const wasConnected = useRef(false);
   useEffect(() => {
     if (!connected) {
       return;
     }
-    let cancelled = false;
-    void fetchJiraSettings().then(
-      (settings) => {
-        if (!cancelled) {
-          setJira(settings);
-          setJiraError(undefined);
-        }
-      },
-      (err) => {
-        if (!cancelled) {
-          setJiraError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    );
-    void fetchForgejoSettings().then(
-      (settings) => {
-        if (!cancelled) {
-          queryClient.removeQueries({ queryKey: ["forgejo"] });
-          setForgejo(settings);
-          setForgejoError(undefined);
-        }
-      },
-      (err) => {
-        if (!cancelled) {
-          setForgejoError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
+    if (wasConnected.current) {
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
+    }
+    wasConnected.current = true;
   }, [connected, queryClient]);
 
-  const updateJira = useCallback(async (input: JiraSettingsInput) => {
-    const settings = await saveJiraSettings(input);
-    setJira(settings);
-    setJiraError(undefined);
-  }, []);
+  const updateJira = useCallback(
+    async (input: JiraSettingsInput) => {
+      const settings = await saveJiraSettings(input);
+      await queryClient.cancelQueries({ queryKey: ["jira"] });
+      queryClient.removeQueries({ queryKey: ["jira"] });
+      queryClient.setQueryData<JiraSettings>(JIRA_SETTINGS_KEY, settings);
+    },
+    [queryClient]
+  );
 
   const updateForgejo = useCallback(
     async (input: ForgejoSettingsInput) => {
       const settings = await saveForgejoSettings(input);
       await queryClient.cancelQueries({ queryKey: ["forgejo"] });
       queryClient.removeQueries({ queryKey: ["forgejo"] });
-      setForgejo(settings);
-      setForgejoError(undefined);
+      queryClient.setQueryData<ForgejoSettings>(FORGEJO_SETTINGS_KEY, settings);
     },
     [queryClient]
   );
