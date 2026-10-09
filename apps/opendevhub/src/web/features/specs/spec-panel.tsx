@@ -1,5 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckIcon, CircleDashedIcon, LockIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  CircleDashedIcon,
+  LockIcon,
+} from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -219,7 +224,9 @@ export const SpecPanel = (props: {
           <span className="flex flex-wrap items-center gap-1.5">
             {change.artifacts.map((a, i) => (
               <span key={a.id} className="inline-flex items-center gap-1.5">
-                {i > 0 && <span className="text-muted-foreground">→</span>}
+                {i > 0 && (
+                  <ChevronRightIcon className="text-muted-foreground size-3.5" />
+                )}
                 <ArtifactStep artifact={a} />
               </span>
             ))}
