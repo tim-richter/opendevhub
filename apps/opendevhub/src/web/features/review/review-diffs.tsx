@@ -6,6 +6,7 @@ import type {
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   Columns2Icon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -39,6 +40,7 @@ import {
   selectionFor,
 } from "./review";
 import type {
+  CommentStop,
   DiffNote,
   DiffView,
   LineAnchor,
@@ -105,6 +107,147 @@ export const LayoutToggle = (props: {
   </ToggleGroup>
 );
 
+/** The comment the stepper last jumped to; `at` tells two jumps to the same comment apart. */
+export interface CommentFocus {
+  stop: CommentStop;
+  at: number;
+}
+
+/** How long a jump waits for a comment to render (its diff may still be parsing) before settling for its file. */
+const SEEK_TIMEOUT_MS = 2000;
+
+const stopSelector = (id: string) => `[data-comment-stop="${CSS.escape(id)}"]`;
+
+/** Steps through the comments in the diff in reading order, wrapping around at either end. */
+export const useCommentStepper = (stops: CommentStop[]) => {
+  const [focus, setFocus] = useState<CommentFocus>();
+  const current = focus ? stops.findIndex((s) => s.id === focus.stop.id) : -1;
+  const step = (delta: 1 | -1) => {
+    if (!stops.length) {
+      return;
+    }
+    let next = (current + delta + stops.length) % stops.length;
+    if (current < 0) {
+      // Nothing focused yet: start from the first comment below (or last above) the middle of the screen.
+      const middle = window.innerHeight / 2;
+      const below = (s: CommentStop) =>
+        (document.querySelector(stopSelector(s.id))?.getBoundingClientRect()
+          .top ?? -1) > middle;
+      const first = stops.findIndex(below);
+      if (delta > 0) {
+        next = Math.max(first, 0);
+      } else {
+        next = (first === -1 ? stops.length : first) - 1;
+        next = next < 0 ? stops.length - 1 : next;
+      }
+    }
+    setFocus({ at: Date.now(), stop: stops[next] });
+  };
+  return { current, focus, step, total: stops.length };
+};
+
+const typing = (target: EventTarget | null) => {
+  const el = target as HTMLElement | null;
+  return (
+    !!el?.closest?.("input, textarea, select, [role=dialog]") ||
+    !!el?.isContentEditable
+  );
+};
+
+/** "2 of 7 comments" with previous and next buttons; `k` and `j` step too. */
+export const CommentStepper = ({
+  stepper,
+}: {
+  stepper: ReturnType<typeof useCommentStepper>;
+}) => {
+  const { current, step, total } = stepper;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) {
+        return;
+      }
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault();
+        step(e.key === "j" ? 1 : -1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [step]);
+  if (!total) {
+    return null;
+  }
+  return (
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
+    <div className="flex items-center gap-1" role="group" aria-label="Comments">
+      <Tip label="Previous comment (k)">
+        <Button
+          variant="outline"
+          size="icon-sm"
+          aria-label="Previous comment"
+          onClick={() => step(-1)}
+        >
+          <ChevronUpIcon />
+        </Button>
+      </Tip>
+      <Tip label="Next comment (j)">
+        <Button
+          variant="outline"
+          size="icon-sm"
+          aria-label="Next comment"
+          onClick={() => step(1)}
+        >
+          <ChevronDownIcon />
+        </Button>
+      </Tip>
+      <span className="px-1 text-sm tabular-nums" aria-live="polite">
+        {current >= 0 ? `${current + 1} of ${total}` : total} comment
+        {total === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+};
+
+/** Scrolls to the focused comment once its diff has drawn it, and briefly outlines it. */
+const useSeek = (focus: CommentFocus | undefined, files: ReviewFile[]) => {
+  useEffect(() => {
+    if (!focus) {
+      return;
+    }
+    const index = files.findIndex((f) => f.file === focus.stop.file);
+    const toFile = () =>
+      document
+        .getElementById(`review-file-${index}`)
+        ?.scrollIntoView({ block: "start" });
+    // A diff that isn't loaded can't show its comments; its file is as close as it gets.
+    if (files[index]?.patch === undefined || files[index]?.binary) {
+      toFile();
+      return;
+    }
+    const deadline = performance.now() + SEEK_TIMEOUT_MS;
+    let frame = 0;
+    const seek = () => {
+      const el = document.querySelector(stopSelector(focus.stop.id));
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        el.animate(
+          [
+            { outline: "2px solid var(--ring)" },
+            { outline: "2px solid transparent" },
+          ],
+          { duration: 1600, easing: "ease-in" }
+        );
+      } else if (performance.now() > deadline) {
+        toFile();
+      } else {
+        frame = requestAnimationFrame(seek);
+      }
+    };
+    seek();
+    return () => cancelAnimationFrame(frame);
+  }, [focus, files]);
+};
+
 /**
  * The changed files as a tree beside their diffs, with line comments drawn inside the diffs. Without `onAnchor`
  * the diffs are read-only.
@@ -127,6 +270,8 @@ export const ReviewDiffs = (props: {
   open?: { file: string; anchor: LineAnchor };
   placeholder: string;
   onAnchor?: (file: string, anchor: LineAnchor) => void;
+  /** The comment to scroll to, from `useCommentStepper`. */
+  focus?: CommentFocus;
   /** These three must be stable: annotations may keep the first ones they were rendered with. */
   onAdd: (file: string, anchor: LineAnchor, text: string) => void;
   onCancel: () => void;
@@ -135,6 +280,7 @@ export const ReviewDiffs = (props: {
   const phone = useMediaQuery("(max-width: 767px)");
   // Side-by-side diffs don't fit a phone.
   const view = phone ? { ...props.view, split: false } : props.view;
+  useSeek(props.focus, props.files);
   const tree = (
     <ChangedFilesTree
       files={props.files}
@@ -193,6 +339,9 @@ export const ReviewDiffs = (props: {
               notes={props.notes}
               renderNote={props.renderNote}
               open={props.open?.file === f.file ? props.open.anchor : undefined}
+              reveal={
+                props.focus?.stop.file === f.file ? props.focus.at : undefined
+              }
               placeholder={props.placeholder}
               onAnchor={
                 props.onAnchor && ((anchor) => props.onAnchor?.(f.file, anchor))
@@ -249,6 +398,8 @@ const FileDiff = (props: {
   renderNote?: (id: string) => ReactNode;
   /** The line whose comment box is open in this file. */
   open: LineAnchor | undefined;
+  /** Changes when the comment stepper jumps into this file, which expands it. */
+  reveal: number | undefined;
   placeholder: string;
   onAnchor?: (anchor: LineAnchor) => void;
   onAdd: (file: string, anchor: LineAnchor, text: string) => void;
@@ -257,6 +408,13 @@ const FileDiff = (props: {
 }) => {
   const { file } = props;
   const [collapsed, setCollapsed] = useState(false);
+  const [revealed, setRevealed] = useState(props.reveal);
+  if (props.reveal !== revealed) {
+    setRevealed(props.reveal);
+    if (props.reveal !== undefined) {
+      setCollapsed(false);
+    }
+  }
   const [patch, setPatch] = useState(file.patch);
   const [loading, setLoading] = useState(false);
   // @pierre/diffs wants stable callbacks and annotations; these read the latest props.
@@ -273,7 +431,11 @@ const FileDiff = (props: {
   const renderAnnotation = useStableCallback(
     (a: DiffLineAnnotation<ReviewAnnotation>) => {
       if (a.metadata.kind === "note") {
-        return props.renderNote?.(a.metadata.id) ?? null;
+        return (
+          <div data-comment-stop={a.metadata.id} className="rounded-md">
+            {props.renderNote?.(a.metadata.id)}
+          </div>
+        );
       }
       if (a.metadata.kind === "draft") {
         const { anchor } = a.metadata;
@@ -287,7 +449,10 @@ const FileDiff = (props: {
         );
       }
       return (
-        <div className="border-primary bg-card text-card-foreground mx-2 my-1 flex items-start gap-2 rounded-sm border-l-3 px-2.5 py-2 font-sans text-sm whitespace-pre-wrap">
+        <div
+          data-comment-stop={a.metadata.comment.id}
+          className="border-primary bg-card text-card-foreground mx-2 my-1 flex items-start gap-2 rounded-sm border-l-3 px-2.5 py-2 font-sans text-sm whitespace-pre-wrap"
+        >
           <span>
             {a.metadata.comment.start !== undefined && (
               <span className="text-muted-foreground">

@@ -511,6 +511,37 @@ export const annotationsFor = (
   return annotations;
 };
 
+/** A comment or note shown in the diff that the comment stepper can jump to. */
+export interface CommentStop {
+  id: string;
+  file: string;
+  line: number;
+}
+
+/** Every comment and note drawn in the diff, in reading order: by file as listed, then by line. */
+export const commentStops = (
+  files: ReviewFile[],
+  comments: ReviewComment[],
+  notes: DiffNote[] = []
+): CommentStop[] => {
+  const order = new Map(files.map((f, i) => [f.file, i] as const));
+  const stops: CommentStop[] = [];
+  for (const c of comments) {
+    if (c.file !== undefined && c.line !== undefined && order.has(c.file)) {
+      stops.push({ file: c.file, id: c.id, line: c.line });
+    }
+  }
+  for (const n of notes) {
+    if (order.has(n.file)) {
+      stops.push({ file: n.file, id: n.id, line: n.line });
+    }
+  }
+  return stops.toSorted(
+    (a, b) =>
+      (order.get(a.file) ?? 0) - (order.get(b.file) ?? 0) || a.line - b.line
+  );
+};
+
 /** `@pierre/diffs` parses file patches; a bare hunk (as in some permission requests) gets `---`/`+++` headers. */
 export const ensurePatchHeader = (patch: string, name: string): string => {
   const firstHunk = patch.search(/^@@ /mu);

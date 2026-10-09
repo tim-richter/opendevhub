@@ -7,6 +7,7 @@ import {
   anchorFor,
   anchorFromRange,
   annotationsFor,
+  commentStops,
   commonDirectory,
   ensurePatchHeader,
   fileVersions,
@@ -775,6 +776,33 @@ describe("diff selection", () => {
       endSide: "additions",
     });
     expect(selectionFor(undefined)).toBeNull();
+  });
+});
+
+describe(commentStops, () => {
+  const file = (name: string) => ({
+    additions: 1,
+    deletions: 0,
+    file: name,
+    patch: "",
+    status: "modified" as const,
+  });
+  it("orders comments and notes by file as listed, then by line, skipping ones the diff can't show", () => {
+    const files = [file("b.ts"), file("a.ts")];
+    const stops = commentStops(
+      files,
+      [
+        { file: "a.ts", id: "c1", line: 3, text: "x" },
+        { file: "b.ts", id: "c2", line: 9, text: "y" },
+        { id: "general", text: "no line" },
+        { file: "gone.ts", id: "c3", line: 1, text: "z" },
+      ],
+      [
+        { file: "b.ts", id: "n1", line: 2, side: "old" },
+        { file: "a.ts", id: "n2", line: 1, side: "new" },
+      ]
+    );
+    expect(stops.map((s) => s.id)).toStrictEqual(["n1", "c2", "n2", "c1"]);
   });
 });
 

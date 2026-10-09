@@ -59,14 +59,25 @@ import { Tip } from "../../components/tip";
 import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { Link, useSearchParams } from "../../routing";
-import { newId, readDiffView, writeDiffView } from "../review/review";
+import {
+  commentStops,
+  newId,
+  readDiffView,
+  writeDiffView,
+} from "../review/review";
 import type {
   DiffNote,
   DiffView,
   LineAnchor,
   ReviewComment,
 } from "../review/review";
-import { FilesToggle, LayoutToggle, ReviewDiffs } from "../review/review-diffs";
+import {
+  CommentStepper,
+  FilesToggle,
+  LayoutToggle,
+  ReviewDiffs,
+  useCommentStepper,
+} from "../review/review-diffs";
 import {
   defaultPullMode,
   forgejoCommentNote,
@@ -332,6 +343,9 @@ const PullView = ({
     };
   }
   const { notes } = notesRef.current;
+  // Your draft comments only show while reviewing.
+  const shownComments = reviewing ? comments : [];
+  const stepper = useCommentStepper(commentStops(files, shownComments, notes));
 
   const pick = (
     kind: FeedbackKind,
@@ -670,8 +684,9 @@ const PullView = ({
                 imageUrl={(file, side) =>
                   forgejoImageUrl(owner, repo, number, file, side)
                 }
-                comments={reviewing ? comments : []}
+                comments={shownComments}
                 notes={notes}
+                focus={stepper.focus}
                 renderNote={renderNoteSlot}
                 open={reviewing ? open : undefined}
                 placeholder="Review comment…"
@@ -685,6 +700,7 @@ const PullView = ({
             <Empty title="No changes in this pull request" />
           ))}
         <div className="bg-background sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t px-4 py-3 md:-mx-8 md:px-8">
+          <CommentStepper stepper={stepper} />
           {reviewing ? (
             <>
               <span className="text-sm">
