@@ -1,6 +1,6 @@
-import { BookOpenIcon, RefreshCwIcon } from "lucide-react";
+import { BookOpenIcon, CircleCheckIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +12,25 @@ import type {
   IntegrationSettingsInput,
 } from "../../shared/integrations";
 import { testForgejoConnection } from "../api";
-import { Note, Page, PageHeader, Section } from "../components/page";
+import { Note, Page, PageHeader } from "../components/page";
 import { useDash } from "../dashboard-context";
 
 const DOCS_URL = "https://tim-richter.github.io/opendevhub/";
+
+/** One settings topic: its name and purpose on the left, the controls on the right. */
+const SettingsGroup = (props: {
+  title: string;
+  hint: string;
+  children: ReactNode;
+}) => (
+  <section className="grid gap-x-10 gap-y-4 border-t pt-6 md:grid-cols-[13rem_minmax(0,1fr)]">
+    <div className="flex flex-col gap-1">
+      <h2 className="font-semibold">{props.title}</h2>
+      <p className="text-muted-foreground text-sm">{props.hint}</p>
+    </div>
+    <div className="min-w-0">{props.children}</div>
+  </section>
+);
 
 export const SettingsPage = () => {
   const { forgejo, forgejoError, updateForgejo, jira, jiraError, updateJira } =
@@ -24,7 +39,7 @@ export const SettingsPage = () => {
     <Page>
       <PageHeader
         title="Settings"
-        description="Optional integrations for your dashboard."
+        description="Project discovery and optional integrations."
       />
       <GeneralSection />
       <IntegrationSettingsForm
@@ -71,6 +86,7 @@ const IntegrationSettingsForm = ({
   const [saved, setSaved] = useState(false);
   const [connection, setConnection] = useState<string>();
   const [testing, setTesting] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const test = async () => {
     setTesting(true);
     setError(undefined);
@@ -100,6 +116,7 @@ const IntegrationSettingsForm = ({
     setEnabled(settings.enabled);
     setUrl(settings.url);
     setToken("");
+    setReplacing(false);
   }, [settings]);
 
   const save = async (e?: FormEvent, removeToken = false) => {
@@ -131,9 +148,9 @@ const IntegrationSettingsForm = ({
   const loading = !settings && !settingsError;
 
   return (
-    <Section title={name} hint={hint}>
+    <SettingsGroup title={name} hint={hint}>
       <form
-        className="flex max-w-2xl flex-col gap-5 px-4 py-4"
+        className="flex max-w-2xl flex-col gap-5"
         onSubmit={(e) => void save(e)}
       >
         <fieldset
@@ -172,31 +189,43 @@ const IntegrationSettingsForm = ({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`${id}-token`}>Access token</Label>
-            <Input
-              id={`${id}-token`}
-              type="password"
-              value={token}
-              onChange={(e) => {
-                setToken(e.target.value);
-                setSaved(false);
-              }}
-              placeholder={
-                settings?.hasToken
-                  ? "Token saved — leave blank to keep it"
-                  : `Paste a ${name} access token`
-              }
-              autoComplete="new-password"
-              spellCheck={false}
-            />
+            {settings?.hasToken && !replacing ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-ok inline-flex items-center gap-1.5 text-sm">
+                  <CircleCheckIcon className="size-4" /> Token saved
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setReplacing(true)}
+                >
+                  Replace
+                </Button>
+              </div>
+            ) : (
+              <Input
+                id={`${id}-token`}
+                type="password"
+                value={token}
+                onChange={(e) => {
+                  setToken(e.target.value);
+                  setSaved(false);
+                }}
+                placeholder={`Paste a ${name} access token`}
+                autoComplete="new-password"
+                spellCheck={false}
+                autoFocus={replacing}
+              />
+            )}
             <p className="text-muted-foreground text-sm">
-              {tokenHelp} Changing the URL requires a new token.
-            </p>
-            <p className="text-muted-foreground text-sm">
-              Saved in your operating system&apos;s credential store. The token
-              is never written to the settings file or returned to the browser.
+              {tokenHelp} Changing the URL requires a new token. Tokens live in
+              your operating system&apos;s credential store, never in the
+              settings file or the browser.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit">{busy ? "Saving…" : "Save"}</Button>
             {name === "Forgejo" && (
               <Button
                 type="button"
@@ -207,14 +236,22 @@ const IntegrationSettingsForm = ({
                 {testing ? "Testing…" : "Test connection"}
               </Button>
             )}
-            <Button type="submit">{busy ? "Saving…" : "Save settings"}</Button>
             {settings?.hasToken && (
               <Button
                 type="button"
-                variant="outline"
-                onClick={() => void save(undefined, true)}
+                variant="ghost"
+                className="text-destructive hover:text-destructive ml-auto"
+                onClick={() => {
+                  if (
+                    confirm(
+                      `Remove the ${name} token and turn ${name} off? You'll need a new token to turn it back on.`
+                    )
+                  ) {
+                    void save(undefined, true);
+                  }
+                }}
               >
-                Remove token and disable
+                Remove token…
               </Button>
             )}
           </div>
@@ -226,7 +263,7 @@ const IntegrationSettingsForm = ({
         )}
         {(error || settingsError) && (
           <div role="alert">
-            <Note warn>{error || settingsError}</Note>
+            <Note error>{error || settingsError}</Note>
           </div>
         )}
         {connection && (
@@ -240,30 +277,39 @@ const IntegrationSettingsForm = ({
           </p>
         )}
       </form>
-    </Section>
+    </SettingsGroup>
   );
 };
 
 const GeneralSection = () => {
   const { snapshot, rescan, scanning } = useDash();
+  const roots = snapshot?.roots ?? [];
   return (
-    <Section title="General" hint="Project discovery and help">
-      <div className="flex flex-wrap gap-2 px-4 py-4">
-        <Button
-          variant="outline"
-          disabled={scanning}
-          onClick={rescan}
-          title={snapshot?.roots.join("\n")}
-        >
-          <RefreshCwIcon className={scanning ? "animate-spin" : undefined} />{" "}
-          {scanning ? "Scanning…" : "Rescan roots"}
-        </Button>
-        <Button asChild variant="outline">
-          <a href={DOCS_URL} target="_blank" rel="noreferrer">
-            <BookOpenIcon /> Documentation
-          </a>
-        </Button>
+    <SettingsGroup title="Projects" hint="Where opendevhub looks for projects">
+      <div className="flex flex-col gap-3">
+        {roots.length > 0 && (
+          <ul className="flex flex-col gap-1 font-mono text-xs">
+            {roots.map((root) => (
+              <li key={root}>{root}</li>
+            ))}
+          </ul>
+        )}
+        <p className="text-muted-foreground text-sm">
+          Roots come from <code className="font-mono text-xs">--root</code> when
+          opendevhub starts (the current directory without it).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={scanning} onClick={rescan}>
+            <RefreshCwIcon className={scanning ? "animate-spin" : undefined} />{" "}
+            {scanning ? "Scanning…" : "Rescan"}
+          </Button>
+          <Button asChild variant="ghost">
+            <a href={DOCS_URL} target="_blank" rel="noreferrer">
+              <BookOpenIcon /> Documentation
+            </a>
+          </Button>
+        </div>
       </div>
-    </Section>
+    </SettingsGroup>
   );
 };

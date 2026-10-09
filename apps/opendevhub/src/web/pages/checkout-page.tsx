@@ -9,7 +9,6 @@ import {
   PlusIcon,
   ServerIcon,
   TerminalIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -51,6 +50,7 @@ import {
   TabLink,
 } from "../components/page";
 import { projectFlags, StartStopButton } from "../components/project-actions";
+import { PublishedPr } from "../components/published-pr";
 import { ResourceStat } from "../components/resource-stat";
 import { SessionList } from "../components/session-list";
 import { Count, StatusDot } from "../components/status";
@@ -175,6 +175,11 @@ export const CheckoutPage = () => {
               </span>
             )}
             {env && <EnvBadge env={env} />}
+            <PublishedPr
+              projectId={view.project.id}
+              directory={checkout.directory}
+              enabled={running}
+            />
             {agent && (
               <Badge
                 variant="outline"
@@ -210,25 +215,17 @@ export const CheckoutPage = () => {
                 view={view}
                 directory={checkout.directory}
                 hostPath={checkout.hostPath}
-                icon
               />
             )}
-            <ContainerMenu view={view} checkout={checkout} />
-            {checkout.worktree && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground"
-                aria-label={`Remove worktree ${checkout.label}`}
-                title="Remove worktree"
-                disabled={!running || !!pending}
-                onClick={() =>
-                  remove(checkout, () => void navigate(projectPath))
-                }
-              >
-                <XIcon />
-              </Button>
-            )}
+            <ContainerMenu
+              view={view}
+              checkout={checkout}
+              onRemoveWorktree={
+                checkout.worktree && !pending
+                  ? () => remove(checkout, () => void navigate(projectPath))
+                  : undefined
+              }
+            />
           </>
         }
       />
@@ -514,11 +511,8 @@ const PortRow = ({ port: p }: { port: ForwardedPort }) => {
         localhost:{p.hostPort} <ExternalLinkIcon className="size-3" />
       </a>
       {moved && (
-        <span
-          className="text-muted-foreground"
-          title={`Port ${p.containerPort} was taken on this machine`}
-        >
-          moved
+        <span className="text-muted-foreground truncate text-xs">
+          ({p.containerPort} was taken here)
         </span>
       )}
       <span className="text-muted-foreground ml-auto truncate">{p.label}</span>

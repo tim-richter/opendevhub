@@ -1,3 +1,5 @@
+import type { InfoIcon } from "lucide-react";
+import { CircleAlertIcon, TriangleAlertIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { NavLink } from "react-router";
 
@@ -143,22 +145,42 @@ export const GroupTitle = (props: {
   </h3>
 );
 
-/** A quiet inline notice; `warn` tints it. */
+/** A quiet inline notice; `warn` and `error` tint it and add an icon. */
 export const Note = (props: {
   warn?: boolean;
+  error?: boolean;
   children: ReactNode;
   className?: string;
-}) => (
-  <p
-    className={cn(
-      "bg-muted text-muted-foreground rounded-lg px-3 py-2 text-sm",
-      props.warn && "bg-warn/10 text-warn",
-      props.className
-    )}
-  >
-    {props.children}
-  </p>
-);
+}) => {
+  let Icon: typeof InfoIcon | undefined;
+  if (props.error) {
+    Icon = CircleAlertIcon;
+  } else if (props.warn) {
+    Icon = TriangleAlertIcon;
+  }
+  return (
+    <div
+      className={cn(
+        "bg-muted text-muted-foreground flex items-start gap-2 rounded-md px-3 py-2 text-sm",
+        props.warn && "border-warn/35 bg-warn/8 text-foreground border",
+        props.error &&
+          "border-destructive/35 bg-destructive/8 text-foreground border",
+        props.className
+      )}
+    >
+      {Icon && (
+        <Icon
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            props.error ? "text-destructive" : "text-warn"
+          )}
+          aria-hidden
+        />
+      )}
+      <div className="min-w-0 flex-1 break-words">{props.children}</div>
+    </div>
+  );
+};
 
 export const muted = "text-sm text-muted-foreground";
 
@@ -177,7 +199,8 @@ export const TabLink = (props: {
     end={props.end}
     className={({ isActive }) =>
       cn(
-        "inline-flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-sm font-medium whitespace-nowrap transition-colors",
+        // Phones drop the icons so all four checkout tabs fit.
+        "inline-flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-sm font-medium whitespace-nowrap transition-colors max-sm:[&>svg]:hidden",
         isActive
           ? "border-foreground text-foreground"
           : "text-muted-foreground hover:text-foreground border-transparent"
@@ -191,7 +214,7 @@ export const TabLink = (props: {
 export const TabBar = (props: { children: ReactNode; label?: string }) => (
   <nav
     aria-label={props.label}
-    className="-mb-2 flex gap-5 overflow-x-auto shadow-[inset_0_-1px_var(--border)]"
+    className="-mb-2 flex gap-4 overflow-x-auto shadow-[inset_0_-1px_var(--border)] sm:gap-5"
   >
     {props.children}
   </nav>

@@ -1,6 +1,3 @@
-import { CpuIcon, MemoryStickIcon } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 import { formatCpu, formatMemory } from "../resources";
@@ -19,13 +16,18 @@ export const ResourceStat = (props: {
     count === undefined
       ? ""
       : ` · ${count} ${count === 1 ? "container" : "containers"}`;
-  const tag = "gap-1 font-normal text-muted-foreground tabular-nums";
+  const value = "text-foreground/80 font-medium";
   return (
-    <span className={cn("inline-flex items-center gap-1.5", props.className)}>
+    <span
+      className={cn(
+        "text-muted-foreground inline-flex items-center gap-3 text-xs whitespace-nowrap tabular-nums",
+        props.className
+      )}
+    >
       <Tip label={`CPU ${formatCpu(cpu)}${containers}`}>
-        <Badge variant="outline" className={tag}>
-          <CpuIcon aria-label="CPU" /> {formatCpu(cpu)}
-        </Badge>
+        <span tabIndex={0}>
+          CPU <span className={value}>{formatCpu(cpu)}</span>
+        </span>
       </Tip>
       <Tip
         label={
@@ -34,9 +36,9 @@ export const ResourceStat = (props: {
             : `Memory ${formatMemory(memory)} of ${formatMemory(memoryLimit)}`
         }
       >
-        <Badge variant="outline" className={tag}>
-          <MemoryStickIcon aria-label="Memory" /> {formatMemory(memory)}
-        </Badge>
+        <span tabIndex={0}>
+          RAM <span className={value}>{formatMemory(memory)}</span>
+        </span>
       </Tip>
     </span>
   );

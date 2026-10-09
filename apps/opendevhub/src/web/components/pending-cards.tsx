@@ -1,5 +1,5 @@
 import { ExternalLinkIcon } from "lucide-react";
-import { Fragment, useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -336,8 +336,22 @@ const FormCard = (props: {
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const ref = useAutoFocus(props.takeFocus);
-  // Forms only use j/k; Enter in a form field submits the form natively.
-  const onKeyDown = useCardKeys(() => undefined);
+  // Forms with several questions start folded to their title, so a page of them stays scannable.
+  const [open, setOpen] = useState(form.fields.length <= 1);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  // Enter on a folded card unfolds it; once open, Enter in a field submits the form natively.
+  const onKeyDown = useCardKeys((action) => {
+    if (action === "once" && !open) {
+      setOpen(true);
+    }
+  });
+  useEffect(() => {
+    if (open && form.fields.length > 1) {
+      formRef.current
+        ?.querySelector<HTMLElement>("input, textarea, button[role=radio]")
+        ?.focus();
+    }
+  }, [open, form.fields.length]);
 
   if (!formSupported(form.fields)) {
     return (
@@ -382,9 +396,55 @@ const FormCard = (props: {
   // opencode takes no reason when a form is cancelled, so Dismiss asks for none.
   const dismiss = () => run(() => dismissForm(props.projectId, form.id));
 
+  if (!open) {
+    return (
+      <section
+        ref={ref}
+        className={CARD}
+        data-pending-card
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        aria-label={form.title}
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="min-w-0 flex-1">
+            {form.title}{" "}
+            <span className="text-muted-foreground">
+              · {form.fields.length} questions
+            </span>
+          </p>
+          <div className={ACTIONS}>
+            <Button size="sm" disabled={busy} onClick={() => setOpen(true)}>
+              Answer{" "}
+              <Kbd className="bg-primary-foreground/15 text-primary-foreground">
+                ↵
+              </Kbd>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={dismiss}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+        {error && (
+          <p className="text-destructive text-xs" role="alert">
+            {error}
+          </p>
+        )}
+      </section>
+    );
+  }
+
   return (
     <form
-      ref={ref}
+      ref={(el) => {
+        formRef.current = el;
+        ref(el);
+      }}
       className={CARD}
       data-pending-card
       tabIndex={0}

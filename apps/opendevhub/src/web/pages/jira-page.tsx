@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  ArrowRightIcon,
   ExternalLinkIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -30,6 +31,7 @@ import {
   PageHeader,
   Section,
 } from "../components/page";
+import { When } from "../components/when";
 import { useDash } from "../dashboard-context";
 import { taskPath } from "../tasks";
 
@@ -89,7 +91,7 @@ const JiraGate = ({ children }: { children: ReactNode }) => {
   if (!jira?.enabled) {
     return (
       <Empty title="Jira is disabled">
-        {jiraError && <Note warn>{jiraError}</Note>}
+        {jiraError && <Note error>{jiraError}</Note>}
         <p className="text-muted-foreground text-sm">
           Connect your Jira instance to browse tickets and create tasks.
         </p>
@@ -122,11 +124,11 @@ export const JiraPage = () => {
   return (
     <Page>
       <PageHeader
-        title="Jira"
+        title="Tickets"
         description={
           search
-            ? `Tickets matching “${search}”.`
-            : "Tickets assigned to you, most recently updated first."
+            ? `Jira tickets matching “${search}”.`
+            : "Jira tickets assigned to you, most recently updated first."
         }
         actions={
           <Button variant="outline" size="sm" disabled={busy} onClick={refresh}>
@@ -168,7 +170,7 @@ export const JiraPage = () => {
         )}
         {error && (
           <div role="alert">
-            <Note warn>{error}</Note>
+            <Note error>{error}</Note>
           </div>
         )}
         {data?.tickets.length === 0 && (
@@ -182,7 +184,7 @@ export const JiraPage = () => {
         )}
         {!!data?.tickets.length && (
           <Section
-            title="Tickets"
+            title={search ? "Results" : "Assigned to you"}
             hint={`${startAt + 1}–${startAt + data.tickets.length} of ${data.total}`}
           >
             <ul className="divide-y">
@@ -268,6 +270,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
       }
     }
   }
+  const [firstTask] = linked.keys();
   const tooLarge =
     source &&
     (jiraTaskPrompt(source).length > 100_000 || source.title.length > 1000);
@@ -295,13 +298,21 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                 </a>
               </Button>
             )}
+            {firstTask && (
+              <Button asChild size="sm">
+                <Link to={firstTask}>
+                  <ArrowRightIcon /> Open task
+                </Link>
+              </Button>
+            )}
             {source && (
               <Button
                 size="sm"
+                variant={firstTask ? "outline" : "default"}
                 disabled={!!tooLarge}
                 onClick={() => newTask(undefined, { jira: source })}
               >
-                <PlusIcon /> Create task
+                <PlusIcon /> {firstTask ? "Another task" : "Create task"}
               </Button>
             )}
             <Button
@@ -323,7 +334,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {error && (
           <div role="alert">
-            <Note warn>{error}</Note>
+            <Note error>{error}</Note>
           </div>
         )}
         {tooLarge && (
@@ -334,31 +345,8 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {data && (
           <>
-            <Section title="Details">
-              <dl className="[&_dt]:text-muted-foreground grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 px-4 py-4 text-sm">
-                <dt>Assignee</dt>
-                <dd>{data.assignee ?? "Unassigned"}</dd>
-                <dt>Reporter</dt>
-                <dd>{data.reporter ?? "—"}</dd>
-                <dt>Priority</dt>
-                <dd>{data.priority ?? "—"}</dd>
-                <dt>Labels</dt>
-                <dd className="break-words">{data.labels.join(", ") || "—"}</dd>
-                <dt>Updated</dt>
-                <dd>{data.updatedAt}</dd>
-              </dl>
-            </Section>
-            <Section title="Description">
-              {data.description ? (
-                <MarkdownBody className="px-4 py-4">
-                  {data.description}
-                </MarkdownBody>
-              ) : (
-                <p className="px-4 py-4 text-sm">No description provided.</p>
-              )}
-            </Section>
             {linked.size > 0 && (
-              <Section title="Tasks created from this ticket">
+              <Section title="Tasks from this ticket" hint={linked.size}>
                 <ul className="divide-y">
                   {[...linked].map(([url, task]) => (
                     <li key={url}>
@@ -373,6 +361,31 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                 </ul>
               </Section>
             )}
+            <Section title="Details">
+              <dl className="[&_dt]:text-muted-foreground grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 px-4 py-4 text-sm">
+                <dt>Assignee</dt>
+                <dd>{data.assignee ?? "Unassigned"}</dd>
+                <dt>Reporter</dt>
+                <dd>{data.reporter ?? "—"}</dd>
+                <dt>Priority</dt>
+                <dd>{data.priority ?? "—"}</dd>
+                <dt>Labels</dt>
+                <dd className="break-words">{data.labels.join(", ") || "—"}</dd>
+                <dt>Updated</dt>
+                <dd>
+                  <When at={data.updatedAt} />
+                </dd>
+              </dl>
+            </Section>
+            <Section title="Description">
+              {data.description ? (
+                <MarkdownBody className="px-4 py-4">
+                  {data.description}
+                </MarkdownBody>
+              ) : (
+                <p className="px-4 py-4 text-sm">No description provided.</p>
+              )}
+            </Section>
           </>
         )}
       </JiraGate>

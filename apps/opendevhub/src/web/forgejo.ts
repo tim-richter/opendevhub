@@ -541,3 +541,24 @@ export const saveAiRun = (
   run: AiReviewRun | undefined
 ): void =>
   saveForgejoPreference(aiRunKey(pull), run ? JSON.stringify(run) : "");
+
+const FORGEJO_PULL =
+  /^(?<owner>[^/]+)\/(?<repo>[^/]+)\/pulls\/(?<number>\d+)\/?$/u;
+
+/** `/forgejo/<owner>/<repo>/<n>` when the URL is a pull request on the configured Forgejo. */
+export const forgejoRoute = (
+  prUrl: string,
+  forgejoUrl: string | undefined
+): string | undefined => {
+  if (!forgejoUrl) {
+    return undefined;
+  }
+  const base = forgejoUrl.replace(/\/$/u, "");
+  if (!prUrl.startsWith(`${base}/`)) {
+    return undefined;
+  }
+  const groups = FORGEJO_PULL.exec(prUrl.slice(base.length + 1))?.groups;
+  return groups
+    ? `/forgejo/${groups.owner}/${groups.repo}/${groups.number}`
+    : undefined;
+};

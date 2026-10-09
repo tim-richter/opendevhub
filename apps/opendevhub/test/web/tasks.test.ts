@@ -8,6 +8,7 @@ import type {
 } from "../../src/shared/types";
 import {
   diffStats,
+  fileMatrix,
   startStepLabel,
   taskPath,
   formatCost,
@@ -326,5 +327,50 @@ describe("starting tasks", () => {
 
   it("goes to the task's page", () => {
     expect(taskPath("p 1", "tsk_1")).toBe("/p/p%201/t/tsk_1");
+  });
+});
+
+describe("fileMatrix", () => {
+  const review = (
+    files: { file: string; additions: number; deletions?: number }[]
+  ): ReviewData =>
+    ({
+      files: files.map((f) => ({
+        additions: f.additions,
+        deletions: f.deletions ?? 0,
+        file: f.file,
+        status: "modified",
+      })),
+    }) as unknown as ReviewData;
+
+  it("lines up each file across variants, the ones they disagree on first", () => {
+    const rows = fileMatrix([
+      review([
+        { additions: 4, file: "src/a.ts" },
+        { additions: 2, file: "src/b.ts" },
+      ]),
+      review([
+        { additions: 4, file: "src/a.ts" },
+        { additions: 9, file: "src/c.ts" },
+      ]),
+    ]);
+    expect(rows.map((r) => [r.file, r.same])).toEqual([
+      ["src/b.ts", false],
+      ["src/c.ts", false],
+      ["src/a.ts", true],
+    ]);
+    expect(rows[0].cells[1]).toBeUndefined();
+    expect(rows[1].cells[1]).toMatchObject({ additions: 9 });
+  });
+
+  it("treats a variant whose changes haven't loaded as touching nothing", () => {
+    const rows = fileMatrix([review([{ additions: 1, file: "x" }]), undefined]);
+    expect(rows).toEqual([
+      {
+        cells: [{ additions: 1, deletions: 0, status: "modified" }, undefined],
+        file: "x",
+        same: false,
+      },
+    ]);
   });
 });

@@ -1,4 +1,4 @@
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import type { ProjectView, SessionStatus } from "../../shared/types";
+import { checkoutPath } from "../checkouts";
 import { Empty, muted, Page, Section, Segmented } from "../components/page";
 import { AllContainersMenu } from "../components/project-actions";
 import { ResourceStat } from "../components/resource-stat";
@@ -33,6 +34,12 @@ import { formatCost } from "../tasks";
 import { formatUsage } from "../usage";
 
 type Filter = "all" | "running" | "stopped";
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "running", label: "Running" },
+  // Stopped, starting and broken containers alike.
+  { id: "stopped", label: "Not running" },
+];
 const ACTIVE_LIMIT = 6;
 const FILTER_THRESHOLD = 6;
 /** More sessions than this and a project's lights end in a "+n". */
@@ -42,7 +49,7 @@ const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
 export const Overview = () => {
-  const { snapshot, newTask } = useDash();
+  const { snapshot, newTask, openAddProject, rescan, scanning } = useDash();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   if (!snapshot) {
@@ -57,7 +64,7 @@ export const Overview = () => {
     (v) => v.runtime.containerState === "running"
   ).length;
 
-  const isUp = (v: ProjectView) => v.runtime.containerState !== "stopped";
+  const isUp = (v: ProjectView) => v.runtime.containerState === "running";
   const rows = [...snapshot.projects]
     .toSorted((a, b) => a.project.name.localeCompare(b.project.name))
     .filter((v) => {
@@ -85,12 +92,15 @@ export const Overview = () => {
         <div className="flex min-w-0 flex-col gap-2">
           <h1 className="sr-only">Overview</h1>
           <p
-            className={cn(
-              "text-2xl font-semibold tracking-tight text-balance",
-              attention.length > 0 && "text-attention"
-            )}
+            className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-balance"
             aria-live="polite"
           >
+            {attention.length > 0 && (
+              <span
+                className="bg-attention inline-block size-2.5 shrink-0 rounded-full"
+                aria-hidden
+              />
+            )}
             {headline}
           </p>
           {hasProjects && (
@@ -116,13 +126,15 @@ export const Overview = () => {
             </p>
           )}
         </div>
-        <Button
-          onClick={() => newTask()}
-          title="New task (n)"
-          className="max-md:w-full"
-        >
-          <PlusIcon /> New task
-        </Button>
+        {hasProjects && (
+          <Button
+            onClick={() => newTask()}
+            title="New task (n)"
+            className="max-md:w-full"
+          >
+            <PlusIcon /> New task
+          </Button>
+        )}
       </header>
 
       {attention.length > 0 && (
@@ -145,10 +157,7 @@ export const Overview = () => {
               label="Show projects"
               value={filter}
               onChange={setFilter}
-              options={(["all", "running", "stopped"] as const).map((f) => ({
-                id: f,
-                label: f.charAt(0).toUpperCase() + f.slice(1),
-              }))}
+              options={FILTERS}
             />
           )}
           {snapshot.projects.length > FILTER_THRESHOLD && (
@@ -164,11 +173,24 @@ export const Overview = () => {
         {hasProjects ? (
           <ProjectRack views={rows} />
         ) : (
-          <Empty title="No projects found">
-            <p className={muted}>
+          <Empty title="Add your first project">
+            <p className={cn(muted, "max-w-md text-balance")}>
               No folder with a devcontainer was found under{" "}
-              {snapshot.roots.join(", ") || "the configured roots"}.
+              <code className="font-mono text-xs">
+                {snapshot.roots.join(", ") || "the configured roots"}
+              </code>
+              . Add a git repo and opendevhub sets up its devcontainer, or start
+              opendevhub with <code className="font-mono text-xs">--root</code>{" "}
+              pointing at your code.
             </p>
+            <div className="mt-2 flex flex-wrap justify-center gap-2">
+              <Button onClick={openAddProject}>
+                <PlusIcon /> Add project
+              </Button>
+              <Button variant="outline" disabled={scanning} onClick={rescan}>
+                <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan"}
+              </Button>
+            </div>
           </Empty>
         )}
       </section>
@@ -199,13 +221,29 @@ const ProjectRack = ({ views }: { views: ProjectView[] }) => {
     return <p className={muted}>No projects match.</p>;
   }
   return (
-    <ul className="bg-card overflow-hidden rounded-xl border">
+    <ul className="bg-card overflow-hidden rounded-lg border">
+      <li
+        aria-hidden
+        className={cn(
+          "text-muted-foreground grid items-center gap-x-5 border-b px-4 py-2 text-xs max-md:hidden",
+          RACK_COLUMNS
+        )}
+      >
+        <span>Project</span>
+        <span>Sessions</span>
+        <span>Status</span>
+        <span>Ports</span>
+        <span className="justify-self-end">Usage</span>
+        <span />
+      </li>
       {views.map((v) => (
         <ProjectRow key={v.project.id} view={v} />
       ))}
     </ul>
   );
 };
+
+const RACK_COLUMNS = "md:grid-cols-[minmax(0,1fr)_9rem_8rem_4.5rem_11rem_2rem]";
 
 const LIGHT: Record<SessionStatus, string> = {
   idle: "bg-muted-foreground/30",
@@ -272,7 +310,7 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
       className={cn(
         "hover:bg-muted/50 relative grid items-center gap-x-5 gap-y-1.5 border-t px-4 py-3 first:border-t-0",
         "grid-cols-[minmax(0,1fr)_auto_auto]",
-        "md:grid-cols-[minmax(0,1fr)_9rem_8rem_4.5rem_10.5rem_2rem]",
+        RACK_COLUMNS,
         tone === "attention" && "shadow-[inset_3px_0_var(--attention)]",
         tone === "error" && "shadow-[inset_3px_0_var(--destructive)]"
       )}
@@ -316,7 +354,14 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
         {status}
       </span>
       <span className="text-muted-foreground text-xs whitespace-nowrap tabular-nums max-md:hidden">
-        {counts.ports > 0 && plural(counts.ports, "port")}
+        {counts.ports > 0 && (
+          <Link
+            to={checkoutPath(view.project.id, "", "runtime")}
+            className="hover:text-foreground relative hover:underline"
+          >
+            {plural(counts.ports, "port")}
+          </Link>
+        )}
       </span>
       <span className="relative justify-self-end max-md:hidden">
         {resources && <ResourceStat {...resources} />}

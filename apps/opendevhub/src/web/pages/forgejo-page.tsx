@@ -67,6 +67,7 @@ import {
   ForgejoWorktreeDialog,
 } from "../components/forgejo-review-dialogs";
 import { ForgejoStack } from "../components/forgejo-stack";
+import { LocalCheckouts } from "../components/local-checkouts";
 import { MarkdownBody } from "../components/markdown-body";
 import {
   Chip,
@@ -84,6 +85,7 @@ import {
 } from "../components/review-diffs";
 import { DiffLinesSkeleton } from "../components/skeletons";
 import { Tip } from "../components/tip";
+import { When } from "../components/when";
 import { useDash } from "../dashboard-context";
 import {
   defaultPullMode,
@@ -117,7 +119,7 @@ const ForgejoGate = ({ children }: { children: ReactNode }) => {
   if (!forgejo?.enabled) {
     return (
       <Empty title="Forgejo is disabled">
-        {forgejoError && <Note warn>{forgejoError}</Note>}
+        {forgejoError && <Note error>{forgejoError}</Note>}
         <p className="text-muted-foreground text-sm">
           Connect your Forgejo account to see your pull requests.
         </p>
@@ -555,6 +557,7 @@ const PullView = ({
             />
           </div>
         </div>
+        <LocalCheckouts details={details} />
         <p className="text-muted-foreground -mt-2 text-sm">
           {reviewing
             ? "Write your review: comment on lines, and accept or dismiss what an AI review suggests."
@@ -645,7 +648,7 @@ const PullView = ({
         )}
         {patch.error && (
           <div role="alert">
-            <Note warn>{patch.error.message}</Note>
+            <Note error>{patch.error.message}</Note>
             <Button variant="link" onClick={() => void patch.refetch()}>
               Retry diff
             </Button>
@@ -672,7 +675,7 @@ const PullView = ({
           ) : (
             <Empty title="No changes in this pull request" />
           ))}
-        <div className="bg-background/95 supports-backdrop-filter:bg-background/80 sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t py-3 backdrop-blur">
+        <div className="bg-background sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t px-4 py-3 md:-mx-8 md:px-8">
           {reviewing ? (
             <>
               <span className="text-sm">
@@ -881,11 +884,11 @@ export const ForgejoPage = () => {
   return (
     <Page>
       <PageHeader
-        title="Forgejo"
+        title="Pull requests"
         description={
           username
-            ? `Pull requests for ${username}.`
-            : "Your pull requests and review inbox."
+            ? `On Forgejo, for ${username}.`
+            : "Your Forgejo pull requests and review inbox."
         }
         actions={
           <Refresh busy={query.isFetching} onClick={() => query.refetch()} />
@@ -988,7 +991,7 @@ export const ForgejoPage = () => {
                             <code className="text-xs">{pull.stack.base}</code>
                           </>
                         )}{" "}
-                        · Updated {new Date(pull.updatedAt).toLocaleString()}
+                        · Updated <When at={pull.updatedAt} />
                       </p>
                       {depth === 0 && pull.stack?.parent && (
                         <p className="text-muted-foreground flex items-center gap-1 text-sm">
@@ -1020,7 +1023,7 @@ export const ForgejoPage = () => {
         )}
         {query.dataUpdatedAt > 0 && (
           <p className="text-muted-foreground text-xs">
-            Last refreshed {new Date(query.dataUpdatedAt).toLocaleTimeString()}
+            Last refreshed <When at={query.dataUpdatedAt} />
             {query.isFetching && " · Refreshing…"}
           </p>
         )}

@@ -10,7 +10,7 @@ This integration uses Jira Server / Data Center's REST v2 API with Bearer authen
 
 ## Browse tickets
 
-The **Jira** sidebar link appears when enabled. The list defaults to tickets assigned to the connected account, most recently updated first. Search by an exact key, such as `APP-123`, or a phrase in the ticket text. Searches include other assignees, limited to projects accessible to your token. **Assigned to me** restores the default list. **Next page** loads more results; **Refresh** reloads the current page.
+**Tickets** appears in the sidebar when Jira is enabled. The list defaults to tickets assigned to the connected account, most recently updated first. Search by an exact key, such as `APP-123`, or a phrase in the ticket text. Searches include other assignees, limited to projects accessible to your token. **Assigned to me** restores the default list. **Next page** loads more results; **Refresh** reloads the current page.
 
 Select a ticket to see its description, project, status, type, assignee, reporter, priority, labels, and update time. Descriptions are displayed as text, including Jira wiki markup. **Open in Jira** opens the original ticket.
 
@@ -24,6 +24,6 @@ Every task variant stores the originating Jira instance, key, title, and origina
 
 The URL, enabled state, and opaque credential reference are saved in `~/.config/opendevhub/integrations/jira.json` (or under `XDG_CONFIG_HOME`), with mode `0600` inside a `0700` directory. The token is stored separately in macOS Keychain, Windows Credential Manager, or persistent Secret Service on Linux, using its own Jira service. The token is never returned to the browser, saved in the settings file, or injected into task containers. An unavailable or locked credential store causes an actionable error; there is no plaintext fallback.
 
-Leave the token field blank to keep the saved token. Changing the instance URL requires a new token. Disabling retains the credential; **Remove token and disable** deletes it.
+A saved token shows as **Token saved**; **Replace** lets you paste a new one. Changing the instance URL requires a new token. Disabling retains the credential; **Remove token…** deletes it and turns Jira off.
 
 Jira access is read-only: creating a task does not change ticket status, assignments, or comments. Individual API responses are limited to 20 MiB, and task prompts and description snapshots are limited to 100,000 characters.

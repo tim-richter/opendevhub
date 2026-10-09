@@ -198,18 +198,25 @@ export const CleanupPage = () => {
   const now = Date.now();
   const groups = branchGroups(plan);
   const notes = riskyNotes(plan, selected);
+  /** A tri-state checkbox for a section's header: every safe row, some, or none. */
   const selectAll = (kind: CleanupItem["kind"]) => {
     const rows = plan.items.filter((i) => i.kind === kind && !isRisky(i));
-    const allOn = rows.length > 0 && rows.every((i) => selected.has(i.id));
+    const on = rows.filter((i) => selected.has(i.id)).length;
+    let state: boolean | "indeterminate" = false;
+    if (on > 0) {
+      state = on === rows.length ? true : "indeterminate";
+    }
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={rows.length === 0}
-        onClick={() => setSelected(toggleAll(plan, selected, kind, !allOn))}
-      >
-        {allOn ? "Select none" : "Select all"}
-      </Button>
+      <label className="text-muted-foreground flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={state}
+          disabled={rows.length === 0}
+          onCheckedChange={() =>
+            setSelected(toggleAll(plan, selected, kind, state !== true))
+          }
+        />
+        {on > 0 ? `${on} of ${rows.length}` : "Select all"}
+      </label>
     );
   };
 
@@ -265,7 +272,10 @@ export const CleanupPage = () => {
                   </Note>
                 )}
                 {items.length === 0 && !project.skipped && (
-                  <p className={cn(muted, "px-4 py-2")}>Nothing to clean up.</p>
+                  <p className={cn(muted, "px-4 py-2")}>
+                    No merged or deleted branches
+                    {project.warning ? ", going by the local refs." : "."}
+                  </p>
                 )}
                 {items.map((item) => (
                   <Row

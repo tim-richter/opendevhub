@@ -26,6 +26,7 @@ import { useForgejoQuery } from "../hooks/use-forgejo";
 import { usePullFeedback } from "../hooks/use-pull-feedback";
 import { MarkdownBody } from "./markdown-body";
 import { Chip, Note, PanelSection, Section } from "./page";
+import { When } from "./when";
 
 export interface ForgejoFeedback {
   comments: ForgejoComment[];
@@ -74,7 +75,7 @@ export const RequestState = ({
     )}
     {query.error && (
       <div role="alert" className="p-4">
-        <Note warn>{query.error.message}</Note>
+        <Note error>{query.error.message}</Note>
         <Button variant="link" onClick={() => void query.refetch()}>
           Retry
         </Button>
@@ -166,8 +167,6 @@ const reviewerStatus: Record<string, { label: string; className: string }> = {
   REQUEST_REVIEW: { className: "text-warn", label: "Requested" },
 };
 
-const formatTime = (at: string) => (at ? new Date(at).toLocaleString() : "");
-
 /**
  * The pull request's description and conversation, with a sidebar of its stack, checks and
  * reviewers that stays in view while the conversation scrolls.
@@ -203,7 +202,7 @@ export const ForgejoContext = ({
         <MessageSquareIcon className="text-muted-foreground size-4 shrink-0" />
         <strong>{c.author}</strong>
         <span className="text-muted-foreground">
-          commented {formatTime(c.updatedAt)}
+          commented <When at={c.updatedAt} />
         </span>
         {c.resolved && <Chip>Resolved</Chip>}
       </div>
@@ -240,7 +239,7 @@ export const ForgejoContext = ({
         <strong>{r.author}</strong>
         <span className="text-muted-foreground">
           {reviewVerb[r.state] ?? r.state.toLowerCase().replaceAll("_", " ")}{" "}
-          {formatTime(r.submittedAt)}
+          <When at={r.submittedAt} />
         </span>
         {r.commit && (
           <code className="text-muted-foreground text-xs">

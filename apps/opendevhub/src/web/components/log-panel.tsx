@@ -38,7 +38,7 @@ export const LogPanel = ({
       </div>
       <Card className="gap-0 overflow-hidden py-0">
         <pre
-          className="bg-muted/40 m-0 h-[calc(100vh-22rem)] min-h-64 overflow-auto px-4 py-3 font-mono text-xs/relaxed wrap-anywhere whitespace-pre-wrap"
+          className="bg-muted/40 m-0 max-h-[calc(100dvh-22rem)] min-h-32 overflow-auto px-4 py-3 font-mono text-xs/relaxed wrap-anywhere whitespace-pre-wrap"
           ref={ref}
           onScroll={(e) => {
             const el = e.currentTarget;
