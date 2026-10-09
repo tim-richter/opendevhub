@@ -124,3 +124,7 @@ Oxlint + Oxfmt will catch most mechanical issues automatically. Focus your atten
 ---
 
 Most formatting and common issues are automatically fixed by Oxlint + Oxfmt. Run `pnpm exec ultracite fix` before committing to ensure compliance.
+
+# graphify
+
+- **graphify** (`.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify` When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
