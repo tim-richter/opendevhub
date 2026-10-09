@@ -1,5 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { PlayIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -32,30 +33,25 @@ import { addedDestination, candidateLabel } from "./onboarding";
 
 export const AddProjectDialog = () => {
   const { addProjectOpen, closeAddProject } = useDash();
-  // Mounted per opening, so it always lists fresh candidates.
+  // Mounted per opening, so it always starts from a fresh form.
   return addProjectOpen ? <AddProjectForm onClose={closeAddProject} /> : null;
 };
 
 const AddProjectForm = ({ onClose }: { onClose: () => void }) => {
   const { report } = useDash();
   const navigate = useNavigate();
-  const [list, setList] = useState<CandidateList>();
+  // The last list shows at once; each opening reads it again.
+  const candidates = useQuery({
+    queryFn: fetchCandidates,
+    queryKey: ["candidates"],
+    staleTime: 0,
+  });
+  const list: CandidateList | undefined = candidates.data;
   const [picked, setPicked] = useState<Candidate>();
   const [stack, setStack] = useState<StackId>("generic");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    let live = true;
-    fetchCandidates().then(
-      (l) => live && setList(l),
-      (err) =>
-        live && setError(err instanceof Error ? err.message : String(err))
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
+  const [submitError, setError] = useState<string>();
+  const error = submitError ?? candidates.error?.message;
 
   const pick = (c: Candidate) => {
     setPicked(c);

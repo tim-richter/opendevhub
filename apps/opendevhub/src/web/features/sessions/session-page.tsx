@@ -1,3 +1,4 @@
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -7,7 +8,7 @@ import {
   LoaderCircleIcon,
   SendIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -44,6 +45,14 @@ import {
   turnActivity,
   turnDuration,
 } from "./session-detail";
+
+/** A session's turns, usage and subagents; shown at once on a return visit, then read again. */
+const sessionDetailQuery = (projectId: string, sessionId: string) =>
+  queryOptions({
+    queryFn: () => fetchSessionDetail(projectId, sessionId),
+    queryKey: ["session", projectId, sessionId],
+    staleTime: 0,
+  });
 
 /** One session of a checkout: its usage, its turns with what each changed, and a box to prompt it. */
 export const SessionPage = () => {
@@ -86,21 +95,24 @@ const SessionView = ({
   session: SessionSummary;
 }) => {
   const projectId = view.project.id;
-  const [detail, setDetail] = useState<SessionDetail>();
-  const [error, setError] = useState<string>();
+  const queryClient = useQueryClient();
+  const { data: detail, error: loadError } = useQuery(
+    sessionDetailQuery(projectId, session.id)
+  );
+  const error = loadError?.message;
   const [notice, setNotice] = useState<string>();
 
-  const load = useCallback(() => {
-    fetchSessionDetail(projectId, session.id).then(
-      (d) => {
-        setDetail(d);
-        setError(undefined);
-      },
-      (err) => setError(err instanceof Error ? err.message : String(err))
-    );
-  }, [projectId, session.id]);
   // The snapshot's summary changes as the session works; read the detail again each time.
-  useEffect(load, [load, session.updatedAt, session.status]);
+  const version = `${session.updatedAt}:${session.status}`;
+  const shownVersion = useRef(version);
+  useEffect(() => {
+    if (version !== shownVersion.current) {
+      shownVersion.current = version;
+      void queryClient.invalidateQueries({
+        queryKey: sessionDetailQuery(projectId, session.id).queryKey,
+      });
+    }
+  }, [version, queryClient, projectId, session.id]);
 
   const title = session.title || "Untitled session";
   const task = taskChip(view, session);

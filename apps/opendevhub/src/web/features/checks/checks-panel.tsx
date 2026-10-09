@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -22,83 +23,56 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 import type { CheckResult, ChecksView } from "../../../shared/types";
-import { fetchCheckRun, fetchChecks, runChecks } from "../../api";
+import { runChecks } from "../../api";
 import { Chip } from "../../components/page";
 import {
   checksState,
   formatDuration,
-  isRunning,
   needingApproval,
   STATE_LABEL,
   withRun,
 } from "./checks";
 import type { ChecksState } from "./checks";
-
-const POLL_MS = 1000;
-
-const message = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
+import { checksKey, checksQuery } from "./checks-queries";
 
 /** A checkout's checks and latest run; polls while a run goes and reloads when it ends. */
 export const useChecks = (projectId: string, directory: string) => {
-  const [view, setView] = useState<ChecksView>();
-  const [error, setError] = useState<string>();
-  const load = useCallback(
-    () =>
-      fetchChecks(projectId, directory).then(
-        (v) => {
-          setView(v);
-          setError(undefined);
-        },
-        (err) => setError(message(err))
-      ),
-    [projectId, directory]
-  );
-  useEffect(() => void load(), [load]);
-
-  const running = isRunning(view?.run);
-  useEffect(() => {
-    if (!running) {
-      return;
-    }
-    const timer = setInterval(() => {
-      fetchCheckRun(projectId, directory)
-        .then((run) => {
-          setView((v) => (v ? withRun(v, run) : v));
-          if (!isRunning(run)) {
-            void load();
+  const queryClient = useQueryClient();
+  const query = useQuery(checksQuery(queryClient, projectId, directory));
+  const run = useMutation({
+    mutationFn: (opts: { names?: string[]; approve?: string[] }) =>
+      runChecks(projectId, directory, opts),
+    onSuccess: (started, opts) =>
+      queryClient.setQueryData<ChecksView>(
+        checksKey(projectId, directory),
+        (v) =>
+          v && {
+            ...withRun(v, started),
+            checks: v.checks.map((c) =>
+              opts.approve?.includes(c.command) ? { ...c, approved: true } : c
+            ),
+            current: true,
           }
-        })
-        .catch(() => undefined);
-    }, POLL_MS);
-    return () => clearInterval(timer);
-  }, [running, projectId, directory, load]);
-
-  const start = useCallback(
-    (opts: { names?: string[]; approve?: string[] } = {}) =>
-      runChecks(projectId, directory, opts).then(
-        (run) => {
-          setError(undefined);
-          setView((v) =>
-            v
-              ? {
-                  ...withRun(v, run),
-                  checks: v.checks.map((c) =>
-                    opts.approve?.includes(c.command)
-                      ? { ...c, approved: true }
-                      : c
-                  ),
-                  current: true,
-                }
-              : v
-          );
-        },
-        (err) => setError(message(err))
       ),
-    [projectId, directory]
+  });
+  const { refetch } = query;
+  const load = useCallback(() => refetch(), [refetch]);
+  const { mutateAsync } = run;
+  const start = useCallback(
+    async (opts: { names?: string[]; approve?: string[] } = {}) => {
+      // The mutation holds the error for the panel to show.
+      await mutateAsync(opts).catch(() => undefined);
+    },
+    [mutateAsync]
   );
-
-  return { error, load, start, state: checksState(view), view };
+  const view = query.data;
+  return {
+    error: (run.error ?? query.error)?.message,
+    load,
+    start,
+    state: checksState(view),
+    view,
+  };
 };
 
 const STATE_ICON: Record<ChecksState, ReactNode> = {

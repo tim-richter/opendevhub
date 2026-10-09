@@ -1,4 +1,10 @@
 import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
   ArrowDownIcon,
   ArrowDownToLineIcon,
   ArrowUpIcon,
@@ -36,7 +42,6 @@ import type { JiraTaskSource } from "../../../shared/jira";
 import type {
   ProjectView,
   PublishResult,
-  ReviewData,
   ReviewMode,
   UpdateResult,
 } from "../../../shared/types";
@@ -87,6 +92,11 @@ import {
   LayoutToggle,
   ReviewDiffs,
 } from "./review-diffs";
+import {
+  publishInfoQuery,
+  refreshCheckout,
+  reviewQuery,
+} from "./review-queries";
 
 // oxlint-disable-next-line complexity
 const ReviewTarget = ({
@@ -113,41 +123,31 @@ const ReviewTarget = ({
     writeReviewMode(projectId, target, next);
   };
   const [, setBaseInput] = useState("");
-  const [data, setData] = useState<ReviewData>();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
-  const load = useCallback(() => {
-    setLoading(true);
-    fetchReview(projectId, directory, { base: baseOverride, mode })
-      .then(
-        (d) => {
-          setData(d);
-          setError(undefined);
-        },
-        (err) => setError(err instanceof Error ? err.message : String(err))
-      )
-      .finally(() => setLoading(false));
-  }, [projectId, directory, baseOverride, mode]);
-  useEffect(load, [load]);
+  // Agents finishing a turn here refresh it too (see useRefreshFinishedCheckouts).
+  const queryClient = useQueryClient();
+  const review = useQuery({
+    ...reviewQuery(projectId, directory, { base: baseOverride, mode }),
+    // Keep the last diff on screen while another mode or base loads.
+    placeholderData: keepPreviousData,
+  });
+  const { data } = review;
+  const loading = review.isFetching;
+  const refresh = useCallback(
+    () => void refreshCheckout(queryClient, projectId, directory),
+    [queryClient, projectId, directory]
+  );
 
-  // Refresh when an agent working here finishes its turn.
-  const runningHere = view.sessions
-    .filter((s) => s.directory === directory && s.status === "running")
-    .map((s) => s.id)
-    .toSorted()
-    .join(",");
-  const previous = useRef(runningHere);
-  useEffect(() => {
-    const before = previous.current.split(",").filter(Boolean);
-    previous.current = runningHere;
-    const now = new Set(runningHere.split(",").filter(Boolean));
-    if (before.some((id) => !now.has(id))) {
-      load();
-    }
-  }, [runningHere, load]);
+  // Git actions and messages to the agent, one at a time; the label says which is running.
+  const action = useMutation({
+    mutationFn: ({ fn }: { label: string; fn: () => Promise<unknown> }) => fn(),
+    onMutate: () => setNotice(undefined),
+  });
+  const run = (label: string, fn: () => Promise<unknown>) =>
+    action.mutate({ fn, label });
+  const busy = action.isPending ? action.variables.label : undefined;
+  const error = (action.error ?? review.error)?.message;
 
   const baseName = data?.base?.name;
   useEffect(() => setBaseInput(baseName ?? ""), [baseName]);
@@ -195,17 +195,6 @@ const ReviewTarget = ({
   }
   const [sessionChoice, setSessionChoice] = useState("");
   const chosen = sessionChoice || sessions[0]?.id || "new";
-
-  const run = (what: string, fn: () => Promise<unknown>) => {
-    setBusy(what);
-    setNotice(undefined);
-    fn()
-      .then(
-        () => setError(undefined),
-        (err) => setError(err instanceof Error ? err.message : String(err))
-      )
-      .finally(() => setBusy(undefined));
-  };
 
   const deliver = (text: string) =>
     chosen === "new"
@@ -275,14 +264,8 @@ const ReviewTarget = ({
   const [published, setPublished] = useState<PublishResult>();
   const publish = usePublishInfo(projectId, directory, data);
 
-  // Checks: reloaded with the review (a commit makes the last run out of date), shown when they run or fail.
+  // Checks: refreshed with the review, shown when they run or fail.
   const checks = useChecks(projectId, directory);
-  const reloadChecks = checks.load;
-  useEffect(() => {
-    if (data) {
-      void reloadChecks();
-    }
-  }, [data, reloadChecks]);
   const [checksOpen, setChecksOpen] = useState(false);
   useEffect(() => {
     if (checks.state === "running" || checks.state === "failed") {
@@ -298,7 +281,7 @@ const ReviewTarget = ({
       setNotice(
         `Fetched ${branch} from ${remoteNode} into this machine's repository.`
       );
-      load();
+      refresh();
     });
   const update = () =>
     run("Updating", async () => {
@@ -310,7 +293,7 @@ const ReviewTarget = ({
       if (!result.conflicts) {
         setNotice(`Updated from ${baseName} (${result.strategy}).`);
       }
-      load();
+      refresh();
     });
   const merge = (ffOnly: boolean) =>
     run("Merging", async () => {
@@ -325,7 +308,7 @@ const ReviewTarget = ({
       );
       setMerged(branch);
       setNotice(`Merged ${branch} into ${baseName}.`);
-      load();
+      refresh();
     });
   const removeMerged = () =>
     run("Removing", async () => {
@@ -598,7 +581,7 @@ const ReviewTarget = ({
               size="icon-sm"
               aria-label="Refresh"
               disabled={loading}
-              onClick={load}
+              onClick={refresh}
             >
               <RefreshCwIcon className={cn(loading && "animate-spin")} />
             </Button>
@@ -703,7 +686,7 @@ const ReviewTarget = ({
           onClose={() => setDialog(undefined)}
           onCommitted={() => {
             setNotice("Committed.");
-            load();
+            refresh();
           }}
         />
       )}
@@ -727,7 +710,10 @@ const ReviewTarget = ({
           onClose={() => setDialog(undefined)}
           onPublished={(r) => {
             setPublished(r);
-            load();
+            refresh();
+            void queryClient.invalidateQueries({
+              queryKey: publishInfoQuery(projectId, directory).queryKey,
+            });
           }}
         />
       )}

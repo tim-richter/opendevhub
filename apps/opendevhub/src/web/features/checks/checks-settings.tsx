@@ -1,14 +1,21 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MonitorIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import type { CheckDef, ChecksConfig, CheckWhere } from "../../../shared/types";
-import { fetchChecks, saveChecks } from "../../api";
+import type {
+  CheckDef,
+  ChecksConfig,
+  ChecksView,
+  CheckWhere,
+} from "../../../shared/types";
+import { saveChecks } from "../../api";
 import { Choice } from "../../components/choice";
 import { Chip, muted } from "../../components/page";
+import { checksKey, projectChecksQuery } from "./checks-queries";
 
 const DEFAULT_TIMEOUT = 900;
 
@@ -17,9 +24,6 @@ const SOURCE_LABEL: Record<ChecksConfig["source"], string> = {
   none: "none yet",
   settings: "your settings for this project",
 };
-
-const message = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
 
 interface Row {
   key: number;
@@ -40,28 +44,25 @@ const toRow = (c: CheckDef): Row => ({
 
 /** The project's checks, in its settings: what Review runs, and where to change it. */
 export const ChecksSettings = ({ projectId }: { projectId: string }) => {
-  const [config, setConfig] = useState<ChecksConfig>();
-  const [error, setError] = useState<string>();
+  const queryClient = useQueryClient();
+  const query = useQuery(projectChecksQuery(projectId));
+  const config: ChecksConfig | undefined = query.data;
   const [rows, setRows] = useState<Row[]>();
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    fetchChecks(projectId).then(setConfig, (err) => setError(message(err)));
-  }, [projectId]);
-
-  const save = (checks: CheckDef[] | null) => {
-    setSaving(true);
-    saveChecks(projectId, checks)
-      .then(
-        (c) => {
-          setConfig(c);
-          setRows(undefined);
-          setError(undefined);
-        },
-        (err) => setError(message(err))
-      )
-      .finally(() => setSaving(false));
-  };
+  const saveMutation = useMutation({
+    mutationFn: (checks: CheckDef[] | null) => saveChecks(projectId, checks),
+    onSuccess: async (saved) => {
+      queryClient.setQueryData<ChecksView>(
+        checksKey(projectId),
+        (v) => v && { ...v, ...saved }
+      );
+      setRows(undefined);
+      // Every checkout's checks follow the project's list.
+      await queryClient.invalidateQueries({ queryKey: checksKey(projectId) });
+    },
+  });
+  const save = (checks: CheckDef[] | null) => saveMutation.mutate(checks);
+  const saving = saveMutation.isPending;
+  const error = (saveMutation.error ?? query.error)?.message;
   const update = (key: number, patch: Partial<Row>) =>
     setRows((rs) => rs?.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 

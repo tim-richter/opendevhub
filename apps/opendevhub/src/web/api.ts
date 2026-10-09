@@ -449,7 +449,8 @@ export const fetchReview = async (
     /** Turn mode: the session and the prompt whose turn to show; the checkout's latest session and turn by default. */
     session?: string;
     from?: string;
-  } = {}
+  } = {},
+  signal?: AbortSignal
 ): Promise<ReviewData> => {
   const query = new URLSearchParams({
     directory,
@@ -460,7 +461,8 @@ export const fetchReview = async (
     ...(opts.from ? { from: opts.from } : {}),
   });
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/review?${query}`
+    `/api/projects/${encodeURIComponent(projectId)}/review?${query}`,
+    signal ? { signal } : undefined
   );
   if (!res.ok) {
     throw await failure(res, "review");
@@ -650,12 +652,14 @@ export const publishChanges = (
 
 export const fetchChecks = async (
   projectId: string,
-  directory?: string
+  directory?: string,
+  signal?: AbortSignal
 ): Promise<ChecksView> => {
   const query =
     directory === undefined ? "" : `?${new URLSearchParams({ directory })}`;
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/checks${query}`
+    `/api/projects/${encodeURIComponent(projectId)}/checks${query}`,
+    signal ? { signal } : undefined
   );
   if (!res.ok) {
     throw await failure(res, "checks");
@@ -665,10 +669,12 @@ export const fetchChecks = async (
 
 export const fetchCheckRun = async (
   projectId: string,
-  directory: string
+  directory: string,
+  signal?: AbortSignal
 ): Promise<CheckRun | undefined> => {
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/checks/run?${new URLSearchParams({ directory })}`
+    `/api/projects/${encodeURIComponent(projectId)}/checks/run?${new URLSearchParams({ directory })}`,
+    signal ? { signal } : undefined
   );
   if (!res.ok) {
     throw await failure(res, "checks");

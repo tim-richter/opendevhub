@@ -1,5 +1,10 @@
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,8 +40,6 @@ export const UsagePage = () => {
   const { snapshot } = useDash();
   const [params, setParams] = useSearchParams();
   const asked = params.get("day");
-  const [report, setReport] = useState<UsageReport>();
-  const [error, setError] = useState<string>();
   const [view, setView] = useState<"chart" | "table">("chart");
   const [chosenMetric, setMetric] = useState<"cost" | "tokens">();
   const live = snapshot?.usage;
@@ -44,19 +47,24 @@ export const UsagePage = () => {
   const liveKey = live ? `${live.today.cost}:${live.today.tokens}` : "";
   const hasLive = !!live;
 
+  const askedDay = asked && DAY.test(asked) ? asked : undefined;
+  const queryClient = useQueryClient();
+  const usage = useQuery({
+    enabled: hasLive,
+    // Keep the last day on screen while the next one loads.
+    placeholderData: keepPreviousData,
+    queryFn: () => fetchUsage(askedDay),
+    queryKey: ["usage", askedDay ?? "today"],
+  });
+  const report: UsageReport | undefined = usage.data;
+  const error = usage.error?.message;
+  const shownLive = useRef(liveKey);
   useEffect(() => {
-    if (!hasLive) {
-      return;
+    if (liveKey !== shownLive.current) {
+      shownLive.current = liveKey;
+      void queryClient.invalidateQueries({ queryKey: ["usage"] });
     }
-    let current = true;
-    fetchUsage(asked && DAY.test(asked) ? asked : undefined).then(
-      (r) => current && (setReport(r), setError(undefined)),
-      (err) => current && setError(err.message)
-    );
-    return () => {
-      current = false;
-    };
-  }, [asked, liveKey, hasLive]);
+  }, [liveKey, queryClient]);
 
   if (!snapshot) {
     return null;

@@ -1,3 +1,4 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
@@ -21,48 +22,52 @@ import type {
   PublishStrategy,
   ReviewData,
 } from "../../../shared/types";
-import { fetchPublishInfo, publishChanges, suggestPublish } from "../../api";
+import { publishChanges, suggestPublish } from "../../api";
 import { Choice } from "../../components/choice";
 import { acceptSuggestion, publishBlocker } from "./review";
+import { publishInfoQuery } from "./review-queries";
 
 const STRATEGY_LABEL: Record<PublishStrategy, string> = {
   agit: "AGit (the push opens the PR)",
   branch: "Push a branch, then open the PR",
 };
 
-/** The checkout's remotes, forge and open PR; reloaded when the review loads or its branch changes. */
+/** The checkout's remotes, forge and open PR; read once the review loads, and again when its branch changes. */
 export const usePublishInfo = (
   projectId: string,
   directory: string,
   data: ReviewData | undefined
 ) => {
-  const [info, setInfo] = useState<PublishInfo>();
-  const [error, setError] = useState<string>();
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...publishInfoQuery(projectId, directory),
+    enabled: !!data,
+  });
+  const branch = data?.branch;
+  const shownBranch = useRef(branch);
+  useEffect(() => {
+    if (branch !== shownBranch.current) {
+      shownBranch.current = branch;
+      void queryClient.invalidateQueries({
+        queryKey: publishInfoQuery(projectId, directory).queryKey,
+      });
+    }
+  }, [branch, projectId, directory, queryClient]);
   const loadInfo = useCallback(
     (remote?: string) =>
-      fetchPublishInfo(projectId, directory, remote)
-        .then((i) => {
-          setInfo(i);
-          setError(undefined);
-          return i;
+      queryClient
+        .fetchQuery({
+          ...publishInfoQuery(projectId, directory, remote),
+          staleTime: 0,
         })
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : String(err));
-          return undefined;
-        }),
-    [projectId, directory]
+        .catch(() => undefined),
+    [projectId, directory, queryClient]
   );
-  const loaded = !!data;
-  const branch = data?.branch;
-  useEffect(() => {
-    if (loaded) {
-      void loadInfo();
-    }
-  }, [loadInfo, loaded, branch]);
+  const info = query.data;
   /** Why publishing isn't possible right now; undefined when it is. */
   const blocker =
     !data || !info
-      ? (error ?? "Loading…")
+      ? (query.error?.message ?? "Loading…")
       : (publishBlocker(data) ??
         (info.remotes.length === 0
           ? "This repository has no remote"

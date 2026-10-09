@@ -1,10 +1,11 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SendIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
-import type { ReviewData, SessionTurn } from "../../../shared/types";
+import type { SessionTurn } from "../../../shared/types";
 import { fetchReview, reviewImageUrl, sendPrompt } from "../../api";
 import { muted } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
@@ -19,6 +20,14 @@ import {
 } from "./review";
 import type { DiffView, LineAnchor, ReviewComment } from "./review";
 import { FilesToggle, LayoutToggle, ReviewDiffs } from "./review-diffs";
+import { reviewQuery } from "./review-queries";
+import type { ReviewOptions } from "./review-queries";
+
+const turnOptions = (session: string, from: string): ReviewOptions => ({
+  from,
+  mode: "turn",
+  session,
+});
 
 /** What one of a session's turns changed, with line comments that go back to that session. */
 export const TurnChanges = (props: {
@@ -35,25 +44,30 @@ export const TurnChanges = (props: {
   onSent: (notice: string) => void;
 }) => {
   const { projectId, directory, sessionId, turn } = props;
-  const [data, setData] = useState<ReviewData>();
-  const [error, setError] = useState<string>();
+  const queryClient = useQueryClient();
+  const { data, error: loadError } = useQuery(
+    reviewQuery(projectId, directory, turnOptions(sessionId, turn.id))
+  );
+  const [sendError, setSendError] = useState<string>();
   const [sending, setSending] = useState(false);
+  const error = sendError ?? loadError?.message;
 
-  const load = useCallback(() => {
-    fetchReview(projectId, directory, {
-      from: turn.id,
-      mode: "turn",
-      session: sessionId,
-    }).then(
-      (d) => {
-        setData(d);
-        setError(undefined);
-      },
-      (err) => setError(err instanceof Error ? err.message : String(err))
-    );
-  }, [projectId, directory, sessionId, turn.id]);
   // Read again as the turn goes on: each model call may change files.
-  useEffect(load, [load, turn.steps, turn.completed]);
+  const progress = `${turn.steps}:${turn.completed}`;
+  const shownProgress = useRef(progress);
+  useEffect(() => {
+    if (progress !== shownProgress.current) {
+      shownProgress.current = progress;
+      void queryClient.invalidateQueries({
+        exact: true,
+        queryKey: reviewQuery(
+          projectId,
+          directory,
+          turnOptions(sessionId, turn.id)
+        ).queryKey,
+      });
+    }
+  }, [progress, queryClient, projectId, directory, sessionId, turn.id]);
 
   // Drafts per session and turn, as the review keeps them.
   const key = draftKey(projectId, props.target, "turn", undefined, {
@@ -129,7 +143,7 @@ export const TurnChanges = (props: {
             `Sent ${n} comment${n === 1 ? "" : "s"} to the agent${props.running ? ", queued behind its turn" : ""}.`
           );
         },
-        (err) => setError(err instanceof Error ? err.message : String(err))
+        (err) => setSendError(err instanceof Error ? err.message : String(err))
       )
       .finally(() => setSending(false));
   };

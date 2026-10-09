@@ -1,3 +1,5 @@
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
@@ -21,12 +23,7 @@ import type {
   SessionSummary,
   StartingVariant,
 } from "../../../shared/types";
-import {
-  dismissStarting,
-  fetchChecks,
-  fetchReview,
-  pickVariant,
-} from "../../api";
+import { dismissStarting, pickVariant } from "../../api";
 import { EnvBadge } from "../../components/env-badge";
 import { Empty, muted, Section } from "../../components/page";
 import { SessionBadge } from "../../components/status";
@@ -36,8 +33,10 @@ import { Link } from "../../routing";
 import { checkoutOf, checkoutPath } from "../checkouts/checkouts";
 import { checksState, failedNames } from "../checks/checks";
 import type { ChecksState } from "../checks/checks";
+import { checksQuery } from "../checks/checks-queries";
 import { JiraSourceCard } from "../jira/jira-source-card";
 import { useProjectView } from "../projects/project-layout";
+import { reviewQuery } from "../review/review-queries";
 import { formatUsage, taskUsage } from "../usage/usage";
 import {
   diffStats,
@@ -50,6 +49,22 @@ import {
   taskSessions,
   variantName,
 } from "./tasks";
+
+/** Results by checkout: undefined while loading, null when it couldn't be read. */
+const byDirectory = <T,>(
+  directories: string[],
+  results: UseQueryResult<T>[]
+): Record<string, T | null> => {
+  const all: Record<string, T | null> = {};
+  for (const [i, result] of results.entries()) {
+    if (result.data !== undefined) {
+      all[directories[i]] = result.data;
+    } else if (result.isError) {
+      all[directories[i]] = null;
+    }
+  }
+  return all;
+};
 
 /** A variant that is still being set up: where it is, and the last lines its setup wrote. */
 const StartingCard = (props: {
@@ -108,9 +123,23 @@ export const ProjectTask = () => {
   const starting = view.starting?.find((t) => t.task === task);
   const jiraSource =
     starting?.jira ?? sessions.find((s) => s.task?.jira)?.task?.jira;
-  // null: the changes couldn't be read.
-  const [reviews, setReviews] = useState<Record<string, ReviewData | null>>({});
-  const [checks, setChecks] = useState<Record<string, ChecksView | null>>({});
+  const queryClient = useQueryClient();
+  const directories = [...new Set(sessions.map((s) => s.directory))];
+  // Shared with each checkout's Review, and refreshed when an agent there finishes a turn.
+  const reviews = byDirectory(
+    directories,
+    useQueries({
+      queries: directories.map((d) => reviewQuery(view.project.id, d)),
+    })
+  );
+  const checks = byDirectory(
+    directories,
+    useQueries({
+      queries: directories.map((d) =>
+        checksQuery(queryClient, view.project.id, d)
+      ),
+    })
+  );
   const [picking, setPicking] = useState(false);
   const [notice, setNotice] = useState<string>();
   const mounted = useRef(true);
@@ -121,30 +150,6 @@ export const ProjectTask = () => {
     };
   }, []);
   const projectPath = `/p/${encodeURIComponent(view.project.id)}`;
-
-  // Reload a variant's changes when its session changes state (e.g. it finished a turn).
-  const reloadKey = sessions
-    .map((s) => `${s.id}:${s.status}:${s.directory}`)
-    .join("|");
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
-  useEffect(() => {
-    let live = true;
-    for (const s of sessionsRef.current) {
-      fetchReview(view.project.id, s.directory).then(
-        (r) => live && setReviews((all) => ({ ...all, [s.directory]: r })),
-        () => live && setReviews((all) => ({ ...all, [s.directory]: null }))
-      );
-      fetchChecks(view.project.id, s.directory).then(
-        (c) => live && setChecks((all) => ({ ...all, [s.directory]: c })),
-        () => live && setChecks((all) => ({ ...all, [s.directory]: null }))
-      );
-    }
-    return () => {
-      live = false;
-    };
-    // `sessions` is rebuilt on every snapshot; reloadKey holds what matters.
-  }, [view.project.id, reloadKey]);
 
   const pick = async (keep: SessionSummary) => {
     if (picking) {
@@ -167,7 +172,12 @@ export const ProjectTask = () => {
       // Re-read the others' changes: the cached ones may predate edits made while this page was open.
       const dirs = [...new Set(others.map((s) => s.directory))];
       const fresh = await Promise.allSettled(
-        dirs.map((d) => fetchReview(view.project.id, d))
+        dirs.map((d) =>
+          queryClient.fetchQuery({
+            ...reviewQuery(view.project.id, d),
+            staleTime: 0,
+          })
+        )
       );
       if (!mounted.current) {
         return;

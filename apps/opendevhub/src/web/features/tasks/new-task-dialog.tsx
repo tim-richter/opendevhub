@@ -1,5 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -50,6 +51,7 @@ interface Row {
   agent: string;
 }
 const EMPTY_ROW: Row = { agent: "", model: "", variant: "" };
+const NO_MODELS: ModelsInfo = { agents: [], models: [] };
 
 export const NewTaskDialog = () => {
   const { snapshot, newTaskFor, closeNewTask } = useDash();
@@ -106,7 +108,6 @@ const TaskForm = ({
   const [environment, setEnvironment] = useState<Isolation>();
   const [node, setNode] = useState("local");
   const [rows, setRows] = useState<Row[]>([EMPTY_ROW]);
-  const [models, setModels] = useState<ModelsInfo>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -140,20 +141,15 @@ const TaskForm = ({
   const isMac =
     typeof navigator !== "undefined" && /mac/iu.test(navigator.platform);
 
-  useEffect(() => {
-    setModels(undefined);
-    if (!canOpen || !projectId) {
-      return;
-    }
-    let live = true;
-    fetchModels(projectId).then(
-      (m) => live && setModels(m),
-      () => live && setModels({ agents: [], models: [] })
-    );
-    return () => {
-      live = false;
-    };
-  }, [projectId, canOpen]);
+  // Cached per project, so the dialog opens with its lists ready; without them, it offers the defaults.
+  const modelsQuery = useQuery({
+    enabled: canOpen && !!projectId,
+    queryFn: () => fetchModels(projectId ?? ""),
+    queryKey: ["models", projectId],
+    staleTime: 5 * 60_000,
+  });
+  const models: ModelsInfo | undefined =
+    modelsQuery.data ?? (modelsQuery.isError ? NO_MODELS : undefined);
 
   const variants: TaskVariantSpec[] = shownRows.map((r) => {
     // Only what the current project's lists offer, so what is sent matches what is shown.

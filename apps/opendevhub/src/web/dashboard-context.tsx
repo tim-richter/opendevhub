@@ -29,6 +29,7 @@ import {
 } from "./api";
 import type { Action } from "./api";
 import { attentionCounts } from "./derive";
+import { useRefreshFinishedCheckouts } from "./features/review/review-queries";
 import { enablePush, pushSupported, syncPush } from "./push";
 import { useNavigate } from "./routing";
 import { useDashboard } from "./use-dashboard";
@@ -104,6 +105,7 @@ const Ctx = createContext<DashboardContextValue | undefined>(undefined);
 
 export const DashboardProvider = ({ children }: { children: ReactNode }) => {
   const { snapshot, connected, logs, loadLogs: fetchLogs } = useDashboard();
+  useRefreshFinishedCheckouts(snapshot);
   const [highlight, setHighlight] = useState<Highlight>();
   const navigate = useNavigate();
   const [error, setError] = useState<string>();

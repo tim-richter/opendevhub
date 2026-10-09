@@ -3,9 +3,9 @@ import { ExternalLinkIcon, GitPullRequestIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 
-import { fetchPublishInfo } from "../../api";
 import { useDash } from "../../dashboard-context";
 import { Link } from "../../routing";
+import { publishInfoQuery } from "../review/review-queries";
 import { forgejoRoute } from "./forgejo";
 
 const PR_NUMBER = /\/(?:pulls|pull|merge_requests)\/(?<n>\d+)\/?$/u;
@@ -18,11 +18,8 @@ export const PublishedPr = (props: {
 }) => {
   const { forgejo } = useDash();
   const { data } = useQuery({
+    ...publishInfoQuery(props.projectId, props.directory),
     enabled: props.enabled,
-    queryFn: ({ signal }) =>
-      fetchPublishInfo(props.projectId, props.directory, undefined, signal),
-    queryKey: ["publish-info", props.projectId, props.directory],
-    staleTime: 60_000,
   });
   const pr = data?.pr;
   if (!pr) {

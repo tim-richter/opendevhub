@@ -14,7 +14,7 @@ const DAY_MS = 24 * 60 * 60_000;
 export const PERSIST_MAX_AGE_MS = DAY_MS;
 
 /** Diffs can run to megabytes and the whole cache is rewritten on every change. */
-const UNPERSISTED_KEYS = new Set(["patch", "local-links"]);
+const UNPERSISTED_KEYS = new Set(["patch", "review", "local-links"]);
 
 const shouldPersist = (query: Query): boolean =>
   query.state.status === "success" &&
