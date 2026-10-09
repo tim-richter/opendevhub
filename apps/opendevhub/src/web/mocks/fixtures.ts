@@ -9,6 +9,8 @@ import type {
   ForgejoSettings,
 } from "../../shared/forgejo";
 import type {
+  JiraBoardColumn,
+  JiraCatalog,
   JiraSettings,
   JiraTicket,
   JiraTicketSummary,
@@ -1134,6 +1136,8 @@ const ticket = (
   key,
   priority: "Medium",
   status: "In Progress",
+  statusCategory: "indeterminate",
+  statusId: "3",
   title,
   type: "Story",
   updatedAt: isoAgo(DAY),
@@ -1149,12 +1153,45 @@ export const jiraTickets: JiraTicketSummary[] = [
   ticket("ACME-121", "Dark mode for the settings page"),
   ticket("ACME-97", "Full-text search in docs", {
     status: "To Do",
+    statusCategory: "new",
+    statusId: "1",
     assignee: undefined,
+  }),
+  ticket("ACME-90", "Rotate the staging TLS certificates", {
+    status: "In Review",
+    statusId: "10001",
+  }),
+  ticket("ACME-84", "Paginate the audit log", {
+    status: "Done",
+    statusCategory: "done",
+    statusId: "10002",
   }),
   ticket("BILL-31", "JPY invoices are off by one yen", {
     priority: "Highest",
     type: "Bug",
   }),
+];
+
+export const jiraCatalog: JiraCatalog = {
+  boards: [
+    { id: 1, name: "ACME Sprint Board", project: "ACME", type: "scrum" },
+    { id: 2, name: "Billing Kanban", project: "BILL", type: "kanban" },
+  ],
+  filters: [
+    { id: 10_100, name: "Security bugs" },
+    { id: 10_101, name: "Release blockers" },
+  ],
+  projects: [
+    { key: "ACME", name: "Acme Platform" },
+    { key: "BILL", name: "Billing" },
+  ],
+};
+
+export const jiraBoardColumns: JiraBoardColumn[] = [
+  { name: "Backlog", statusIds: [] },
+  { name: "To Do", statusIds: ["1"] },
+  { name: "In Progress", statusIds: ["3"] },
+  { name: "Done", statusIds: ["10002"] },
 ];
 
 export const jiraTicket = (key: string): JiraTicket => {

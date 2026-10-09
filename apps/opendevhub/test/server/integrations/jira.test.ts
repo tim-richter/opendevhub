@@ -170,7 +170,7 @@ describe("Jira Server/Data Center API", () => {
       ],
     });
     await expect(
-      jira.tickets("", first.nextStartAt)
+      jira.tickets({ startAt: first.nextStartAt })
     ).resolves.not.toHaveProperty("nextStartAt");
     for (const [url, init] of fetcher.mock.calls) {
       const parsed = new URL(String(url));
@@ -197,12 +197,15 @@ describe("Jira Server/Data Center API", () => {
       .fn<typeof fetch>()
       .mockImplementation(async () => response(page([])));
     const jira = new Jira(settings, fetcher);
-    await jira.tickets(" app-123 ");
+    await jira.tickets({ search: " app-123 ", scope: "board", board: 7 });
     expect(
       new URL(String(fetcher.mock.calls[0][0])).searchParams.get("jql")
     ).toBe('key = "APP-123"');
+    expect(new URL(String(fetcher.mock.calls[0][0])).pathname).toBe(
+      "/jira/rest/api/2/search"
+    );
     const text = 'login" OR assignee = admin';
-    await jira.tickets(text);
+    await jira.tickets({ search: text, scope: "all" });
     const jql = new URL(String(fetcher.mock.calls[1][0])).searchParams.get(
       "jql"
     )!;
@@ -210,6 +213,148 @@ describe("Jira Server/Data Center API", () => {
       `text ~ ${JSON.stringify('"login\\" OR assignee = admin"')} ORDER BY updated DESC`
     );
     expect(jql).not.toContain("currentUser()");
+  });
+
+  it("combines views and filters into JQL and lists boards through the agile API", async () => {
+    await settings.save(configured);
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => response(page([])));
+    const jira = new Jira(settings, fetcher);
+    const call = (index: number) =>
+      new URL(String(fetcher.mock.calls[index][0]));
+    await jira.tickets({
+      scope: "watching",
+      project: "APP",
+      status: "open",
+      sort: "priority",
+    });
+    expect(call(0).searchParams.get("jql")).toBe(
+      'watcher = currentUser() AND project = "APP" AND statusCategory != done ORDER BY priority DESC, updated DESC'
+    );
+    await jira.tickets({ scope: "filter", filter: 10_100, status: "todo" });
+    expect(call(1).searchParams.get("jql")).toBe(
+      "filter = 10100 AND statusCategory = new ORDER BY updated DESC"
+    );
+    await jira.tickets({
+      scope: "board",
+      board: 7,
+      sprint: true,
+      sort: "rank",
+    });
+    expect(call(2).pathname).toBe("/jira/rest/agile/1.0/board/7/issue");
+    expect(call(2).searchParams.get("jql")).toBe(
+      "sprint in openSprints() ORDER BY Rank ASC"
+    );
+    expect(call(1).pathname).toBe("/jira/rest/api/2/search");
+  });
+
+  it("loads boards across pages, favourite filters and projects, skipping malformed entries", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const { pathname, searchParams } = new URL(String(url));
+      if (pathname.endsWith("/board")) {
+        return searchParams.get("startAt") === "0"
+          ? response({
+              isLast: false,
+              values: [
+                {
+                  id: 1,
+                  name: "Sprint board",
+                  type: "scrum",
+                  location: { projectKey: "APP" },
+                },
+                { id: "x", name: "bad" },
+              ],
+            })
+          : response({
+              isLast: true,
+              values: [{ id: 2, name: "Kanban", type: "kanban" }],
+            });
+      }
+      if (pathname.endsWith("/filter/favourite")) {
+        return response([
+          { id: "10100", name: "Bugs", jql: "type = Bug" },
+          { id: "-1", name: "bad" },
+        ]);
+      }
+      return response([
+        { key: "APP", name: "App", id: "1" },
+        { key: "bad key", name: "x" },
+      ]);
+    });
+    await expect(new Jira(settings, fetcher).catalog()).resolves.toStrictEqual({
+      boards: [
+        { id: 1, name: "Sprint board", type: "scrum", project: "APP" },
+        { id: 2, name: "Kanban", type: "kanban" },
+      ],
+      filters: [{ id: 10_100, name: "Bugs" }],
+      projects: [{ key: "APP", name: "App" }],
+    });
+    const withoutAgile = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url) =>
+        String(url).includes("/agile/")
+          ? new Response("", { status: 404 })
+          : response([])
+      );
+    await expect(
+      new Jira(settings, withoutAgile).catalog()
+    ).resolves.toStrictEqual({
+      boards: [],
+      filters: [],
+      projects: [],
+    });
+  });
+
+  it("reports status ids and categories and reads a board's columns", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) =>
+      String(url).endsWith("/configuration")
+        ? response({
+            columnConfig: {
+              columns: [
+                { name: "To Do", statuses: [{ id: "1" }, { id: 2 }] },
+                { name: "Done", statuses: [] },
+                { statuses: [{ id: "5" }] },
+              ],
+            },
+          })
+        : response(
+            page([
+              issue("APP-1", {
+                status: {
+                  id: "3",
+                  name: "In Progress",
+                  statusCategory: { key: "indeterminate" },
+                },
+              }),
+              issue("APP-2", {
+                status: { name: "Odd", statusCategory: { key: "weird" } },
+              }),
+            ])
+          )
+    );
+    const jira = new Jira(settings, fetcher);
+    const { tickets } = await jira.tickets();
+    expect(tickets[0]).toMatchObject({
+      statusCategory: "indeterminate",
+      statusId: "3",
+    });
+    expect(tickets[1]).not.toHaveProperty("statusId");
+    expect(tickets[1]).not.toHaveProperty("statusCategory");
+    await expect(jira.columns(7)).resolves.toStrictEqual([
+      { name: "To Do", statusIds: ["1"] },
+      { name: "Done", statusIds: [] },
+    ]);
+    expect(new URL(String(fetcher.mock.calls[1][0])).pathname).toBe(
+      "/jira/rest/agile/1.0/board/7/configuration"
+    );
+    await expect(jira.columns(0)).rejects.toThrow("Invalid Jira board.");
+    fetcher.mockImplementation(async () => response({ columnConfig: null }));
+    await expect(jira.columns(7)).rejects.toThrow(
+      "invalid board configuration"
+    );
   });
 
   it("loads ticket details and builds links from the configured instance", async () => {
@@ -255,14 +400,22 @@ describe("Jira Server/Data Center API", () => {
       await expect(jira.ticket(key)).rejects.toMatchObject({ status: 400 });
     }
     for (const offset of [-1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      await expect(jira.tickets("", offset)).rejects.toMatchObject({
+      await expect(jira.tickets({ startAt: offset })).rejects.toMatchObject({
         status: 400,
       });
     }
-    await expect(jira.tickets("x".repeat(501))).rejects.toMatchObject({
-      status: 400,
-    });
-    await expect(jira.tickets("x\ny")).rejects.toMatchObject({ status: 400 });
+    for (const query of [
+      { search: "x".repeat(501) },
+      { search: "x\ny" },
+      { scope: "board" as const },
+      { scope: "filter" as const, filter: 0 },
+      { board: 1 },
+      { project: 'APP" OR project = X' },
+      { status: "closed" as never },
+      { sort: "key" as never },
+    ]) {
+      await expect(jira.tickets(query)).rejects.toMatchObject({ status: 400 });
+    }
     expect(fetcher).not.toHaveBeenCalled();
   });
 

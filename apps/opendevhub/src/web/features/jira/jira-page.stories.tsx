@@ -12,6 +12,18 @@ const meta = preview.meta({
 
 export const Tickets = meta.story();
 
+export const BoardSprint = meta.story({
+  parameters: { route: "/jira?scope=board&board=1&sprint=1&status=open" },
+});
+
+export const Kanban = meta.story({
+  parameters: { route: "/jira?layout=board" },
+});
+
+export const KanbanBoardColumns = meta.story({
+  parameters: { route: "/jira?scope=board&board=1&layout=board" },
+});
+
 export const Ticket = meta.story({ parameters: { route: "/jira/ACME-118" } });
 
 export const NotConfigured = meta.story({

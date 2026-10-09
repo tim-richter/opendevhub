@@ -355,10 +355,51 @@ describe("dashboard API", () => {
       await expect(
         (await app.request("/api/jira/tickets?search=login&startAt=50")).json()
       ).resolves.toStrictEqual({ tickets: [], total: 0 });
-      expect(tickets).toHaveBeenCalledWith("login", 50);
-      expect((await app.request("/api/jira/tickets?startAt=1e2")).status).toBe(
-        400
+      expect(tickets).toHaveBeenCalledWith({
+        scope: "assigned",
+        search: "login",
+        sort: "updated",
+        startAt: 50,
+        status: "any",
+      });
+      await app.request(
+        "/api/jira/tickets?scope=board&board=4&sprint=1&project=APP&status=open&sort=rank"
       );
+      expect(tickets).toHaveBeenLastCalledWith({
+        board: 4,
+        project: "APP",
+        scope: "board",
+        search: "",
+        sort: "rank",
+        sprint: true,
+        startAt: 0,
+        status: "open",
+      });
+      for (const query of [
+        "startAt=1e2",
+        "scope=board",
+        "scope=assigned&board=4",
+        "scope=filter&filter=abc",
+        "project=app",
+        "status=closed",
+        "sprint=1",
+      ]) {
+        expect((await app.request(`/api/jira/tickets?${query}`)).status).toBe(
+          400
+        );
+      }
+      const columns = vi
+        .spyOn(jira, "columns")
+        .mockResolvedValue([{ name: "To Do", statusIds: ["1"] }]);
+      await expect(
+        (await app.request("/api/jira/boards/4/columns")).json()
+      ).resolves.toStrictEqual([{ name: "To Do", statusIds: ["1"] }]);
+      expect(columns).toHaveBeenCalledWith(4);
+      for (const board of ["0", "abc", "1e2"]) {
+        expect(
+          (await app.request(`/api/jira/boards/${board}/columns`)).status
+        ).toBe(400);
+      }
       await expect(
         (await app.request("/api/jira/tickets/APP-12")).json()
       ).resolves.toStrictEqual({ key: "APP-12" });

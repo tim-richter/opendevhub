@@ -17,6 +17,8 @@ import {
   forgejoReviewComments,
   forgejoReviews,
   forgejoSettings,
+  jiraBoardColumns,
+  jiraCatalog,
   jiraSettings,
   reviewImage,
   jiraTicket,
@@ -166,13 +168,24 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     // Jira
     http.get("/api/jira/tickets", async ({ request }) => {
       await wait();
-      const search =
-        new URL(request.url).searchParams.get("search")?.toLowerCase() ?? "";
-      const tickets = jiraTickets.filter((t) =>
-        `${t.key} ${t.title}`.toLowerCase().includes(search)
+      const params = new URL(request.url).searchParams;
+      const search = params.get("search")?.toLowerCase() ?? "";
+      const project = params.get("project");
+      const status = params.get("status");
+      const tickets = jiraTickets.filter(
+        (t) =>
+          `${t.key} ${t.title}`.toLowerCase().includes(search) &&
+          (!project || t.key.startsWith(`${project}-`)) &&
+          (status !== "done" || t.status === "Done") &&
+          (status !== "todo" || t.status === "To Do") &&
+          (status !== "progress" || t.status === "In Progress")
       );
       return HttpResponse.json({ tickets, total: tickets.length });
     }),
+    http.get("/api/jira/catalog", () => HttpResponse.json(jiraCatalog)),
+    http.get("/api/jira/boards/:id/columns", () =>
+      HttpResponse.json(jiraBoardColumns)
+    ),
     http.get("/api/jira/tickets/:key", ({ params }) =>
       HttpResponse.json(jiraTicket(String(params.key)))
     ),

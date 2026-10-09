@@ -10,6 +10,7 @@ import type {
   ForgejoInbox,
   ForgejoPullFilter,
 } from "../shared/forgejo";
+import { parseJiraQuery } from "../shared/jira";
 import type { AddProjectResult, LogEvent, ReviewMode } from "../shared/types";
 import { InvalidNodeError, InvalidRootError } from "./config";
 import type { Checks } from "./environments/checks";
@@ -139,7 +140,10 @@ export interface DashboardDeps {
     | "test"
   > &
     Partial<Pick<Forgejo, "review" | "organizations" | "teams" | "image">>;
-  jira?: Pick<Jira, "view" | "save" | "tickets" | "ticket">;
+  jira?: Pick<
+    Jira,
+    "view" | "save" | "tickets" | "ticket" | "catalog" | "columns"
+  >;
   webDir?: string;
 }
 
@@ -531,11 +535,21 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   );
   app.get("/api/jira/tickets", (c) =>
     json(c, () => {
-      const page = c.req.query("startAt") ?? "0";
-      if (!/^\d+$/u.test(page)) {
-        throw new InvalidRequestError("Invalid Jira page.");
+      const query = parseJiraQuery(new URL(c.req.url).searchParams);
+      if (!query) {
+        throw new InvalidRequestError("Invalid Jira search or page.");
       }
-      return requireJira().tickets(c.req.query("search") ?? "", Number(page));
+      return requireJira().tickets(query);
+    })
+  );
+  app.get("/api/jira/catalog", (c) => json(c, () => requireJira().catalog()));
+  app.get("/api/jira/boards/:id/columns", (c) =>
+    json(c, () => {
+      const id = param(c, "id");
+      if (!/^[1-9]\d{0,14}$/u.test(id)) {
+        throw new InvalidRequestError("Invalid Jira board.");
+      }
+      return requireJira().columns(Number(id));
     })
   );
   app.get("/api/jira/tickets/:key", (c) =>

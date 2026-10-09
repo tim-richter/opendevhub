@@ -73,9 +73,12 @@ describe("api", () => {
         JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
       ).not.toHaveProperty("token");
       const { signal } = new AbortController();
-      await fetchJiraTickets("login & logout", 50, signal);
+      await fetchJiraTickets(
+        { search: "login & logout", startAt: 50, scope: "board", board: 3 },
+        signal
+      );
       expect(fetchMock.mock.calls[2]).toStrictEqual([
-        "/api/jira/tickets?search=login+%26+logout&startAt=50",
+        "/api/jira/tickets?scope=board&board=3&search=login+%26+logout&startAt=50",
         { signal, cache: "no-store" },
       ]);
       await fetchJiraTicket("APP-1?", signal);

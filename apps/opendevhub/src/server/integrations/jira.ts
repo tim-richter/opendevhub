@@ -1,6 +1,23 @@
-import { JIRA_KEY } from "../../shared/jira";
+import {
+  JIRA_DEFAULT_QUERY,
+  JIRA_KEY,
+  JIRA_PROJECT_KEY,
+  JIRA_SCOPES,
+  JIRA_SORTS,
+  JIRA_STATUS_CATEGORIES,
+  JIRA_STATUSES,
+} from "../../shared/jira";
 import type {
+  JiraBoard,
+  JiraBoardColumn,
+  JiraCatalog,
+  JiraFilter,
+  JiraProject,
+  JiraScope,
   JiraSettings,
+  JiraSort,
+  JiraStatusFilter,
+  JiraTicketQuery,
   JiraTicket,
   JiraTicketSummary,
   JiraTickets,
@@ -42,7 +59,11 @@ interface Issue {
   fields: {
     summary: string;
     description?: string | null;
-    status: { name: string };
+    status: {
+      id?: unknown;
+      name: string;
+      statusCategory?: { key?: unknown } | null;
+    };
     issuetype: { name: string };
     priority?: { name: string } | null;
     assignee?: { displayName: string } | null;
@@ -56,6 +77,74 @@ interface Issue {
 
 const FIELDS = "summary,status,issuetype,priority,assignee,updated";
 const PAGE_SIZE = 50;
+/** Stop listing boards after this many pages so a huge instance cannot stall the picker. */
+const BOARD_PAGES = 10;
+const CATALOG_LIMIT = 2000;
+
+const SCOPE_JQL: Record<Exclude<JiraScope, "filter">, string> = {
+  all: "",
+  assigned: "assignee = currentUser()",
+  // The board's own filter scopes its issue endpoint.
+  board: "",
+  reported: "reporter = currentUser()",
+  watching: "watcher = currentUser()",
+};
+const STATUS_JQL: Record<JiraStatusFilter, string> = {
+  any: "",
+  done: "statusCategory = done",
+  open: "statusCategory != done",
+  progress: "statusCategory = indeterminate",
+  todo: "statusCategory = new",
+};
+const ORDER_JQL: Record<JiraSort, string> = {
+  created: "created DESC",
+  priority: "priority DESC, updated DESC",
+  rank: "Rank ASC",
+  updated: "updated DESC",
+};
+
+const isId = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) > 0;
+
+const validQuery = (query: JiraTicketQuery): boolean =>
+  JIRA_SCOPES.includes(query.scope) &&
+  JIRA_STATUSES.includes(query.status) &&
+  JIRA_SORTS.includes(query.sort) &&
+  typeof query.search === "string" &&
+  query.search.length <= 500 &&
+  !/[\u0000-\u001F]/u.test(query.search) &&
+  Number.isSafeInteger(query.startAt) &&
+  query.startAt >= 0 &&
+  (query.scope === "board" ? isId(query.board) : query.board === undefined) &&
+  (query.scope === "filter"
+    ? isId(query.filter)
+    : query.filter === undefined) &&
+  (query.project === undefined ||
+    (typeof query.project === "string" &&
+      query.project.length <= 100 &&
+      JIRA_PROJECT_KEY.test(query.project)));
+
+/** The JQL for a query; text is escaped for both Lucene and JQL, never accepted as JQL. */
+export const ticketJql = (query: JiraTicketQuery): string => {
+  const term = query.search.trim();
+  if (JIRA_KEY.test(term.toUpperCase())) {
+    // An exact key finds the ticket wherever it lives.
+    return `key = ${JSON.stringify(term.toUpperCase())}`;
+  }
+  const clauses = [
+    query.scope === "filter"
+      ? `filter = ${query.filter}`
+      : SCOPE_JQL[query.scope],
+    query.scope === "board" && query.sprint ? "sprint in openSprints()" : "",
+    query.project ? `project = ${JSON.stringify(query.project)}` : "",
+    STATUS_JQL[query.status],
+    term
+      ? `text ~ ${JSON.stringify(`"${term.replaceAll(/[+\-&|!(){}[\]^"~*?:\\/]/gu, "\\$&")}"`)}`
+      : "",
+  ].filter(Boolean);
+  const where = clauses.join(" AND ");
+  return `${where ? `${where} ` : ""}ORDER BY ${ORDER_JQL[query.sort]}`;
+};
 
 /** Jira Server/Data Center REST v2 with a personal access token (Bearer authentication). */
 export class Jira {
@@ -91,19 +180,17 @@ export class Jira {
     return { token: settings.token, url: settings.url };
   }
 
+  /** GETs `route` relative to the instance, e.g. `rest/api/2/search?…`. */
   private async json<T>(connection: Connection, route: string): Promise<T> {
     try {
-      const response = await this.fetcher(
-        `${connection.url}/rest/api/2/${route}`,
-        {
-          headers: {
-            accept: "application/json",
-            authorization: `Bearer ${connection.token}`,
-          },
-          redirect: "error",
-          signal: AbortSignal.timeout(30_000),
-        }
-      );
+      const response = await this.fetcher(`${connection.url}/${route}`, {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${connection.token}`,
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      });
       if (!response.ok) {
         await response.body?.cancel();
         if (response.status === 401 || response.status === 403) {
@@ -178,9 +265,17 @@ export class Jira {
     ) {
       throw new JiraError("Jira returned an invalid ticket.", 502);
     }
+    const statusId = f.status.id;
+    const category = JIRA_STATUS_CATEGORIES.find(
+      (c) => c === f.status.statusCategory?.key
+    );
     return {
       key: issue.key,
       status: f.status.name,
+      ...(typeof statusId === "string" && statusId.length <= 100
+        ? { statusId }
+        : {}),
+      ...(category ? { statusCategory: category } : {}),
       title: f.summary,
       type: f.issuetype.name,
       updatedAt: f.updated,
@@ -190,41 +285,31 @@ export class Jira {
     };
   }
 
-  async tickets(search = "", startAt = 0): Promise<JiraTickets> {
-    if (
-      search.length > 500 ||
-      /[\u0000-\u001F]/u.test(search) ||
-      !Number.isSafeInteger(startAt) ||
-      startAt < 0
-    ) {
+  async tickets(input: Partial<JiraTicketQuery> = {}): Promise<JiraTickets> {
+    const query = { ...JIRA_DEFAULT_QUERY, ...input };
+    if (!validQuery(query)) {
       throw new JiraError("Invalid Jira search or page.");
     }
-    const term = search.trim();
-    // Escape both Lucene and JQL syntax: the search box accepts text, never arbitrary JQL.
-    const phrase = `"${term.replaceAll(/[+\-&|!(){}[\]^"~*?:\\/]/gu, "\\$&")}"`;
-    let jql;
-    if (term) {
-      if (JIRA_KEY.test(term.toUpperCase())) {
-        jql = `key = ${JSON.stringify(term.toUpperCase())}`;
-      } else {
-        jql = `text ~ ${JSON.stringify(phrase)} ORDER BY updated DESC`;
-      }
-    } else {
-      jql = "assignee = currentUser() ORDER BY updated DESC";
-    }
+    const { startAt } = query;
+    const jql = ticketJql(query);
     const connection = await this.connection();
-    const query = new URLSearchParams({
+    const params = new URLSearchParams({
       fields: FIELDS,
       jql,
       maxResults: String(PAGE_SIZE),
       startAt: String(startAt),
     });
+    // A key lookup ignores the board, like it ignores every other filter.
+    const route =
+      query.scope === "board" && !jql.startsWith("key = ")
+        ? `rest/agile/1.0/board/${query.board}/issue?${params}`
+        : `rest/api/2/search?${params}`;
     const result = await this.json<{
       issues: Issue[];
       total: number;
       startAt: number;
       maxResults: number;
-    }>(connection, `search?${query}`);
+    }>(connection, route);
     if (
       !result ||
       !Array.isArray(result.issues) ||
@@ -254,7 +339,7 @@ export class Jira {
     const connection = await this.connection();
     const issue = await this.json<Issue>(
       connection,
-      `issue/${encodeURIComponent(key)}?fields=${FIELDS},description,project,reporter,labels,created`
+      `rest/api/2/issue/${encodeURIComponent(key)}?fields=${FIELDS},description,project,reporter,labels,created`
     );
     const summary = this.summary(connection, issue);
     const f = issue.fields;
@@ -281,5 +366,114 @@ export class Jira {
       project: f.project.name,
       ...(f.reporter ? { reporter: f.reporter.displayName } : {}),
     };
+  }
+
+  /** Boards, favourite filters and projects for the Tickets page's pickers. */
+  async catalog(): Promise<JiraCatalog> {
+    const connection = await this.connection();
+    const [boards, filters, projects] = await Promise.all([
+      this.boards(connection),
+      this.json<unknown>(connection, "rest/api/2/filter/favourite"),
+      this.json<unknown>(connection, "rest/api/2/project"),
+    ]);
+    if (!Array.isArray(filters) || !Array.isArray(projects)) {
+      throw new JiraError(
+        "Jira returned an invalid filter or project list.",
+        502
+      );
+    }
+    return {
+      boards,
+      filters: filters
+        .flatMap((f): JiraFilter[] => {
+          const id = Number(f?.id);
+          return isId(id) && typeof f.name === "string"
+            ? [{ id, name: f.name }]
+            : [];
+        })
+        .slice(0, CATALOG_LIMIT),
+      projects: projects
+        .flatMap((p): JiraProject[] =>
+          typeof p?.key === "string" &&
+          p.key.length <= 100 &&
+          JIRA_PROJECT_KEY.test(p.key) &&
+          typeof p.name === "string"
+            ? [{ key: p.key, name: p.name }]
+            : []
+        )
+        .slice(0, CATALOG_LIMIT),
+    };
+  }
+
+  /** A board's columns and the status ids mapped to each, for the kanban layout. */
+  async columns(board: number): Promise<JiraBoardColumn[]> {
+    if (!isId(board)) {
+      throw new JiraError("Invalid Jira board.");
+    }
+    const connection = await this.connection();
+    const result = await this.json<{
+      columnConfig?: { columns?: unknown } | null;
+    }>(connection, `rest/agile/1.0/board/${board}/configuration`);
+    const columns = result?.columnConfig?.columns;
+    if (!Array.isArray(columns) || columns.length > CATALOG_LIMIT) {
+      throw new JiraError("Jira returned an invalid board configuration.", 502);
+    }
+    return columns.flatMap((c): JiraBoardColumn[] =>
+      typeof c?.name === "string" && Array.isArray(c.statuses)
+        ? [
+            {
+              name: c.name,
+              statusIds: c.statuses.flatMap((st: { id?: unknown } | null) =>
+                typeof st?.id === "string" ? [st.id] : []
+              ),
+            },
+          ]
+        : []
+    );
+  }
+
+  /** Boards come from Jira Software's agile API; without it there are simply none. */
+  private async boards(connection: Connection): Promise<JiraBoard[]> {
+    const boards: JiraBoard[] = [];
+    for (let page = 0; page < BOARD_PAGES; page += 1) {
+      let result: {
+        values?: unknown;
+        isLast?: unknown;
+      };
+      try {
+        result = await this.json(
+          connection,
+          `rest/agile/1.0/board?startAt=${boards.length}&maxResults=${PAGE_SIZE}`
+        );
+      } catch (error) {
+        if (error instanceof JiraError && error.status === 404 && page === 0) {
+          return [];
+        }
+        throw error;
+      }
+      if (!result || !Array.isArray(result.values)) {
+        throw new JiraError("Jira returned an invalid board list.", 502);
+      }
+      for (const b of result.values as {
+        id?: unknown;
+        name?: unknown;
+        type?: unknown;
+        location?: { projectKey?: unknown } | null;
+      }[]) {
+        if (isId(b?.id) && typeof b.name === "string") {
+          const project = b.location?.projectKey;
+          boards.push({
+            id: b.id,
+            name: b.name,
+            type: typeof b.type === "string" ? b.type : "",
+            ...(typeof project === "string" ? { project } : {}),
+          });
+        }
+      }
+      if (result.isLast !== false || result.values.length === 0) {
+        break;
+      }
+    }
+    return boards;
   }
 }

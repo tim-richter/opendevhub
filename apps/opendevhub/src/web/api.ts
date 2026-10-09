@@ -17,10 +17,14 @@ import type {
   ForgejoTeams,
 } from "../shared/forgejo";
 import type { ImageSide } from "../shared/images";
+import { jiraQueryParams } from "../shared/jira";
 import type {
+  JiraBoardColumn,
+  JiraCatalog,
   JiraSettings,
   JiraSettingsInput,
   JiraTicket,
+  JiraTicketQuery,
   JiraTickets,
 } from "../shared/jira";
 import type { StackId } from "../shared/stacks";
@@ -228,16 +232,40 @@ export const saveJiraSettings = async (
 };
 
 export const fetchJiraTickets = async (
-  search = "",
-  startAt = 0,
+  query: Partial<JiraTicketQuery> = {},
   signal?: AbortSignal
 ): Promise<JiraTickets> => {
+  const params = jiraQueryParams(query);
   const res = await fetch(
-    `/api/jira/tickets?${new URLSearchParams({ search, startAt: String(startAt) })}`,
+    `/api/jira/tickets${params.size ? `?${params}` : ""}`,
     { cache: "no-store", signal }
   );
   if (!res.ok) {
     throw await failure(res, "Jira tickets");
+  }
+  return res.json();
+};
+
+export const fetchJiraCatalog = async (
+  signal?: AbortSignal
+): Promise<JiraCatalog> => {
+  const res = await fetch("/api/jira/catalog", { cache: "no-store", signal });
+  if (!res.ok) {
+    throw await failure(res, "Jira boards and filters");
+  }
+  return res.json();
+};
+
+export const fetchJiraBoardColumns = async (
+  board: number,
+  signal?: AbortSignal
+): Promise<JiraBoardColumn[]> => {
+  const res = await fetch(`/api/jira/boards/${board}/columns`, {
+    cache: "no-store",
+    signal,
+  });
+  if (!res.ok) {
+    throw await failure(res, "Jira board columns");
   }
   return res.json();
 };
