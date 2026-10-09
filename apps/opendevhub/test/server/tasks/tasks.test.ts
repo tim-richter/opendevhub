@@ -395,6 +395,42 @@ describe("tasks", () => {
     ).rejects.toThrow(UnavailableError);
   });
 
+  it("starts a spec-first task by running opsx-propose with the prompt in each variant's session", async () => {
+    const { hub, client } = await started();
+    client.commands.mockResolvedValue([{ name: "opsx-propose" }]);
+    const result = await hub.tasks.createTask(project.id, {
+      prompt: "Add dark mode",
+      spec: true,
+      variants: [{}, {}],
+    });
+    expect(result.variants.every((v) => v.sessionId)).toBe(true);
+    expect(client.commands.mock.calls.map(([dir]) => dir)).toStrictEqual(
+      result.variants.map((v) => v.directory)
+    );
+    expect(client.command.mock.calls).toStrictEqual(
+      result.variants.map((v) => [
+        v.sessionId,
+        "opsx-propose",
+        "Add dark mode",
+        v.directory,
+      ])
+    );
+    expect(client.prompt).not.toHaveBeenCalled();
+    expect(client.createSession.mock.calls[0][1]?.metadata).toMatchObject({
+      opendevhub: { spec: true },
+    });
+  });
+
+  it("fails a spec-first variant whose opencode has no opsx-propose, before creating its session", async () => {
+    const { hub, client } = await started();
+    const result = await hub.tasks.createTask(project.id, {
+      prompt: "Add dark mode",
+      spec: true,
+    });
+    expect(result.variants[0].error).toMatch(/opsx-propose/u);
+    expect(client.createSession).not.toHaveBeenCalled();
+  });
+
   it("starts a session with a first prompt when creating a worktree", async () => {
     const { hub, client, worktrees } = await started();
     worktrees.list.mockResolvedValue([
@@ -438,6 +474,36 @@ describe("tasks", () => {
     clock.now += 60_001;
     await hub.sessions.models(project.id);
     expect(client.models).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers OpenSpec's workflow when opencode has opsx commands, with whether the container has the CLI", async () => {
+    const { hub, client, containers } = await started();
+    client.commands.mockResolvedValue(
+      ["opsx-propose", "opsx-apply", "opsx-explore"].map((name) => ({ name }))
+    );
+    containers.exec.mockResolvedValueOnce({
+      exitCode: 1,
+      stderr: "",
+      stdout: "",
+      timedOut: false,
+    });
+    const info = await hub.sessions.models(project.id);
+    expect(info.spec).toStrictEqual({
+      missing: ["opsx-update", "opsx-archive"],
+      cli: false,
+    });
+    expect(client.commands).toHaveBeenCalledWith("/workspaces/demo");
+    expect(containers.exec.mock.calls[0][1].slice(0, 2)).toStrictEqual([
+      "sh",
+      "-c",
+    ]);
+  });
+
+  it("leaves OpenSpec out when opencode has no opsx command or can't list commands", async () => {
+    const { hub, client, containers } = await started();
+    client.commands.mockRejectedValueOnce(new Error("404"));
+    expect(await hub.sessions.models(project.id)).not.toHaveProperty("spec");
+    expect(containers.exec).not.toHaveBeenCalled();
   });
 
   it("retries once when a fresh opencode answers empty", async () => {

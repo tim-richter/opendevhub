@@ -29,6 +29,7 @@ import { LOCAL_NODE } from "../nodes/host";
 import type { NodeRepoLayout } from "../nodes/repo";
 import type { OpencodeClient } from "../opencode/client";
 import { newTaskId } from "../projects/ids";
+import { PROPOSE_COMMAND } from "./openspec";
 import { discardMetadata, parseTaskMeta, parseTaskRequest } from "./request";
 
 const NO_WORKTREE_MOUNT =
@@ -260,6 +261,7 @@ export class Tasks {
             variant: i + 1,
             ...(req.jira ? { jira: req.jira } : {}),
             ...(branch ? { branch } : {}),
+            ...(req.spec ? { spec: true } : {}),
           };
           await this.startVariant(
             client,
@@ -319,6 +321,7 @@ export class Tasks {
             title,
             ...(req.jira ? { jira: req.jira } : {}),
             branch: worktree.branch,
+            ...(req.spec ? { spec: true } : {}),
           };
           await this.startVariant(
             this.envs.opencodeClient(env.id),
@@ -421,7 +424,10 @@ export class Tasks {
     };
   }
 
-  /** Creates a variant's session (recorded on the result at once) and sends the prompt. */
+  /**
+   * Creates a variant's session (recorded on the result at once) and sends the prompt. A spec-first variant runs
+   * `opsx-propose` with the prompt as its arguments instead, checked first so that a missing command leaves no session.
+   */
   private async startVariant(
     client: OpencodeClient,
     result: TaskVariantResult,
@@ -431,6 +437,14 @@ export class Tasks {
     v: TaskVariantSpec,
     prompt: string
   ): Promise<void> {
+    if (meta.spec) {
+      const commands = await client.commands(directory);
+      if (!commands.some((c) => c.name === PROPOSE_COMMAND)) {
+        throw new UnavailableError(
+          `opencode has no ${PROPOSE_COMMAND} command here; run \`openspec init --tools opencode\` in the repository`
+        );
+      }
+    }
     const session = await client.createSession(directory, {
       title,
       ...(v.model ? { model: v.model } : {}),
@@ -438,7 +452,9 @@ export class Tasks {
       metadata: { opendevhub: meta },
     });
     result.sessionId = session.id;
-    await client.prompt(session.id, prompt, undefined, directory);
+    await (meta.spec
+      ? client.command(session.id, PROPOSE_COMMAND, prompt, directory)
+      : client.prompt(session.id, prompt, undefined, directory));
   }
 
   private variantFailed(

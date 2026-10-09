@@ -143,6 +143,10 @@ export const parseTaskRequest = (
     );
   }
   const variants = raw.map((v, i) => parseVariant(v, i + 1));
+  if (body.spec !== undefined && typeof body.spec !== "boolean") {
+    throw new InvalidRequestError("spec must be true or false");
+  }
+  const spec = body.spec === true;
   if (where === "workspace") {
     if (environment === "isolated") {
       throw new InvalidRequestError(
@@ -169,6 +173,7 @@ export const parseTaskRequest = (
     ...(node ? { node } : {}),
     ...(branch ? { branch } : {}),
     ...(base ? { base } : {}),
+    ...(spec ? { spec } : {}),
     variants,
   };
 };
@@ -190,6 +195,7 @@ export const parseTaskMeta = (metadata: unknown): TaskMeta | undefined => {
     branch,
     discarded,
     jira: rawJira,
+    spec,
   } = m as Record<string, unknown>;
   if (typeof task !== "string" || !task.startsWith("tsk_")) {
     return undefined;
@@ -220,6 +226,7 @@ export const parseTaskMeta = (metadata: unknown): TaskMeta | undefined => {
     ...(jira ? { jira } : {}),
     title: typeof title === "string" ? title : "",
     ...(typeof branch === "string" ? { branch } : {}),
+    ...(spec === true ? { spec: true } : {}),
     ...(discarded === true ? { discarded: true } : {}),
   };
 };

@@ -31,6 +31,7 @@ import type {
   NewSession,
   OpencodeEndpoint,
   RawAgent,
+  RawCommand,
   RawMessage,
   RawModel,
   RawSession,
@@ -299,6 +300,17 @@ export function setup(
     reconciled: number;
   }[] = [];
   const containers = {
+    exec: vi.fn(
+      async (
+        _t: ExecTarget,
+        _command: string[]
+      ): Promise<{
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        timedOut: boolean;
+      }> => ({ exitCode: 0, stderr: "", stdout: "", timedOut: false })
+    ),
     workspaceFolder: vi.fn(
       async (_p?: ExecTarget): Promise<string | undefined> => "/workspaces/demo"
     ),
@@ -507,6 +519,10 @@ export function setup(
     agents: vi.fn(async (_dir: string): Promise<RawAgent[]> => [
       { id: "build", name: "Build", mode: "primary" },
     ]),
+    commands: vi.fn(async (_dir: string): Promise<RawCommand[]> => []),
+    command: vi.fn(
+      async (_sid: string, _name: string, _text: string, _dir?: string) => {}
+    ),
     session: vi.fn(async (id: string): Promise<RawSession> => ({
       id,
       time: { created: 1, updated: 1 },

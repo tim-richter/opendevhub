@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -43,7 +44,7 @@ import type { NewTaskDraft } from "../../dashboard-context";
 import { useNavigate } from "../../routing";
 import { nodeChoices } from "../nodes/nodes";
 import { projectFlags } from "../projects/project-actions";
-import { modelFromKey, modelKey, taskPath } from "./tasks";
+import { modelFromKey, modelKey, specUnavailable, taskPath } from "./tasks";
 
 interface Row {
   model: string;
@@ -108,6 +109,7 @@ const TaskForm = ({
   const [environment, setEnvironment] = useState<Isolation>();
   const [node, setNode] = useState("local");
   const [rows, setRows] = useState<Row[]>([EMPTY_ROW]);
+  const [specFirst, setSpecFirst] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -141,12 +143,13 @@ const TaskForm = ({
   const isMac =
     typeof navigator !== "undefined" && /mac/iu.test(navigator.platform);
 
-  // Cached per project, so the dialog opens with its lists ready; without them, it offers the defaults.
+  // Cached per project, so the dialog opens with its lists ready; without them, it offers the defaults. Refreshed on
+  // every opening, so a model, agent or OpenSpec setup added since shows up.
   const modelsQuery = useQuery({
     enabled: canOpen && !!projectId,
     queryFn: () => fetchModels(projectId ?? ""),
     queryKey: ["models", projectId],
-    staleTime: 5 * 60_000,
+    refetchOnMount: "always",
   });
   const models: ModelsInfo | undefined =
     modelsQuery.data ?? (modelsQuery.isError ? NO_MODELS : undefined);
@@ -164,6 +167,8 @@ const TaskForm = ({
       ...(agent ? { agent } : {}),
     };
   });
+  const specBlocked = models?.spec ? specUnavailable(models.spec) : undefined;
+  const spec = specFirst && !!models?.spec && !specBlocked;
   const shownTitle = title.trim() || deriveTitle(prompt);
   const preview =
     effectiveWhere === "worktree" && shownTitle
@@ -200,6 +205,7 @@ const TaskForm = ({
       ...(remote ? { node } : {}),
       ...(worktree && branch.trim() ? { branch: branch.trim() } : {}),
       ...(worktree && base.trim() ? { base: base.trim() } : {}),
+      ...(spec ? { spec: true as const } : {}),
       variants,
     })
       .then(
@@ -281,7 +287,11 @@ const TaskForm = ({
               rows={6}
               className="min-h-28"
               value={prompt}
-              placeholder="What should the agent do?"
+              placeholder={
+                spec
+                  ? "What should the change propose?"
+                  : "What should the agent do?"
+              }
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -291,6 +301,23 @@ const TaskForm = ({
               }}
             />
           </div>
+
+          {models?.spec && (
+            <div className="flex flex-col gap-1 text-sm">
+              <Label className="font-normal">
+                <Checkbox
+                  checked={spec}
+                  disabled={!!specBlocked}
+                  onCheckedChange={(c) => setSpecFirst(c === true)}
+                />{" "}
+                Spec first
+              </Label>
+              <span className="text-muted-foreground">
+                {specBlocked ??
+                  "The agent proposes an OpenSpec change (proposal, specs, design, tasks) before writing any code."}
+              </span>
+            </div>
+          )}
 
           {nodes.length > 1 && (
             <div className="flex flex-wrap items-center gap-4 text-sm">

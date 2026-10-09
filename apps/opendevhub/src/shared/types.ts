@@ -369,6 +369,16 @@ export interface ModelsInfo {
   models: ModelOption[];
   default?: ModelRef;
   agents: AgentOption[];
+  /** Absent when opencode has none of OpenSpec's `opsx-*` commands. */
+  spec?: SpecWorkflow;
+}
+
+/** OpenSpec's workflow as the project's environment offers it. Spec-first tasks need every command and the CLI. */
+export interface SpecWorkflow {
+  /** The `opsx-*` commands a spec-first task needs that opencode doesn't have. */
+  missing: string[];
+  /** Whether the container has the `openspec` CLI; absent when that could not be checked. */
+  cli?: boolean;
 }
 
 /** What opendevhub writes to `metadata.opendevhub` on each session of a task. */
@@ -381,6 +391,8 @@ export interface TaskMeta {
   title: string;
   /** The branch the task created for this variant's worktree; absent for the main checkout and for older tasks. */
   branch?: string;
+  /** Started with OpenSpec's `opsx-propose`: the agent writes a change proposal before any code. */
+  spec?: true;
   discarded?: boolean;
 }
 
@@ -403,6 +415,8 @@ export interface TaskRequest {
   environment?: Isolation;
   /** The node isolated variants run on; absent for this machine. */
   node?: NodeId;
+  /** Start with OpenSpec's `opsx-propose`, the prompt being what to propose. */
+  spec?: true;
   variants: TaskVariantSpec[];
 }
 

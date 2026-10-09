@@ -18,6 +18,7 @@ import {
   opensNewTask,
   pickPrompts,
   projectIdFromPath,
+  specUnavailable,
   removals,
   taskChip,
   taskDestination,
@@ -372,5 +373,16 @@ describe("fileMatrix", () => {
         same: false,
       },
     ]);
+  });
+});
+
+describe(specUnavailable, () => {
+  it("names missing commands first, then a missing CLI", () => {
+    expect(specUnavailable({ missing: [], cli: true })).toBeUndefined();
+    expect(specUnavailable({ missing: [] })).toBeUndefined();
+    expect(specUnavailable({ missing: ["opsx-update"], cli: false })).toMatch(
+      /opsx-update/u
+    );
+    expect(specUnavailable({ missing: [], cli: false })).toMatch(/CLI/u);
   });
 });

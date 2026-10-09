@@ -72,6 +72,16 @@ describe(parseTaskRequest, () => {
     });
   });
 
+  it("reads spec-first, which must be a boolean", () => {
+    expect(parseTaskRequest({ prompt: "x", spec: true }).spec).toBe(true);
+    expect(parseTaskRequest({ prompt: "x", spec: false })).not.toHaveProperty(
+      "spec"
+    );
+    expect(() => parseTaskRequest({ prompt: "x", spec: "yes" })).toThrow(
+      InvalidRequestError
+    );
+  });
+
   it("keeps every field it understands", () => {
     expect(
       parseTaskRequest({
@@ -174,6 +184,12 @@ describe("task metadata", () => {
     expect(
       parseTaskMeta({ opendevhub: { ...meta, branch: "fix-a" } })
     ).toStrictEqual({ ...meta, branch: "fix-a" });
+    expect(
+      parseTaskMeta({ opendevhub: { ...meta, spec: true } })
+    ).toStrictEqual({ ...meta, spec: true });
+    expect(
+      parseTaskMeta({ opendevhub: { ...meta, spec: "yes" } })
+    ).toStrictEqual(meta);
     expect(parseTaskMeta({ opendevhub: { ...meta, branch: 5 } })).toStrictEqual(
       meta
     );

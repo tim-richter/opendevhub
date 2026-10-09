@@ -87,6 +87,12 @@ export interface RawAgent {
   description?: string;
 }
 
+/** A slash command opencode knows, from the repo's or the user's config. */
+export interface RawCommand {
+  name: string;
+  description?: string;
+}
+
 export interface NewSession {
   title?: string;
   model?: ModelRef;
@@ -394,6 +400,21 @@ export class OpencodeClient {
     );
   }
 
+  /** Runs a slash command in the session, `text` being its arguments; opencode expands it as typed `/name text`. */
+  command(
+    sessionId: string,
+    name: string,
+    text: string,
+    directory?: string
+  ): Promise<void> {
+    return this.send(
+      "POST",
+      `/api/session/${encodeURIComponent(sessionId)}/command`,
+      { name, text },
+      directory
+    );
+  }
+
   /** Stops the session's running turn. */
   interrupt(sessionId: string, directory?: string): Promise<void> {
     return this.send(
@@ -444,6 +465,14 @@ export class OpencodeClient {
       directory
     );
     return result7.data;
+  }
+
+  async commands(directory: string): Promise<RawCommand[]> {
+    const result = await this.get<{ data: RawCommand[] }>(
+      "/api/command",
+      directory
+    );
+    return result.data;
   }
 
   /** opencode replaces `metadata` as a whole, so pass every key the session should keep. */

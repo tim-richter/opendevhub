@@ -38,7 +38,7 @@ export type ContainersPort = Pick<
   | "ensureVolume"
   | "removeVolume"
 > &
-  Partial<Pick<Containers, "remoteEnv">>;
+  Partial<Pick<Containers, "remoteEnv" | "exec">>;
 export type ImagesPort = Pick<Images, "ensureBase">;
 export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
 export type GitPort = Pick<

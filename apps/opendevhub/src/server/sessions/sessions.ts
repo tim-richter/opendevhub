@@ -4,9 +4,11 @@ import type {
   ModelsInfo,
   PendingItems,
   PermissionDecision,
+  Project,
   ProjectId,
   SessionDetail,
   SessionSummary,
+  SpecWorkflow,
 } from "../../shared/types";
 import type { Environments } from "../environments/environments";
 import type { HubDeps } from "../environments/ports";
@@ -14,6 +16,7 @@ import { AlreadyAnsweredError, NotFoundError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import { isGone, isInvalidAnswer } from "../opencode/client";
 import type { OpencodeClient } from "../opencode/client";
+import { OPENSPEC_CLI_CHECK, specWorkflow } from "../tasks/openspec";
 import { toModelsInfo } from "../tasks/request";
 import {
   DETAIL_MESSAGES,
@@ -206,7 +209,11 @@ export class Sessions {
         client.models(ws),
         client.defaultModel(ws).catch(() => undefined),
         client.agents(ws),
-      ]).then(([models, def, agents]) => toModelsInfo(models, def, agents));
+        this.specWorkflow(project, client, ws),
+      ]).then(([models, def, agents, spec]) => ({
+        ...toModelsInfo(models, def, agents),
+        ...(spec ? { spec } : {}),
+      }));
     const isEmpty = (v: ModelsInfo) =>
       v.models.length === 0 && v.agents.length === 0;
     const delay =
@@ -232,6 +239,27 @@ export class Sessions {
     // oxlint-disable-next-line promise/prefer-catch
     value.then((v) => isEmpty(v) && forget(), forget);
     return value;
+  }
+
+  /** OpenSpec's workflow in the project's environment; an opencode that can't list commands has none. */
+  private async specWorkflow(
+    project: Project,
+    client: OpencodeClient,
+    ws: string
+  ): Promise<SpecWorkflow | undefined> {
+    const workflow = specWorkflow(await client.commands(ws).catch(() => []));
+    if (!workflow) {
+      return undefined;
+    }
+    // 1 is the check's own "not found"; anything else means the container couldn't be asked.
+    const cli = await this.deps.containers
+      .exec?.(project, ["sh", "-c", OPENSPEC_CLI_CHECK])
+      .then(
+        (r) =>
+          r.exitCode === 0 || r.exitCode === 1 ? r.exitCode === 0 : undefined,
+        () => undefined
+      );
+    return { ...workflow, ...(cli === undefined ? {} : { cli }) };
   }
 
   /** Answers a permission request the dashboard listed for this project. */

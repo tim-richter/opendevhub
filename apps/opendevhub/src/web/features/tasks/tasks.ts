@@ -4,6 +4,7 @@ import type {
   ReviewData,
   ReviewFile,
   SessionSummary,
+  SpecWorkflow,
   StartStep,
   TaskResult,
 } from "../../../shared/types";
@@ -293,4 +294,15 @@ export const fileMatrix = (
   return rows.toSorted(
     (a, b) => Number(a.same) - Number(b.same) || a.file.localeCompare(b.file)
   );
+};
+
+/** Why a spec-first task can't start in this environment; undefined when it can. */
+export const specUnavailable = (spec: SpecWorkflow): string | undefined => {
+  if (spec.missing.length > 0) {
+    return `opencode lacks ${spec.missing.join(", ")}; run \`openspec update\` in the repository.`;
+  }
+  if (spec.cli === false) {
+    return "The container has no openspec CLI; add it to the devcontainer.";
+  }
+  return undefined;
 };
