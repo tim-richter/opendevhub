@@ -418,6 +418,11 @@ const Compare = (props: {
                   </span>
                 </span>
               ))}
+              {row("Context", (s) => (
+                <span className="tabular-nums">
+                  {formatTokens(s.context)} tokens
+                </span>
+              ))}
               {row("Container", (s) => {
                 const env = envOfDirectory(view, s.directory);
                 return env ? <EnvBadge env={env} /> : "Shared";

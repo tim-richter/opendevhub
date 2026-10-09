@@ -10,6 +10,13 @@ export interface OpencodeEndpoint {
   password: string;
 }
 
+export interface RawTokens {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache: { read: number; write: number };
+}
+
 export interface RawSession {
   id: string;
   title?: string;
@@ -21,13 +28,41 @@ export interface RawSession {
   agent?: string;
   /** USD. */
   cost?: number;
-  tokens?: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: { read: number; write: number };
-  };
+  tokens?: RawTokens;
   outcome?: "succeeded" | "failed" | "interrupted";
+}
+
+/** One piece of an assistant message: text, reasoning or a tool call. */
+export interface RawAssistantContent {
+  type: string;
+  /** Set on text and reasoning. */
+  text?: string;
+  /** Set on a tool call. */
+  name?: string;
+  /** Set on a tool call: "pending", "running", "completed" or "error". */
+  state?: { status: string };
+}
+
+/** The fields of a session message that opendevhub reads. */
+export interface RawMessage {
+  id: string;
+  /** "user", "assistant", "synthetic", "compaction" and more. */
+  type: string;
+  time?: { created: number; completed?: number };
+  /** A user message's prompt. */
+  text?: string;
+  /** The rest are an assistant message's. */
+  agent?: string;
+  model?: ModelRef;
+  content?: RawAssistantContent[];
+  /** USD. */
+  cost?: number;
+  tokens?: RawTokens;
+  /** Why the model stopped, such as "stop" or "tool-calls". */
+  finish?: string;
+  error?: { message?: string };
+  /** The files this message changed. */
+  snapshot?: { files?: string[] };
 }
 
 /**
@@ -41,6 +76,7 @@ export interface RawModel {
   enabled?: boolean;
   status?: string;
   variants?: { id: string }[];
+  limit?: { context?: number };
 }
 
 export interface RawAgent {
@@ -84,6 +120,13 @@ export interface RawFileStatus {
 
 export interface RawFileDiff extends RawFileStatus {
   patch: string;
+}
+
+/** The fields of a user message that opendevhub reads. */
+export interface RawUserMessage {
+  id: string;
+  text: string;
+  time: { created: number };
 }
 
 export interface OpencodeEvent {
@@ -315,6 +358,27 @@ export class OpencodeClient {
     return result4.data;
   }
 
+  /**
+   * What a session changed in one turn (`from`, the newest by default), or across turns up to `to`; whole-file
+   * patches, like `vcsDiff`. A turn still running compares with the working copy.
+   */
+  async sessionDiff(
+    sessionId: string,
+    opts: { from?: string; to?: string } = {},
+    directory?: string
+  ): Promise<RawFileDiff[]> {
+    const query = new URLSearchParams({
+      ...(opts.from ? { from: opts.from } : {}),
+      ...(opts.to ? { to: opts.to } : {}),
+    });
+    const result = await this.get<{ data: RawFileDiff[] }>(
+      `/api/session/${encodeURIComponent(sessionId)}/diff${query.size ? `?${query}` : ""}`,
+      directory,
+      DIFF_TIMEOUT_MS
+    );
+    return result.data;
+  }
+
   /** Adds a user message; asynchronous on opencode's side. `queue` waits for a running agent to finish its turn. */
   prompt(
     sessionId: string,
@@ -420,6 +484,25 @@ export class OpencodeClient {
       `/api/session/${encodeURIComponent(id)}`
     );
     return result9.data;
+  }
+
+  /** A session's newest `limit` messages, newest first. */
+  async messages(sessionId: string, limit: number): Promise<RawMessage[]> {
+    const result = await this.get<{ data: RawMessage[] }>(
+      `/api/session/${encodeURIComponent(sessionId)}/message?limit=${limit}&order=desc`
+    );
+    return result.data;
+  }
+
+  /** A session's newest `limit` user messages, newest first: the prompts its turns start from. */
+  async userMessages(
+    sessionId: string,
+    limit: number
+  ): Promise<RawUserMessage[]> {
+    const result = await this.get<{ data: RawUserMessage[] }>(
+      `/api/session/${encodeURIComponent(sessionId)}/message?type=user&limit=${limit}&order=desc`
+    );
+    return result.data;
   }
 
   async active(): Promise<Set<string>> {

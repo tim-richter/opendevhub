@@ -8,8 +8,10 @@ import type {
 } from "../shared/types";
 import type {
   RawForm,
+  RawMessage,
   RawPermissionRequest,
   RawSession,
+  RawTokens,
 } from "./opencode/client";
 import { parseTaskMeta } from "./tasks";
 
@@ -22,6 +24,8 @@ export interface StatusInput {
   forms: RawForm[];
   /** When the monitor first saw each pending item, by item id. */
   firstSeen?: Map<string, number>;
+  /** Tokens in each root session's context, by session id (see `contextOf`). */
+  contexts?: Map<string, number>;
 }
 
 const RANK: Record<SessionStatus, number> = {
@@ -95,15 +99,35 @@ const modelOf = (s: RawSession): ModelRef | undefined => {
   };
 };
 
-const tokensOf = (s: RawSession): number | undefined => {
-  const t = s.tokens;
-  return t ? (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0) : undefined;
+/** Every token a model call processed: input, output, reasoning, and cache reads and writes. */
+export const tokenTotal = (t: RawTokens): number =>
+  (t.input ?? 0) +
+  (t.output ?? 0) +
+  (t.reasoning ?? 0) +
+  (t.cache?.read ?? 0) +
+  (t.cache?.write ?? 0);
+
+const tokensOf = (s: RawSession): number | undefined =>
+  s.tokens ? tokenTotal(s.tokens) : undefined;
+
+/**
+ * The tokens in a session's context as of its latest reply, the "total tokens" opencode shows for it: everything
+ * the newest assistant message that used any processed. Undefined when none of `newestFirst` is such a message.
+ */
+export const contextOf = (newestFirst: RawMessage[]): number | undefined => {
+  for (const m of newestFirst) {
+    const total = m.type === "assistant" && m.tokens ? tokenTotal(m.tokens) : 0;
+    if (total > 0) {
+      return total;
+    }
+  }
+  return undefined;
 };
 
 export interface RolledUp {
   /** USD; undefined when no session in the tree reports it. */
   cost?: number;
-  /** Input, output and reasoning tokens; undefined when no session in the tree reports them. */
+  /** All tokens processed, cache included; undefined when no session in the tree reports them. */
   tokens?: number;
   /** The latest `time.updated` in the tree. */
   updatedAt: number;
@@ -187,6 +211,7 @@ export const deriveSessions = (
         const items = pending.get(s.id);
         const model = modelOf(s);
         const { cost, tokens } = totals.get(s.id) ?? {};
+        const context = input.contexts?.get(s.id);
         return {
           id: s.id,
           projectId,
@@ -207,6 +232,7 @@ export const deriveSessions = (
           ...(model ? { model } : {}),
           ...(cost === undefined ? {} : { cost }),
           ...(tokens === undefined ? {} : { tokens }),
+          ...(context === undefined ? {} : { context }),
         };
       })
       .toSorted(compareSessions)

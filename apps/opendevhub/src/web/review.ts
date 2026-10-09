@@ -9,6 +9,7 @@ import type {
   ReviewData,
   ReviewFile,
   ReviewMode,
+  ReviewTurn,
   UpdateStrategy,
 } from "../shared/types";
 import { workspaceFolderOf } from "./derive";
@@ -148,10 +149,17 @@ export const composeReviewPrompt = (o: {
   branch?: string;
   base?: string;
   uncommitted?: boolean;
+  /** The comments are on what a turn changed: the latest one, or the one this prompt started. */
+  turn?: { latest: boolean; prompt?: string };
   comments: ReviewComment[];
 }): string => {
   let what;
-  if (o.branch) {
+  if (o.turn) {
+    what =
+      o.turn.latest || !o.turn.prompt
+        ? "Review feedback on the changes from your last turn"
+        : `Review feedback on the changes from your turn "${o.turn.prompt}"`;
+  } else if (o.branch) {
     if (o.uncommitted) {
       what = `Review feedback on the uncommitted changes on ${o.branch}`;
     } else {
@@ -161,7 +169,7 @@ export const composeReviewPrompt = (o: {
     what = "Review feedback on the working copy";
   }
   const vs =
-    !o.uncommitted && o.base && o.base !== o.branch
+    !o.turn && !o.uncommitted && o.base && o.base !== o.branch
       ? ` (compared with ${o.base})`
       : "";
   const withText = o.comments.filter((c) => c.text.trim());
@@ -205,14 +213,22 @@ export const conflictPrompt = (o: {
   return `${how} and resolve the conflicts in ${o.files.join(", ")}. Run the tests afterwards, then reply with what you changed.`;
 };
 
-/** Drafts per diff: ends in the base when comparing with it, empty for uncommitted changes. */
+/** Drafts per diff: ends in the base when comparing with it, in the session and turn for a turn, empty for uncommitted changes. */
 export const draftKey = (
   projectId: string,
   target: string,
   mode: ReviewMode,
-  base: string | undefined
-): string =>
-  `opendevhub:review:${projectId}:${target || "main-checkout"}:${mode === "branch" ? (base ?? "") : ""}`;
+  base: string | undefined,
+  turn?: Pick<ReviewTurn, "sessionId" | "from">
+): string => {
+  let scope = "";
+  if (mode === "branch") {
+    scope = base ?? "";
+  } else if (mode === "turn") {
+    scope = `turn:${turn?.sessionId ?? ""}:${turn?.from ?? ""}`;
+  }
+  return `opendevhub:review:${projectId}:${target || "main-checkout"}:${scope}`;
+};
 
 const modeKey = (projectId: string, target: string): string =>
   `opendevhub:review-mode:${projectId}:${target || "main-checkout"}`;

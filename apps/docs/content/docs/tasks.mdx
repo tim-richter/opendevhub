@@ -22,6 +22,10 @@ By default a task creates a [worktree](/docs/worktrees) on a branch named after 
 
 A task is stored in its sessions' opencode metadata (`metadata.opendevhub`), so it survives restarts of opendevhub and of the container.
 
+## A session's page
+
+Click a session's title to open its page. It shows the session's cost and tokens (its subagents included, with its own tokens split by kind), how full its context window is, and its subagents. Its turns are listed newest first: each prompt with how long the agent took, what the turn cost, its tool calls and the agent's last reply. Expand **Changes** to see what a turn changed, from the prompt until the agent went idle, whatever was committed in between; while the turn runs it compares with the working copy. Comment on a line with the **+** in the gutter and send the comments to the session. The box above the turns sends the session another prompt, queued behind its current turn while it works.
+
 ## Review and publish
 
 Each checkout has a **Review** tab that shows the changes. Its toolbar stays at the top while you scroll: the branch, which changes are shown, how far ahead and behind the base it is, and whether it has uncommitted changes. **Uncommitted** (the default) shows the checkout's `git diff`, new files included. Switch to the base (for example **main**) to see everything since the branch left it, committed or not; click the base again to pick another. Each checkout remembers its choice, and when nothing is uncommitted but the branch has commits, the review offers to compare with the base. By default a diff shows only the changed lines with a few lines around them; click an "unmodified lines" bar to expand it, or switch to the full file. You can also show the old and new versions side by side, and hide the changed-files tree. These choices are remembered.

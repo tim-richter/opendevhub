@@ -22,7 +22,7 @@ import {
 import type { Checks } from "./checks";
 import { parseCleanupItems } from "./cleanup";
 import type { Cleanup } from "./cleanup";
-import { InvalidNodeError } from "./config";
+import { InvalidNodeError, InvalidRootError } from "./config";
 import { CommandError } from "./containers";
 import { EditorUnavailableError } from "./editors";
 import { ForgejoError } from "./forgejo";
@@ -67,6 +67,7 @@ export type DashboardOrchestrator = Pick<
   | "cancelForm"
   | "review"
   | "promptSession"
+  | "sessionDetail"
   | "removeSession"
   | "commitMessage"
   | "commit"
@@ -97,6 +98,8 @@ export interface DashboardDeps {
   store: StateStore;
   orchestrator: DashboardOrchestrator;
   onboarding: OnboardingPort;
+  /** Validates and persists the scan roots; throws InvalidRootError for a bad list. */
+  saveRoots?: (input: unknown) => void;
   push: PushPort;
   cleanup: Pick<Cleanup, "scan" | "apply">;
   checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;
@@ -148,7 +151,8 @@ const errorStatus = (err: unknown): 400 | 404 | 409 | 412 | 422 | 500 | 502 => {
     err instanceof InvalidRequestError ||
     err instanceof EditorUnavailableError ||
     err instanceof InvalidSubscriptionError ||
-    err instanceof InvalidNodeError
+    err instanceof InvalidNodeError ||
+    err instanceof InvalidRootError
   ) {
     return 400;
   }
@@ -492,6 +496,17 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
     return c.json(store.snapshot());
   });
 
+  app.post("/api/settings/roots", (c) =>
+    json(c, async (_id, b) => {
+      if (!deps.saveRoots) {
+        throw new UnavailableError("Saving roots is not available");
+      }
+      deps.saveRoots(b.roots);
+      await orchestrator.rescan();
+      return store.snapshot();
+    })
+  );
+
   // Add project: repos under the roots without a devcontainer.
   app.get("/api/onboarding/candidates", async (c) =>
     c.json(await onboarding.list())
@@ -673,6 +688,21 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
       ),
     }))
   );
+  app.get("/api/projects/:id/sessions/:sid", async (c) => {
+    try {
+      return c.json(
+        await orchestrator.sessionDetail(
+          c.req.param("id"),
+          c.req.param("sid") ?? ""
+        )
+      );
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        errorStatus(error)
+      );
+    }
+  });
   app.delete("/api/projects/:id/sessions/:sid", (c) =>
     json(c, (id) => orchestrator.removeSession(id, c.req.param("sid") ?? ""))
   );
@@ -742,7 +772,7 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
   app.get("/api/projects/:id/review", async (c) => {
     try {
       const mode = c.req.query("mode") ?? "working";
-      if (mode !== "working" && mode !== "branch") {
+      if (mode !== "working" && mode !== "branch" && mode !== "turn") {
         throw new InvalidRequestError(`unknown review mode ${mode}`);
       }
       const data = await orchestrator.review(
@@ -751,7 +781,9 @@ export const createDashboardApp = (deps: DashboardDeps): Hono => {
         {
           base: c.req.query("base"),
           file: c.req.query("file"),
+          from: c.req.query("from"),
           mode,
+          session: c.req.query("session"),
         }
       );
       return c.json(data);

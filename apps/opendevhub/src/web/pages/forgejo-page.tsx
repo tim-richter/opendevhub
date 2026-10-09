@@ -186,7 +186,7 @@ const PullDiff = ({
   );
   if (!details.data) {
     return (
-      <Page className="max-w-none">
+      <Page>
         <BackLink search={listSearch} />
         <PageHeader
           title={`${owner}/${repo} #${number}`}
@@ -484,7 +484,7 @@ const PullView = ({
   const aiBusy =
     !!ai.run && ai.run.stage !== "done" && ai.run.stage !== "failed";
   return (
-    <Page className="max-w-none pb-0">
+    <Page className="pb-0">
       <BackLink search={listSearch} />
       <PageHeader
         title={details.pull.title}

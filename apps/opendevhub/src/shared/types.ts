@@ -180,8 +180,34 @@ export interface ReviewBase {
   source: "request" | "config" | "opencode" | "default";
 }
 
-/** `working`: uncommitted changes. `branch`: everything since the merge-base with the base. */
-export type ReviewMode = "working" | "branch";
+/**
+ * `working`: uncommitted changes. `branch`: everything since the merge-base with the base. `turn`: what an agent
+ * session changed in one of its turns.
+ */
+export type ReviewMode = "working" | "branch" | "turn";
+
+/** A prompt that started a turn, for picking which turn to review. */
+export interface ReviewTurnPrompt {
+  /** The user message id. */
+  id: string;
+  /** The prompt's text, cut to its start. */
+  text: string;
+  created: number;
+}
+
+/** The session and turn a `turn` review shows. */
+export interface ReviewTurn {
+  sessionId: string;
+  sessionTitle: string;
+  /** The prompt whose turn is shown; missing when the session has no prompts yet. */
+  from?: string;
+  /** The newest prompt's turn is shown. */
+  latest: boolean;
+  /** The session is still working, so the turn may change. */
+  running: boolean;
+  /** Recent prompts, newest first. */
+  prompts: ReviewTurnPrompt[];
+}
 
 export interface ReviewFile {
   file: string;
@@ -201,6 +227,8 @@ export interface ReviewData {
   branch?: string;
   base?: ReviewBase;
   mode: ReviewMode;
+  /** Set in `turn` mode. */
+  turn?: ReviewTurn;
   ahead: number;
   behind: number;
   /** Uncommitted changes in the target. */
@@ -417,8 +445,74 @@ export interface SessionSummary {
   model?: ModelRef;
   /** USD so far, its subagents included. */
   cost?: number;
-  /** Input, output and reasoning tokens so far, its subagents included. */
+  /** Tokens processed so far (input, output, reasoning and cache), its subagents included. */
   tokens?: number;
+  /** Tokens in its context as of the latest reply, the number opencode shows for it; its subagents excluded. */
+  context?: number;
+}
+
+/** Tokens by kind. */
+export interface TokenBreakdown {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** One turn of a session: a prompt and the agent's replies to it. */
+export interface SessionTurn {
+  /** The prompt's user message id; the `from` of a `turn` review. */
+  id: string;
+  /** The prompt, cut short when long. */
+  prompt: string;
+  created: number;
+  /** When its last reply finished; missing while the agent is still at it. */
+  completed?: number;
+  /** USD; its subagents excluded. */
+  cost?: number;
+  /** Tokens processed, cache included; its subagents excluded. */
+  tokens?: number;
+  /** Model calls the agent made. */
+  steps: number;
+  tools: number;
+  failedTools: number;
+  /** Files its replies changed. */
+  files: number;
+  /** The text of its last reply that has any, cut short when long. */
+  reply?: string;
+  /** Why its last reply failed, when it did. */
+  error?: string;
+  agent?: string;
+  model?: ModelRef;
+}
+
+/** A subagent (child session) of a session. */
+export interface SubagentSummary {
+  id: string;
+  title: string;
+  agent?: string;
+  updatedAt: number;
+  /** USD; its own subagents included. */
+  cost?: number;
+  tokens?: number;
+}
+
+/** What the session page shows beyond the session's summary. */
+export interface SessionDetail {
+  session: SessionSummary;
+  createdAt: number;
+  agent?: string;
+  outcome?: "succeeded" | "failed" | "interrupted";
+  /** Its own tokens by kind; its subagents excluded. */
+  tokens?: TokenBreakdown;
+  /** The context window of its model, when opencode knows it. */
+  contextLimit?: number;
+  subagents: SubagentSummary[];
+  /** Its turns, newest first. */
+  turns: SessionTurn[];
+  /** It has older turns than those listed. */
+  more: boolean;
 }
 
 export interface Preflight {
@@ -485,7 +579,7 @@ export interface EditorInfo {
 export interface Usage {
   /** USD. */
   cost: number;
-  /** Input, output and reasoning tokens. */
+  /** Tokens processed: input, output, reasoning and cache. */
   tokens: number;
 }
 

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { InvalidNodeError } from "../../src/server/config";
+import { InvalidNodeError, InvalidRootError } from "../../src/server/config";
 import { CommandError } from "../../src/server/containers";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import type {
@@ -37,6 +37,7 @@ import type {
   ModelsInfo,
   PickResult,
   Project,
+  SessionDetail,
   TaskResult,
 } from "../../src/shared/types";
 import { MemorySecretStore } from "../helpers/secrets";
@@ -135,6 +136,11 @@ function setup(webDir?: string) {
       async (_id: string, _sid: string, _text: string) => {}
     ),
     removeSession: vi.fn(async (_id: string, _sid: string) => {}),
+    sessionDetail: vi.fn(
+      async (_id: string, _sid: string): Promise<SessionDetail> => {
+        throw new NotFoundError(_sid, "session");
+      }
+    ),
     commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
     commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
     updateFromBase: vi.fn(async (_id: string, _dir: string, _base: string) => ({
@@ -1016,6 +1022,31 @@ describe("dashboard API", () => {
     expect(orchestrator.rescan).toHaveBeenCalled();
   });
 
+  it("saves roots, rescans and returns the snapshot", async () => {
+    const deps = setup();
+    const saveRoots = vi.fn((input: unknown) => {
+      if (!Array.isArray(input) || input.includes("rel")) {
+        throw new InvalidRootError("bad root");
+      }
+      deps.store.setRoots(input as string[]);
+    });
+    const app = createDashboardApp({ ...deps, saveRoots });
+    const post = (roots: unknown) =>
+      app.request("/api/settings/roots", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roots }),
+      });
+    const res = await post(["/code"]);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { roots: string[] }).roots).toStrictEqual([
+      "/code",
+    ]);
+    expect(deps.orchestrator.rescan).toHaveBeenCalledOnce();
+    expect((await post(["rel"])).status).toBe(400);
+    expect(deps.orchestrator.rescan).toHaveBeenCalledOnce();
+  });
+
   it("GET logs returns buffered lines", async () => {
     const { app } = setup();
     await expect(
@@ -1185,6 +1216,8 @@ describe("dashboard API", () => {
         base: "main",
         mode: "branch",
         file: "a.ts",
+        from: undefined,
+        session: undefined,
       });
       await app.request(
         `/api/projects/${project.id}/review?directory=%2Fw%2Fx`
@@ -1193,6 +1226,18 @@ describe("dashboard API", () => {
         base: undefined,
         mode: "working",
         file: undefined,
+        from: undefined,
+        session: undefined,
+      });
+      await app.request(
+        `/api/projects/${project.id}/review?directory=%2Fw%2Fx&mode=turn&session=ses_1&from=msg_2`
+      );
+      expect(orchestrator.review).toHaveBeenLastCalledWith(project.id, "/w/x", {
+        base: undefined,
+        mode: "turn",
+        file: undefined,
+        from: "msg_2",
+        session: "ses_1",
       });
       expect(
         (
@@ -1254,6 +1299,37 @@ describe("dashboard API", () => {
       });
       expect(failed.status).toBe(422);
       expect((await failed.json()).error).toMatch(/user\.name/u);
+    });
+
+    it("answers a session's detail, 404 for an unknown session", async () => {
+      const { app, orchestrator } = setup();
+      const missing = await app.request(
+        `/api/projects/${project.id}/sessions/ses_x`
+      );
+      expect(missing.status).toBe(404);
+      orchestrator.sessionDetail.mockResolvedValueOnce({
+        createdAt: 1,
+        more: false,
+        session: {
+          directory: "/w",
+          id: "ses_1",
+          projectId: project.id,
+          status: "idle",
+          title: "Fix",
+          updatedAt: 2,
+        },
+        subagents: [],
+        turns: [],
+      });
+      const res = await app.request(
+        `/api/projects/${project.id}/sessions/ses_1`
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).session.title).toBe("Fix");
+      expect(orchestrator.sessionDetail).toHaveBeenLastCalledWith(
+        project.id,
+        "ses_1"
+      );
     });
 
     it("prompts a session, starts one with a prompt, and removes a worktree with its branch", async () => {

@@ -1,4 +1,4 @@
-import { Outlet, useLocation, useOutletContext, useParams } from "react-router";
+import { Outlet, useOutletContext, useParams } from "react-router";
 
 import type { ProjectView } from "../../shared/types";
 import { Page } from "../components/page";
@@ -9,14 +9,12 @@ import { NotFound } from "./not-found";
 export const ProjectLayout = () => {
   const { projectId } = useParams();
   const { snapshot } = useDash();
-  // Review lays diffs side by side, so it gets the viewport's whole width.
-  const wide = useLocation().pathname.endsWith("/review");
   const view = snapshot?.projects.find((v) => v.project.id === projectId);
   if (!view) {
     return <NotFound what="Project" />;
   }
   return (
-    <Page className={wide ? "max-w-none" : undefined}>
+    <Page>
       <Outlet context={view} />
     </Page>
   );

@@ -281,6 +281,40 @@ describe(OpencodeClient, () => {
     ]);
   });
 
+  it("reads a session's prompts and what one of its turns changed", async () => {
+    fake.state.messages = {
+      ses_1: [
+        { id: "msg_1", type: "user", text: "first", time: { created: 1 } },
+        { id: "msg_2", type: "assistant" },
+        { id: "msg_3", type: "user", text: "second", time: { created: 3 } },
+      ],
+    };
+    const changed = {
+      file: "a.ts",
+      patch: "@@ -1 +1 @@\n-a\n+b\n",
+      additions: 1,
+      deletions: 1,
+      status: "modified" as const,
+    };
+    fake.state.turnDiffs = { ses_1: { msg_1: [changed], msg_3: [] } };
+    expect(
+      (await client.userMessages("ses_1", 10)).map((m) => m.id)
+    ).toStrictEqual(["msg_3", "msg_1"]);
+    await expect(
+      client.sessionDiff("ses_1", {}, "/w/x")
+    ).resolves.toStrictEqual([]);
+    await expect(
+      client.sessionDiff("ses_1", { from: "msg_1" }, "/w/x")
+    ).resolves.toStrictEqual([changed]);
+    expect(fake.state.turnQueries).toStrictEqual([
+      { sessionId: "ses_1" },
+      { sessionId: "ses_1", from: "msg_1" },
+    ]);
+    await expect(
+      client.sessionDiff("ses_1", { from: "msg_9" })
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
   it("treats an ambiguous or missing base as unknown", async () => {
     fake.state.vcs["/w/a"] = { base: "ambiguous" };
     fake.state.vcs["/w/b"] = { base: null };

@@ -26,7 +26,9 @@ import type {
   PublishResult,
   ReviewData,
   ReviewMode,
+  ReviewTurn,
   SessionCleanupItem,
+  SessionDetail,
   SessionSummary,
   StartingVariant,
   TaskMeta,
@@ -69,10 +71,11 @@ import type { MonitorOptions } from "./monitor";
 import { directRoute } from "./network";
 import type { HostPort, Network, Route, RouteContainer } from "./network";
 import type { NodeRepoLayout, NodeRepoPort } from "./node-repo";
-import { isGone, isInvalidAnswer } from "./opencode/client";
+import { isGone, isInvalidAnswer, OpencodeHttpError } from "./opencode/client";
 import type {
   OpencodeClient,
   OpencodeEndpoint,
+  RawFileDiff,
   RawSession,
 } from "./opencode/client";
 import {
@@ -89,7 +92,21 @@ import type { AgentTunnelOptions } from "./relay/agent";
 import type { RelayTarget } from "./relay/client";
 import { generateRelayToken } from "./relay/runtime";
 import type { RelayRuntime } from "./relay/runtime";
-import { diffMode, NO_LIMITS, resolveBase, toReviewFiles } from "./review";
+import {
+  diffMode,
+  isMessageId,
+  NO_LIMITS,
+  resolveBase,
+  toReviewFiles,
+  toTurnPrompts,
+  TURN_PROMPTS,
+} from "./review";
+import {
+  DETAIL_MESSAGES,
+  subagentsOf,
+  toBreakdown,
+  toSessionTurns,
+} from "./session-detail";
 import type { EnvRecord, StateStore } from "./state";
 import {
   discardMetadata,
@@ -977,6 +994,44 @@ export class Orchestrator {
     this.monitors.get(envId)?.reconcile?.();
   }
 
+  /** What one of the project's sessions did: its turns, token usage and subagents. */
+  async sessionDetail(
+    id: ProjectId,
+    sessionId: string
+  ): Promise<SessionDetail> {
+    this.requireProject(id);
+    const session = this.deps.store
+      .sessionsOf(id)
+      .find((s) => s.id === sessionId);
+    if (!session) {
+      throw new NotFoundError(sessionId, "session");
+    }
+    const client = this.opencodeClient(session.envId ?? id);
+    const [raw, messages, all, models] = await Promise.all([
+      client.session(sessionId),
+      client.messages(sessionId, DETAIL_MESSAGES),
+      client.sessions(),
+      session.model
+        ? client.models(session.directory).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    const contextLimit = models.find(
+      (m) =>
+        m.id === session.model?.id && m.providerID === session.model.providerID
+    )?.limit?.context;
+    return {
+      createdAt: raw.time.created,
+      more: messages.length >= DETAIL_MESSAGES,
+      session,
+      subagents: subagentsOf(sessionId, all),
+      turns: toSessionTurns(messages),
+      ...(raw.agent ? { agent: raw.agent } : {}),
+      ...(raw.outcome ? { outcome: raw.outcome } : {}),
+      ...(raw.tokens ? { tokens: toBreakdown(raw.tokens) } : {}),
+      ...(contextLimit ? { contextLimit } : {}),
+    };
+  }
+
   /** Sends a prompt to one of the project's sessions, queued behind the current turn when it is running. */
   async promptSession(
     id: ProjectId,
@@ -1684,11 +1739,25 @@ export class Orchestrator {
   async review(
     id: ProjectId,
     directory: string,
-    opts: { base?: string; mode?: ReviewMode; file?: string } = {}
+    opts: {
+      base?: string;
+      mode?: ReviewMode;
+      file?: string;
+      /** Turn mode: the session (the checkout's latest by default) and the prompt whose turn to show (its newest). */
+      session?: string;
+      from?: string;
+    } = {}
   ): Promise<ReviewData> {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
     const request = opts.base?.trim() ? validateBranch(opts.base) : undefined;
+    if (opts.from !== undefined && !isMessageId(opts.from)) {
+      throw new InvalidRequestError(`invalid turn ${opts.from}`);
+    }
+    const session =
+      opts.mode === "turn"
+        ? this.turnSession(id, directory, opts.session)
+        : undefined;
     const client = this.opencodeClient(
       this.envForDirectory(project, directory).id
     );
@@ -1707,23 +1776,28 @@ export class Orchestrator {
       opencode: opencodeBase,
       request,
     });
-    const mode = diffMode(opts.mode, base);
-    const [raw, status, counts, pushed, wsBranch, wsClean] = await Promise.all([
-      client.vcsDiff(
-        directory,
-        mode,
-        mode === "branch" ? base?.name : undefined
-      ),
-      client.vcsStatus(directory),
-      base
-        ? on.git
-            .aheadBehind(on.target, directory, base.name)
-            .catch(() => ({ ahead: 0, behind: 0 }))
-        : { ahead: 0, behind: 0 },
-      branch ? on.git.isPushed(on.target, directory, branch) : false,
-      git.currentBranch(project, ws),
-      git.isClean(project, ws),
-    ]);
+    const mode = diffMode(opts.mode, base, session !== undefined);
+    const [[raw, turn], status, counts, pushed, wsBranch, wsClean] =
+      await Promise.all([
+        session && mode === "turn"
+          ? this.turnDiff(id, directory, session, opts.from)
+          : client
+              .vcsDiff(
+                directory,
+                mode === "branch" ? "branch" : "working",
+                mode === "branch" ? base?.name : undefined
+              )
+              .then((d) => [d, undefined] as const),
+        client.vcsStatus(directory),
+        base
+          ? on.git
+              .aheadBehind(on.target, directory, base.name)
+              .catch(() => ({ ahead: 0, behind: 0 }))
+          : { ahead: 0, behind: 0 },
+        branch ? on.git.isPushed(on.target, directory, branch) : false,
+        git.currentBranch(project, ws),
+        git.isClean(project, ws),
+      ]);
     const wanted =
       opts.file === undefined ? raw : raw.filter((f) => f.file === opts.file);
     const { files, truncated } = toReviewFiles(
@@ -1735,6 +1809,7 @@ export class Orchestrator {
       ...(branch ? { branch } : {}),
       ...(base ? { base } : {}),
       mode,
+      ...(turn ? { turn } : {}),
       ...counts,
       dirty: status.length > 0,
       pushed,
@@ -1742,6 +1817,60 @@ export class Orchestrator {
       files,
       ...(truncated ? { truncated } : {}),
     };
+  }
+
+  /** The session whose turns a review shows: the one asked for, which must work in `directory`, or the latest there. */
+  private turnSession(
+    id: ProjectId,
+    directory: string,
+    sessionId: string | undefined
+  ): SessionSummary | undefined {
+    if (!sessionId) {
+      return this.latestSession(id, directory);
+    }
+    const found = this.deps.store
+      .sessionsOf(id)
+      .find((s) => s.id === sessionId && s.directory === directory);
+    if (!found) {
+      throw new NotFoundError(sessionId, "session");
+    }
+    return found;
+  }
+
+  /** What one of the session's turns changed (the newest unless `from` names its prompt), and the turns to pick from. */
+  private async turnDiff(
+    id: ProjectId,
+    directory: string,
+    session: SessionSummary,
+    from: string | undefined
+  ): Promise<readonly [RawFileDiff[], ReviewTurn]> {
+    const client = this.opencodeClient(session.envId ?? id);
+    const prompts = toTurnPrompts(
+      await client.userMessages(session.id, TURN_PROMPTS)
+    );
+    const shown = from ?? prompts[0]?.id;
+    const turn: ReviewTurn = {
+      latest: shown === prompts[0]?.id,
+      prompts,
+      running: session.status !== "idle",
+      sessionId: session.id,
+      sessionTitle: session.title,
+      ...(shown ? { from: shown } : {}),
+    };
+    if (!shown) {
+      return [[], turn] as const;
+    }
+    try {
+      return [
+        await client.sessionDiff(session.id, { from: shown }, directory),
+        turn,
+      ] as const;
+    } catch (error) {
+      if (error instanceof OpencodeHttpError && error.status === 404) {
+        throw new NotFoundError(shown, "turn");
+      }
+      throw error;
+    }
   }
 
   /** A commit message suggested by the target's latest session; empty when there is none or it fails. */

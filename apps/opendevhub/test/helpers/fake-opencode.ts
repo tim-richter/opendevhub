@@ -5,6 +5,7 @@ import type {
   RawFileDiff,
   RawFileStatus,
   RawForm,
+  RawMessage,
   RawPermissionRequest,
   RawSession,
 } from "../../src/server/opencode/client";
@@ -56,6 +57,12 @@ export interface FakeState {
   interrupts: string[];
   /** Session ids `DELETE /api/session/:id` removed. */
   deleted: string[];
+  /** Each session's messages, oldest first; user messages carry `text` and `time`. */
+  messages?: Record<string, RawMessage[]>;
+  /** `GET /api/session/:id/diff` data per session, keyed by the `from` user message id. */
+  turnDiffs?: Record<string, Record<string, RawFileDiff[]>>;
+  /** Every session diff opendevhub asked for. */
+  turnQueries: { sessionId: string; from?: string; to?: string }[];
 }
 
 export async function startFakeOpencode(
@@ -73,6 +80,7 @@ export async function startFakeOpencode(
     replies: [],
     vcs: {},
     diffQueries: [],
+    turnQueries: [],
     prompts: [],
     patches: [],
     interrupts: [],
@@ -377,6 +385,37 @@ export async function startFakeOpencode(
             )
           );
           return;
+        }
+        const listed = url.pathname.match(
+          /^\/api\/session\/(ses[^/]+)\/message$/u
+        );
+        if (listed) {
+          const type = url.searchParams.get("type");
+          const all = (state.messages?.[listed[1]] ?? []).filter(
+            (m) => !type || m.type === type
+          );
+          const ordered =
+            url.searchParams.get("order") === "desc" ? all.toReversed() : all;
+          const limit = Number(url.searchParams.get("limit") ?? ordered.length);
+          return json({ cursor: {}, data: ordered.slice(0, limit) });
+        }
+        const turnDiff = url.pathname.match(
+          /^\/api\/session\/(ses[^/]+)\/diff$/u
+        );
+        if (turnDiff) {
+          const sessionId = turnDiff[1];
+          const from = url.searchParams.get("from") ?? undefined;
+          const to = url.searchParams.get("to") ?? undefined;
+          state.turnQueries.push({
+            sessionId,
+            ...(from ? { from } : {}),
+            ...(to ? { to } : {}),
+          });
+          const newest = (state.messages?.[sessionId] ?? []).findLast(
+            (m) => m.type === "user"
+          )?.id;
+          const data = state.turnDiffs?.[sessionId]?.[from ?? newest ?? ""];
+          return data ? json({ data }) : fail(404, "MessageNotFoundError");
         }
         const one = url.pathname.match(/^\/api\/session\/(ses[^/]+)$/u);
         const found = one && state.sessions.find((s) => s.id === one[1]);

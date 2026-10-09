@@ -45,6 +45,7 @@ import type {
   PublishResult,
   ReviewData,
   ReviewMode,
+  SessionDetail,
   TaskRequest,
   TaskResult,
   UpdateResult,
@@ -440,13 +441,22 @@ export const dismissForm = (
 export const fetchReview = async (
   projectId: string,
   directory: string,
-  opts: { base?: string; mode?: ReviewMode; file?: string } = {}
+  opts: {
+    base?: string;
+    mode?: ReviewMode;
+    file?: string;
+    /** Turn mode: the session and the prompt whose turn to show; the checkout's latest session and turn by default. */
+    session?: string;
+    from?: string;
+  } = {}
 ): Promise<ReviewData> => {
   const query = new URLSearchParams({
     directory,
     ...(opts.base ? { base: opts.base } : {}),
     ...(opts.mode ? { mode: opts.mode } : {}),
     ...(opts.file ? { file: opts.file } : {}),
+    ...(opts.session ? { session: opts.session } : {}),
+    ...(opts.from ? { from: opts.from } : {}),
   });
   const res = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/review?${query}`
@@ -531,10 +541,39 @@ export const removeSession = async (
   }
 };
 
+/** A session's turns, token usage and subagents. */
+export const fetchSessionDetail = async (
+  projectId: string,
+  sessionId: string
+): Promise<SessionDetail> => {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`
+  );
+  if (!res.ok) {
+    throw await failure(res, "load the session");
+  }
+  return (await res.json()) as SessionDetail;
+};
+
 export const rescan = async (): Promise<DashboardSnapshot> => {
   const res = await fetch("/api/projects/rescan", { method: "POST" });
   if (!res.ok) {
     throw await failure(res, "rescan");
+  }
+  return (await res.json()) as DashboardSnapshot;
+};
+
+/** Replaces the folders scanned for projects; the server rescans before answering. */
+export const saveRoots = async (
+  roots: string[]
+): Promise<DashboardSnapshot> => {
+  const res = await fetch("/api/settings/roots", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ roots }),
+  });
+  if (!res.ok) {
+    throw await failure(res, "save folders");
   }
   return (await res.json()) as DashboardSnapshot;
 };

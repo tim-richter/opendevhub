@@ -14,19 +14,8 @@ import { loadConfig, saveConfig, saveState } from "../../src/server/config";
 import { StateStore } from "../../src/server/state";
 
 describe(parseCli, () => {
-  it("parses repeated roots, port and --no-open", () => {
-    expect(
-      parseCli([
-        "--root",
-        "~/code",
-        "-r",
-        "/work",
-        "--port",
-        "9000",
-        "--no-open",
-      ])
-    ).toStrictEqual({
-      roots: ["~/code", "/work"],
+  it("parses port and --no-open", () => {
+    expect(parseCli(["--port", "9000", "--no-open"])).toStrictEqual({
       port: 9000,
       open: false,
       help: false,
@@ -35,64 +24,39 @@ describe(parseCli, () => {
 
   it("defaults", () => {
     expect(parseCli([])).toStrictEqual({
-      roots: [process.cwd()],
       port: undefined,
       open: true,
       help: false,
     });
   });
 
-  it("defaults to the current directory with other options", () => {
-    expect(parseCli(["--port", "8080", "--no-open"])).toStrictEqual({
-      roots: [process.cwd()],
-      port: 8080,
-      open: false,
-      help: false,
-    });
+  it.each([
+    ["--port", "abc"],
+    ["--port", "70000"],
+    ["--bogus"],
+    ["--root", "/x"],
+  ])("rejects %s", (...argv) => {
+    expect(() => parseCli(argv)).toThrow();
   });
-
-  it.each([["--port", "abc"], ["--port", "70000"], ["--bogus"]])(
-    "rejects %s",
-    (...argv) => {
-      expect(() => parseCli(argv)).toThrow();
-    }
-  );
 });
 
 describe(loadAndSaveStartupConfig, () => {
-  it.each([[], ["--root", "/other"]])(
-    "does not persist roots for %j",
-    (...argv) => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-"));
-      try {
-        const opts = parseCli(argv);
-        loadAndSaveStartupConfig(dir, opts);
-        expect(
-          JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf-8"))
-        ).toStrictEqual({ port: 7777 });
-        expect(parseCli([]).roots).toStrictEqual([process.cwd()]);
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
-      }
-    }
-  );
-
-  it("ignores and removes legacy saved roots while preserving other settings", () => {
+  it("keeps saved roots and other settings", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-"));
     try {
       const forges = { "git.example.com": { kind: "forgejo" } };
       fs.writeFileSync(
         path.join(dir, "config.json"),
-        JSON.stringify({ roots: ["/legacy"], port: 9000, forges })
+        JSON.stringify({ roots: ["/code"], port: 9000, forges })
       );
       expect(loadAndSaveStartupConfig(dir, parseCli([]))).toStrictEqual({
         port: 9000,
+        roots: ["/code"],
         forges,
       });
       expect(
         JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf-8"))
-      ).toStrictEqual({ port: 9000, forges });
-      expect(parseCli(["--root", "/other"]).roots).toStrictEqual(["/other"]);
+      ).toStrictEqual({ port: 9000, roots: ["/code"], forges });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

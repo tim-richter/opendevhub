@@ -18,6 +18,7 @@ import { ProjectLayout } from "./pages/project-layout";
 import { ProjectOverview } from "./pages/project-overview";
 import { ProjectReview } from "./pages/project-review";
 import { ProjectTask } from "./pages/project-task";
+import { SessionPage } from "./pages/session-page";
 import { SessionsPage } from "./pages/sessions-page";
 import { SettingsPage } from "./pages/settings-page";
 import { UsagePage } from "./pages/usage-page";
@@ -31,6 +32,7 @@ const CheckoutTerminal = lazy(() =>
 const checkoutTabs = (
   <>
     <Route index element={<CheckoutSessions />} />
+    <Route path="s/:sessionId" element={<SessionPage />} />
     <Route path="review" element={<ProjectReview />} />
     <Route
       path="terminal"

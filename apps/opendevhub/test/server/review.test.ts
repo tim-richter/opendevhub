@@ -4,9 +4,11 @@ import type { RawFileDiff } from "../../src/server/opencode/client";
 import {
   diffMode,
   isBinaryPatch,
+  isMessageId,
   NO_LIMITS,
   resolveBase,
   toReviewFiles,
+  toTurnPrompts,
 } from "../../src/server/review";
 
 const diff = (
@@ -64,6 +66,40 @@ describe(diffMode, () => {
     expect(diffMode("working", main)).toBe("working");
     expect(diffMode("branch", main)).toBe("branch");
     expect(diffMode("branch", undefined)).toBe("working");
+  });
+
+  it("shows a turn only when there is a session to take it from", () => {
+    expect(diffMode("turn", main, true)).toBe("turn");
+    expect(diffMode("turn", main)).toBe("working");
+    expect(diffMode("branch", main, true)).toBe("branch");
+  });
+});
+
+describe(toTurnPrompts, () => {
+  it("keeps each prompt's first non-empty line, cut short", () => {
+    const prompts = toTurnPrompts([
+      {
+        id: "msg_2",
+        text: "\n  Fix the login\nand more",
+        time: { created: 2 },
+      },
+      { id: "msg_1", text: "x".repeat(200), time: { created: 1 } },
+    ]);
+    expect(prompts[0]).toStrictEqual({
+      created: 2,
+      id: "msg_2",
+      text: "Fix the login",
+    });
+    expect(prompts[1].text).toHaveLength(120);
+    expect(prompts[1].text.endsWith("…")).toBeTruthy();
+  });
+});
+
+describe(isMessageId, () => {
+  it("accepts opencode message ids only", () => {
+    expect(isMessageId("msg_01ABCdef")).toBeTruthy();
+    expect(isMessageId("ses_1")).toBeFalsy();
+    expect(isMessageId("msg_1&to=x")).toBeFalsy();
   });
 });
 

@@ -14,11 +14,11 @@ import {
   nodeInUse,
   loadConfig,
   loadState,
-  resolveRoots,
   removeNode,
   saveConfig,
   saveState,
   stateDir,
+  validateRoots,
 } from "./config";
 import type { Config } from "./config";
 import { Containers } from "./containers";
@@ -55,9 +55,8 @@ import { StateStore } from "./state";
 import { UsageStore, trackUsage } from "./usage";
 import { Worktrees } from "./worktrees";
 
-const USAGE = `Usage: opendevhub [--root <dir>]... [--port <n>] [--no-open]
+const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
 
-  -r, --root <dir>   Directory to scan for devcontainer projects (default: current directory; repeatable)
   -p, --port <n>     Dashboard port (default 7777, saved)
       --no-open      Do not open the browser
   -h, --help         Show this help
@@ -72,7 +71,6 @@ Environment:
   OPENDEVHUB_GATEWAY_IMAGE   Image for the gateway container (default node:22-alpine)`;
 
 export interface CliOptions {
-  roots: string[];
   port?: number;
   open: boolean;
   help: boolean;
@@ -86,7 +84,6 @@ export const parseCli = (argv: string[]): CliOptions => {
       help: { short: "h", type: "boolean" },
       "no-open": { type: "boolean" },
       port: { short: "p", type: "string" },
-      root: { multiple: true, short: "r", type: "string" },
     },
     strict: true,
   });
@@ -101,7 +98,6 @@ export const parseCli = (argv: string[]): CliOptions => {
     help: values.help === true,
     open: !values["no-open"],
     port,
-    roots: values.root ?? [process.cwd()],
   };
 };
 
@@ -120,7 +116,7 @@ export const proxyTargets =
     return { ...address, password: rt.password };
   };
 
-/** Saves the dashboard port while preserving the other settings. Scan roots are per-run. */
+/** Saves the dashboard port while preserving the other settings. */
 export const loadAndSaveStartupConfig = (
   dir: string,
   opts: Pick<CliOptions, "port">
@@ -237,7 +233,8 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
 
   const dir = configDir();
   const config = loadAndSaveStartupConfig(dir, opts);
-  const roots = resolveRoots(opts.roots);
+  // Edited in Settings; the scans below read the current list.
+  let roots = config.roots ?? [];
   const store = new StateStore({
     persist: (s) => saveState(dir, s),
     persisted: loadState(dir),
@@ -337,6 +334,13 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     push,
     nodes,
     onboarding: new Onboarding({ roots: () => roots }),
+    saveRoots: (input) => {
+      const next = validateRoots(input);
+      const saved = loadConfig(dir);
+      saveConfig(dir, { ...saved, roots: next });
+      roots = next;
+      store.setRoots(next);
+    },
     forgejo: new Forgejo(new FileForgejoSettings(dir)),
     jira: new Jira(new FileJiraSettings(dir)),
     ...(usage ? { usage } : {}),

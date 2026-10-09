@@ -1,5 +1,10 @@
-import type { ReviewBase, ReviewFile, ReviewMode } from "../shared/types";
-import type { RawFileDiff } from "./opencode/client";
+import type {
+  ReviewBase,
+  ReviewFile,
+  ReviewMode,
+  ReviewTurnPrompt,
+} from "../shared/types";
+import type { RawFileDiff, RawUserMessage } from "./opencode/client";
 
 export const PATCH_BUDGET_BYTES = 2 * 1024 * 1024;
 
@@ -29,11 +34,49 @@ export const resolveBase = (c: {
   return undefined;
 };
 
-/** The diff asked for; comparing with the base needs one, so without it the review shows uncommitted changes. */
+/**
+ * The diff asked for. Comparing with the base needs one and a turn needs a session; without them the review shows
+ * uncommitted changes.
+ */
 export const diffMode = (
   requested: ReviewMode | undefined,
-  base: ReviewBase | undefined
-): ReviewMode => (requested === "branch" && base ? "branch" : "working");
+  base: ReviewBase | undefined,
+  hasSession = false
+): ReviewMode => {
+  if (requested === "branch" && base) {
+    return "branch";
+  }
+  if (requested === "turn" && hasSession) {
+    return "turn";
+  }
+  return "working";
+};
+
+/** How many recent prompts the turn picker offers. */
+export const TURN_PROMPTS = 20;
+const PROMPT_PREVIEW_CHARS = 120;
+
+/** A user message id opencode accepts as a turn (`from`). */
+export const isMessageId = (id: string): boolean => /^msg_[\w-]+$/u.test(id);
+
+/** A prompt's first non-empty line, cut short, for the turn picker. */
+const preview = (text: string): string => {
+  const line =
+    text
+      .split("\n")
+      .map((l) => l.trim())
+      .find(Boolean) ?? "";
+  return line.length > PROMPT_PREVIEW_CHARS
+    ? `${line.slice(0, PROMPT_PREVIEW_CHARS - 1)}…`
+    : line;
+};
+
+export const toTurnPrompts = (raw: RawUserMessage[]): ReviewTurnPrompt[] =>
+  raw.map((m) => ({
+    created: m.time.created,
+    id: m.id,
+    text: preview(m.text),
+  }));
 
 export const isBinaryPatch = (patch: string): boolean =>
   /^Binary files .* differ$/mu.test(patch) ||

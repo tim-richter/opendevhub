@@ -161,8 +161,9 @@ const AddProjectForm = ({ onClose }: { onClose: () => void }) => {
               )}
               {list && list.candidates.length === 0 && (
                 <div className="text-muted-foreground p-3 text-sm">
-                  No git repos without a devcontainer under{" "}
-                  {list.roots.join(", ")}
+                  {list.roots.length > 0
+                    ? `No git repos without a devcontainer under ${list.roots.join(", ")}`
+                    : "No folders to look in yet. Add them under Settings → Projects."}
                 </div>
               )}
               {list && list.candidates.length > 0 && (

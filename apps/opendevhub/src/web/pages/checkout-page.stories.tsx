@@ -21,6 +21,19 @@ export const Review = meta.story({
   parameters: { route: "/p/acme-web/w/rate-limit/review" },
 });
 
+/** One session: its usage, its turns (the newest with its changes open) and its subagents. */
+export const Session = meta.story({
+  parameters: { route: "/p/acme-web/w/rate-limit/s/ses_perm01" },
+});
+
+export const SessionLoading = meta.story({
+  beforeEach: mockApi(
+    {},
+    pending("get", "/api/projects/:id/sessions/:session")
+  ),
+  parameters: { route: "/p/acme-web/w/rate-limit/s/ses_perm01" },
+});
+
 export const ReviewLoading = meta.story({
   beforeEach: mockApi({}, pending("get", "/api/projects/:id/review")),
   parameters: { route: "/p/acme-web/w/rate-limit/review" },

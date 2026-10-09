@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveSessions, rollUp } from "../../src/server/status";
+import { contextOf, deriveSessions, rollUp } from "../../src/server/status";
 import { rawSession } from "../helpers/fake-opencode";
 
 const base = { active: new Set<string>(), permissions: [], forms: [] };
@@ -238,7 +238,7 @@ describe(deriveSessions, () => {
       task: { task: "tsk_1", variant: 1, of: 2, title: "Fix" },
       model: { id: "m", providerID: "p" },
       cost: 0.25,
-      tokens: 16,
+      tokens: 116,
     });
     expect(out[0].model).not.toHaveProperty("variant");
     expect(out[1]).not.toHaveProperty("task");
@@ -258,7 +258,7 @@ const tokens = (input: number, output = 0, reasoning = 0) => ({
 });
 
 describe(rollUp, () => {
-  it("adds children and grandchildren into the root, without cache tokens", () => {
+  it("adds children and grandchildren into the root, cache tokens included", () => {
     const out = rollUp([
       rawSession("root", {
         cost: 1,
@@ -281,7 +281,7 @@ describe(rollUp, () => {
     expect([...out.keys()]).toStrictEqual(["root"]);
     expect(out.get("root")).toStrictEqual({
       cost: 1.75,
-      tokens: 22,
+      tokens: 64,
       updatedAt: 300,
     });
   });
@@ -316,6 +316,46 @@ describe("deriveSessions cost", () => {
       ],
     });
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ id: "root", cost: 1.5, tokens: 15 });
+    expect(out[0]).toMatchObject({ id: "root", cost: 1.5, tokens: 43 });
+  });
+});
+
+describe(contextOf, () => {
+  it("is everything the newest assistant message with usage processed, skipping one still streaming", () => {
+    expect(
+      contextOf([
+        {
+          id: "m4",
+          type: "assistant",
+          tokens: { ...tokens(0), cache: { read: 0, write: 0 } },
+        },
+        { id: "m3", type: "user" },
+        { id: "m2", type: "assistant", tokens: tokens(10, 5, 1) },
+        { id: "m1", type: "assistant", tokens: tokens(1000) },
+      ])
+    ).toBe(30);
+  });
+
+  it("is undefined when no assistant message reports usage", () => {
+    expect(contextOf([{ id: "m1", type: "user" }])).toBeUndefined();
+  });
+});
+
+describe("deriveSessions context", () => {
+  it("carries the root's own context, not its subagents'", () => {
+    const out = deriveSessions("p", {
+      ...base,
+      contexts: new Map([
+        ["root", 1234],
+        ["child", 99],
+      ]),
+      sessions: [
+        rawSession("root"),
+        rawSession("child", { parentID: "root" }),
+        rawSession("other"),
+      ],
+    });
+    expect(out.find((s) => s.id === "root")?.context).toBe(1234);
+    expect(out.find((s) => s.id === "other")).not.toHaveProperty("context");
   });
 });

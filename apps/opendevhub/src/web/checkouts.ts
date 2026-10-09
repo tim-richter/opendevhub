@@ -61,16 +61,23 @@ export const checkoutPath = (
   return tab ? `${base}/${tab}` : base;
 };
 
-/** Where a session lives: its checkout's Sessions tab, or the project overview when the checkout is unknown. */
+/** A session's own page in its checkout. */
+export const sessionPagePath = (
+  projectId: string,
+  target: string,
+  sessionId: string
+): string =>
+  `${checkoutPath(projectId, target)}/s/${encodeURIComponent(sessionId)}`;
+
+/** Where a session lives: its page in its checkout, or the project overview when the checkout is unknown. */
 export const sessionPath = (
   view: ProjectView,
   session: SessionSummary
 ): string => {
   const c = checkoutOf(view, session.directory);
-  const base = c
-    ? checkoutPath(view.project.id, c.target)
-    : `/p/${encodeURIComponent(view.project.id)}`;
-  return `${base}?session=${encodeURIComponent(session.id)}`;
+  return c
+    ? sessionPagePath(view.project.id, c.target, session.id)
+    : `/p/${encodeURIComponent(view.project.id)}?session=${encodeURIComponent(session.id)}`;
 };
 
 /** Sessions in no known checkout, e.g. one whose worktree was removed. */

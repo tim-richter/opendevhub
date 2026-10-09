@@ -281,6 +281,14 @@ describe("api", () => {
       expect(fetchMock.mock.calls[1][0]).toBe(
         "/api/projects/p/review?directory=%2Fw"
       );
+      await fetchReview("p", "/w", {
+        mode: "turn",
+        session: "ses_1",
+        from: "msg_2",
+      });
+      expect(fetchMock.mock.calls[2][0]).toBe(
+        "/api/projects/p/review?directory=%2Fw&mode=turn&session=ses_1&from=msg_2"
+      );
     });
 
     it("posts the git actions and prompts", async () => {

@@ -136,6 +136,43 @@ describe(Monitor, () => {
     );
   });
 
+  it("reads each root session's context, again only once the session is updated", async () => {
+    const usage = (input: number) => ({
+      input,
+      output: 1,
+      reasoning: 0,
+      cache: { read: 100, write: 0 },
+    });
+    fake.state.sessions = [
+      rawSession("ses_1", { time: { created: 1, updated: 1 } }),
+      rawSession("ses_2", { parentID: "ses_1" }),
+    ];
+    fake.state.messages = {
+      ses_1: [
+        { id: "msg_1", type: "assistant", tokens: usage(10) },
+        { id: "msg_2", type: "user" },
+      ],
+    };
+    const reads = () =>
+      fake.requests.filter((r) => r.includes("/message?")).length;
+    start();
+    await vi.waitFor(() => expect(latest?.[0]?.context).toBe(111));
+    await monitor?.reconcile();
+    expect(reads()).toBe(1);
+
+    fake.state.messages.ses_1.push({
+      id: "msg_3",
+      type: "assistant",
+      tokens: usage(50),
+    });
+    fake.state.sessions[0] = rawSession("ses_1", {
+      time: { created: 1, updated: 2 },
+    });
+    await monitor?.reconcile();
+    expect(latest?.[0]?.context).toBe(151);
+    expect(reads()).toBe(2);
+  });
+
   it("ignores irrelevant events", async () => {
     start();
     await vi.waitFor(() => expect(latest).toStrictEqual([]));

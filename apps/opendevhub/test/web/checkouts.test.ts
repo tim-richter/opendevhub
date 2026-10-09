@@ -118,7 +118,7 @@ describe(checkouts, () => {
 
   it("links a session to its checkout, or to the project when its checkout is unknown", () => {
     const v = view([session("a", wt("login")), session("b", "/gone")]);
-    expect(sessionPath(v, v.sessions[0])).toBe("/p/p%201/w/login?session=a");
+    expect(sessionPath(v, v.sessions[0])).toBe("/p/p%201/w/login/s/a");
     expect(sessionPath(v, v.sessions[1])).toBe("/p/p%201?session=b");
     expect(orphanSessions(v).map((s) => s.id)).toStrictEqual(["b"]);
   });

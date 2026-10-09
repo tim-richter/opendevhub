@@ -14,6 +14,8 @@ import { LOCAL_NODE } from "./host";
 
 export interface Config {
   port: number;
+  /** Absolute directories scanned for projects, set in Settings. */
+  roots?: string[];
   /** Forge per git host: configured by hand or remembered after a probe. */
   forges?: Record<string, ForgeEntry>;
   /** Per-project settings keyed by the project's path (`{ isolation, keyFiles, sshAgent }`), validated where used. */
@@ -240,8 +242,14 @@ export const loadConfig = (dir: string): Config => {
   const raw = readJson<Partial<Config>>(path.join(dir, "config.json"), {});
   const forges = readForges(raw.forges);
   const nodes = readNodes(raw.nodes);
+  const roots = Array.isArray(raw.roots)
+    ? raw.roots.filter(
+        (r): r is string => typeof r === "string" && path.isAbsolute(r)
+      )
+    : [];
   return {
     port: typeof raw.port === "number" ? raw.port : DEFAULT_PORT,
+    ...(roots.length > 0 ? { roots } : {}),
     ...(Object.keys(forges).length > 0 ? { forges } : {}),
     ...(nodes.length > 0 ? { nodes } : {}),
     ...(raw.projects &&
@@ -343,13 +351,31 @@ const expandHome = (p: string): string => {
   return p;
 };
 
-export const resolveRoots = (
-  roots: string[],
-  cwd = process.cwd()
-): string[] => {
+export class InvalidRootError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidRootError";
+  }
+}
+
+/** Scan roots as Settings submits them: absolute or `~` paths to existing directories, deduplicated. */
+export const validateRoots = (input: unknown): string[] => {
+  if (!Array.isArray(input)) {
+    throw new InvalidRootError("roots must be a list of folders");
+  }
   const out: string[] = [];
-  for (const r of roots) {
-    const abs = path.resolve(cwd, expandHome(r));
+  for (const value of input) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    const expanded = expandHome(raw);
+    if (!path.isAbsolute(expanded)) {
+      throw new InvalidRootError(
+        `${JSON.stringify(raw)} is not an absolute path`
+      );
+    }
+    const abs = path.resolve(expanded);
+    if (!fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new InvalidRootError(`${abs} is not a folder`);
+    }
     if (!out.includes(abs)) {
       out.push(abs);
     }

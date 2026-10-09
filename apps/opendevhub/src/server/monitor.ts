@@ -1,6 +1,6 @@
 import type { SessionSummary } from "../shared/types";
 import type { OpencodeClient, RawSession } from "./opencode/client";
-import { deriveSessions } from "./status";
+import { contextOf, deriveSessions } from "./status";
 
 export interface MonitorOptions {
   client: OpencodeClient;
@@ -26,6 +26,9 @@ const RELEVANT_EVENT = /^(?<g1>session|permission|form)\./u;
 const FAILURES_BEFORE_UNHEALTHY = 3;
 const MAX_SESSION_LOOKUPS = 20;
 const MAX_DIRECTORIES = 16;
+const MAX_CONTEXT_LOOKUPS = 20;
+/** The newest assistant message with usage is nearly always among a session's last few (a streaming one has none yet). */
+const CONTEXT_MESSAGES = 5;
 
 const uniqueById = <T extends { id: string }>(items: T[]): T[] => [
   ...new Map(items.map((i) => [i.id, i])).values(),
@@ -57,6 +60,11 @@ export class Monitor {
   private inFlight?: Promise<void>;
   private rerun = false;
   private readonly firstSeen = new Map<string, number>();
+  /** Each root session's context size, as of the `updatedAt` it was read at. */
+  private readonly contexts = new Map<
+    string,
+    { updatedAt: number; tokens?: number }
+  >();
 
   private readonly opts: MonitorOptions;
   constructor(opts: MonitorOptions) {
@@ -123,6 +131,7 @@ export class Monitor {
         ...forms.map((f) => f.sessionID),
       ];
       const all = await this.withMissing(sessions, flagged);
+      const contexts = await this.contextsOf(all);
       if (this.stopped) {
         return;
       }
@@ -132,6 +141,7 @@ export class Monitor {
       this.opts.onSessions(
         deriveSessions(projectId, {
           active,
+          contexts,
           envId: this.opts.envId,
           firstSeen: this.firstSeen,
           forms,
@@ -164,6 +174,46 @@ export class Monitor {
         this.firstSeen.set(id, now);
       }
     }
+  }
+
+  /**
+   * Each root session's context size. Only sessions updated since they were last read are read again, newest
+   * first and at most `MAX_CONTEXT_LOOKUPS` a poll; a failed read is best effort and retried next poll.
+   */
+  private async contextsOf(
+    sessions: RawSession[]
+  ): Promise<Map<string, number>> {
+    const roots = sessions.filter(
+      (s) => !s.parentID && s.time.archived === undefined
+    );
+    const listed = new Set(roots.map((s) => s.id));
+    for (const id of this.contexts.keys()) {
+      if (!listed.has(id)) {
+        this.contexts.delete(id);
+      }
+    }
+    const stale = roots
+      .filter((s) => this.contexts.get(s.id)?.updatedAt !== s.time.updated)
+      .toSorted((a, b) => b.time.updated - a.time.updated)
+      .slice(0, MAX_CONTEXT_LOOKUPS);
+    await Promise.all(
+      stale.map(async (s) => {
+        const messages = await this.opts.client
+          .messages(s.id, CONTEXT_MESSAGES)
+          .catch(() => undefined);
+        if (messages) {
+          this.contexts.set(s.id, {
+            tokens: contextOf(messages),
+            updatedAt: s.time.updated,
+          });
+        }
+      })
+    );
+    return new Map(
+      [...this.contexts].flatMap(([id, c]) =>
+        c.tokens === undefined ? [] : [[id, c.tokens] as const]
+      )
+    );
   }
 
   /**

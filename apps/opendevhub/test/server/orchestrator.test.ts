@@ -17,6 +17,7 @@ import type {
   NewSession,
   OpencodeEndpoint,
   RawAgent,
+  RawMessage,
   RawModel,
   RawSession,
 } from "../../src/server/opencode/client";
@@ -546,6 +547,25 @@ function setup(
         status: "added" as const,
       },
     ]),
+    userMessages: vi.fn(async (_sid: string, _limit: number) => [
+      { id: "msg_2", text: "Now add tests", time: { created: 2 } },
+      { id: "msg_1", text: "Fix the login\nplease", time: { created: 1 } },
+    ]),
+    sessionDiff: vi.fn(
+      async (
+        _sid: string,
+        _opts: { from?: string; to?: string },
+        _dir?: string
+      ) => [
+        {
+          file: "c.ts",
+          patch: "@@ -1 +1 @@\n-x\n+y\n",
+          additions: 1,
+          deletions: 1,
+          status: "modified" as const,
+        },
+      ]
+    ),
     prompt: vi.fn(
       async (
         _sid: string,
@@ -560,6 +580,9 @@ function setup(
     ),
     interrupt: vi.fn(async (_sid: string, _dir?: string) => {}),
     sessions: vi.fn(async (): Promise<RawSession[]> => []),
+    messages: vi.fn(
+      async (_sid: string, _limit: number): Promise<RawMessage[]> => []
+    ),
     active: vi.fn(async () => new Set<string>()),
     deleteSession: vi.fn(async (_id: string, _dir?: string) => {}),
   };
@@ -2407,6 +2430,178 @@ describe(Orchestrator, () => {
       await expect(orch.review(project.id, "/etc")).rejects.toThrow(
         InvalidRequestError
       );
+    });
+
+    it("shows what a session's turn changed, the newest by default, and lists its prompts", async () => {
+      const { orch, client, store } = await running();
+      const fallback = await orch.review(project.id, wt, { mode: "turn" });
+      expect(fallback.mode).toBe("working");
+      expect(fallback.turn).toBeUndefined();
+      store.setSessions(project.id, [
+        {
+          id: "ses_old",
+          projectId: project.id,
+          title: "old",
+          directory: wt,
+          updatedAt: 1,
+          status: "idle",
+        },
+        {
+          id: "ses_new",
+          projectId: project.id,
+          title: "Login",
+          directory: wt,
+          updatedAt: 2,
+          status: "running",
+        },
+      ]);
+      const r = await orch.review(project.id, wt, { mode: "turn" });
+      expect(client.sessionDiff).toHaveBeenLastCalledWith(
+        "ses_new",
+        { from: "msg_2" },
+        wt
+      );
+      expect(r.mode).toBe("turn");
+      expect(r.files.map((f) => f.file)).toStrictEqual(["c.ts"]);
+      expect(r.turn).toStrictEqual({
+        sessionId: "ses_new",
+        sessionTitle: "Login",
+        from: "msg_2",
+        latest: true,
+        running: true,
+        prompts: [
+          { id: "msg_2", text: "Now add tests", created: 2 },
+          { id: "msg_1", text: "Fix the login", created: 1 },
+        ],
+      });
+      const older = await orch.review(project.id, wt, {
+        mode: "turn",
+        session: "ses_old",
+        from: "msg_1",
+      });
+      expect(client.sessionDiff).toHaveBeenLastCalledWith(
+        "ses_old",
+        { from: "msg_1" },
+        wt
+      );
+      expect(older.turn).toMatchObject({ latest: false, running: false });
+    });
+
+    it("rejects a turn of another checkout's session, a bad turn id and a turn opencode doesn't have", async () => {
+      const { orch, client, store } = await running();
+      store.setSessions(project.id, [
+        {
+          id: "ses_main",
+          projectId: project.id,
+          title: "t",
+          directory: "/workspaces/demo",
+          updatedAt: 1,
+          status: "idle",
+        },
+        {
+          id: "ses_wt",
+          projectId: project.id,
+          title: "t",
+          directory: wt,
+          updatedAt: 1,
+          status: "idle",
+        },
+      ]);
+      await expect(
+        orch.review(project.id, wt, { mode: "turn", session: "ses_main" })
+      ).rejects.toThrow(NotFoundError);
+      await expect(
+        orch.review(project.id, wt, { mode: "turn", from: "msg_1&to=x" })
+      ).rejects.toThrow(InvalidRequestError);
+      client.sessionDiff.mockRejectedValueOnce(
+        new OpencodeHttpError(404, "/api/session/ses_wt/diff")
+      );
+      await expect(
+        orch.review(project.id, wt, { mode: "turn", from: "msg_1" })
+      ).rejects.toThrow(/unknown turn msg_1/u);
+      client.userMessages.mockResolvedValueOnce([]);
+      const empty = await orch.review(project.id, wt, { mode: "turn" });
+      expect(empty.files).toStrictEqual([]);
+      expect(empty.turn).toMatchObject({ latest: true, prompts: [] });
+    });
+
+    it("details a session: its turns, tokens, subagents and its model's context window", async () => {
+      const { orch, client, store } = await running();
+      await expect(orch.sessionDetail(project.id, "ses_x")).rejects.toThrow(
+        NotFoundError
+      );
+      store.setSessions(project.id, [
+        {
+          id: "ses_1",
+          projectId: project.id,
+          title: "Login",
+          directory: wt,
+          updatedAt: 5,
+          status: "idle",
+          model: { id: "m1", providerID: "p" },
+        },
+      ]);
+      client.models.mockResolvedValueOnce([
+        { id: "m1", providerID: "p", name: "M1", limit: { context: 200_000 } },
+      ]);
+      client.session.mockResolvedValueOnce({
+        id: "ses_1",
+        agent: "build",
+        outcome: "succeeded",
+        time: { created: 1, updated: 5 },
+        location: { directory: wt },
+        tokens: {
+          input: 10,
+          output: 5,
+          reasoning: 0,
+          cache: { read: 3, write: 1 },
+        },
+      });
+      client.sessions.mockResolvedValueOnce([
+        {
+          id: "ses_1",
+          time: { created: 1, updated: 5 },
+          location: { directory: wt },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_1",
+          title: "Explore",
+          cost: 0.5,
+          time: { created: 2, updated: 3 },
+          location: { directory: wt },
+        },
+      ]);
+      client.messages.mockResolvedValueOnce([
+        {
+          id: "msg_2",
+          type: "assistant",
+          content: [{ type: "text", text: "Done." }],
+          time: { created: 3, completed: 4 },
+        },
+        { id: "msg_1", type: "user", text: "Fix it", time: { created: 2 } },
+      ]);
+      const d = await orch.sessionDetail(project.id, "ses_1");
+      expect(client.messages).toHaveBeenLastCalledWith("ses_1", 200);
+      expect(d).toMatchObject({
+        agent: "build",
+        contextLimit: 200_000,
+        createdAt: 1,
+        more: false,
+        outcome: "succeeded",
+        subagents: [{ id: "ses_child", title: "Explore", cost: 0.5 }],
+        tokens: {
+          input: 10,
+          output: 5,
+          reasoning: 0,
+          cacheRead: 3,
+          cacheWrite: 1,
+        },
+        turns: [
+          { id: "msg_1", prompt: "Fix it", reply: "Done.", completed: 4 },
+        ],
+      });
+      expect(d.session.title).toBe("Login");
     });
 
     it("prompts a session, queued while it runs, and starts a session with a first prompt", async () => {

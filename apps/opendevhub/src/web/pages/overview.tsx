@@ -1,4 +1,4 @@
-import { PlusIcon, RefreshCwIcon } from "lucide-react";
+import { FolderPlusIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 
@@ -174,22 +174,48 @@ export const Overview = () => {
           <ProjectRack views={rows} />
         ) : (
           <Empty title="Add your first project">
-            <p className={cn(muted, "max-w-md text-balance")}>
-              No folder with a devcontainer was found under{" "}
-              <code className="font-mono text-xs">
-                {snapshot.roots.join(", ") || "the configured roots"}
-              </code>
-              . Add a git repo and opendevhub sets up its devcontainer, or start
-              opendevhub with <code className="font-mono text-xs">--root</code>{" "}
-              pointing at your code.
-            </p>
+            {snapshot.roots.length > 0 ? (
+              <p className={cn(muted, "max-w-md text-balance")}>
+                No folder with a devcontainer was found under{" "}
+                <code className="font-mono text-xs">
+                  {snapshot.roots.join(", ")}
+                </code>
+                . Add a git repo and opendevhub sets up its devcontainer, or{" "}
+                <Link
+                  to="/settings#roots"
+                  className="text-foreground underline underline-offset-4"
+                >
+                  add more folders in Settings
+                </Link>
+                .
+              </p>
+            ) : (
+              <p className={cn(muted, "max-w-md text-balance")}>
+                opendevhub doesn&apos;t know where your code lives yet. Add the
+                folders that hold your git repos in Settings.
+              </p>
+            )}
             <div className="mt-2 flex flex-wrap justify-center gap-2">
-              <Button onClick={openAddProject}>
-                <PlusIcon /> Add project
-              </Button>
-              <Button variant="outline" disabled={scanning} onClick={rescan}>
-                <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan"}
-              </Button>
+              {snapshot.roots.length > 0 ? (
+                <>
+                  <Button onClick={openAddProject}>
+                    <PlusIcon /> Add project
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={scanning}
+                    onClick={rescan}
+                  >
+                    <RefreshCwIcon /> {scanning ? "Scanning…" : "Rescan"}
+                  </Button>
+                </>
+              ) : (
+                <Button asChild>
+                  <Link to="/settings#roots">
+                    <FolderPlusIcon /> Add folders
+                  </Link>
+                </Button>
+              )}
             </div>
           </Empty>
         )}

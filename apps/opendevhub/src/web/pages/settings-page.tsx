@@ -1,6 +1,13 @@
-import { BookOpenIcon, CircleCheckIcon, RefreshCwIcon } from "lucide-react";
+import {
+  BookOpenIcon,
+  CircleCheckIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { useLocation } from "react-router";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -12,7 +19,7 @@ import type {
   IntegrationSettings,
   IntegrationSettingsInput,
 } from "../../shared/integrations";
-import { testForgejoConnection } from "../api";
+import { saveRoots, testForgejoConnection } from "../api";
 import { Note, Page, PageHeader } from "../components/page";
 import { useDash } from "../dashboard-context";
 
@@ -20,11 +27,15 @@ const DOCS_URL = "https://tim-richter.github.io/opendevhub/";
 
 /** One settings topic: its name and purpose on the left, the controls on the right. */
 const SettingsGroup = (props: {
+  id?: string;
   title: string;
   hint: string;
   children: ReactNode;
 }) => (
-  <section className="grid gap-x-10 gap-y-4 border-t pt-6 md:grid-cols-[13rem_minmax(0,1fr)]">
+  <section
+    id={props.id}
+    className="grid gap-x-10 gap-y-4 border-t pt-6 md:grid-cols-[13rem_minmax(0,1fr)]"
+  >
     <div className="flex flex-col gap-1">
       <h2 className="font-semibold">{props.title}</h2>
       <p className="text-muted-foreground text-sm">{props.hint}</p>
@@ -287,23 +298,102 @@ const IntegrationSettingsForm = ({
 
 const GeneralSection = () => {
   const { snapshot, rescan, scanning } = useDash();
+  const location = useLocation();
   const roots = snapshot?.roots ?? [];
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  const save = async (next: string[]): Promise<boolean> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await saveRoots(next);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    const folder = draft.trim();
+    if (folder && (await save([...roots, folder]))) {
+      setDraft("");
+    }
+  };
+
   return (
-    <SettingsGroup title="Projects" hint="Where opendevhub looks for projects">
-      <div className="flex flex-col gap-3">
-        {roots.length > 0 && (
-          <ul className="flex flex-col gap-1 font-mono text-xs">
+    <SettingsGroup
+      id="roots"
+      title="Projects"
+      hint="Folders opendevhub scans for projects"
+    >
+      <div className="flex max-w-2xl flex-col gap-3">
+        {roots.length > 0 ? (
+          <ul className="flex flex-col divide-y rounded-md border">
             {roots.map((root) => (
-              <li key={root}>{root}</li>
+              <li
+                key={root}
+                className="flex items-center gap-2 py-1 pr-1 pl-3 font-mono text-xs"
+              >
+                <span className="min-w-0 flex-1 truncate" title={root}>
+                  {root}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={busy}
+                  aria-label={`Remove ${root}`}
+                  onClick={() => void save(roots.filter((r) => r !== root))}
+                >
+                  <XIcon />
+                </Button>
+              </li>
             ))}
           </ul>
+        ) : (
+          <p className="text-muted-foreground text-sm">
+            No folders yet. Add the folder that holds your git repos.
+          </p>
         )}
-        <p className="text-muted-foreground text-sm">
-          Roots come from <code className="font-mono text-xs">--root</code> when
-          opendevhub starts (the current directory without it).
-        </p>
+        <form className="flex flex-col gap-1.5" onSubmit={(e) => void add(e)}>
+          <Label htmlFor="roots-add">Add folder</Label>
+          <div className="flex gap-2">
+            <Input
+              id="roots-add"
+              className="font-mono"
+              placeholder="~/code"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              disabled={busy}
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus={location.hash === "#roots"}
+            />
+            <Button type="submit" disabled={busy || !draft.trim()}>
+              <PlusIcon /> Add
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            An absolute path on this machine. Projects are found in its
+            subfolders.
+          </p>
+        </form>
+        {error && (
+          <div role="alert">
+            <Note error>{error}</Note>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={scanning} onClick={rescan}>
+          <Button
+            variant="outline"
+            disabled={scanning || busy}
+            onClick={rescan}
+          >
             <RefreshCwIcon className={scanning ? "animate-spin" : undefined} />{" "}
             {scanning ? "Scanning…" : "Rescan"}
           </Button>

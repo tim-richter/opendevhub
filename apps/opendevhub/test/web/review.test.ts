@@ -144,6 +144,22 @@ describe(composeReviewPrompt, () => {
     );
   });
 
+  it("names the turn the comments are on and leaves out the base", () => {
+    const first = (turn: { latest: boolean; prompt?: string }) =>
+      composeReviewPrompt({
+        branch: "feature/login",
+        base: "main",
+        turn,
+        comments: [{ id: "g", text: "ok" }],
+      }).split("\n")[0];
+    expect(first({ latest: true, prompt: "Fix it" })).toBe(
+      "Review feedback on the changes from your last turn. Address each point, then reply with what you changed."
+    );
+    expect(first({ latest: false, prompt: "Fix it" })).toBe(
+      'Review feedback on the changes from your turn "Fix it". Address each point, then reply with what you changed.'
+    );
+  });
+
   it("marks removed lines, indents multi-line comments and skips empty ones", () => {
     const text = composeReviewPrompt({
       comments: [
@@ -250,6 +266,9 @@ describe("draft storage", () => {
     expect(draftKey("p", "wt", "working", "main")).toBe(
       "opendevhub:review:p:wt:"
     );
+    expect(
+      draftKey("p", "wt", "turn", "main", { sessionId: "ses_1", from: "msg_2" })
+    ).toBe("opendevhub:review:p:wt:turn:ses_1:msg_2");
     writeComments(key, [{ id: "1", text: "hi" }], s);
     expect(readComments(key, s)).toStrictEqual([{ id: "1", text: "hi" }]);
     writeComments(key, [], s);
@@ -511,6 +530,9 @@ describe("review mode", () => {
     writeReviewMode("p", "wt", "branch", storage);
     expect(readReviewMode("p", "wt", storage)).toBe("branch");
     expect(readReviewMode("p", "", storage)).toBe("working");
+    // Turns are reviewed on the session page now.
+    writeReviewMode("p", "wt", "turn", storage);
+    expect(readReviewMode("p", "wt", storage)).toBe("working");
     writeReviewMode("p", "wt", "working", storage);
     expect(store.size).toBe(0);
     expect(

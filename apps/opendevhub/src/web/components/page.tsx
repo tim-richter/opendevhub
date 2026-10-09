@@ -9,10 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 export const Page = ({ className, ...props }: ComponentProps<"div">) => (
-  <div
-    className={cn("mx-auto flex max-w-6xl flex-col gap-6", className)}
-    {...props}
-  />
+  <div className={cn("flex flex-col gap-6", className)} {...props} />
 );
 
 export const PageHeader = (props: {
@@ -192,20 +189,23 @@ export const diffFont =
 export const TabLink = (props: {
   to: string;
   end?: boolean;
+  /** Marks the tab active on pages under it that `end` would leave out. */
+  active?: boolean;
   children: ReactNode;
 }) => (
   <NavLink
     to={props.to}
     end={props.end}
-    className={({ isActive }) =>
-      cn(
+    className={({ isActive: matched }) => {
+      const isActive = matched || props.active;
+      return cn(
         // Phones drop the icons so all four checkout tabs fit.
         "inline-flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-sm font-medium whitespace-nowrap transition-colors max-sm:[&>svg]:hidden",
         isActive
           ? "border-foreground text-foreground"
           : "text-muted-foreground hover:text-foreground border-transparent"
-      )
-    }
+      );
+    }}
   >
     {props.children}
   </NavLink>

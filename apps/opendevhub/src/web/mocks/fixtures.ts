@@ -24,6 +24,7 @@ import type {
   ProjectView,
   PublishInfo,
   ReviewData,
+  SessionDetail,
   SessionSummary,
   UsageReport,
 } from "../../shared/types";
@@ -112,6 +113,7 @@ const webSessions: SessionSummary[] = [
     },
     title: "Add burst limit to the login rate limiter",
     tokens: 184_000,
+    context: 61_000,
     updatedAt: ago(2 * MINUTE),
   },
   {
@@ -601,6 +603,139 @@ export const reviewData = (directory: string): ReviewData => ({
   pushed: false,
   workspace: { branch: "main", clean: true },
 });
+
+/** Recent prompts of the rate-limit worktree's session, newest first. */
+const RATE_LIMIT_PROMPTS = [
+  {
+    created: ago(4 * MINUTE),
+    id: "msg_03",
+    text: "Also register the limiter on the login route",
+  },
+  {
+    created: ago(25 * MINUTE),
+    id: "msg_02",
+    text: "Add a burst allowance to the login rate limiter",
+  },
+  {
+    created: ago(70 * MINUTE),
+    id: "msg_01",
+    text: "Read the rate limiter and explain how it counts requests",
+  },
+];
+
+/** What a session's turn changed: the newest one by default, nothing for the first (read-only) turn. */
+export const turnReviewData = (
+  directory: string,
+  from?: string
+): ReviewData => {
+  const session = webSessions.find((s) => s.directory === directory);
+  const base = reviewData(directory);
+  if (!session) {
+    return { ...base, mode: "working" };
+  }
+  const shown = from ?? RATE_LIMIT_PROMPTS[0].id;
+  const files: Record<string, ReviewData["files"]> = {
+    msg_01: [],
+    msg_02: base.files.slice(0, 1),
+    msg_03: base.files.slice(1, 2),
+  };
+  return {
+    ...base,
+    files: files[shown] ?? [],
+    mode: "turn",
+    turn: {
+      from: shown,
+      latest: shown === RATE_LIMIT_PROMPTS[0].id,
+      prompts: RATE_LIMIT_PROMPTS,
+      running: session.status !== "idle",
+      sessionId: session.id,
+      sessionTitle: session.title,
+    },
+  };
+};
+
+/** The rate-limit worktree's session: three turns, the newest waiting on a permission, and one subagent. */
+export const sessionDetail = (sessionId: string): SessionDetail | undefined => {
+  const session = webSessions.find((s) => s.id === sessionId);
+  if (!session) {
+    return undefined;
+  }
+  const { model } = session;
+  return {
+    agent: "build",
+    contextLimit: 200_000,
+    createdAt: ago(75 * MINUTE),
+    more: false,
+    outcome: "succeeded",
+    session,
+    subagents: [
+      {
+        agent: "explore",
+        cost: 0.04,
+        id: "ses_sub01",
+        title: "Find where requests are counted",
+        tokens: 22_000,
+        updatedAt: ago(68 * MINUTE),
+      },
+    ],
+    tokens: {
+      cacheRead: 98_000,
+      cacheWrite: 12_000,
+      input: 41_000,
+      output: 8400,
+      reasoning: 2600,
+    },
+    turns: [
+      {
+        agent: "build",
+        cost: 0.11,
+        created: RATE_LIMIT_PROMPTS[0].created,
+        failedTools: 0,
+        files: 1,
+        id: RATE_LIMIT_PROMPTS[0].id,
+        model,
+        prompt: RATE_LIMIT_PROMPTS[0].text,
+        reply:
+          "Registered the limiter on POST /login. Running the rate-limit tests next.",
+        steps: 3,
+        tokens: 46_000,
+        tools: 4,
+      },
+      {
+        agent: "build",
+        completed: RATE_LIMIT_PROMPTS[1].created + 6 * MINUTE,
+        cost: 0.24,
+        created: RATE_LIMIT_PROMPTS[1].created,
+        failedTools: 1,
+        files: 1,
+        id: RATE_LIMIT_PROMPTS[1].id,
+        model,
+        prompt: `${RATE_LIMIT_PROMPTS[1].text}.\n\nKeep the steady rate at 10 requests a minute, allow bursts of up to 5 more, and make both configurable through the existing limiter options. Add tests for the burst, for running out of it and for the refill.`,
+        reply:
+          "Added a `burst` option to the token bucket (default 5) next to `perMinute`.\n\n- The bucket now starts full at `perMinute + burst`.\n- Refill stays at `perMinute`.\n- Three tests cover the burst, running out and the refill.",
+        steps: 7,
+        tokens: 104_000,
+        tools: 11,
+      },
+      {
+        agent: "build",
+        completed: RATE_LIMIT_PROMPTS[2].created + 2 * MINUTE,
+        cost: 0.07,
+        created: RATE_LIMIT_PROMPTS[2].created,
+        failedTools: 0,
+        files: 0,
+        id: RATE_LIMIT_PROMPTS[2].id,
+        model,
+        prompt: RATE_LIMIT_PROMPTS[2].text,
+        reply:
+          "The limiter is a token bucket per IP: each request takes a token and tokens refill at `perMinute`.",
+        steps: 2,
+        tokens: 34_000,
+        tools: 3,
+      },
+    ],
+  };
+};
 
 export const checksView: ChecksView = {
   checks: [

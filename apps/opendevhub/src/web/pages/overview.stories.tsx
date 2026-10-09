@@ -12,7 +12,12 @@ const meta = preview.meta({
 /** Four projects: one needing attention, a multi-variant task, a stopped and a broken container. */
 export const Default = meta.story();
 
-/** First run: no projects found under the roots yet. */
+/** First run: no folders to scan yet; links to Settings. */
+export const NoFolders = meta.story({
+  beforeEach: mockApi({ snapshot: { ...emptySnapshot, roots: [] } }),
+});
+
+/** Folders are set but hold no projects yet. */
 export const NoProjects = meta.story({
   beforeEach: mockApi({ snapshot: emptySnapshot }),
 });

@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import type { SessionSummary } from "../../shared/types";
 import { sessionUrl } from "../../shared/urls";
 import { removeSession } from "../api";
-import { checkoutOf, checkoutPath } from "../checkouts";
+import { checkoutOf, checkoutPath, sessionPagePath } from "../checkouts";
 import { useDash } from "../dashboard-context";
 import { openUrlOf, worktreeLabel } from "../derive";
 import type { SessionEntry } from "../derive";
@@ -38,6 +38,8 @@ export const SessionRow = (props: {
   worktree?: string;
   /** The checkout's page, which the worktree chip links to. */
   worktreeTo?: string;
+  /** The session's own page, which its title links to. */
+  to?: string;
   highlighted?: boolean;
   task?: { label: string; title: string; to?: string; model?: string };
 }) => {
@@ -90,9 +92,19 @@ export const SessionRow = (props: {
         <SessionBadge status={session.status} />
       </span>
       <div className="flex min-w-0 flex-col gap-0.5 max-md:col-span-full">
-        <span className="truncate" title={title}>
-          {title}
-        </span>
+        {props.to ? (
+          <Link
+            className="truncate hover:underline"
+            title={title}
+            to={props.to}
+          >
+            {title}
+          </Link>
+        ) : (
+          <span className="truncate" title={title}>
+            {title}
+          </span>
+        )}
         {chips && (
           <span className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
             {props.task &&
@@ -187,6 +199,14 @@ const checkoutTo = (
   return c ? checkoutPath(view.project.id, c.target) : undefined;
 };
 
+const sessionTo = (
+  view: SessionEntry["view"],
+  session: SessionSummary
+): string | undefined => {
+  const c = checkoutOf(view, session.directory);
+  return c ? sessionPagePath(view.project.id, c.target, session.id) : undefined;
+};
+
 export const SessionList = (props: {
   entries: SessionEntry[];
   showProject?: boolean;
@@ -214,6 +234,7 @@ export const SessionList = (props: {
                 (props.showMain ? "main" : undefined))
           }
           worktreeTo={checkoutTo(view, session.directory)}
+          to={sessionTo(view, session)}
           highlighted={session.id === props.highlight}
           task={taskChip(view, session)}
         />

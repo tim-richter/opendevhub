@@ -25,6 +25,8 @@ import {
   PATCH,
   publishInfo,
   reviewData,
+  sessionDetail,
+  turnReviewData,
   snapshot,
   usageReport,
 } from "./fixtures";
@@ -224,8 +226,13 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.get("/api/projects/:id/models", () => HttpResponse.json(models)),
     http.get("/api/projects/:id/review", async ({ request }) => {
       await wait();
-      const directory =
-        new URL(request.url).searchParams.get("directory") ?? "";
+      const query = new URL(request.url).searchParams;
+      const directory = query.get("directory") ?? "";
+      if (query.get("mode") === "turn") {
+        return HttpResponse.json(
+          turnReviewData(directory, query.get("from") ?? undefined)
+        );
+      }
       return HttpResponse.json(reviewData(directory));
     }),
     http.post("/api/projects/:id/review/commit-message", () =>
@@ -298,6 +305,13 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.post("/api/projects/:id/sessions", () =>
       HttpResponse.json({ sessionId: "ses_new03" })
     ),
+    http.get("/api/projects/:id/sessions/:session", async ({ params }) => {
+      await wait();
+      const detail = sessionDetail(String(params.session));
+      return detail
+        ? HttpResponse.json(detail)
+        : HttpResponse.json({ error: "unknown session" }, { status: 404 });
+    }),
     http.post("/api/projects/:id/sessions/:session/prompt", ok),
     http.delete("/api/projects/:id/sessions/:session", ok),
     http.post("/api/projects/:id/permissions/:request", ok),

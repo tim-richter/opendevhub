@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PORT,
   InvalidNodeError,
+  InvalidRootError,
   addNode,
   nodeIdFor,
   removeNode,
@@ -16,7 +17,7 @@ import {
   FileProjectSettings,
   loadConfig,
   loadState,
-  resolveRoots,
+  validateRoots,
   saveConfig,
   saveState,
   stateDir,
@@ -112,11 +113,38 @@ describe("state", () => {
   );
 });
 
-describe(resolveRoots, () => {
-  it("resolves, expands ~ and dedupes preserving order", () => {
-    expect(
-      resolveRoots(["/a", "/b", "/b", "rel", "~/code"], "/cwd")
-    ).toStrictEqual(["/a", "/b", "/cwd/rel", path.join(os.homedir(), "code")]);
+describe(validateRoots, () => {
+  it("expands ~, normalizes and dedupes preserving order", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-roots-"));
+    try {
+      expect(validateRoots([dir, `${dir}/`, " ~ ", os.tmpdir()])).toStrictEqual(
+        [dir, os.homedir(), path.resolve(os.tmpdir())]
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [["rel"]],
+    [[""]],
+    [[path.join(os.tmpdir(), "odh-missing-root")]],
+    ["/a"],
+  ])("rejects %j", (input) => {
+    expect(() => validateRoots(input)).toThrow(InvalidRootError);
+  });
+
+  it("round-trips through config.json, dropping invalid entries", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-roots-cfg-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "config.json"),
+        JSON.stringify({ port: 7777, roots: ["/code", "rel", 3] })
+      );
+      expect(loadConfig(dir).roots).toStrictEqual(["/code"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

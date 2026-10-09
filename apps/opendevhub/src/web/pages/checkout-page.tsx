@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Link,
   Outlet,
+  useLocation,
   useNavigate,
   useOutletContext,
   useParams,
@@ -86,6 +87,7 @@ export const CheckoutPage = () => {
   const view = useProjectView();
   const { worktree = "" } = useParams();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { running } = projectFlags(view, false);
   const { pending, newSession, remove, containerAction } =
     useCheckoutActions(view);
@@ -114,6 +116,7 @@ export const CheckoutPage = () => {
   }
 
   const base = checkoutPath(view.project.id, checkout.target);
+  const onSession = pathname.startsWith(`${base}/s/`);
   const n = checkoutCounts(view, checkout.directory);
   const env = envOfDirectory(view, checkout.directory);
   const agent = sshAgentBadge(checkoutRuntime(view, checkout.directory));
@@ -233,7 +236,7 @@ export const CheckoutPage = () => {
       {!checkout.worktree && <UnmountedNotice view={view} />}
 
       <TabBar label="Worktree">
-        <TabLink to={base} end>
+        <TabLink to={base} end active={onSession}>
           <MessagesSquareIcon className="size-4" /> Sessions{" "}
           <Count n={n.attention} tone="attention" />
           {n.attention === 0 && <Count n={n.running + n.idle} tone="muted" />}
