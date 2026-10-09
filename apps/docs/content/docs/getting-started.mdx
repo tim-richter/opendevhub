@@ -49,3 +49,13 @@ When that IP is not reachable from the host (macOS, where containers live in a V
 | `OPENDEVHUB_GATEWAY_IMAGE` | Image for the gateway container (default `node:22-alpine`; it needs `node` on `PATH`). |
 | `OPENDEVHUB_PUSH` | Where [Publish](/docs/publish) runs git: `host` or `container`. Default: the host when the checkout works there, else the container. |
 | `OPENDEVHUB_RELATIVE_WORKTREES` | Set to `0` to always create [worktrees](/docs/worktrees) with absolute links. |
+
+## Sessions survive rebuilds
+
+Every container opendevhub creates (the project's and each worktree's own) gets a Docker volume, `opendevhub-opencode-<environment>`, mounted at `/opendevhub/opencode`. Before it starts `opencode serve`, opendevhub links opencode's data folder (`${XDG_DATA_HOME:-~/.local/share}/opencode`: sessions, messages, provider logins) and state folder (`${XDG_STATE_HOME:-~/.local/state}/opencode`) to it, so **Rebuild** and a changed devcontainer config keep your conversations.
+
+- A fresh volume belongs to root; opendevhub gives it to the container user once (`docker exec -u root … chown`).
+- Data a container already has moves onto an empty volume. When the volume already holds data, it wins and the container's copy is kept next to it as `opencode.before-opendevhub.<time>`.
+- If your devcontainer already mounts one of these folders (or a folder above it, like a home volume), opendevhub leaves it alone.
+- Removing a worktree's own container removes its volume. The project's volume stays until you remove it: `docker volume rm opendevhub-opencode-<project id>` (with the container stopped) starts opencode from scratch.
+- Containers created before this feature have no volume: their sessions are lost on the next rebuild, which adds it.

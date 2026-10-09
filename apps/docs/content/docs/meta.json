@@ -13,6 +13,7 @@
     "forgejo",
     "jira",
     "git-and-ssh",
+    "remote-nodes",
     "notifications",
     "---Reference---",
     "known-limitations"
