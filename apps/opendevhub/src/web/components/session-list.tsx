@@ -7,6 +7,7 @@ import {
 import { Fragment, useState } from "react";
 import { Link } from "react-router";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -45,13 +46,16 @@ export const SessionRow = (props: {
   const [removing, setRemoving] = useState(false);
   const waiting =
     session.status === "needs-permission" || session.status === "needs-answer";
-  const remove = () => {
+  const remove = async () => {
     const title = session.title || "Untitled session";
     const stop = session.status === "idle" ? "" : " It is stopped first.";
     if (
-      !confirm(
-        `Remove the session ${title}? It is deleted in opencode with its subagents.${stop} This can't be undone.`
-      )
+      !(await confirm({
+        confirmLabel: "Remove",
+        description: `It is deleted in opencode with its subagents.${stop} This can't be undone.`,
+        destructive: true,
+        title: `Remove the session ${title}?`,
+      }))
     ) {
       return;
     }

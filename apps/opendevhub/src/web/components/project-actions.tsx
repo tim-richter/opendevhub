@@ -1,5 +1,6 @@
 import { EllipsisIcon, PlayIcon, SquareIcon } from "lucide-react";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -136,11 +137,13 @@ export const AllContainersMenu = ({ view }: { view: ProjectView }) => {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
-          onSelect={() => {
+          onSelect={async () => {
             if (
-              confirm(
-                `Rebuild all ${count} containers of ${view.project.name}? Running sessions will be interrupted.`
-              )
+              await confirm({
+                confirmLabel: "Rebuild",
+                description: "Running sessions will be interrupted.",
+                title: `Rebuild all ${count} containers of ${view.project.name}?`,
+              })
             ) {
               all("rebuild");
             }

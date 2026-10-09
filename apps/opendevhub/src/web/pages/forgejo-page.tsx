@@ -25,6 +25,7 @@ import {
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -462,9 +463,11 @@ const PullView = ({
     // Keep old content visible while fetching. Commit-specific patch/check keys prevent mixing revisions.
     if (
       drafting &&
-      !confirm(
-        "Refresh the pull request? If it has new commits, your draft review is discarded."
-      )
+      !(await confirm({
+        confirmLabel: "Refresh",
+        description: "If it has new commits, your draft review is discarded.",
+        title: "Refresh the pull request?",
+      }))
     ) {
       return;
     }

@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 
+import { ConfirmDialogHost } from "@/components/confirm-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { App } from "./app";
@@ -29,6 +30,7 @@ createRoot(rootElement).render(
         <DashboardProvider>
           <TooltipProvider>
             <App />
+            <ConfirmDialogHost />
           </TooltipProvider>
         </DashboardProvider>
       </BrowserRouter>

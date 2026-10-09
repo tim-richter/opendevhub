@@ -2,6 +2,7 @@ import { BookOpenIcon, CircleCheckIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -241,11 +242,14 @@ const IntegrationSettingsForm = ({
                 type="button"
                 variant="ghost"
                 className="text-destructive hover:text-destructive ml-auto"
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    confirm(
-                      `Remove the ${name} token and turn ${name} off? You'll need a new token to turn it back on.`
-                    )
+                    await confirm({
+                      confirmLabel: "Remove token",
+                      description: `${name} is turned off. You'll need a new token to turn it back on.`,
+                      destructive: true,
+                      title: `Remove the ${name} token?`,
+                    })
                   ) {
                     void save(undefined, true);
                   }

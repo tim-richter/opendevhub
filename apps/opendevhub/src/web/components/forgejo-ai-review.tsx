@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link } from "react-router";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -557,10 +558,15 @@ export const AiReviewPanel = (props: {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => {
+            onClick={async () => {
               if (
                 run.stage !== "done" ||
-                confirm("Clear the AI review and its open suggestions?")
+                (await confirm({
+                  confirmLabel: "Clear",
+                  description: "Its open suggestions are cleared with it.",
+                  destructive: true,
+                  title: "Clear the AI review?",
+                }))
               ) {
                 ai.clear();
               }

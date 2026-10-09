@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -146,7 +147,12 @@ export const ProjectTask = () => {
     const others = sessions.filter((s) => s.id !== keep.id);
     const name = variantName(keep);
     const running = others.some((s) => s.status !== "idle");
-    if (!confirm(pickPrompts(name, others.length, [], running).discard)) {
+    const confirmed = await confirm({
+      confirmLabel: "Keep and discard others",
+      description: pickPrompts(name, others.length, [], running).discard,
+      title: `Keep ${name}?`,
+    });
+    if (!confirmed) {
       return;
     }
     setPicking(true);
@@ -172,7 +178,14 @@ export const ProjectTask = () => {
         removals(view, task, keep.id, dirty),
         running
       );
-      const removeWorktrees = prompts.remove ? confirm(prompts.remove) : false;
+      const removeWorktrees = prompts.remove
+        ? await confirm({
+            confirmLabel: "Remove worktrees",
+            description: prompts.remove,
+            destructive: true,
+            title: "Remove their worktrees too?",
+          })
+        : false;
       const r = await pickVariant(
         view.project.id,
         task,

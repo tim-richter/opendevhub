@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import type { ComponentProps, FormEvent } from "react";
 import { useNavigate } from "react-router";
 
+import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -64,12 +65,17 @@ export const useCheckoutActions = (view: ProjectView) => {
     );
 
   /** Removes a worktree after confirming, asking again before discarding uncommitted changes. */
-  const remove = (c: Checkout, after?: () => void) => {
+  const remove = async (c: Checkout, after?: () => void) => {
     const what = envOfDirectory(view, c.directory)
       ? "Its folder, its container and the container's sessions are deleted"
       : "Its folder is deleted";
     if (
-      !confirm(`Remove the worktree ${c.label}? ${what}; the branch is kept.`)
+      !(await confirm({
+        confirmLabel: "Remove",
+        description: `${what}; the branch is kept.`,
+        destructive: true,
+        title: `Remove the worktree ${c.label}?`,
+      }))
     ) {
       return;
     }
@@ -81,9 +87,12 @@ export const useCheckoutActions = (view: ProjectView) => {
           throw error;
         }
         if (
-          !confirm(
-            `${c.label} has uncommitted or untracked changes. Remove it anyway and discard them?`
-          )
+          !(await confirm({
+            confirmLabel: "Discard and remove",
+            description: `${c.label} has uncommitted or untracked changes. Removing it anyway discards them.`,
+            destructive: true,
+            title: "Discard uncommitted changes?",
+          }))
         ) {
           return;
         }
@@ -97,11 +106,18 @@ export const useCheckoutActions = (view: ProjectView) => {
     busy(`env:${c.directory}`, () => createEnv(view.project.id, c.directory));
   const containerAction = (env: EnvironmentView, action: Action) =>
     busy(`env:${env.id}`, () => envAction(view.project.id, env.id, action));
-  const removeContainer = (env: EnvironmentView, label: string) => {
-    const text = env.node
-      ? `Remove ${label} from ${env.node}? Its container, worktree and branch there are deleted; bring the branch home first to keep its commits.`
-      : `Remove the container of ${label}? Its sessions are deleted; the worktree and its files stay.`;
-    if (!confirm(text)) {
+  const removeContainer = async (env: EnvironmentView, label: string) => {
+    const ok = await confirm({
+      confirmLabel: "Remove",
+      description: env.node
+        ? "Its container, worktree and branch there are deleted; bring the branch home first to keep its commits."
+        : "Its sessions are deleted; the worktree and its files stay.",
+      destructive: true,
+      title: env.node
+        ? `Remove ${label} from ${env.node}?`
+        : `Remove the container of ${label}?`,
+    });
+    if (!ok) {
       return;
     }
     busy(`env:${env.id}`, () => removeEnv(view.project.id, env.id));
@@ -177,11 +193,13 @@ const MainContainerMenu = ({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={locked}
-          onSelect={() => {
+          onSelect={async () => {
             if (
-              confirm(
-                `Rebuild the container of ${c.label}? Running sessions will be interrupted.`
-              )
+              await confirm({
+                confirmLabel: "Rebuild",
+                description: "Running sessions will be interrupted.",
+                title: `Rebuild the container of ${c.label}?`,
+              })
             ) {
               act(id, "rebuild");
             }
@@ -191,11 +209,14 @@ const MainContainerMenu = ({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={locked}
-          onSelect={() => {
+          onSelect={async () => {
             if (
-              confirm(
-                `Rebuild the container of ${c.label} without cache? Every image layer is built again, which can take a while. Running sessions will be interrupted.`
-              )
+              await confirm({
+                confirmLabel: "Rebuild",
+                description:
+                  "Every image layer is built again, which can take a while. Running sessions will be interrupted.",
+                title: `Rebuild the container of ${c.label} without cache?`,
+              })
             ) {
               act(id, "rebuild-no-cache");
             }
@@ -263,11 +284,13 @@ export const ContainerMenu = ({
             )}
             <DropdownMenuItem
               disabled={settling}
-              onSelect={() => {
+              onSelect={async () => {
                 if (
-                  confirm(
-                    `Rebuild the container of ${c.label}? Running sessions will be interrupted.`
-                  )
+                  await confirm({
+                    confirmLabel: "Rebuild",
+                    description: "Running sessions will be interrupted.",
+                    title: `Rebuild the container of ${c.label}?`,
+                  })
                 ) {
                   containerAction(env, "rebuild");
                 }
@@ -277,11 +300,14 @@ export const ContainerMenu = ({
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={settling}
-              onSelect={() => {
+              onSelect={async () => {
                 if (
-                  confirm(
-                    `Rebuild the container of ${c.label} without cache? Every image layer is built again, which can take a while. Running sessions will be interrupted.`
-                  )
+                  await confirm({
+                    confirmLabel: "Rebuild",
+                    description:
+                      "Every image layer is built again, which can take a while. Running sessions will be interrupted.",
+                    title: `Rebuild the container of ${c.label} without cache?`,
+                  })
                 ) {
                   containerAction(env, "rebuild-no-cache");
                 }
@@ -363,11 +389,13 @@ export const UnmountedNotice = ({ view }: { view: ProjectView }) => {
         variant="outline"
         size="sm"
         disabled={locked}
-        onClick={() => {
+        onClick={async () => {
           if (
-            confirm(
-              `Rebuild the devcontainer for ${view.project.name}? Running sessions will be interrupted.`
-            )
+            await confirm({
+              confirmLabel: "Rebuild",
+              description: "Running sessions will be interrupted.",
+              title: `Rebuild the devcontainer for ${view.project.name}?`,
+            })
           ) {
             act(view.project.id, "rebuild");
           }

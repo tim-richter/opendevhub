@@ -7,6 +7,7 @@ import { setupWorker } from "msw/browser";
 import { useState } from "react";
 import { MemoryRouter } from "react-router";
 
+import { ConfirmDialogHost } from "@/components/confirm-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { DashboardProvider } from "../src/web/dashboard-context";
@@ -55,6 +56,7 @@ export default definePreview({
             <DashboardProvider>
               <TooltipProvider>
                 <Story />
+                <ConfirmDialogHost />
               </TooltipProvider>
             </DashboardProvider>
           </MemoryRouter>
