@@ -10,11 +10,13 @@ import type {
   ImageCleanupItem,
   Project,
   ProjectId,
+  ReviewCleanupItem,
   SessionCleanupItem,
   TaskCleanupItem,
   Worktree,
 } from "../../shared/types";
 import { USER } from "../db/events";
+import type { LinkStore } from "../db/links";
 import type { TaskStore } from "../db/tasks";
 import type {
   ContainerInfo,
@@ -410,6 +412,29 @@ export const staleTasks = (
     ];
   });
 
+/** Stored reviews of closed or merged pull requests not reviewed for as long as an idle session, offered unchecked. */
+export const staleReviews = (
+  links: Pick<LinkStore, "staleReviews">,
+  now: number
+): ReviewCleanupItem[] =>
+  links
+    .staleReviews(now - IDLE_SESSION_MS)
+    .map(({ pull, count, lastReview }) => {
+      const days = Math.floor((now - lastReview) / (24 * 60 * 60_000));
+      return {
+        checked: false,
+        count,
+        id: `review:${pull.id}`,
+        kind: "review" as const,
+        lastReview,
+        pullRequestId: pull.id,
+        reason: `${pull.state ?? "closed"}, last reviewed ${days} days ago`,
+        url: pull.url,
+        ...(pull.number === undefined ? {} : { number: pull.number }),
+        ...(pull.title === undefined ? {} : { title: pull.title }),
+      };
+    });
+
 /** opendevhub's base images by name, and the UID images built on them by label. */
 export const CLEANUP_IMAGE_FILTERS = [
   `reference=${BASE_REPO}*`,
@@ -434,6 +459,8 @@ export interface CleanupDeps {
     TaskStore,
     "listForProject" | "lastActivity" | "get" | "archive"
   >;
+  /** Stored AI reviews to offer for deletion; none are offered without it. */
+  reviews?: Pick<LinkStore, "staleReviews" | "deleteStaleReviews">;
   /** Writes a line to a project's log. */
   log: (projectId: ProjectId, line: string) => void;
   now?: () => number;
@@ -465,13 +492,19 @@ export class Cleanup {
       scannedAt,
       projects: perProject.map((r) => r.summary),
       ...(docker.error ? { dockerError: docker.error } : {}),
-      items: [...perProject.flatMap((r) => r.items), ...docker.items],
+      items: [
+        ...perProject.flatMap((r) => r.items),
+        ...(this.deps.reviews
+          ? staleReviews(this.deps.reviews, scannedAt)
+          : []),
+        ...docker.items,
+      ],
     };
   }
 
   /**
    * Removes the selected items: branches, then sessions, then containers, then images, each re-checked first. Tasks
-   * are archived last.
+   * are archived and stale reviews deleted last.
    */
   async apply(items: CleanupItem[]): Promise<CleanupResult> {
     if (this.applying) {
@@ -529,6 +562,11 @@ export class Cleanup {
       for (const item of items) {
         if (item.kind === "task") {
           results.push({ id: item.id, ...this.archiveTask(item) });
+        }
+      }
+      for (const item of items) {
+        if (item.kind === "review") {
+          results.push({ id: item.id, ...this.deleteReviews(item) });
         }
       }
       return { freedBytes, results };
@@ -651,6 +689,28 @@ export class Cleanup {
       this.deps.tasks?.archive(item.taskId, USER);
       this.deps.log(item.projectId, `cleanup: archived task ${task.title}`);
       return { message: "archived", outcome: "removed" };
+    } catch (error) {
+      return { message: message(error), outcome: "failed" };
+    }
+  }
+
+  /** Deletes a pull request's stored reviews, if it is still closed or merged and none ran since the scan's cutoff. */
+  private deleteReviews(item: ReviewCleanupItem): CleanupOutcome {
+    const { reviews } = this.deps;
+    if (!reviews) {
+      return { message: "reviews are not available", outcome: "skipped" };
+    }
+    try {
+      const n = reviews.deleteStaleReviews(
+        item.pullRequestId,
+        this.now() - IDLE_SESSION_MS
+      );
+      return n === 0
+        ? { message: "reopened or reviewed again", outcome: "skipped" }
+        : {
+            message: `deleted ${n} review${n === 1 ? "" : "s"}`,
+            outcome: "removed",
+          };
     } catch (error) {
       return { message: message(error), outcome: "failed" };
     }
@@ -781,6 +841,24 @@ export const parseCleanupItems = (value: unknown): CleanupItem[] => {
         reason: "",
         taskId,
         title: "",
+      };
+    }
+    if (o.kind === "review") {
+      const id = o.pullRequestId;
+      if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
+        throw new InvalidRequestError(
+          "cleanup item needs a valid pullRequestId"
+        );
+      }
+      return {
+        checked: true,
+        count: 0,
+        id: `review:${id}`,
+        kind: "review",
+        lastReview: 0,
+        pullRequestId: id,
+        reason: "",
+        url: "",
       };
     }
     throw new InvalidRequestError(

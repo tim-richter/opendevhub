@@ -21,7 +21,7 @@ import { projectUrl } from "../../shared/urls";
 import { creatorView } from "../db/checkouts";
 import type { CheckoutStore } from "../db/checkouts";
 import type { DurablePatch, EnvironmentStore } from "../db/environments";
-import type { Actor } from "../db/events";
+import type { Actor, EventStore } from "../db/events";
 import { SYSTEM } from "../db/events";
 import type { LinkStore, TaskLinks } from "../db/links";
 import type { TaskRecord, TaskStore } from "../db/tasks";
@@ -38,6 +38,8 @@ export interface StoreOptions {
   links?: LinkStore;
   /** Where environments and their durable runtime fields live; read once at start. */
   environments: EnvironmentStore;
+  /** The event log; the snapshot carries its newest id so the activity views know to refetch. */
+  events?: Pick<EventStore, "latestId">;
 }
 
 const DURABLE_KEYS = [
@@ -398,6 +400,9 @@ export class StateStore {
         ? { resources: this.resourceStats }
         : {}),
       ...(this.nodeViews.length > 0 ? { nodes: this.nodeViews } : {}),
+      ...(this.opts.events
+        ? { activity: { latestId: this.opts.events.latestId() } }
+        : {}),
     };
   }
 
@@ -435,6 +440,7 @@ export class StateStore {
       return {
         ...w,
         createdBy,
+        id: row.id,
         ...(row.branchId === undefined ? {} : { branchId: row.branchId }),
         ...(branch?.originUrl ? { origin: branch.originUrl } : {}),
       };

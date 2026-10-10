@@ -45,8 +45,8 @@ const shots: Shot[] = [
   {
     height: 660,
     name: "task-variants",
-    ready: "text=Compare variants",
-    story: "pages-project--task",
+    ready: "text=Pick this one",
+    story: "pages-project--task-compare",
   },
   {
     name: "review",

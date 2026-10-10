@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { eventsSince } from "../../../src/server/db/events";
+import { EventStore, eventsSince } from "../../../src/server/db/events";
 import { StateStore } from "../../../src/server/projects/state";
 import type { Project, SessionSummary } from "../../../src/shared/types";
 import {
@@ -313,6 +313,33 @@ describe("task environments", () => {
       "environment.created a-feat-0a1b",
       "environment.removed a-feat-0a1b",
     ]);
+  });
+});
+
+describe("activity", () => {
+  it("carries the newest event id, and tells listeners when a task records one", () => {
+    const { dbs } = make();
+    const store = new StateStore({
+      ...stateStores(dbs),
+      events: new EventStore(dbs.db),
+      port: 7777,
+    });
+    store.setProjects([p("a")]);
+    const before = store.snapshot().activity?.latestId ?? 0;
+    expect(before).toBe(eventsSince(dbs.db).at(-1)?.id);
+    const heard = vi.fn();
+    store.subscribe(heard);
+    dbs.tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: "a",
+      prompt: "x",
+      title: "x",
+      variants: [{}],
+    });
+    expect(heard).toHaveBeenCalled();
+    expect(store.snapshot().activity?.latestId).toBeGreaterThan(before);
+    expect(make().store.snapshot().activity).toBe(undefined);
   });
 });
 

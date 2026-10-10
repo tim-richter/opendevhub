@@ -1,48 +1,15 @@
+import type {
+  ActivityEvent,
+  ActivityFilter,
+  ActivityPage,
+  Actor,
+  EventVerb,
+  ObjectType,
+} from "../../shared/activity";
+import { ACTIVITY_PAGE_SIZE } from "../../shared/activity";
 import type { Db } from "./database";
 
-/** What can happen to a record. Later changes add verbs for their own records. */
-export type EventVerb =
-  | "project.discovered"
-  | "project.missing"
-  | "task.started"
-  | "task.ended"
-  | "task.archived"
-  | "variant.failed"
-  | "variant.picked"
-  | "variant.discarded"
-  | "session.started"
-  | "session.adopted"
-  | "session.removed"
-  | "branch.created"
-  | "branch.published"
-  | "branch.deleted"
-  | "worktree.created"
-  | "worktree.adopted"
-  | "worktree.switched"
-  | "worktree.removed"
-  | "environment.created"
-  | "environment.removed"
-  | "ticket.linked"
-  | "pull_request.linked"
-  | "review.run";
-
-export type ObjectType =
-  | "project"
-  | "task"
-  | "variant"
-  | "session"
-  | "branch"
-  | "worktree"
-  | "environment"
-  | "ticket"
-  | "pull_request"
-  | "review";
-
-/** Who caused a change: the user (an API request), a task's setup job for its variant, or opendevhub itself. */
-export type Actor =
-  | { type: "user" }
-  | { type: "system" }
-  | { type: "variant"; id: string };
+export type { Actor, EventVerb, ObjectType } from "../../shared/activity";
 
 export const USER: Actor = { type: "user" };
 export const SYSTEM: Actor = { type: "system" };
@@ -126,3 +93,104 @@ export const lastEventId = (db: Db): number =>
       id: number | null;
     }
   ).id ?? 0;
+
+/** Events are kept this long; older ones are deleted at startup. */
+export const EVENT_RETENTION_MS = 180 * 24 * 60 * 60_000;
+const PRUNE_BATCH = 1000;
+
+/**
+ * A page of events matching `filter`, newest first, older than event `before` when given. Keyset-paged by id, so
+ * events recorded meanwhile never shift a page. Each event carries its project's name and its task's title.
+ */
+export const page = (
+  db: Db,
+  filter: ActivityFilter = {},
+  before?: number,
+  limit = ACTIVITY_PAGE_SIZE
+): ActivityPage => {
+  const where: string[] = [];
+  const args: (string | number)[] = [];
+  if (filter.projectId !== undefined) {
+    where.push("e.project_id = ?");
+    args.push(filter.projectId);
+  }
+  if (filter.taskId !== undefined) {
+    where.push("e.task_id = ?");
+    args.push(filter.taskId);
+  }
+  if (filter.entity) {
+    where.push("e.object_type = ? AND e.object_id = ?");
+    args.push(filter.entity.type, filter.entity.id);
+  }
+  if (before !== undefined) {
+    where.push("e.id < ?");
+    args.push(before);
+  }
+  const rows = db
+    .prepare(
+      `SELECT e.*, p.name AS project_name, t.title AS task_title FROM events e
+       LEFT JOIN projects p ON p.id = e.project_id
+       LEFT JOIN tasks t ON t.id = e.task_id
+       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY e.id DESC LIMIT ?`
+    )
+    .all(...args, limit + 1) as unknown as (RawEvent & {
+    project_name: string | null;
+    task_title: string | null;
+  })[];
+  const more = rows.length > limit;
+  const events = rows.slice(0, limit).map((r): ActivityEvent => ({
+    ...toEvent(r),
+    ...(r.project_name === null ? {} : { projectName: r.project_name }),
+    ...(r.task_title === null ? {} : { taskTitle: r.task_title }),
+  }));
+  const last = events.at(-1);
+  return { events, ...(more && last ? { next: last.id } : {}) };
+};
+
+/** Deletes the events recorded before `olderThan`, a batch at a time so no one transaction grows large. */
+export const prune = (
+  db: Db,
+  olderThan: number,
+  batch = PRUNE_BATCH
+): number => {
+  const remove = db.prepare(
+    "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE at < ? ORDER BY id LIMIT ?)"
+  );
+  let total = 0;
+  for (;;) {
+    const { changes } = remove.run(olderThan, batch);
+    total += Number(changes);
+    if (Number(changes) < batch) {
+      return total;
+    }
+  }
+};
+
+/** The event log as the API and the snapshot read it. Writes go through `record` inside each repository's change. */
+export class EventStore {
+  private readonly db: Db;
+  private readonly now: () => number;
+
+  constructor(db: Db, now: () => number = Date.now) {
+    this.db = db;
+    this.now = now;
+  }
+
+  page(
+    filter: ActivityFilter = {},
+    before?: number,
+    limit?: number
+  ): ActivityPage {
+    return page(this.db, filter, before, limit);
+  }
+
+  latestId(): number {
+    return lastEventId(this.db);
+  }
+
+  /** Deletes events past retention; returns how many. */
+  pruneOld(): number {
+    return prune(this.db, this.now() - EVENT_RETENTION_MS);
+  }
+}

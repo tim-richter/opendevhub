@@ -11,6 +11,7 @@ import type {
   VariantView,
 } from "../../../shared/types";
 import { workspaceFolderOf } from "../../derive";
+import type { Tone } from "../../derive";
 
 export const taskOf = (view: ProjectView, task: string): TaskView | undefined =>
   view.tasks.find((t) => t.id === task);
@@ -195,8 +196,8 @@ export const pickPrompts = (
 };
 
 /**
- * The task chip on a session row; it links to the task page when the task has several variants, or is an AI review
- * (whose page shows the pull request). A manual task is the session itself, so it gets none.
+ * The "created by" chip on a session row, linking to the task page: the task's variant (with its model when there
+ * are several), the AI review it runs, a session started on its own here, or one found outside opendevhub.
  */
 export const taskChip = (
   view: ProjectView,
@@ -205,26 +206,35 @@ export const taskChip = (
   | { label: string; title: string; to?: string; model?: string }
   | undefined => {
   const found = variantOf(view, s);
-  if (!found || found.task.kind === "manual") {
+  if (!found) {
     return undefined;
   }
   const { task, variant } = found;
+  const to = taskPath(view.project.id, task.id);
+  if (task.kind === "manual") {
+    return s.task?.adopted
+      ? {
+          label: "outside opendevhub",
+          title: "Found in opencode; started outside opendevhub",
+        }
+      : {
+          label: "started here",
+          title: "Started on its own in opendevhub",
+          to,
+        };
+  }
   if (task.kind === "review") {
-    return {
-      label: "AI review",
-      title: task.title,
-      to: taskPath(view.project.id, task.id),
-    };
+    return { label: "AI review", title: task.title, to };
   }
   const title = `Task: ${task.title}`;
   const of = task.variants.length;
   if (of === 1) {
-    return { label: "task", title };
+    return { label: "task", title, to };
   }
   return {
     label: `task ${variant.n}/${of}`,
     title,
-    to: taskPath(view.project.id, task.id),
+    to,
     ...(s.model ? { model: modelShortName(s.model) } : {}),
   };
 };
@@ -343,4 +353,31 @@ export const specUnavailable = (spec: SpecWorkflow): string | undefined => {
     return "The container has no openspec CLI; add it to the devcontainer.";
   }
   return undefined;
+};
+
+/** A variant's state for the hub's rows: discarded, failed, still starting, ended, or its live session's status. */
+export const variantStatus = (
+  v: VariantView,
+  session: SessionSummary | undefined
+): { label: string; tone: Tone } => {
+  if (v.discarded) {
+    return { label: "discarded", tone: "off" };
+  }
+  if (v.step === "failed") {
+    return { label: "failed", tone: "error" };
+  }
+  if (!v.sessionId) {
+    return { label: startStepLabel(v.step), tone: "running" };
+  }
+  if (v.sessionRemoved || !session) {
+    return { label: v.picked ? "picked · ended" : "ended", tone: "off" };
+  }
+  const picked = v.picked ? "picked · " : "";
+  if (session.status === "running") {
+    return { label: `${picked}working`, tone: "running" };
+  }
+  if (session.status === "idle") {
+    return { label: `${picked}idle`, tone: "ok" };
+  }
+  return { label: `${picked}needs you`, tone: "attention" };
 };

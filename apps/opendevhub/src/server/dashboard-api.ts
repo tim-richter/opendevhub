@@ -3,13 +3,16 @@ import path from "node:path";
 
 import { Hono } from "hono";
 
+import { createActivityRoutes } from "./api/activity";
 import { createCoreRoutes } from "./api/core";
 import { createForgejoRoutes } from "./api/forgejo";
 import { errorResponse } from "./api/helpers";
 import { createJiraRoutes } from "./api/jira";
 import { createLinksRoutes } from "./api/links";
 import { createProjectsRoutes } from "./api/projects";
+import type { EventStore } from "./db/events";
 import type { LinkStore } from "./db/links";
+import type { ProvenanceStore } from "./db/provenance";
 import type { Checks } from "./environments/checks";
 import type { Environments } from "./environments/environments";
 import type { Checkouts } from "./git/checkouts";
@@ -137,6 +140,10 @@ export interface DashboardDeps {
     | "forPull"
     | "forTicket"
   >;
+  /** The event feed; absent in tests that don't need it. */
+  activity?: Pick<EventStore, "page">;
+  /** Where entities came from; absent in tests that don't need it. */
+  provenance?: Pick<ProvenanceStore, "of">;
   webDir?: string;
 }
 
@@ -174,6 +181,7 @@ export const createDashboardApp = (deps: DashboardDeps) => {
   });
 
   const api = app
+    .route("/", createActivityRoutes(deps))
     .route("/", createCoreRoutes(deps))
     .route("/", createForgejoRoutes(deps))
     .route("/", createJiraRoutes(deps))

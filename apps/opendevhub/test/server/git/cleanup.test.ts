@@ -506,10 +506,12 @@ function service(
     containers,
     branches,
     tasks: dbs.tasks,
+    reviews: dbs.links,
     log,
     now: () => NOW,
   });
   return {
+    links: dbs.links,
     cleanup,
     containers,
     branches,
@@ -860,6 +862,94 @@ describe("ended tasks", () => {
         title: "",
       },
     ]);
+  });
+});
+
+describe("stale reviews", () => {
+  const DAY_MS = 24 * 60 * 60_000;
+  const reviewed = (
+    s: ReturnType<typeof service>,
+    n: number,
+    state: "open" | "closed" | "merged",
+    at: number
+  ) => {
+    const url = `https://forge.example/o/r/pulls/${n}`;
+    const pull = s.links.ensurePull(url);
+    s.links.refreshPull(url, { state, title: `PR ${n}` });
+    s.clock.now = at;
+    s.links.insertReview(
+      {
+        findings: [],
+        headSha: "abc",
+        mode: "quick",
+        pullRequestId: pull.id,
+        summary: "",
+      },
+      SYSTEM
+    );
+    s.clock.now = NOW;
+    return pull.id;
+  };
+
+  it("offers, unchecked, the reviews of closed or merged PRs whose newest review is past the idle cutoff", async () => {
+    const s = service();
+    const merged = reviewed(s, 1, "merged", NOW - 40 * DAY_MS);
+    reviewed(s, 1, "merged", NOW - 35 * DAY_MS);
+    reviewed(s, 2, "open", NOW - 40 * DAY_MS);
+    reviewed(s, 3, "closed", NOW - DAY_MS);
+    const plan = await s.cleanup.scan();
+    expect(plan.items.filter((i) => i.kind === "review")).toStrictEqual([
+      {
+        checked: false,
+        count: 2,
+        id: `review:${merged}`,
+        kind: "review",
+        lastReview: NOW - 35 * DAY_MS,
+        number: 1,
+        pullRequestId: merged,
+        reason: "merged, last reviewed 35 days ago",
+        title: "PR 1",
+        url: "https://forge.example/o/r/pulls/1",
+      },
+    ]);
+  });
+
+  it("deletes the selected reviews, and skips a PR reviewed again since", async () => {
+    const s = service();
+    const merged = reviewed(s, 1, "merged", NOW - 40 * DAY_MS);
+    const closed = reviewed(s, 2, "closed", NOW - 40 * DAY_MS);
+    const plan = await s.cleanup.scan();
+    reviewed(s, 2, "closed", NOW);
+    const result = await s.cleanup.apply(
+      plan.items.filter((i) => i.kind === "review")
+    );
+    expect(result.results).toStrictEqual([
+      {
+        id: `review:${merged}`,
+        message: "deleted 1 review",
+        outcome: "removed",
+      },
+      {
+        id: `review:${closed}`,
+        message: "reopened or reviewed again",
+        outcome: "skipped",
+      },
+    ]);
+    expect(
+      s.links.reviewsOf("https://forge.example/o/r/pulls/1")
+    ).toStrictEqual([]);
+    expect(s.links.reviewsOf("https://forge.example/o/r/pulls/2")).toHaveLength(
+      2
+    );
+  });
+
+  it("parses a review item by its pull request", () => {
+    expect(
+      parseCleanupItems([{ kind: "review", pullRequestId: 7 }])
+    ).toMatchObject([{ id: "review:7", kind: "review", pullRequestId: 7 }]);
+    expect(() =>
+      parseCleanupItems([{ kind: "review", pullRequestId: "7" }])
+    ).toThrow(InvalidRequestError);
   });
 });
 

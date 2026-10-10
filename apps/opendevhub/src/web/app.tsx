@@ -9,6 +9,7 @@ import type { AnyRoute, RouterHistory } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
+import { ActivityPage } from "./features/activity/activity-page";
 import {
   CheckoutPage,
   CheckoutRuntime,
@@ -117,6 +118,7 @@ const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([
     page("/", Overview),
     page("sessions", SessionsPage),
+    page("activity", ActivityPage),
     page("usage", UsagePage),
     page("cleanup", CleanupPage),
     page("nodes", NodesPage),

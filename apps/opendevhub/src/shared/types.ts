@@ -55,6 +55,8 @@ export interface Worktree {
   origin?: string;
   /** Its branch's row, from `GET /api/projects/:id/branches`. */
   branchId?: number;
+  /** Its own row, for `GET /api/provenance/worktree/:id`; absent until opendevhub has recorded it. */
+  id?: number;
   /** Who made the worktree; absent until opendevhub has recorded it. */
   createdBy?: CheckoutCreator;
 }
@@ -744,6 +746,8 @@ export interface TaskView {
 
 /** What a pull request is linked to in opendevhub, from `GET /api/links/pull`. Empty for one it never touched. */
 export interface PullLinks {
+  /** Its row, for `GET /api/provenance/pull_request/:id`. */
+  id?: number;
   pull?: PullRequestRef;
   branches: {
     projectId: ProjectId;
@@ -769,6 +773,8 @@ export interface PullLinks {
 
 /** What a ticket is linked to in opendevhub, from `GET /api/links/ticket`. Empty for one no task started from. */
 export interface TicketLinks {
+  /** Its row, for `GET /api/provenance/ticket/:id`. */
+  id?: number;
   ticket?: TicketRef;
   /** The tasks started from it, archived ones included, newest first, each with its variants' pull requests. */
   tasks: {
@@ -803,6 +809,8 @@ export interface SessionTaskRef {
   /** Its variant's number. */
   n: number;
   discarded: boolean;
+  /** Found in opencode rather than started by opendevhub (while its `session.adopted` event is kept). */
+  adopted?: boolean;
 }
 
 export type EditorTarget = "host" | "container";
@@ -887,6 +895,8 @@ export interface DashboardSnapshot {
   resources?: Record<EnvId, ResourceStats>;
   /** `local` first, then configured nodes in config order. */
   nodes?: NodeView[];
+  /** The newest recorded event's id; changes whenever an event is recorded. Absent without an event log. */
+  activity?: { latestId: number };
 }
 
 export interface LogEvent {
@@ -995,12 +1005,30 @@ export interface TaskCleanupItem {
   lastActivity: number;
 }
 
+/** The stored AI reviews of a closed or merged pull request, none of them recent. */
+export interface ReviewCleanupItem {
+  /** `review:<pullRequestId>`. */
+  id: string;
+  kind: "review";
+  checked: boolean;
+  reason: string;
+  pullRequestId: number;
+  url: string;
+  number?: number;
+  title?: string;
+  /** How many reviews it has. */
+  count: number;
+  /** When its newest review ran. */
+  lastReview: number;
+}
+
 export type CleanupItem =
   | BranchCleanupItem
   | ContainerCleanupItem
   | ImageCleanupItem
   | SessionCleanupItem
-  | TaskCleanupItem;
+  | TaskCleanupItem
+  | ReviewCleanupItem;
 
 export interface CleanupProject {
   id: ProjectId;

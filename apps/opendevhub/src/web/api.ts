@@ -1,3 +1,4 @@
+import type { ActivityFilter, ObjectType } from "../shared/activity";
 import type {
   ForgejoReviewInput,
   ForgejoPullFilter,
@@ -177,6 +178,43 @@ export const fetchPullLinks = (url: string, signal?: AbortSignal) =>
       { init: { cache: "no-store", signal } }
     ),
     "pull request links"
+  );
+
+/** A page of the event feed, newest first; `before` is the previous page's `next`. */
+export const fetchActivity = (
+  filter: ActivityFilter,
+  before?: number,
+  signal?: AbortSignal
+) =>
+  read(
+    api.activity.$get(
+      {
+        query: {
+          ...(filter.projectId ? { project: filter.projectId } : {}),
+          ...(filter.taskId ? { task: filter.taskId } : {}),
+          ...(filter.entity
+            ? { entity: `${filter.entity.type}:${filter.entity.id}` }
+            : {}),
+          ...(before === undefined ? {} : { before: String(before) }),
+        },
+      },
+      { init: { cache: "no-store", signal } }
+    ),
+    "activity"
+  );
+
+/** Where an entity came from and what it led to. */
+export const fetchProvenance = (
+  type: ObjectType,
+  id: string,
+  signal?: AbortSignal
+) =>
+  read(
+    api.provenance[":type"][":id"].$get(
+      { param: { id: encodeURIComponent(id), type } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "provenance"
   );
 
 /** The tasks started from a ticket and their pull requests. */

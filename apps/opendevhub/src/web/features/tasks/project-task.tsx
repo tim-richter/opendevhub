@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   ExternalLinkIcon,
   LoaderCircleIcon,
+  TicketIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -14,6 +15,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -27,11 +29,13 @@ import type {
 } from "../../../shared/types";
 import { archiveTask, dismissStarting, pickVariant } from "../../api";
 import { EnvBadge } from "../../components/env-badge";
-import { Empty, muted, Section } from "../../components/page";
+import { Chip, Empty, muted, Section } from "../../components/page";
 import { SessionBadge } from "../../components/status";
 import { useDash } from "../../dashboard-context";
 import { envOfDirectory, sessionHref } from "../../derive";
-import { Link } from "../../routing";
+import { Link, useSearchParams } from "../../routing";
+import { ActivityFeed } from "../activity/activity-feed";
+import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { checkoutOf, checkoutPath } from "../checkouts/checkouts";
 import { checksState, failedNames } from "../checks/checks";
 import type { ChecksState } from "../checks/checks";
@@ -45,12 +49,12 @@ import { SpecSection } from "../specs/spec-panel";
 import { specQuery } from "../specs/spec-queries";
 import { PHASE_LABEL, specSessions, taskProgress } from "../specs/specs";
 import { formatUsage, taskUsage } from "../usage/usage";
+import { SpecChain, TaskReviews, VariantTable } from "./task-hub";
 import {
   diffStats,
   fileMatrix,
   formatCost,
   formatTokens,
-  endedVariants,
   pickPrompts,
   removals,
   startingVariants,
@@ -141,28 +145,6 @@ const VariantPulls = (props: { task: TaskView; n: number | undefined }) => {
   );
 };
 
-/** Variants whose session is gone: what they were, so the task's history stays readable. */
-const EndedVariants = (props: { task: TaskView; variants: VariantView[] }) => (
-  <Section title="Ended variants" hint="their sessions are gone from opencode">
-    <ul>
-      {props.variants.map((v) => (
-        <li
-          key={v.n}
-          className="flex min-w-0 items-center gap-3 border-t px-4 py-2 first:border-t-0"
-        >
-          <strong className="shrink-0">#{v.n}</strong>
-          <span className="truncate font-mono text-xs">
-            {v.branch ?? v.directory ?? "—"}
-          </span>
-          {v.picked && <span className={muted}>picked</span>}
-          {v.node && <span className={muted}>on {v.node}</span>}
-          <VariantPulls task={props.task} n={v.n} />
-        </li>
-      ))}
-    </ul>
-  </Section>
-);
-
 /** Hides an ended task from the dashboard; its record stays. */
 const ArchiveButton = (props: { view: ProjectView; task: TaskView }) => {
   const { report } = useDash();
@@ -189,11 +171,11 @@ export const ProjectTask = () => {
   const view = useProjectView();
   const { task = "" } = useParams({ strict: false });
   const { report, snapshot } = useDash();
+  const [params, setParams] = useSearchParams();
   const total = taskUsage(snapshot, task);
   const record = taskOf(view, task);
   const sessions = taskSessions(view, task);
   const starting = record ? startingVariants(record) : [];
-  const ended = record ? endedVariants(record) : [];
   const jiraSource = record?.jira;
   const queryClient = useQueryClient();
   const directories = [...new Set(sessions.map((s) => s.directory))];
@@ -319,31 +301,89 @@ export const ProjectTask = () => {
     );
   }
   const variantCount = record.variants.length;
+  const comparable = record.kind === "task";
+  const tab =
+    comparable && params.get("tab") === "compare" ? "compare" : "overview";
+  const crumbs = (
+    <nav
+      aria-label="Breadcrumb"
+      className="text-muted-foreground flex items-center gap-1 text-sm"
+    >
+      <Link to={projectPath} className="hover:text-foreground hover:underline">
+        {view.project.name}
+      </Link>
+      <ChevronRightIcon className="size-3.5" /> {KIND_LABEL[record.kind]}
+    </nav>
+  );
+
+  const overview = (
+    <div className="flex flex-col gap-4">
+      {jiraSource && (
+        <JiraSourceCard
+          source={jiraSource}
+          {...(record.ticket ? { ticket: record.ticket } : {})}
+        />
+      )}
+      {starting.length > 0 && (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
+          {starting.map((v) => (
+            <StartingCard
+              key={`starting-${v.n}`}
+              variant={v}
+              onDismiss={() =>
+                void dismissStarting(view.project.id, task).catch(report)
+              }
+            />
+          ))}
+        </div>
+      )}
+      <VariantTable view={view} task={record} />
+      {specVariants.length > 0 && (
+        <SpecSection
+          projectId={view.project.id}
+          task={record}
+          sessions={specVariants}
+          reviews={reviews}
+        />
+      )}
+      <SpecChain view={view} task={record} />
+      <TaskReviews task={record} />
+      <ActivityFeed
+        filter={{ taskId: record.id }}
+        empty="Nothing recorded for this task yet."
+      />
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-4">
-      <nav
-        aria-label="Breadcrumb"
-        className="text-muted-foreground flex items-center gap-1 text-sm"
-      >
-        <Link
-          to={projectPath}
-          className="hover:text-foreground hover:underline"
-        >
-          {view.project.name}
-        </Link>
-        <ChevronRightIcon className="size-3.5" />{" "}
-        {record.kind === "review" ? "Review" : "Task"}
-      </nav>
-      <div className="flex items-baseline gap-2.5">
+      <ProvenanceBreadcrumb type="task" id={record.id} fallback={crumbs} />
+      <div className="flex flex-wrap items-baseline gap-2.5">
         <h2 className="text-lg font-semibold">{record.title || "Task"}</h2>
+        <Chip>{KIND_LABEL[record.kind]}</Chip>
+        <Chip variant={record.state === "running" ? "secondary" : "outline"}>
+          {record.state}
+        </Chip>
+        {record.ticket && (
+          <Chip variant="outline" asChild>
+            <Link to={`/jira/${encodeURIComponent(record.ticket.key)}`}>
+              <TicketIcon className="size-3" /> {record.ticket.key}
+              {record.ticket.status && ` · ${record.ticket.status}`}
+            </Link>
+          </Chip>
+        )}
         <span className={muted}>
-          {variantCount} variant
-          {variantCount === 1 ? "" : "s"}
+          {comparable && (
+            <>
+              {variantCount} variant
+              {variantCount === 1 ? "" : "s"}
+            </>
+          )}
           {starting.some((v) => v.step !== "failed") && " · starting"}
-          {record.state === "ended" && " · ended"}
           {total && (
-            <span className="tabular-nums"> · Total {formatUsage(total)}</span>
+            <span className="tabular-nums">
+              {comparable ? " · " : ""}Total {formatUsage(total)}
+            </span>
           )}
         </span>
         <span className="ml-auto">
@@ -364,53 +404,71 @@ export const ProjectTask = () => {
           <PullRequestBadge pull={record.reviewOf} />
         </p>
       )}
-      {jiraSource && (
-        <JiraSourceCard
-          source={jiraSource}
-          {...(record.ticket ? { ticket: record.ticket } : {})}
-        />
-      )}
       {notice && (
         <Alert className="border-ok/40 bg-ok/10">
           <AlertDescription className="text-ok">{notice}</AlertDescription>
         </Alert>
       )}
-      {starting.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
-          {starting.map((v) => (
-            <StartingCard
-              key={`starting-${v.n}`}
-              variant={v}
-              onDismiss={() =>
-                void dismissStarting(view.project.id, task).catch(report)
-              }
-            />
-          ))}
-        </div>
+      {comparable ? (
+        <Tabs
+          value={tab}
+          onValueChange={(next) =>
+            setParams(
+              (prev) => {
+                const out = new URLSearchParams(prev);
+                if (next === "compare") {
+                  out.set("tab", "compare");
+                } else {
+                  out.delete("tab");
+                }
+                return out;
+              },
+              { replace: true }
+            )
+          }
+        >
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="compare">
+              {sessions.length > 1 ? "Compare variants" : "Changes"}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="overview" className="mt-2">
+            {overview}
+          </TabsContent>
+          <TabsContent value="compare" className="mt-2 flex flex-col gap-4">
+            {sessions.length > 0 ? (
+              <Compare
+                view={view}
+                task={record}
+                sessions={sessions}
+                reviews={reviews}
+                checks={checks}
+                specs={specs}
+                picking={picking}
+                onPick={(s) => void pick(s)}
+              />
+            ) : (
+              <Empty title="No live sessions">
+                <p className={muted}>
+                  The variants&apos; sessions are gone, so there is nothing to
+                  compare.
+                </p>
+              </Empty>
+            )}
+          </TabsContent>
+        </Tabs>
+      ) : (
+        overview
       )}
-      {specVariants.length > 0 && (
-        <SpecSection
-          projectId={view.project.id}
-          task={record}
-          sessions={specVariants}
-          reviews={reviews}
-        />
-      )}
-      {sessions.length > 0 && (
-        <Compare
-          view={view}
-          task={record}
-          sessions={sessions}
-          reviews={reviews}
-          checks={checks}
-          specs={specs}
-          picking={picking}
-          onPick={(s) => void pick(s)}
-        />
-      )}
-      {ended.length > 0 && <EndedVariants task={record} variants={ended} />}
     </div>
   );
+};
+
+const KIND_LABEL: Record<TaskView["kind"], string> = {
+  manual: "Session",
+  review: "AI review",
+  task: "Task",
 };
 
 const CHECK_TONE: Record<ChecksState, string> = {

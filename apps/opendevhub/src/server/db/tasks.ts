@@ -701,7 +701,9 @@ export class TaskStore {
     if (!this.refs) {
       const rows = this.db
         .prepare(
-          `SELECT v.session_id AS session, v.task_id AS id, t.kind AS kind, v.n AS n, v.discarded_at AS discarded
+          `SELECT v.session_id AS session, v.task_id AS id, t.kind AS kind, v.n AS n, v.discarded_at AS discarded,
+             EXISTS (SELECT 1 FROM events e WHERE e.object_type = 'session' AND e.object_id = v.session_id
+               AND e.verb = 'session.adopted') AS adopted
            FROM variants v JOIN tasks t ON t.id = v.task_id WHERE v.session_id IS NOT NULL`
         )
         .all() as unknown as {
@@ -710,11 +712,18 @@ export class TaskStore {
         kind: TaskKind;
         n: number;
         discarded: number | null;
+        adopted: number;
       }[];
       this.refs = new Map(
         rows.map((r) => [
           r.session,
-          { discarded: r.discarded !== null, id: r.id, kind: r.kind, n: r.n },
+          {
+            discarded: r.discarded !== null,
+            id: r.id,
+            kind: r.kind,
+            n: r.n,
+            ...(r.adopted ? { adopted: true } : {}),
+          },
         ])
       );
     }

@@ -1,5 +1,11 @@
 // Mock data for Storybook. Shapes follow src/shared; values describe a plausible day with two projects.
 import type {
+  ActivityEvent,
+  ActivityPage,
+  Provenance,
+  ProvenanceStep,
+} from "../../shared/activity";
+import type {
   ForgejoApprovals,
   ForgejoChecks,
   ForgejoComment,
@@ -281,6 +287,7 @@ export const webProject: ProjectView = {
       {
         branch: "feat/rate-limit",
         branchId: 1,
+        id: 1,
         createdBy: {
           by: "variant",
           n: 1,
@@ -294,6 +301,7 @@ export const webProject: ProjectView = {
       {
         branch: "feat/dark-mode",
         branchId: 2,
+        id: 2,
         createdBy: { by: "unmanaged" },
         head: "1a2b3c4",
         hostPath: "/home/dev/code/.worktrees/acme-web/dark-mode",
@@ -599,6 +607,7 @@ export const snapshot: DashboardSnapshot = {
     "acme-web-dark": { cpu: 142, memory: 2600 * MIB, memoryLimit: 8 * GIB },
     "billing-api": { cpu: 4, memory: 640 * MIB, memoryLimit: 4 * GIB },
   },
+  activity: { latestId: 14 },
   roots: ["/home/dev/code"],
   usage: {
     projects: {
@@ -1457,6 +1466,7 @@ export const pullLinks = (url: string): PullLinks =>
             worktrees: [{ path: WEB_WORKTREE }],
           },
         ],
+        id: 7,
         pull: RATE_LIMIT_PR,
         reviewTasks: [
           {
@@ -1507,6 +1517,7 @@ export const pullLinks = (url: string): PullLinks =>
 export const ticketLinks = (key: string): TicketLinks =>
   key === ACME_118.key
     ? {
+        id: 3,
         tasks: [
           {
             createdAt: ago(40 * MINUTE),
@@ -1520,3 +1531,288 @@ export const ticketLinks = (key: string): TicketLinks =>
         ticket: ACME_118,
       }
     : { tasks: [] };
+
+const RATE_TASK = "Add burst limit to the login rate limiter";
+
+/** What happened in the fixtures' projects, newest first: one of every kind worth showing. */
+export const activityEvents: ActivityEvent[] = (
+  [
+    [
+      14,
+      4 * MINUTE,
+      { type: "variant", id: "tsk_search/1" },
+      "branch.created",
+      { type: "branch", id: "5" },
+      { createdBy: "variant", name: "feat/search-1" },
+      "tsk_search",
+    ],
+    [
+      13,
+      5 * MINUTE,
+      { type: "user" },
+      "task.started",
+      { type: "task", id: "tsk_search" },
+      { kind: "task", title: "Add full-text search to the docs", variants: 2 },
+      "tsk_search",
+    ],
+    [
+      12,
+      9 * MINUTE,
+      { type: "variant", id: "tsk_search/2" },
+      "variant.failed",
+      { type: "variant", id: "tsk_search/2" },
+      { error: "image build failed: npm ci exited 1" },
+      "tsk_search",
+    ],
+    [
+      11,
+      20 * MINUTE,
+      { type: "user" },
+      "branch.published",
+      { type: "branch", id: "1" },
+      { name: "feat/rate-limit", remote: "origin" },
+      "tsk_rate",
+    ],
+    [
+      10,
+      20 * MINUTE,
+      { type: "user" },
+      "pull_request.linked",
+      { type: "pull_request", id: "7" },
+      { branch: "feat/rate-limit", role: "head", url: RATE_LIMIT_PR.url },
+      "tsk_rate",
+    ],
+    [
+      9,
+      90 * MINUTE,
+      { type: "user" },
+      "review.run",
+      { type: "review", id: "2" },
+      { findings: 1, mode: "session", url: RATE_LIMIT_PR.url },
+      "tsk_review42",
+    ],
+    [
+      8,
+      2 * HOUR,
+      { type: "system" },
+      "worktree.adopted",
+      { type: "worktree", id: "2" },
+      { branch: "feat/dark-mode", path: WEB_ISOLATED_WORKTREE },
+      undefined,
+    ],
+    [
+      7,
+      2 * HOUR,
+      { type: "system" },
+      "session.adopted",
+      { type: "session", id: "ses_run01" },
+      { variant: 1 },
+      "tsk_dark",
+    ],
+    [
+      6,
+      40 * MINUTE,
+      { type: "variant", id: "tsk_rate/1" },
+      "session.started",
+      { type: "session", id: "ses_perm01" },
+      { variant: 1 },
+      "tsk_rate",
+    ],
+    [
+      5,
+      40 * MINUTE,
+      { type: "variant", id: "tsk_rate/1" },
+      "worktree.created",
+      { type: "worktree", id: "1" },
+      { branch: "feat/rate-limit", path: WEB_WORKTREE },
+      "tsk_rate",
+    ],
+    [
+      4,
+      40 * MINUTE,
+      { type: "user" },
+      "ticket.linked",
+      { type: "ticket", id: "3" },
+      { key: ACME_118.key, url: ACME_118.url },
+      "tsk_rate",
+    ],
+    [
+      3,
+      40 * MINUTE,
+      { type: "user" },
+      "task.started",
+      { type: "task", id: "tsk_rate" },
+      { kind: "task", title: RATE_TASK, variants: 1 },
+      "tsk_rate",
+    ],
+    [
+      2,
+      3 * HOUR,
+      { type: "system" },
+      "session.removed",
+      { type: "session", id: "ses_gone01" },
+      { variant: 1 },
+      "tsk_old",
+    ],
+    [
+      1,
+      DAY,
+      { type: "system" },
+      "project.discovered",
+      { type: "project", id: "acme-web" },
+      { name: "acme-web", path: "/home/dev/code/acme-web" },
+      undefined,
+    ],
+  ] as const
+).map(([id, age, actor, verb, object, data, taskId]): ActivityEvent => {
+  const project = "acme-web";
+  const title = taskId
+    ? webProject.tasks.find((t) => t.id === taskId)?.title
+    : undefined;
+  return {
+    actor,
+    at: ago(age),
+    data,
+    id,
+    object,
+    projectId: project,
+    projectName: "acme-web",
+    verb,
+    ...(taskId ? { taskId } : {}),
+    ...(title ? { taskTitle: title } : {}),
+  };
+});
+
+/** `GET /api/activity` over the fixture events. */
+export const activityPage = (query: URLSearchParams): ActivityPage => {
+  const limit = Number(query.get("limit") ?? 50);
+  const before = query.get("before");
+  const project = query.get("project");
+  const task = query.get("task");
+  const entity = query.get("entity");
+  const matching = activityEvents.filter(
+    (e) =>
+      (!before || e.id < Number(before)) &&
+      (!project || e.projectId === project) &&
+      (!task || e.taskId === task) &&
+      (!entity || `${e.object.type}:${e.object.id}` === entity)
+  );
+  const events = matching.slice(0, limit);
+  const last = events.at(-1);
+  return {
+    events,
+    ...(matching.length > limit && last ? { next: last.id } : {}),
+  };
+};
+
+const base = "/p/acme-web";
+const steps = {
+  branch: {
+    href: `${base}/w/rate-limit`,
+    id: "1",
+    label: "feat/rate-limit",
+    type: "branch",
+  },
+  pull: {
+    href: "/forgejo/acme/web/42",
+    id: "7",
+    label: "PR #42",
+    type: "pull_request",
+    url: RATE_LIMIT_PR.url,
+  },
+  review: {
+    href: "/forgejo/acme/web/42",
+    id: "2",
+    label: "AI review · 1 finding",
+    type: "review",
+    url: RATE_LIMIT_PR.url,
+  },
+  session: {
+    href: `${base}/w/rate-limit/s/ses_perm01`,
+    id: "ses_perm01",
+    label: "Session",
+    type: "session",
+  },
+  task: {
+    href: `${base}/t/tsk_rate`,
+    id: "tsk_rate",
+    label: RATE_TASK,
+    type: "task",
+  },
+  ticket: {
+    href: "/jira/ACME-118",
+    id: "3",
+    label: "ACME-118",
+    type: "ticket",
+    url: ACME_118.url,
+  },
+  variant: {
+    href: `${base}/t/tsk_rate`,
+    id: "tsk_rate/1",
+    label: "Variant 1 (claude-opus-5-5)",
+    type: "variant",
+  },
+  worktree: {
+    href: `${base}/w/rate-limit`,
+    id: "1",
+    label: "rate-limit",
+    type: "worktree",
+  },
+} satisfies Record<string, ProvenanceStep>;
+
+/** A trail with a removed worktree and container, for the breadcrumb's stories. */
+export const removedTrail: Provenance = {
+  ledTo: [],
+  trail: [
+    steps.ticket,
+    steps.task,
+    steps.variant,
+    { ...steps.branch, href: undefined },
+    { id: "9", label: "rate-limit", removed: true, type: "worktree" },
+    { id: "env-9", label: "Container", removed: true, type: "environment" },
+  ],
+};
+
+/** `GET /api/provenance/:type/:id` for the fixtures' entities; undefined for any other. */
+export const provenanceOf = (
+  type: string,
+  id: string
+): Provenance | undefined => {
+  const chain = [steps.ticket, steps.task, steps.variant, steps.branch];
+  const ledTo = [steps.pull, steps.review];
+  switch (`${type}:${id}`) {
+    case "task:tsk_rate": {
+      return { ledTo, trail: [steps.ticket, steps.task] };
+    }
+    case "session:ses_perm01": {
+      return { ledTo, trail: [...chain, steps.worktree, steps.session] };
+    }
+    case "worktree:1": {
+      return { ledTo, trail: [...chain, steps.worktree] };
+    }
+    case "worktree:2": {
+      return {
+        ledTo: [],
+        trail: [
+          { href: base, id: "acme-web", label: "acme-web", type: "project" },
+          {
+            href: `${base}/w/dark-mode`,
+            id: "2",
+            label: "dark-mode",
+            type: "worktree",
+            unmanaged: true,
+          },
+        ],
+      };
+    }
+    case "pull_request:7": {
+      return { ledTo: [steps.review], trail: [...chain, steps.pull] };
+    }
+    case "ticket:3": {
+      return { ledTo: [steps.task, steps.pull], trail: [steps.ticket] };
+    }
+    default: {
+      return undefined;
+    }
+  }
+};

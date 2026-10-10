@@ -22,8 +22,10 @@ import { createDashboardApp } from "./dashboard-api";
 import { CheckoutStore } from "./db/checkouts";
 import { openStateDatabase } from "./db/database";
 import { EnvironmentStore } from "./db/environments";
+import { EventStore } from "./db/events";
 import { LinkStore } from "./db/links";
 import { ProjectStore } from "./db/projects";
+import { ProvenanceStore } from "./db/provenance";
 import { TaskStore } from "./db/tasks";
 import { Checks } from "./environments/checks";
 import { Containers } from "./environments/containers";
@@ -259,11 +261,14 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const checkouts = new CheckoutStore(db);
   const environments = new EnvironmentStore(db);
   const links = new LinkStore(db);
+  const events = new EventStore(db);
+  events.pruneOld();
   // The jobs that were setting these variants up died with the previous process.
   tasks.failInterrupted();
   const store = new StateStore({
     checkouts,
     environments,
+    events,
     links,
     port: config.port,
     tasks,
@@ -339,6 +344,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     branches: hub.cleanupTargets,
     containers,
     log: (id, line) => hub.environments.note(id, line),
+    reviews: links,
     store,
     tasks,
   });
@@ -394,6 +400,8 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     forgejo: new Forgejo(new FileForgejoSettings(dir)),
     jira: new Jira(new FileJiraSettings(dir)),
     links,
+    activity: events,
+    provenance: new ProvenanceStore(db),
     ...(usage ? { usage } : {}),
     webDir: findWebDir(),
   });

@@ -21,9 +21,19 @@ export const ContainerError = meta.story({
   parameters: { route: "/p/ml-pipeline" },
 });
 
-/** Two variants of one task side by side. */
+/** A task's hub: its variants, reviews and activity. */
 export const Task = meta.story({
   parameters: { route: "/p/billing-api/t/tsk_round" },
+});
+
+/** Two variants of one task side by side, in the hub's Compare tab. */
+export const TaskCompare = meta.story({
+  parameters: { route: "/p/billing-api/t/tsk_round?tab=compare" },
+});
+
+/** A session started on its own: one row, no comparison. */
+export const ManualTask = meta.story({
+  parameters: { route: "/p/acme-web/t/tsk_dark" },
 });
 
 /** A task whose variants are still being set up; one failed. */

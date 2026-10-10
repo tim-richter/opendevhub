@@ -59,6 +59,7 @@ import {
 import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { Link, useSearchParams } from "../../routing";
+import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { PullRequestBadge } from "../forgejo/pull-request-badge";
 import { taskPath } from "../tasks/tasks";
 import { useJiraQuery, useTicketLinks } from "./use-jira";
@@ -743,6 +744,9 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {data && (
           <>
+            {links?.id !== undefined && (
+              <ProvenanceBreadcrumb type="ticket" id={String(links.id)} />
+            )}
             {linked.length > 0 && (
               <Section title="Tasks from this ticket" hint={linked.length}>
                 <ul className="divide-y">

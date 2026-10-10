@@ -8,6 +8,8 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { InvalidNodeError, InvalidRootError } from "../../src/server/config";
 import { createDashboardApp } from "../../src/server/dashboard-api";
 import type { DashboardHub, PushPort } from "../../src/server/dashboard-api";
+import { EventStore } from "../../src/server/db/events";
+import { ProvenanceStore } from "../../src/server/db/provenance";
 import { CommandError } from "../../src/server/environments/containers";
 import { EditorUnavailableError } from "../../src/server/environments/editors";
 import {
@@ -27,6 +29,7 @@ import type { PushMessage } from "../../src/server/notifications/push";
 import { DevcontainerExistsError } from "../../src/server/projects/onboarding";
 import type { OnboardingPort } from "../../src/server/projects/onboarding";
 import { StateStore } from "../../src/server/projects/state";
+import type { ActivityPage, Provenance } from "../../src/shared/activity";
 import type {
   Candidate,
   CheckRun,
@@ -1880,6 +1883,95 @@ describe("cleanup endpoints", () => {
     expect((await post({ items: "x" })).status).toBe(400);
     cleanup.apply.mockRejectedValueOnce(new BusyError("cleanup"));
     expect((await post({ items: [] })).status).toBe(409);
+  });
+});
+
+describe("activity endpoints", () => {
+  const withActivity = () => {
+    const deps = setup();
+    const dbs = memoryStores();
+    dbs.projects.upsertAll([
+      {
+        devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
+        id: "demo",
+        name: "demo",
+        path: "/src/demo",
+      },
+    ]);
+    // Only the tasks' events.
+    dbs.db.exec("DELETE FROM events");
+    for (const id of ["tsk_1", "tsk_2", "tsk_3"]) {
+      dbs.tasks.createTask({
+        createdAt: 1,
+        id,
+        projectId: "demo",
+        prompt: id,
+        title: `Task ${id}`,
+        variants: [{}],
+      });
+    }
+    const app = createDashboardApp({
+      ...deps,
+      activity: new EventStore(dbs.db),
+      provenance: new ProvenanceStore(dbs.db),
+    });
+    return { app, dbs };
+  };
+
+  it("pages the feed and filters it by project, task and entity", async () => {
+    const { app } = withActivity();
+    const get = async (query: string) => {
+      const res = await app.request(`/api/activity${query}`);
+      expect(res.status).toBe(200);
+      return (await res.json()) as ActivityPage;
+    };
+    const first = await get("?limit=2");
+    expect(first.events.map((e) => e.taskTitle)).toStrictEqual([
+      "Task tsk_3",
+      "Task tsk_2",
+    ]);
+    const rest = await get(`?limit=2&before=${first.next}`);
+    expect(rest.events.map((e) => e.taskId)).toStrictEqual(["tsk_1"]);
+    expect(rest.next).toBe(undefined);
+    expect((await get("?project=demo")).events).toHaveLength(3);
+    expect((await get("?project=other")).events).toHaveLength(0);
+    expect((await get("?task=tsk_2")).events.map((e) => e.verb)).toStrictEqual([
+      "task.started",
+    ]);
+    expect(
+      (await get("?entity=task:tsk_1")).events.map((e) => e.object.id)
+    ).toStrictEqual(["tsk_1"]);
+  });
+
+  it("rejects bad cursors, limits and entities", async () => {
+    const { app } = withActivity();
+    for (const query of [
+      "?before=0",
+      "?before=x",
+      "?limit=201",
+      "?entity=task",
+      "?entity=thing:1",
+      "?entity=task:",
+    ]) {
+      expect((await app.request(`/api/activity${query}`)).status).toBe(400);
+    }
+  });
+
+  it("serves an entity's provenance, 404 for an unknown one, and 412 without the log", async () => {
+    const { app } = withActivity();
+    const res = await app.request(
+      `/api/provenance/variant/${encodeURIComponent("tsk_1/1")}`
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Provenance;
+    expect(body.trail.map((s) => s.label)).toStrictEqual([
+      "demo",
+      "Task tsk_1",
+      "Variant 1",
+    ]);
+    expect((await app.request("/api/provenance/task/nope")).status).toBe(404);
+    expect((await app.request("/api/provenance/thing/1")).status).toBe(404);
+    expect((await setup().app.request("/api/activity")).status).toBe(412);
   });
 });
 

@@ -1,6 +1,7 @@
 import { validator } from "hono/validator";
 import { z } from "zod";
 
+import { MAX_ACTIVITY_PAGE_SIZE, OBJECT_TYPES } from "../../shared/activity";
 import {
   JIRA_KEY,
   JIRA_SCOPES,
@@ -190,6 +191,13 @@ export const bodies = {
 };
 
 const page = z.object({ page: text });
+/** A positive whole number, as a query string carries it. */
+const count = z.string().regex(/^[1-9]\d{0,15}$/u);
+/** `<type>:<id>`, e.g. `worktree:12` or `variant:tsk_…/2`. */
+const entity = z
+  .string()
+  .max(500)
+  .regex(new RegExp(`^(?:${OBJECT_TYPES.join("|")}):.+$`, "u"));
 const review = directory.extend({
   base: text,
   file: text,
@@ -230,6 +238,13 @@ export const queries = {
   forgejoImage: z.object({ side: z.enum(["old", "new"]), file: z.string() }),
   publish: directory.extend({ remote: text }),
   spec: directory.extend({ change: text }),
+  activity: z.object({
+    project: z.string().max(200).optional(),
+    task: z.string().max(200).optional(),
+    entity: entity.optional(),
+    before: count.optional(),
+    limit: count.refine((n) => Number(n) <= MAX_ACTIVITY_PAGE_SIZE).optional(),
+  }),
   linkPull: z.object({ url: webUrl }),
   linkTicket: z.object({
     instance: webUrl,

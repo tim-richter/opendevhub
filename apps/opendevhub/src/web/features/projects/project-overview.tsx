@@ -25,6 +25,7 @@ import {
 } from "../../derive";
 import { checkoutResources } from "../../lib/resources";
 import { Link, Navigate, useSearchParams } from "../../routing";
+import { ActivityFeed } from "../activity/activity-feed";
 import {
   checkoutCounts,
   checkoutOf,
@@ -242,6 +243,12 @@ export const ProjectOverview = () => {
           />
         </Section>
       )}
+
+      <ActivityFeed
+        filter={{ projectId: project.id }}
+        title="Recent activity"
+        empty="Nothing has happened in this project yet."
+      />
     </>
   );
 };

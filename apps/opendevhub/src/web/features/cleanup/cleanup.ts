@@ -52,6 +52,7 @@ export const selectionSummary = (
     count(of("branch"), "branch", "branches"),
     count(of("session"), "session", "sessions"),
     count(of("task"), "task to archive", "tasks to archive"),
+    count(of("review"), "PR's reviews", "PRs' reviews"),
     count(of("container"), "container", "containers"),
     count(of("image"), "image", "images"),
   ]
@@ -86,6 +87,9 @@ export const riskyNotes = (
       }
       if (i.kind === "task") {
         return `archives the task ${i.title}`;
+      }
+      if (i.kind === "review") {
+        return `deletes ${i.count} stored AI review${i.count === 1 ? "" : "s"} of ${i.number === undefined ? i.url : `PR #${i.number}`}`;
       }
       return `removes ${i.ref}`;
     });

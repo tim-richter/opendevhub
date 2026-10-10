@@ -74,6 +74,7 @@ export const CommandPalette = ({
           label: "All sessions",
           run: go("/sessions"),
         },
+        { key: "nav-activity", label: "Activity", run: go("/activity") },
         ...(forgejo?.enabled
           ? [{ key: "nav-pulls", label: "Pull requests", run: go("/forgejo") }]
           : []),

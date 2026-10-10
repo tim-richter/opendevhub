@@ -108,7 +108,7 @@ describe("task sessions", () => {
     expect(variantName(taskSessions(v, "tsk_1")[1])).toBe("#3");
   });
 
-  it("shows a chip that links to the task page only for several variants, and none for a manual task", () => {
+  it("shows a created-by chip linking to the task page, for manual sessions too unless found outside opendevhub", () => {
     const v = view(
       [],
       [
@@ -123,13 +123,29 @@ describe("task sessions", () => {
     ).toStrictEqual({
       label: "task",
       title: "Task: Fix",
+      to: "/p/p%201/t/tsk_one",
     });
     expect(
       taskChip(
         v,
         session("s", "/w", { task: { ...ref(1, "tsk_man"), kind: "manual" } })
       )
-    ).toBeUndefined();
+    ).toStrictEqual({
+      label: "started here",
+      title: "Started on its own in opendevhub",
+      to: "/p/p%201/t/tsk_man",
+    });
+    expect(
+      taskChip(
+        v,
+        session("s", "/w", {
+          task: { ...ref(1, "tsk_man"), adopted: true, kind: "manual" },
+        })
+      )
+    ).toStrictEqual({
+      label: "outside opendevhub",
+      title: "Found in opencode; started outside opendevhub",
+    });
     expect(
       taskChip(
         v,

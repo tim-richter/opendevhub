@@ -6,6 +6,8 @@ import type { AiReviewResult, ForgejoSettings } from "../../shared/forgejo";
 import type { JiraSettings } from "../../shared/jira";
 import type { DashboardSnapshot } from "../../shared/types";
 import {
+  activityPage,
+  provenanceOf,
   candidates,
   checksView,
   specView,
@@ -167,6 +169,16 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.get("/api/forgejo/pulls/:owner/:repo/:number/ai-reviews", () =>
       HttpResponse.json({ reviews: pullLinks(forgejoDetails.pull.url).reviews })
     ),
+    http.get("/api/activity", async ({ request }) => {
+      await wait();
+      return HttpResponse.json(activityPage(new URL(request.url).searchParams));
+    }),
+    http.get("/api/provenance/:type/:id", ({ params }) => {
+      const found = provenanceOf(String(params.type), String(params.id));
+      return found
+        ? HttpResponse.json(found)
+        : HttpResponse.json({ error: "unknown entity" }, { status: 404 });
+    }),
     http.get("/api/links/pull", ({ request }) =>
       HttpResponse.json(
         pullLinks(new URL(request.url).searchParams.get("url") ?? "")

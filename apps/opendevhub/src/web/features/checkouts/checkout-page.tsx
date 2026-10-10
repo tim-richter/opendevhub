@@ -45,6 +45,7 @@ import {
 import type { SessionEntry } from "../../derive";
 import { checkoutResources } from "../../lib/resources";
 import { Link, useNavigate, useSearchParams } from "../../routing";
+import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { PublishedPr } from "../forgejo/published-pr";
 import { projectFlags, StartStopButton } from "../projects/project-actions";
 import { useProjectView } from "../projects/project-layout";
@@ -84,10 +85,58 @@ export const useCheckout = (): CheckoutContext => {
   return value;
 };
 
+/**
+ * Where the open session, else the worktree, came from; the project alone for the main checkout or while the trail
+ * loads.
+ */
+const CheckoutBreadcrumb = (props: {
+  projectPath: string;
+  projectName: string;
+  sessionId?: string;
+  worktreeId?: number;
+}) => {
+  const plain = (
+    <nav
+      aria-label="Breadcrumb"
+      className="text-muted-foreground -mb-4 flex items-center gap-1 text-sm"
+    >
+      <Link
+        to={props.projectPath}
+        className="hover:text-foreground hover:underline"
+      >
+        {props.projectName}
+      </Link>
+      <ChevronRightIcon className="size-3.5" />
+    </nav>
+  );
+  if (props.sessionId) {
+    return (
+      <ProvenanceBreadcrumb
+        key={props.sessionId}
+        type="session"
+        id={props.sessionId}
+        className="-mb-4"
+        fallback={plain}
+      />
+    );
+  }
+  if (props.worktreeId !== undefined) {
+    return (
+      <ProvenanceBreadcrumb
+        type="worktree"
+        id={String(props.worktreeId)}
+        className="-mb-4"
+        fallback={plain}
+      />
+    );
+  }
+  return plain;
+};
+
 /** One checkout (the main one or a worktree) and its tabs. */
 export const CheckoutPage = () => {
   const view = useProjectView();
-  const { worktree = "" } = useParams({ strict: false });
+  const { worktree = "", sessionId } = useParams({ strict: false });
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { running } = projectFlags(view, false);
@@ -145,18 +194,12 @@ export const CheckoutPage = () => {
     );
   return (
     <>
-      <nav
-        aria-label="Breadcrumb"
-        className="text-muted-foreground -mb-4 flex items-center gap-1 text-sm"
-      >
-        <Link
-          to={projectPath}
-          className="hover:text-foreground hover:underline"
-        >
-          {view.project.name}
-        </Link>
-        <ChevronRightIcon className="size-3.5" />
-      </nav>
+      <CheckoutBreadcrumb
+        projectPath={projectPath}
+        projectName={view.project.name}
+        sessionId={onSession ? sessionId : undefined}
+        worktreeId={checkout.worktree?.id}
+      />
       <PageHeader
         title={
           <>

@@ -669,6 +669,7 @@ export class LinkStore {
             }
           : {}),
       })),
+      id: pull.id,
       pull: pullRef(pull),
       reviewTasks: reviewTasks.map((t) => ({
         createdAt: t.created_at,
@@ -723,6 +724,7 @@ export class LinkStore {
         title: t.title,
         ...(t.archived_at === null ? {} : { archived: true }),
       })),
+      id: ticket.id,
       ticket: ticketRef(ticket),
     };
   }
@@ -767,6 +769,49 @@ export class LinkStore {
       entry(task).reviewOf = pullRef(toPull(pull));
     }
     return out;
+  }
+
+  /** Closed or merged pull requests whose newest stored review ran before `cutoff`, with their review counts. */
+  staleReviews(cutoff: number): {
+    pull: PullRecord;
+    count: number;
+    lastReview: number;
+  }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.*, COUNT(r.id) AS review_count, MAX(r.created_at) AS last_review
+         FROM pull_requests p JOIN reviews r ON r.pull_request_id = p.id
+         WHERE p.state IN ('closed', 'merged')
+         GROUP BY p.id HAVING MAX(r.created_at) < ? ORDER BY last_review`
+      )
+      .all(cutoff) as unknown as (RawPull & {
+      review_count: number;
+      last_review: number;
+    })[];
+    return rows.map(
+      ({ review_count: count, last_review: lastReview, ...p }) => ({
+        count,
+        lastReview,
+        pull: toPull(p),
+      })
+    );
+  }
+
+  /**
+   * Deletes a pull request's stored reviews if it is still closed or merged and none ran since `cutoff`. Returns how
+   * many it deleted; 0 when the pull request no longer qualifies.
+   */
+  deleteStaleReviews(pullId: number, cutoff: number): number {
+    if (!this.staleReviews(cutoff).some((r) => r.pull.id === pullId)) {
+      return 0;
+    }
+    return this.write(() =>
+      Number(
+        this.db
+          .prepare("DELETE FROM reviews WHERE pull_request_id = ?")
+          .run(pullId).changes
+      )
+    );
   }
 
   subscribe(fn: () => void): () => void {

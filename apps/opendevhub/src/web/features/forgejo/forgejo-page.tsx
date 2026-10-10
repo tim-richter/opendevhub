@@ -59,6 +59,7 @@ import { Tip } from "../../components/tip";
 import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { Link, useSearchParams } from "../../routing";
+import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import {
   commentStops,
   newId,
@@ -582,6 +583,12 @@ const PullView = ({
             />
           </div>
         </div>
+        {pullLinks.data?.id !== undefined && (
+          <ProvenanceBreadcrumb
+            type="pull_request"
+            id={String(pullLinks.data.id)}
+          />
+        )}
         <LocalCheckouts details={details} />
         {pullLinks.data && <PullOrigins links={pullLinks.data} />}
         <p className="text-muted-foreground -mt-2 text-sm">

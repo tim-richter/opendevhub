@@ -193,6 +193,7 @@ export const CleanupPage = () => {
   const images = plan.items.filter((i) => i.kind === "image");
   const sessions = plan.items.filter((i) => i.kind === "session");
   const tasks = plan.items.filter((i) => i.kind === "task");
+  const reviews = plan.items.filter((i) => i.kind === "review");
   const projectName = (id: string) =>
     plan.projects.find((p) => p.id === id)?.name ?? id;
   // oxlint-disable-next-line react/purity
@@ -361,6 +362,43 @@ export const CleanupPage = () => {
               </Row>
             ))}
           </Section>
+
+          {reviews.length > 0 && (
+            <Section
+              title="AI reviews"
+              hint="stored reviews of closed or merged pull requests, none in 30 days"
+              action={selectAll("review")}
+            >
+              {reviews.map((item) => (
+                <Row
+                  key={item.id}
+                  item={item}
+                  selected={selected.has(item.id)}
+                  onToggle={(on) => toggle(item.id, on)}
+                  result={results.get(item.id)}
+                >
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="truncate text-sm hover:underline"
+                  >
+                    {item.number === undefined
+                      ? item.url
+                      : `PR #${item.number}`}
+                    {item.title && ` · ${item.title}`}
+                  </a>
+                  <span className={muted}>
+                    {item.count} review{item.count === 1 ? "" : "s"}
+                  </span>
+                  <Chip variant="outline">{item.reason}</Chip>
+                  <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
+                    {relativeTime(item.lastReview, now)}
+                  </span>
+                </Row>
+              ))}
+            </Section>
+          )}
 
           {plan.dockerError ? (
             <Note warn>
