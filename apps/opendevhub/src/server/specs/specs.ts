@@ -12,8 +12,10 @@ import type {
 } from "../../shared/types";
 import type { CheckTarget } from "../environments/checks";
 import type { Containers } from "../environments/containers";
+import { BusyError, UnavailableError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import type { OpencodeClient } from "../opencode/client";
+import { UPDATE_COMMAND } from "../tasks/openspec";
 import { patchTaskMetadata } from "../tasks/request";
 
 const EXEC_TIMEOUT_MS = 60_000;
@@ -220,7 +222,12 @@ export interface SpecsDeps {
   target: (projectId: ProjectId, directory: string) => CheckTarget;
   containers: Pick<Containers, "exec">;
   sessions: (projectId: ProjectId) => SessionSummary[];
-  client: (envId: string) => Pick<OpencodeClient, "session" | "updateSession">;
+  client: (
+    envId: string
+  ) => Pick<
+    OpencodeClient,
+    "session" | "updateSession" | "command" | "commands"
+  >;
   /** Re-reads an environment's sessions after their metadata changed. */
   reconcile?: (envId: string) => void;
   log: (projectId: ProjectId, line: string) => void;
@@ -295,6 +302,59 @@ export class Specs {
       await this.record(projectId, tasks, picked);
     }
     return { changes, change: await this.change(host, picked, sections) };
+  }
+
+  /**
+   * Sends review feedback on the checkout's change to its spec-first task as `/opsx-update <change>`, which revises
+   * the planning artifacts without touching code. Only while the spec is proposed and the agent is between turns.
+   */
+  async revise(
+    projectId: ProjectId,
+    directory: string,
+    change: string,
+    feedback: string
+  ): Promise<void> {
+    if (!CHANGE_NAME.test(change)) {
+      throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
+    }
+    if (!feedback.trim()) {
+      throw new InvalidRequestError("the feedback is empty");
+    }
+    this.deps.target(projectId, directory);
+    const session = this.deps
+      .sessions(projectId)
+      .find(
+        (s) => s.directory === directory && s.task?.spec && !s.task.discarded
+      );
+    if (!session) {
+      throw new InvalidRequestError(`no spec-first task works in ${directory}`);
+    }
+    if (session.task?.spec?.phase !== "propose") {
+      throw new InvalidRequestError(
+        "the spec is approved; it can only be revised while it's proposed"
+      );
+    }
+    if (session.status !== "idle") {
+      throw new BusyError(
+        session.id,
+        "the agent is still busy; send the comments when its turn ends"
+      );
+    }
+    const envId = session.envId ?? projectId;
+    const client = this.deps.client(envId);
+    const commands = await client.commands(directory);
+    if (!commands.some((c) => c.name === UPDATE_COMMAND)) {
+      throw new UnavailableError(
+        `opencode has no ${UPDATE_COMMAND} command here; run \`openspec update\` in the repository`
+      );
+    }
+    await client.command(
+      session.id,
+      UPDATE_COMMAND,
+      `${change}\n\n${feedback.trim()}`,
+      directory
+    );
+    this.deps.reconcile?.(envId);
   }
 
   private async run(

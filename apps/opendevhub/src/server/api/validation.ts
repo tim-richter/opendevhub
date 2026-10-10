@@ -167,6 +167,7 @@ export const bodies = {
       .nullable(),
   }),
   runChecks: directory.extend({ names: strings, approve: strings }),
+  reviseSpec: directory.extend({ change: z.string(), feedback: z.string() }),
 };
 
 const page = z.object({ page: text });

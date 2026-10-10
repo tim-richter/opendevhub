@@ -3,10 +3,12 @@ import type { RawCommand } from "../opencode/client";
 
 /** The command a spec-first task starts with. */
 export const PROPOSE_COMMAND = "opsx-propose";
+/** The command that revises a proposed change with review feedback. */
+export const UPDATE_COMMAND = "opsx-update";
 /** OpenSpec's OPSX commands a spec-first task goes through: propose, revise, implement, archive. */
 export const SPEC_COMMANDS = [
   PROPOSE_COMMAND,
-  "opsx-update",
+  UPDATE_COMMAND,
   "opsx-apply",
   "opsx-archive",
 ] as const;

@@ -292,6 +292,9 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     ),
     http.get("/api/projects/:id/checks", () => HttpResponse.json(checksView)),
     http.get("/api/projects/:id/spec", () => HttpResponse.json(specView)),
+    http.post("/api/projects/:id/spec/revise", () =>
+      HttpResponse.json({ ok: true })
+    ),
     http.get("/api/projects/:id/checks/run", () =>
       HttpResponse.json({ run: checksView.run })
     ),

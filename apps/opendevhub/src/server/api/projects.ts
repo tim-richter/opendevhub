@@ -467,6 +467,23 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
         );
       }
     })
+    .post(
+      "/api/projects/:id/spec/revise",
+      validateJson(bodies.reviseSpec),
+      (c) =>
+        ok(c, (id) => {
+          if (!deps.specs) {
+            throw new UnavailableError("the spec view isn't set up");
+          }
+          const b = c.req.valid("json");
+          return deps.specs.revise(
+            id,
+            str(b.directory) ?? "",
+            b.change,
+            b.feedback
+          );
+        })
+    )
     .get("/api/projects/:id/logs", (c) =>
       c.json({ lines: hub.environments.logLines(c.req.param("id")) }, 200)
     );

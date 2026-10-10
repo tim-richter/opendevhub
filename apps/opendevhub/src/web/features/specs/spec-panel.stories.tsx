@@ -6,6 +6,7 @@ import { specView } from "../../mocks/fixtures";
 import { failing } from "../../mocks/handlers";
 import { mockApi } from "../../mocks/story";
 import { SpecSection } from "./spec-panel";
+import { specDraftKey } from "./specs";
 
 const variant = (n: number, model: string): SessionSummary => ({
   context: 0,
@@ -41,6 +42,59 @@ const meta = preview.meta({
 
 /** A proposed change: its documents, the artifact chain and the requirements it adds, modifies and removes. */
 export const Proposing = meta.story({});
+
+/** Comments drafted on a proposal block, a requirement and in general, ready to send with `/opsx-update`. */
+export const WithComments = meta.story({
+  beforeEach: () => {
+    const { directory } = variant(1, "claude-opus-5-5");
+    localStorage.setItem(
+      specDraftKey("acme-web", directory, "add-login-burst-limit"),
+      JSON.stringify([
+        {
+          file: "proposal.md",
+          id: "c1",
+          line: 7,
+          quote: [
+            "- Limit login attempts to **5 per minute** per IP and account",
+          ],
+          text: "Per account only; shared office IPs would lock everyone out.",
+        },
+        {
+          file: "specs/auth/spec.md",
+          id: "c2",
+          line: 8,
+          quote: ["### Requirement: Login attempt limit"],
+          start: 3,
+          text: "Add a scenario for the account limit.",
+        },
+        { id: "c3", text: "Mention the lockout email as a non-goal." },
+      ])
+    );
+    return () => localStorage.clear();
+  },
+});
+
+/** The agent is working, so the comments wait for its turn to end. */
+export const AgentWorking = meta.story({
+  args: {
+    sessions: [{ ...variant(1, "claude-opus-5-5"), status: "running" }],
+  },
+});
+
+/** Once approved, the spec is read-only: no comments. */
+export const Implementing = meta.story({
+  args: {
+    sessions: [
+      {
+        ...variant(1, "claude-opus-5-5"),
+        task: {
+          ...variant(1, "claude-opus-5-5").task,
+          spec: { change: "add-login-burst-limit", phase: "implement" },
+        } as SessionSummary["task"],
+      },
+    ],
+  },
+});
 
 /** Several variants proposed a change each: one tab per variant. */
 export const Variants = meta.story({

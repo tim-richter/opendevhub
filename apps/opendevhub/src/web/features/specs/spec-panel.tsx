@@ -21,17 +21,28 @@ import type {
   SpecPhase,
 } from "../../../shared/types";
 import { MarkdownBody } from "../../components/markdown-body";
+import type { MarkdownBlock } from "../../components/markdown-body";
 import { muted, Section, Segmented } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import { variantName } from "../tasks/tasks";
+import {
+  AnchorComments,
+  CommentButton,
+  SendComments,
+  useSpecComments,
+} from "./spec-comments";
+import type { SpecComments } from "./spec-comments";
 import { specQuery } from "./spec-queries";
 import {
   artifactLabel,
+  blockAnchor,
   byCapability,
   documentTabs,
   PHASE_LABEL,
+  requirementAnchor,
   requirementBody,
 } from "./specs";
+import type { SpecAnchor } from "./specs";
 
 // The diff highlighter is large; load it with the first modified requirement on screen.
 const RequirementDiff = lazy(() => import("./requirement-diff"));
@@ -72,8 +83,12 @@ const ArtifactStep = ({ artifact }: { artifact: SpecArtifact }) => {
 
 const Requirement = ({
   requirement: r,
+  anchor,
+  comments,
 }: {
   requirement: RequirementChange;
+  anchor: SpecAnchor;
+  comments?: SpecComments;
 }) => (
   <li className="flex flex-col gap-2 border-t px-4 py-3 first:border-t-0">
     <div className="flex flex-wrap items-center gap-2">
@@ -90,6 +105,13 @@ const Requirement = ({
           r.name
         )}
       </span>
+      {comments && (
+        <CommentButton
+          label={`Comment on ${r.name}`}
+          className="ml-auto"
+          onClick={() => comments.edit(anchor)}
+        />
+      )}
     </div>
     {r.operation === "MODIFIED" && r.before !== undefined && (
       <div className="overflow-hidden rounded-md border">
@@ -113,14 +135,45 @@ const Requirement = ({
       requirementBody(r.delta) && (
         <MarkdownBody>{requirementBody(r.delta)}</MarkdownBody>
       )}
+    {comments && <AnchorComments anchor={anchor} comments={comments} />}
   </li>
 );
 
-const ChangeBody = ({ change }: { change: SpecChange }) => {
+const ChangeBody = ({
+  change,
+  projectId,
+  directory,
+  review,
+}: {
+  change: SpecChange;
+  projectId: string;
+  directory: string;
+  /** Present while the spec can be commented on: why sending waits, if it does. */
+  review?: { blocked?: string };
+}) => {
   const tabs = documentTabs(change);
   const [tab, setTab] = useState<string>();
   const shown = tabs.find((t) => t.id === tab) ?? tabs[0];
   const groups = byCapability(change.requirements);
+  const drafts = useSpecComments(projectId, directory, change.name);
+  const comments = review ? drafts : undefined;
+  const shownFile = shown?.id;
+  const blockAside = (block: MarkdownBlock) => {
+    if (!comments || !shownFile) {
+      return null;
+    }
+    const anchor = blockAnchor(shownFile, block);
+    return (
+      <>
+        <CommentButton
+          label="Comment on this"
+          className="absolute top-0 right-0 opacity-0 group-hover/block:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+          onClick={() => comments.edit(anchor)}
+        />
+        <AnchorComments anchor={anchor} comments={comments} />
+      </>
+    );
+  };
   return (
     <div className="flex flex-col gap-4 px-4 py-3">
       {!change.validation.valid && (
@@ -145,7 +198,9 @@ const ChangeBody = ({ change }: { change: SpecChange }) => {
               onChange={setTab}
             />
           )}
-          <MarkdownBody>{shown.content}</MarkdownBody>
+          <MarkdownBody blockAside={comments ? blockAside : undefined}>
+            {shown.content}
+          </MarkdownBody>
         </div>
       ) : (
         <p className={muted}>The change has no documents yet.</p>
@@ -163,12 +218,23 @@ const ChangeBody = ({ change }: { change: SpecChange }) => {
                   <Requirement
                     key={`${r.operation}:${r.from ?? ""}:${r.name}`}
                     requirement={r}
+                    anchor={requirementAnchor(change, r)}
+                    comments={comments}
                   />
                 ))}
               </ul>
             </div>
           ))}
         </div>
+      )}
+      {review && (
+        <SendComments
+          projectId={projectId}
+          directory={directory}
+          change={change.name}
+          comments={drafts}
+          blocked={review.blocked}
+        />
       )}
     </div>
   );
@@ -179,6 +245,8 @@ export const SpecPanel = (props: {
   projectId: string;
   directory: string;
   phase: SpecPhase;
+  /** The task's agent is working, so comments wait for its turn to end. */
+  busy?: boolean;
 }) => {
   const [picked, setPicked] = useState<string>();
   const query = useQuery(specQuery(props.projectId, props.directory, picked));
@@ -234,7 +302,21 @@ export const SpecPanel = (props: {
         )}
       </div>
       {change ? (
-        <ChangeBody key={change.name} change={change} />
+        <ChangeBody
+          key={change.name}
+          change={change}
+          projectId={props.projectId}
+          directory={props.directory}
+          review={
+            props.phase === "propose"
+              ? {
+                  blocked: props.busy
+                    ? "The agent is working; send when its turn ends."
+                    : undefined,
+                }
+              : undefined
+          }
+        />
       ) : (
         <p className={cn(muted, "px-4 py-3")}>
           The agent hasn&apos;t proposed a change in this checkout yet.
@@ -279,6 +361,7 @@ export const SpecSection = (props: {
         projectId={props.projectId}
         directory={shown.directory}
         phase={phase}
+        busy={shown.status !== "idle"}
       />
     </Section>
   );

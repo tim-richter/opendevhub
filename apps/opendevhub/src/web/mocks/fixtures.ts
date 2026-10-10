@@ -788,6 +788,11 @@ export const specView: SpecView = {
           "## 1. Limiter\n\n- [x] 1.1 Add a burst window to `RateLimiter`\n- [ ] 1.2 Prune old hits for other keys\n\n## 2. Login route\n\n- [ ] 2.1 Apply the limiter to `/login`\n- [ ] 2.2 Send `Retry-After`",
         path: "tasks.md",
       },
+      {
+        content:
+          "## ADDED Requirements\n\n### Requirement: Login attempt limit\nThe system SHALL reject more than 5 login attempts per minute from one IP or for one account with `429`.\n\n#### Scenario: Burst from one IP\n- **WHEN** an IP sends a 6th attempt within a minute\n- **THEN** the response is `429` with `Retry-After`\n\n## MODIFIED Requirements\n\n### Requirement: Failed login response\nThe system SHALL answer a failed login with `401` after 1 second, and count it towards the attempt limit.\n\n#### Scenario: Wrong password\n- **WHEN** the password is wrong\n- **THEN** the response is `401`\n- **AND** the attempt counts towards the limit\n\n## REMOVED Requirements\n\n### Requirement: Captcha after failures\n**Reason**: The attempt limit replaces it.\n**Migration**: None.\n",
+        path: "specs/auth/spec.md",
+      },
     ],
     name: "add-login-burst-limit",
     planningComplete: true,

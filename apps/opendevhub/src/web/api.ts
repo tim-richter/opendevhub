@@ -602,6 +602,17 @@ export const fetchSpec = (
     "spec"
   );
 
+/** Sends review feedback on a change to the checkout's spec-first task, which runs `/opsx-update`. */
+export const reviseSpec = async (
+  projectId: string,
+  body: { directory: string; change: string; feedback: string }
+) => {
+  await complete(
+    project.spec.revise.$post({ param: projectParam(projectId), json: body }),
+    "send the comments"
+  );
+};
+
 export const fetchCheckRun = async (
   projectId: string,
   directory: string,

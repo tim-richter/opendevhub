@@ -81,13 +81,17 @@ const target = (over: Partial<CheckTarget> = {}): CheckTarget => ({
   ...over,
 });
 
-const taskSession = (spec: {
-  phase: "propose";
-  change?: string;
-}): SessionSummary =>
+const taskSession = (
+  spec: {
+    phase: "propose" | "implement";
+    change?: string;
+  },
+  status: SessionSummary["status"] = "idle"
+): SessionSummary =>
   ({
     directory: "/workspaces/wt",
     id: "ses_1",
+    status,
     task: { of: 1, spec, task: "tsk_1", title: "Login", variant: 1 },
     title: "Login",
   }) as SessionSummary;
@@ -101,6 +105,8 @@ const make = (opts: {
     ok(opts.outputs.shift() ?? "")
   );
   const client = {
+    command: vi.fn(async () => undefined),
+    commands: vi.fn(async () => [{ name: "opsx-update" }]),
     session: vi.fn(async () => ({
       metadata: { opendevhub: { task: "tsk_1" }, x: 1 },
     })),
@@ -347,5 +353,68 @@ describe(Specs, () => {
     await expect(specs.view("p", "/w", "../etc")).rejects.toThrow(
       InvalidRequestError
     );
+  });
+});
+
+describe("Specs.revise", () => {
+  it("runs /opsx-update with the change and the feedback in the task's session", async () => {
+    const { client, reconcile, specs } = make({
+      outputs: [],
+      sessions: [taskSession({ change: "add-login", phase: "propose" })],
+    });
+    await specs.revise(
+      "p",
+      "/workspaces/wt",
+      "add-login",
+      " Shorter timeout. "
+    );
+    expect(client.command).toHaveBeenCalledWith(
+      "ses_1",
+      "opsx-update",
+      "add-login\n\nShorter timeout.",
+      "/workspaces/wt"
+    );
+    expect(reconcile).toHaveBeenCalledWith("p");
+  });
+
+  it("refuses once the spec is approved, while the agent works, or without the command", async () => {
+    const approved = make({
+      outputs: [],
+      sessions: [taskSession({ phase: "implement" })],
+    });
+    await expect(
+      approved.specs.revise("p", "/workspaces/wt", "add-login", "x")
+    ).rejects.toThrow("only be revised while it's proposed");
+
+    const busy = make({
+      outputs: [],
+      sessions: [taskSession({ phase: "propose" }, "running")],
+    });
+    await expect(
+      busy.specs.revise("p", "/workspaces/wt", "add-login", "x")
+    ).rejects.toThrow("still busy");
+
+    const missing = make({
+      outputs: [],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    missing.client.commands.mockResolvedValue([]);
+    await expect(
+      missing.specs.revise("p", "/workspaces/wt", "add-login", "x")
+    ).rejects.toThrow("no opsx-update command");
+    expect(missing.client.command).not.toHaveBeenCalled();
+  });
+
+  it("rejects bad input and checkouts without a spec-first task", async () => {
+    const { specs } = make({ outputs: [] });
+    await expect(
+      specs.revise("p", "/workspaces/wt", "../etc", "x")
+    ).rejects.toThrow(InvalidRequestError);
+    await expect(
+      specs.revise("p", "/workspaces/wt", "add-login", "  ")
+    ).rejects.toThrow("feedback is empty");
+    await expect(
+      specs.revise("p", "/workspaces/wt", "add-login", "x")
+    ).rejects.toThrow("no spec-first task");
   });
 });
