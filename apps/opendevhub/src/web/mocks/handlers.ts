@@ -3,6 +3,7 @@ import { delay, http, HttpResponse, sse } from "msw";
 import type { AnyHandler } from "msw";
 
 import type { AiReviewResult, ForgejoSettings } from "../../shared/forgejo";
+import type { GitSetup } from "../../shared/git-setup";
 import type { JiraSettings } from "../../shared/jira";
 import type { DashboardSnapshot } from "../../shared/types";
 import {
@@ -20,6 +21,7 @@ import {
   forgejoReviewComments,
   forgejoReviews,
   forgejoSettings,
+  gitSetup,
   jiraBoardColumns,
   jiraCatalog,
   jiraSettings,
@@ -45,6 +47,7 @@ export interface MockOptions {
   snapshot?: DashboardSnapshot | null;
   forgejo?: ForgejoSettings;
   jira?: JiraSettings;
+  git?: GitSetup;
   /** Milliseconds every REST response waits, to show loading states. */
   latency?: number;
 }
@@ -79,6 +82,7 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     snapshot: snap = snapshot,
     forgejo = forgejoSettings,
     jira = jiraSettings,
+    git = gitSetup,
     latency = 0,
   } = options;
   const wait = async () => {
@@ -260,6 +264,29 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.get("/api/push/key", () =>
       HttpResponse.json({ error: "push is not mocked" }, { status: 404 })
     ),
+    http.post("/api/push/test", () => HttpResponse.json({ sent: 1 })),
+    http.post("/api/push/unsubscribe", ok),
+
+    // Settings
+    http.get("/api/settings/git", async () => {
+      await wait();
+      return HttpResponse.json(git);
+    }),
+    http.post("/api/settings/git/test", async ({ request }) => {
+      const { host } = (await request.json()) as { host: string };
+      await delay(400);
+      return host.startsWith("[")
+        ? HttpResponse.json({
+            message: "git@git.internal: Permission denied (publickey).",
+            ok: false,
+          })
+        : HttpResponse.json({
+            message:
+              "Hi there, dev! You've successfully authenticated with the key named dev@laptop",
+            ok: true,
+          });
+    }),
+    http.post("/api/projects/:id/name", ok),
 
     // Per project
     http.get("/api/projects/:id/logs", () =>

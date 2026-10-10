@@ -591,6 +591,23 @@ export const rescan = () => read(api.projects.rescan.$post(), "rescan");
 export const saveRoots = (roots: string[]) =>
   read(api.settings.roots.$post({ json: { roots } }), "save folders");
 
+/** A blank name goes back to the project's folder name. */
+export const renameProject = async (projectId: string, name: string) => {
+  await complete(
+    project.name.$post({ json: { name }, param: projectParam(projectId) }),
+    "rename project"
+  );
+};
+
+export const fetchGitSetup = () =>
+  read(
+    api.settings.git.$get(undefined, { init: { cache: "no-store" } }),
+    "git settings"
+  );
+
+export const testSshHost = (host: string) =>
+  read(api.settings.git.test.$post({ json: { host } }), "test ssh connection");
+
 export const fetchUsage = (day?: string) =>
   read(api.usage.$get({ query: day ? { day } : {} }), "usage");
 

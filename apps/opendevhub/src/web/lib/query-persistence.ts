@@ -13,8 +13,16 @@ const DAY_MS = 24 * 60 * 60_000;
 /** How long a cached response may be restored after a reload; queries must stay in memory as long. */
 export const PERSIST_MAX_AGE_MS = DAY_MS;
 
-/** Diffs can run to megabytes and the whole cache is rewritten on every change. */
-const UNPERSISTED_KEYS = new Set(["patch", "review", "local-links"]);
+/**
+ * Diffs can run to megabytes and the whole cache is rewritten on every change; the git setup is live machine state
+ * that a restored copy would only show stale.
+ */
+const UNPERSISTED_KEYS = new Set([
+  "patch",
+  "review",
+  "local-links",
+  "git-setup",
+]);
 
 const shouldPersist = (query: Query): boolean =>
   query.state.status === "success" &&

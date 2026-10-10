@@ -1244,6 +1244,52 @@ describe("dashboard API", () => {
     expect(deps.hub.environments.rescan).toHaveBeenCalledOnce();
   });
 
+  it("renames a project, and reports when renaming isn't wired", async () => {
+    const deps = setup();
+    const renameProject = vi.fn(async (_id: string, _name: string) => {});
+    const app = createDashboardApp({ ...deps, renameProject });
+    const post = (target: typeof app, body: unknown) =>
+      target.request(`/api/projects/${project.id}/name`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await post(app, { name: "Acme" })).status).toBe(200);
+    expect(renameProject).toHaveBeenCalledWith(project.id, "Acme");
+    expect((await post(app, { name: 3 })).status).toBe(400);
+    expect((await post(deps.app, { name: "Acme" })).status).toBe(412);
+  });
+
+  it("serves the git setup and tests a host", async () => {
+    const deps = setup();
+    const view = {
+      agent: { keys: [], running: true },
+      hosts: [],
+      identity: { name: "Dev" },
+      keyFiles: [],
+      projects: [],
+      signing: { enabled: false },
+    };
+    const gitSetup = {
+      test: vi.fn(async (host: string) => ({ message: host, ok: true })),
+      view: vi.fn(async () => view),
+    };
+    const app = createDashboardApp({ ...deps, gitSetup });
+    await expect(
+      (await app.request("/api/settings/git")).json()
+    ).resolves.toStrictEqual(view);
+    const res = await app.request("/api/settings/git/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ host: "code.example.com" }),
+    });
+    await expect(res.json()).resolves.toStrictEqual({
+      message: "code.example.com",
+      ok: true,
+    });
+    expect((await deps.app.request("/api/settings/git")).status).toBe(412);
+  });
+
   it("GET logs returns buffered lines", async () => {
     const { app } = setup();
     await expect(

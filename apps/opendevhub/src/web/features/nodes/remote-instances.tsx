@@ -16,22 +16,20 @@ import { cn } from "@/lib/utils";
 
 import type { NodeView } from "../../../shared/types";
 import { addNode, removeNode } from "../../api";
-import {
-  Chip,
-  muted,
-  Note,
-  Page,
-  PageHeader,
-  Section,
-} from "../../components/page";
+import { Chip, muted, Note } from "../../components/page";
 import { useDash } from "../../dashboard-context";
+import {
+  SettingsBlock,
+  SettingsHeader,
+  SettingsList,
+} from "../settings/settings-layout";
 import { formatNodeStats, nodeStateClass, nodeStateLabel } from "./nodes";
 
 const NodeRow = (props: { node: NodeView; onRemove?: () => void }) => {
   const { node } = props;
   const stats = formatNodeStats(node.stats);
   return (
-    <div className="flex flex-col gap-1 border-b px-4 py-3 last:border-b-0">
+    <li className="flex flex-col gap-1 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{node.label}</span>
         {node.ssh && node.ssh !== node.label && (
@@ -60,11 +58,11 @@ const NodeRow = (props: { node: NodeView; onRemove?: () => void }) => {
         ) : (
           <Note error>{node.reason}</Note>
         ))}
-    </div>
+    </li>
   );
 };
 
-export const NodesPage = () => {
+export const RemoteInstancesSettings = () => {
   const { snapshot, report } = useDash();
   const [ssh, setSsh] = useState("");
   const [label, setLabel] = useState("");
@@ -104,28 +102,32 @@ export const NodesPage = () => {
   };
 
   return (
-    <Page>
-      <PageHeader
-        title="Nodes"
-        description="Machines that run task environments, reached over ssh. Choose one in the New task form."
+    <>
+      <SettingsHeader
+        title="Remote instances"
+        description="Other machines that run task environments, reached over ssh. Pick one in the New task form."
       />
 
-      <Section title="Machines">
-        {nodes.map((node) => (
-          <NodeRow
-            key={node.id}
-            node={node}
-            onRemove={node.id === "local" ? undefined : () => setRemoving(node)}
-          />
-        ))}
-      </Section>
+      <SettingsBlock title="Machines">
+        <SettingsList>
+          {nodes.map((node) => (
+            <NodeRow
+              key={node.id}
+              node={node}
+              onRemove={
+                node.id === "local" ? undefined : () => setRemoving(node)
+              }
+            />
+          ))}
+        </SettingsList>
+      </SettingsBlock>
 
-      <Section
-        title="Add a node"
-        hint="needs Docker, the devcontainer CLI and git ≥ 2.48 on the machine, and an ssh key that works without a prompt"
+      <SettingsBlock
+        title="Add a remote instance"
+        hint="The machine needs Docker, the devcontainer CLI and git ≥ 2.48, and an ssh key that works without a prompt."
       >
         <form
-          className="flex flex-wrap items-end gap-3 px-4 py-3"
+          className="flex flex-wrap items-end gap-3"
           onSubmit={(e) => void submit(e)}
         >
           <div className="flex min-w-56 flex-1 flex-col gap-1.5">
@@ -153,15 +155,11 @@ export const NodesPage = () => {
             />
           </div>
           <Button type="submit" disabled={busy}>
-            {busy ? "Connecting…" : "Add node"}
+            {busy ? "Connecting…" : "Add instance"}
           </Button>
         </form>
-        {error && (
-          <Note error className="mx-4 mb-3">
-            {error}
-          </Note>
-        )}
-      </Section>
+        {error && <Note error>{error}</Note>}
+      </SettingsBlock>
 
       <Dialog
         open={!!removing}
@@ -185,6 +183,6 @@ export const NodesPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Page>
+    </>
   );
 };

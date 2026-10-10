@@ -19,14 +19,12 @@ import { legacyPath } from "./features/checkouts/checkouts";
 import { CleanupPage } from "./features/cleanup/cleanup-page";
 import { ForgejoPage, ForgejoPullPage } from "./features/forgejo/forgejo-page";
 import { JiraPage, JiraTicketPage } from "./features/jira/jira-page";
-import { NodesPage } from "./features/nodes/nodes-page";
 import { Overview } from "./features/projects/overview";
 import { ProjectLayout } from "./features/projects/project-layout";
 import { ProjectOverview } from "./features/projects/project-overview";
 import { ProjectReview } from "./features/review/project-review";
 import { SessionPage } from "./features/sessions/session-page";
 import { SessionsPage } from "./features/sessions/sessions-page";
-import { SettingsPage } from "./features/settings/settings-page";
 import { ProjectTask } from "./features/tasks/project-task";
 import { UsagePage } from "./features/usage/usage-page";
 import { parseSearch, stringifySearch } from "./routing";
@@ -121,8 +119,23 @@ const routeTree = rootRoute.addChildren([
     page("activity", ActivityPage),
     page("usage", UsagePage),
     page("cleanup", CleanupPage),
-    page("nodes", NodesPage),
-    page("settings", SettingsPage),
+    // Settings opens as a dialog over the current page; these keep old links working.
+    ...["settings", "settings/$section", "nodes"].map((path) =>
+      createRoute({
+        beforeLoad: ({ location, params }) => {
+          const section =
+            path === "nodes"
+              ? "remote-instances"
+              : ((params as { section?: string }).section ?? "general");
+          throw redirect({
+            href: `/?settings=${encodeURIComponent(section)}${location.hash ? `#${location.hash}` : ""}`,
+            replace: true,
+          });
+        },
+        getParentRoute: () => shellRoute,
+        path,
+      })
+    ),
     page("jira", JiraPage),
     page("jira/$key", JiraTicketPage),
     page("forgejo", ForgejoPage),

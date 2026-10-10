@@ -18,6 +18,7 @@ import type { Environments } from "./environments/environments";
 import type { Checkouts } from "./git/checkouts";
 import type { Cleanup } from "./git/cleanup";
 import type { ReviewActions } from "./git/review-actions";
+import type { GitSetupProbe } from "./git/setup";
 import type { Forgejo } from "./integrations/forgejo";
 import type { Jira } from "./integrations/jira";
 import type { Nodes } from "./nodes/registry";
@@ -97,6 +98,10 @@ export interface DashboardDeps {
   onboarding: OnboardingPort;
   /** Validates and persists the scan roots; throws InvalidRootError for a bad list. */
   saveRoots?: (input: unknown) => void;
+  /** Shows the project under `name`, or its folder name again when `name` is blank. */
+  renameProject?: (id: string, name: string) => Promise<void>;
+  /** This machine's git identity and ssh keys; absent in tests that don't need it. */
+  gitSetup?: Pick<GitSetupProbe, "view" | "test">;
   push: PushPort;
   cleanup: Pick<Cleanup, "scan" | "apply">;
   checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;

@@ -71,7 +71,8 @@ interface DashboardContextValue {
   openAddProject: () => void;
   closeAddProject: () => void;
   permission: Permission;
-  requestPermission: () => void;
+  /** Asks for notification permission and subscribes this browser; failures land in the error banner. */
+  requestPermission: () => Promise<void>;
   jira: JiraSettings | undefined;
   jiraError: string | undefined;
   updateJira: (input: JiraSettingsInput) => Promise<void>;
@@ -238,16 +239,14 @@ export const DashboardProvider = ({ children }: { children: ReactNode }) => {
     (projectId: string) => void fetchLogs(projectId).catch(fail),
     [fetchLogs, fail]
   );
-  const requestPermission = useCallback(
-    () =>
-      void enablePush()
-        .then(setPermission)
-        .catch((err) => {
-          setPermission(Notification.permission);
-          fail(err);
-        }),
-    [fail]
-  );
+  const requestPermission = useCallback(async () => {
+    try {
+      setPermission(await enablePush());
+    } catch (err) {
+      setPermission(Notification.permission);
+      fail(err);
+    }
+  }, [fail]);
 
   // Keeps this browser subscribed (and moves it to new keys) without a click once permission is granted.
   useEffect(() => {

@@ -52,6 +52,14 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
   };
 
   return new Hono()
+    .post("/api/projects/:id/name", validateJson(bodies.projectName), (c) =>
+      ok(c, async (id) => {
+        if (!deps.renameProject) {
+          throw new UnavailableError("Renaming projects is not available");
+        }
+        await deps.renameProject(id, c.req.valid("json").name);
+      })
+    )
     .post("/api/projects/:id/rebuild", (c) =>
       action(c, () => actions["rebuild"](param(c, "id")))
     )

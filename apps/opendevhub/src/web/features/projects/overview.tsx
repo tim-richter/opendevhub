@@ -29,6 +29,7 @@ import { projectResources } from "../../lib/resources";
 import { Link } from "../../routing";
 import { checkoutPath } from "../checkouts/checkouts";
 import { SessionList } from "../sessions/session-list";
+import { SettingsLink } from "../settings/settings-link";
 import { formatCost } from "../tasks/tasks";
 import { formatUsage } from "../usage/usage";
 import { AllContainersMenu } from "./project-actions";
@@ -181,12 +182,13 @@ export const Overview = () => {
                   {snapshot.roots.join(", ")}
                 </code>
                 . Add a git repo and opendevhub sets up its devcontainer, or{" "}
-                <Link
-                  to="/settings#roots"
+                <SettingsLink
+                  section="general"
+                  hash="roots"
                   className="text-foreground underline underline-offset-4"
                 >
                   add more folders in Settings
-                </Link>
+                </SettingsLink>
                 .
               </p>
             ) : (
@@ -211,9 +213,9 @@ export const Overview = () => {
                 </>
               ) : (
                 <Button asChild>
-                  <Link to="/settings#roots">
+                  <SettingsLink section="general" hash="roots">
                     <FolderPlusIcon /> Add folders
-                  </Link>
+                  </SettingsLink>
                 </Button>
               )}
             </div>

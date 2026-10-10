@@ -97,6 +97,8 @@ export const bodies = {
     commitId: z.string(),
   }),
   roots: z.object({ roots: z.array(z.string()) }),
+  projectName: z.object({ name: z.string().max(200) }),
+  sshTest: z.object({ host: z.string().min(1) }),
   onboarding: z.object({ path: text, stack: z.enum(STACK_IDS) }),
   cleanup: z
     .object({ items: z.unknown() })

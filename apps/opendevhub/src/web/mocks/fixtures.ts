@@ -14,6 +14,7 @@ import type {
   ForgejoReview,
   ForgejoSettings,
 } from "../../shared/forgejo";
+import type { GitSetup } from "../../shared/git-setup";
 import type {
   JiraBoardColumn,
   JiraCatalog,
@@ -1815,4 +1816,95 @@ export const provenanceOf = (
       return undefined;
     }
   }
+};
+
+export const gitSetup: GitSetup = {
+  agent: {
+    keys: [
+      {
+        bits: 256,
+        comment: "dev@laptop",
+        fingerprint: "SHA256:q3Vb8m1PZ0kQd6T1sJr0R2mYxX4nF7aLwC9eHgUoK2s",
+        type: "ED25519",
+      },
+    ],
+    running: true,
+  },
+  hosts: [
+    {
+      host: "code.example.com",
+      identityFiles: [
+        {
+          exists: true,
+          inAgent: true,
+          path: "/home/dev/.ssh/id_ed25519",
+        },
+      ],
+      known: true,
+      projects: ["acme-web", "acme-api"],
+      user: "git",
+    },
+    {
+      host: "[git.internal]:2222",
+      identityFiles: [
+        {
+          exists: true,
+          inAgent: false,
+          path: "/home/dev/.ssh/work_rsa",
+        },
+      ],
+      known: false,
+      projects: ["billing"],
+      user: "git",
+    },
+  ],
+  identity: { email: "dev@example.com", name: "Dev Example" },
+  keyFiles: [
+    {
+      bits: 256,
+      comment: "dev@laptop",
+      fingerprint: "SHA256:q3Vb8m1PZ0kQd6T1sJr0R2mYxX4nF7aLwC9eHgUoK2s",
+      path: "/home/dev/.ssh/id_ed25519",
+      type: "ED25519",
+    },
+    {
+      bits: 4096,
+      comment: "dev@work",
+      fingerprint: "SHA256:Zk1m0pQ9rT2vX6yB8cD4eF7gH1jK3lM5nP7qR9sT0uV",
+      path: "/home/dev/.ssh/work_rsa",
+      type: "RSA",
+    },
+  ],
+  projects: [
+    {
+      identity: { email: "dev@work.example", name: "Dev Example" },
+      project: "billing",
+      projectId: "billing",
+    },
+  ],
+  signing: { enabled: true, format: "ssh", key: "~/.ssh/id_ed25519.pub" },
+  version: "2.49.0",
+};
+
+/** A machine without git identity, agent or keys. */
+export const gitSetupBare: GitSetup = {
+  agent: {
+    error: "Could not open a connection to your authentication agent.",
+    keys: [],
+    running: false,
+  },
+  hosts: [
+    {
+      host: "code.example.com",
+      identityFiles: [],
+      known: false,
+      projects: ["acme-web"],
+      user: "git",
+    },
+  ],
+  identity: {},
+  keyFiles: [],
+  projects: [],
+  signing: { enabled: false },
+  version: "2.43.0",
 };

@@ -55,18 +55,75 @@ const subscribe = async (): Promise<void> => {
   );
 };
 
+/** Set while this browser has turned notifications off in Settings, so loading the page doesn't subscribe it again. */
+const OFF_KEY = "opendevhub.notifications.off";
+
+const turnedOff = (): boolean => {
+  try {
+    return localStorage.getItem(OFF_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const setTurnedOff = (off: boolean): void => {
+  try {
+    if (off) {
+      localStorage.setItem(OFF_KEY, "1");
+    } else {
+      localStorage.removeItem(OFF_KEY);
+    }
+  } catch {
+    // Without storage the choice lasts until the next page load.
+  }
+};
+
 /** Asks for notification permission, then subscribes. Resolves to the permission the user chose. */
 export const enablePush = async (): Promise<NotificationPermission> => {
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
+    setTurnedOff(false);
     await subscribe();
   }
   return permission;
 };
 
+/** Unsubscribes this browser; permission stays granted, so turning notifications back on needs no prompt. */
+export const disablePush = async (): Promise<void> => {
+  setTurnedOff(true);
+  const registration = await navigator.serviceWorker.getRegistration();
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) {
+    return;
+  }
+  const { endpoint } = subscription;
+  await subscription.unsubscribe();
+  await complete(
+    api.push.unsubscribe.$post({ json: { endpoint } }),
+    "unsubscribe from notifications"
+  );
+};
+
+/** Whether this browser receives notifications: permission granted, not turned off, and subscribed. */
+export const pushEnabled = async (): Promise<boolean> => {
+  if (
+    !pushSupported() ||
+    Notification.permission !== "granted" ||
+    turnedOff()
+  ) {
+    return false;
+  }
+  const registration = await navigator.serviceWorker.getRegistration();
+  return !!(await registration?.pushManager.getSubscription());
+};
+
 /** On load with permission granted: subscribe again if needed, so pushes keep arriving without a click. */
 export const syncPush = async (): Promise<void> => {
-  if (!pushSupported() || Notification.permission !== "granted") {
+  if (
+    !pushSupported() ||
+    Notification.permission !== "granted" ||
+    turnedOff()
+  ) {
     return;
   }
   await subscribe();

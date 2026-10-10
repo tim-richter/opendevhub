@@ -10,7 +10,6 @@ import {
   TicketIcon,
   PlusIcon,
   SearchIcon,
-  ServerIcon,
   SettingsIcon,
   XIcon,
 } from "lucide-react";
@@ -65,6 +64,11 @@ import {
 } from "../features/checkouts/checkouts";
 import { nodesNeedingAttention } from "../features/nodes/nodes";
 import { AddProjectDialog } from "../features/projects/add-project-dialog";
+import { SettingsDialog } from "../features/settings/settings-dialog";
+import {
+  SETTINGS_PARAM,
+  useSettingsHref,
+} from "../features/settings/settings-link";
 import { NewTaskDialog } from "../features/tasks/new-task-dialog";
 import {
   formatCost,
@@ -72,7 +76,7 @@ import {
   projectIdFromPath,
 } from "../features/tasks/tasks";
 import { formatUsage } from "../features/usage/usage";
-import { Link, useIsActive } from "../routing";
+import { Link, useIsActive, useSearchParams } from "../routing";
 import { CommandPalette } from "./command-palette";
 import { Logo } from "./logo";
 
@@ -81,16 +85,24 @@ const FILTER_THRESHOLD = 8;
 const NavItem = (props: {
   to: string;
   end?: boolean;
+  /** Overrides whether the route makes the item active. */
+  active?: boolean;
+  onClick?: () => void;
   title?: string;
   children: ReactNode;
   badge?: ReactNode;
   sub?: ReactNode;
 }) => {
-  const active = useIsActive(props.to, props.end);
+  const routeActive = useIsActive(props.to, props.end);
+  const active = props.active ?? routeActive;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={active} title={props.title}>
-        <Link to={props.to} activeOptions={{ exact: props.end }}>
+        <Link
+          to={props.to}
+          activeOptions={{ exact: props.end }}
+          onClick={props.onClick}
+        >
           {props.children}
         </Link>
       </SidebarMenuButton>
@@ -147,6 +159,8 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
   } = useDash();
   const { setOpenMobile } = useSidebar();
   const [filter, setFilter] = useState("");
+  const [params] = useSearchParams();
+  const settingsHref = useSettingsHref();
   const location = useLocation();
 
   // oxlint-disable-next-line react/exhaustive-effect-dependencies
@@ -283,8 +297,18 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
             >
               <CircleDollarSignIcon /> Usage
             </NavItem>
+            <NavItem to="/cleanup">
+              <EraserIcon /> Cleanup
+            </NavItem>
             <NavItem
-              to="/nodes"
+              to={settingsHref()}
+              active={params.has(SETTINGS_PARAM)}
+              onClick={() => setOpenMobile(false)}
+              title={
+                nodesNeedingAttention(snapshot.nodes) > 0
+                  ? "Settings — a remote instance needs attention"
+                  : "Settings"
+              }
               badge={
                 nodesNeedingAttention(snapshot.nodes) > 0 && (
                   <Count
@@ -294,12 +318,6 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
                 )
               }
             >
-              <ServerIcon /> Nodes
-            </NavItem>
-            <NavItem to="/cleanup">
-              <EraserIcon /> Cleanup
-            </NavItem>
-            <NavItem to="/settings">
               <SettingsIcon /> Settings
             </NavItem>
           </SidebarMenu>
@@ -315,7 +333,7 @@ const AppSidebar = ({ onSearch }: { onSearch: () => void }) => {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Enable notifications"
-                  onClick={requestPermission}
+                  onClick={() => void requestPermission()}
                 >
                   <BellIcon />
                 </Button>
@@ -404,6 +422,8 @@ export const Shell = () => {
     useDash();
   const [palette, setPalette] = useState(false);
   const location = useLocation();
+  const [params] = useSearchParams();
+  const settingsOpen = params.has(SETTINGS_PARAM);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -412,14 +432,27 @@ export const Shell = () => {
         setPalette((p) => !p);
         return;
       }
-      if (!palette && !newTaskFor && !addProjectOpen && opensNewTask(e)) {
+      if (
+        !palette &&
+        !settingsOpen &&
+        !newTaskFor &&
+        !addProjectOpen &&
+        opensNewTask(e)
+      ) {
         e.preventDefault();
         newTask(projectIdFromPath(location.pathname));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [palette, newTaskFor, addProjectOpen, newTask, location.pathname]);
+  }, [
+    palette,
+    settingsOpen,
+    newTaskFor,
+    addProjectOpen,
+    newTask,
+    location.pathname,
+  ]);
 
   if (!snapshot) {
     return (
@@ -445,6 +478,7 @@ export const Shell = () => {
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <NewTaskDialog />
       <AddProjectDialog />
+      <SettingsDialog />
     </SidebarProvider>
   );
 };

@@ -9,12 +9,19 @@ import { errorStatus, isDay, json, ok, str } from "./helpers";
 import { bodies, queries, validateJson, validateQuery } from "./validation";
 
 export const createCoreRoutes = (deps: DashboardDeps) => {
-  const { store, hub, onboarding, push, usage, cleanup, nodes } = deps;
+  const { store, hub, onboarding, push, usage, cleanup, nodes, gitSetup } =
+    deps;
   const requireNodes = () => {
     if (!nodes) {
       throw new UnavailableError("remote nodes are not available");
     }
     return nodes;
+  };
+  const requireGitSetup = () => {
+    if (!gitSetup) {
+      throw new UnavailableError("git settings are not available");
+    }
+    return gitSetup;
   };
   return new Hono()
     .get("/api/projects", (c) => c.json(store.snapshot(), 200))
@@ -32,6 +39,10 @@ export const createCoreRoutes = (deps: DashboardDeps) => {
         await hub.environments.rescan();
         return store.snapshot();
       })
+    )
+    .get("/api/settings/git", (c) => json(c, (_id) => requireGitSetup().view()))
+    .post("/api/settings/git/test", validateJson(bodies.sshTest), (c) =>
+      json(c, (_id) => requireGitSetup().test(c.req.valid("json").host))
     )
     .get("/api/onboarding/candidates", async (c) =>
       c.json(await onboarding.list(), 200)

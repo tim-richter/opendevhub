@@ -79,6 +79,7 @@ import {
   ReviewDiffs,
   useCommentStepper,
 } from "../review/review-diffs";
+import { SettingsLink } from "../settings/settings-link";
 import {
   defaultPullMode,
   forgejoCommentNote,
@@ -141,7 +142,7 @@ const ForgejoGate = ({ children }: { children: ReactNode }) => {
           Connect your Forgejo account to see your pull requests.
         </p>
         <Button asChild variant="outline">
-          <Link to="/settings">Open settings</Link>
+          <SettingsLink section="forgejo">Open settings</SettingsLink>
         </Button>
       </Empty>
     );

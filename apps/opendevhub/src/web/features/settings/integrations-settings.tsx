@@ -1,95 +1,176 @@
-import { useLocation } from "@tanstack/react-router";
 import {
-  BookOpenIcon,
+  ChevronRightIcon,
   CircleCheckIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  XIcon,
+  GitPullRequestIcon,
+  TicketIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 
 import type {
   IntegrationSettings,
   IntegrationSettingsInput,
 } from "../../../shared/integrations";
-import { saveRoots, testForgejoConnection } from "../../api";
-import { Note, Page, PageHeader } from "../../components/page";
+import { testForgejoConnection } from "../../api";
+import { Note } from "../../components/page";
 import { useDash } from "../../dashboard-context";
+import { Link } from "../../routing";
+import {
+  SettingRow,
+  SettingsBlock,
+  SettingsHeader,
+  SettingsList,
+} from "./settings-layout";
+import { SettingsLink } from "./settings-link";
 
-const DOCS_URL = "https://tim-richter.github.io/opendevhub/";
+/** Set up enough to deserve its own settings page: a token saved or the integration turned on. */
+export const integrationConfigured = (
+  settings?: IntegrationSettings
+): boolean => !!settings && (settings.enabled || settings.hasToken);
 
-/** One settings topic: its name and purpose on the left, the controls on the right. */
-const SettingsGroup = (props: {
-  id?: string;
-  title: string;
-  hint: string;
-  children: ReactNode;
-}) => (
-  <section
-    id={props.id}
-    className="grid gap-x-10 gap-y-4 border-t pt-6 md:grid-cols-[13rem_minmax(0,1fr)]"
-  >
-    <div className="flex flex-col gap-1">
-      <h2 className="font-semibold">{props.title}</h2>
-      <p className="text-muted-foreground text-sm">{props.hint}</p>
-    </div>
-    <div className="min-w-0">{props.children}</div>
-  </section>
+const INTEGRATIONS = {
+  forgejo: {
+    description: "Your pull requests, their diffs and reviews.",
+    icon: GitPullRequestIcon,
+    name: "Forgejo",
+    tokenHelp:
+      "Use a token with read:user, read:repository, and read:issue scopes, including private repositories you want to see.",
+  },
+  jira: {
+    description: "Tickets assigned to you, to start tasks from.",
+    icon: TicketIcon,
+    name: "Jira",
+    tokenHelp:
+      "Use a personal access token from your self-hosted Jira Server or Data Center profile, with permission to browse the projects you need.",
+  },
+} as const;
+
+type IntegrationId = keyof typeof INTEGRATIONS;
+
+const statusOf = (settings?: IntegrationSettings, error?: string) => {
+  if (error) {
+    return { label: "Error", tone: "text-destructive" };
+  }
+  if (!settings) {
+    return { label: "Loading…", tone: "text-muted-foreground" };
+  }
+  if (settings.enabled && settings.hasToken) {
+    return { label: "Connected", tone: "text-ok" };
+  }
+  if (settings.hasToken) {
+    return { label: "Turned off", tone: "text-muted-foreground" };
+  }
+  return { label: "Not set up", tone: "text-muted-foreground" };
+};
+
+const useIntegration = (id: IntegrationId) => {
+  const dash = useDash();
+  return id === "forgejo"
+    ? {
+        error: dash.forgejoError,
+        settings: dash.forgejo,
+        update: dash.updateForgejo,
+      }
+    : { error: dash.jiraError, settings: dash.jira, update: dash.updateJira };
+};
+
+const IntegrationRow = ({ id }: { id: IntegrationId }) => {
+  const meta = INTEGRATIONS[id];
+  const { settings, error } = useIntegration(id);
+  const status = statusOf(settings, error);
+  const Icon = meta.icon;
+  return (
+    <li>
+      <SettingsLink
+        section={id}
+        replace
+        className="hover:bg-muted/50 flex items-center gap-3 px-4 py-3 transition-colors first:rounded-t-lg last:rounded-b-lg"
+      >
+        <span className="bg-muted grid size-9 shrink-0 place-content-center rounded-md">
+          <Icon className="size-4" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="font-medium">{meta.name}</span>
+          <span className="text-muted-foreground truncate text-sm">
+            {settings?.url || meta.description}
+          </span>
+        </span>
+        <span className={cn("text-sm whitespace-nowrap", status.tone)}>
+          {status.label}
+        </span>
+        <ChevronRightIcon className="text-muted-foreground size-4" />
+      </SettingsLink>
+    </li>
+  );
+};
+
+export const IntegrationsSettings = () => (
+  <>
+    <SettingsHeader
+      title="Integrations"
+      description="Connect the services opendevhub reads pull requests and tickets from. Each one gets its own page in this sidebar once it's set up."
+    />
+    <SettingsBlock title="Services">
+      <SettingsList>
+        <IntegrationRow id="forgejo" />
+        <IntegrationRow id="jira" />
+      </SettingsList>
+    </SettingsBlock>
+  </>
 );
 
-export const SettingsPage = () => {
-  const { forgejo, forgejoError, updateForgejo, jira, jiraError, updateJira } =
-    useDash();
+export const IntegrationSettingsPage = ({ id }: { id: IntegrationId }) => {
+  const meta = INTEGRATIONS[id];
+  const { settings, error, update } = useIntegration(id);
   return (
-    <Page>
-      <PageHeader
-        title="Settings"
-        description="Project discovery and optional integrations."
-      />
-      <GeneralSection />
+    <>
+      <SettingsHeader title={meta.name} description={meta.description} />
       <IntegrationSettingsForm
-        name="Forgejo"
-        hint="Your pull requests and their diffs"
-        settings={forgejo}
-        settingsError={forgejoError}
-        update={updateForgejo}
-        tokenHelp="Use a token with read:user, read:repository, and read:issue scopes, including private repositories you want to see."
+        id={id}
+        name={meta.name}
+        settings={settings}
+        settingsError={error}
+        update={update}
+        tokenHelp={meta.tokenHelp}
       />
-      <IntegrationSettingsForm
-        name="Jira"
-        hint="Assigned tickets and tasks"
-        settings={jira}
-        settingsError={jiraError}
-        update={updateJira}
-        tokenHelp="Use a personal access token from your self-hosted Jira Server or Data Center profile, with permission to browse the projects you need."
-      />
-    </Page>
+      {settings?.enabled && (
+        <SettingsBlock title="Open" hint={`See what ${meta.name} has for you.`}>
+          <div>
+            <Button asChild variant="outline">
+              <Link to={`/${id}`}>
+                {id === "forgejo" ? "Pull requests" : "Tickets"}
+                <ChevronRightIcon />
+              </Link>
+            </Button>
+          </div>
+        </SettingsBlock>
+      )}
+    </>
   );
 };
 
 const IntegrationSettingsForm = ({
+  id,
   name,
-  hint,
   settings,
   settingsError,
   update,
   tokenHelp,
 }: {
-  name: "Forgejo" | "Jira";
-  hint: string;
+  id: IntegrationId;
+  name: string;
   settings?: IntegrationSettings;
   settingsError?: string;
   update: (input: IntegrationSettingsInput) => Promise<void>;
   tokenHelp: string;
 }) => {
-  const id = name.toLowerCase();
   const [enabled, setEnabled] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
@@ -160,16 +241,20 @@ const IntegrationSettingsForm = ({
   const loading = !settings && !settingsError;
 
   return (
-    <SettingsGroup title={name} hint={hint}>
-      <form
-        className="flex max-w-2xl flex-col gap-5"
-        onSubmit={(e) => void save(e)}
-      >
+    <SettingsBlock
+      title="Connection"
+      hint="Where the instance is and how opendevhub signs in."
+    >
+      <form className="flex flex-col gap-5" onSubmit={(e) => void save(e)}>
         <fieldset
           disabled={busy || testing || loading}
           className="flex flex-col gap-5 disabled:opacity-60"
         >
-          <div className="flex items-center gap-3">
+          <SettingRow
+            label={`Enable ${name}`}
+            description="Show it in the sidebar and offer its items when starting tasks."
+            htmlFor={`${id}-enabled`}
+          >
             <Switch
               id={`${id}-enabled`}
               checked={enabled}
@@ -178,8 +263,7 @@ const IntegrationSettingsForm = ({
                 setSaved(false);
               }}
             />
-            <Label htmlFor={`${id}-enabled`}>Enable {name}</Label>
-          </div>
+          </SettingRow>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`${id}-url`}>{name} URL</Label>
             <Input
@@ -238,7 +322,7 @@ const IntegrationSettingsForm = ({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit">{busy ? "Saving…" : "Save"}</Button>
-            {name === "Forgejo" && (
+            {id === "forgejo" && (
               <Button
                 type="button"
                 variant="outline"
@@ -292,118 +376,6 @@ const IntegrationSettingsForm = ({
           </p>
         )}
       </form>
-    </SettingsGroup>
-  );
-};
-
-const GeneralSection = () => {
-  const { snapshot, rescan, scanning } = useDash();
-  const location = useLocation();
-  const roots = snapshot?.roots ?? [];
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-
-  const save = async (next: string[]): Promise<boolean> => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await saveRoots(next);
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-  const add = async (e: FormEvent) => {
-    e.preventDefault();
-    const folder = draft.trim();
-    if (folder && (await save([...roots, folder]))) {
-      setDraft("");
-    }
-  };
-
-  return (
-    <SettingsGroup
-      id="roots"
-      title="Projects"
-      hint="Folders opendevhub scans for projects"
-    >
-      <div className="flex max-w-2xl flex-col gap-3">
-        {roots.length > 0 ? (
-          <ul className="flex flex-col divide-y rounded-md border">
-            {roots.map((root) => (
-              <li
-                key={root}
-                className="flex items-center gap-2 py-1 pr-1 pl-3 font-mono text-xs"
-              >
-                <span className="min-w-0 flex-1 truncate" title={root}>
-                  {root}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={`Remove ${root}`}
-                  onClick={() => void save(roots.filter((r) => r !== root))}
-                >
-                  <XIcon />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground text-sm">
-            No folders yet. Add the folder that holds your git repos.
-          </p>
-        )}
-        <form className="flex flex-col gap-1.5" onSubmit={(e) => void add(e)}>
-          <Label htmlFor="roots-add">Add folder</Label>
-          <div className="flex gap-2">
-            <Input
-              id="roots-add"
-              className="font-mono"
-              placeholder="~/code"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              disabled={busy}
-              autoComplete="off"
-              spellCheck={false}
-              autoFocus={location.hash === "roots"}
-            />
-            <Button type="submit" disabled={busy || !draft.trim()}>
-              <PlusIcon /> Add
-            </Button>
-          </div>
-          <p className="text-muted-foreground text-sm">
-            An absolute path on this machine. Projects are found in its
-            subfolders.
-          </p>
-        </form>
-        {error && (
-          <div role="alert">
-            <Note error>{error}</Note>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            disabled={scanning || busy}
-            onClick={rescan}
-          >
-            <RefreshCwIcon className={scanning ? "animate-spin" : undefined} />{" "}
-            {scanning ? "Scanning…" : "Rescan"}
-          </Button>
-          <Button asChild variant="ghost">
-            <a href={DOCS_URL} target="_blank" rel="noreferrer">
-              <BookOpenIcon /> Documentation
-            </a>
-          </Button>
-        </div>
-      </div>
-    </SettingsGroup>
+    </SettingsBlock>
   );
 };

@@ -19,6 +19,7 @@ import {
   checkouts,
   checkoutTone,
 } from "../features/checkouts/checkouts";
+import { useSettingsHref } from "../features/settings/settings-link";
 import { projectIdFromPath } from "../features/tasks/tasks";
 import { sendTestNotification } from "../push";
 import { useNavigate } from "../routing";
@@ -53,6 +54,7 @@ export const CommandPalette = ({
   } = useDash();
   const navigate = useNavigate();
   const location = useLocation();
+  const settingsHref = useSettingsHref();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -82,10 +84,23 @@ export const CommandPalette = ({
           ? [{ key: "nav-tickets", label: "Tickets", run: go("/jira") }]
           : []),
         { key: "nav-usage", label: "Usage", run: go("/usage") },
-        { key: "nav-nodes", label: "Nodes", run: go("/nodes") },
         { key: "nav-cleanup", label: "Cleanup", run: go("/cleanup") },
-        { key: "nav-settings", label: "Settings", run: go("/settings") },
+        { key: "nav-settings", label: "Settings", run: go(settingsHref()) },
       ].map((item): Item => ({ group: "Go to", ...item })),
+      ...[
+        ["general", "General"],
+        ["notifications", "Notifications"],
+        ["shortcuts", "Shortcuts"],
+        ["projects", "Projects"],
+        ["remote-instances", "Remote instances"],
+        ["git", "Git"],
+        ["integrations", "Integrations"],
+      ].map(([id, label]): Item => ({
+        group: "Settings",
+        key: `settings-${id}`,
+        label: `Settings › ${label}`,
+        run: go(`/settings/${id}`),
+      })),
       {
         group: "Actions",
         hint: "n",
@@ -161,6 +176,7 @@ export const CommandPalette = ({
     permission,
     report,
     location.pathname,
+    settingsHref,
     forgejo?.enabled,
     jira?.enabled,
   ]);

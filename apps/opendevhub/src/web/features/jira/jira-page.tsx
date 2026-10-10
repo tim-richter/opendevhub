@@ -61,6 +61,7 @@ import { useDash } from "../../dashboard-context";
 import { Link, useSearchParams } from "../../routing";
 import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { PullRequestBadge } from "../forgejo/pull-request-badge";
+import { SettingsLink } from "../settings/settings-link";
 import { taskPath } from "../tasks/tasks";
 import { useJiraQuery, useTicketLinks } from "./use-jira";
 
@@ -99,7 +100,7 @@ const JiraGate = ({ children }: { children: ReactNode }) => {
           Connect your Jira instance to browse tickets and create tasks.
         </p>
         <Button asChild variant="outline">
-          <Link to="/settings">Open settings</Link>
+          <SettingsLink section="jira">Open settings</SettingsLink>
         </Button>
       </Empty>
     );

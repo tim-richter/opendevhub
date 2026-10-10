@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 
 import open from "open";
 
-import type { NodeId } from "../shared/types";
+import type { NodeId, Project } from "../shared/types";
 import {
   FileForgeStore,
   FileProjectSettings,
@@ -40,9 +40,11 @@ import { EnvFiles } from "./environments/files";
 import { Images } from "./environments/images";
 import { ensureSpawnHelperExecutable } from "./environments/pty-helper";
 import { startResourceSampler } from "./environments/resources";
+import { NotFoundError } from "./errors";
 import { Cleanup } from "./git/cleanup";
 import { GitOps } from "./git/ops";
 import { Publisher } from "./git/publish";
+import { GitSetupProbe } from "./git/setup";
 import { Worktrees } from "./git/worktrees";
 import { createHub } from "./hub";
 import { FileForgejoSettings, Forgejo } from "./integrations/forgejo";
@@ -297,6 +299,17 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const editors = new EditorLauncher(await detectEditors(pathWhich()));
   store.setEditors(editors.list());
   const git = new GitOps({ containers });
+  const projectSettings = new FileProjectSettings(dir);
+  /** A name set in Settings replaces the folder name discovery gives a project. */
+  const withNames = (list: Project[]): Project[] => {
+    const entries = loadConfig(dir).projects ?? {};
+    return list.map((p) => {
+      const name = (entries[p.path] as { name?: unknown } | undefined)?.name;
+      return typeof name === "string" && name.trim()
+        ? { ...p, name: name.trim() }
+        : p;
+    });
+  };
   const hub = createHub({
     store,
     projects,
@@ -338,7 +351,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     editors,
     clientFor,
     roots: () => roots,
-    scan: (toScan) => scanRoots(toScan),
+    scan: async (toScan) => withNames(await scanRoots(toScan)),
   });
   const cleanup = new Cleanup({
     branches: hub.cleanupTargets,
@@ -354,7 +367,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     log: (id, line) => hub.environments.note(id, line),
     project: (id) => store.project(id),
     run: spawnRunner,
-    settings: new FileProjectSettings(dir),
+    settings: projectSettings,
     target: (id, directory) => hub.checkouts.checkTarget(id, directory),
   });
 
@@ -397,6 +410,18 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
       roots = next;
       store.setRoots(next);
     },
+    renameProject: async (id, name) => {
+      const project = store.project(id);
+      if (!project) {
+        throw new NotFoundError(id);
+      }
+      projectSettings.update(project.path, { name: name.trim() || undefined });
+      await hub.environments.rescan();
+    },
+    gitSetup: new GitSetupProbe({
+      projects: () => store.projects(),
+      run: spawnRunner,
+    }),
     forgejo: new Forgejo(new FileForgejoSettings(dir)),
     jira: new Jira(new FileJiraSettings(dir)),
     links,
