@@ -202,6 +202,7 @@ const darkEnv: EnvironmentView = {
     hostPath: "/home/dev/code/.worktrees/acme-web/dark-mode",
     path: WEB_ISOLATED_WORKTREE,
   },
+  worktreeId: 3,
 };
 
 export const webProject: ProjectView = {

@@ -16,10 +16,8 @@ import {
   FileForgeStore,
   FileProjectSettings,
   loadConfig,
-  loadState,
   validateRoots,
   saveConfig,
-  saveState,
   stateDir,
 } from "../../src/server/config";
 
@@ -68,42 +66,6 @@ describe("config", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       try {
         expect(loadConfig(dir)).toStrictEqual({ port: DEFAULT_PORT });
-        expect(fs.readFileSync(`${file}.bak`, "utf-8")).toBe(text);
-        expect(warn).toHaveBeenCalledOnce();
-      } finally {
-        warn.mockRestore();
-      }
-    }
-  );
-});
-
-describe("state", () => {
-  it("round-trips and is written with mode 0600", () => {
-    saveState(dir, {
-      projects: {
-        p1: { containerId: "c", password: "s", workspaceFolder: "/w" },
-      },
-    });
-    expect(loadState(dir)).toStrictEqual({
-      projects: {
-        p1: { containerId: "c", password: "s", workspaceFolder: "/w" },
-      },
-    });
-    expect(fs.statSync(path.join(dir, "state.json")).mode & 0o777).toBe(0o600);
-  });
-
-  it("defaults when missing", () => {
-    expect(loadState(dir)).toStrictEqual({ projects: {} });
-  });
-
-  it.each(["null", "[]", '"invalid"', "42", "true"])(
-    "backs up an invalid top-level state value %j and uses defaults",
-    (text) => {
-      const file = path.join(dir, "state.json");
-      fs.writeFileSync(file, text);
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      try {
-        expect(loadState(dir)).toStrictEqual({ projects: {} });
         expect(fs.readFileSync(`${file}.bak`, "utf-8")).toBe(text);
         expect(warn).toHaveBeenCalledOnce();
       } finally {
@@ -246,27 +208,6 @@ describe(stateDir, () => {
     expect(stateDir({ XDG_STATE_HOME: "rel" })).toBe(
       path.join(os.homedir(), ".local", "state", "opendevhub")
     );
-  });
-});
-
-describe("persisted environments", () => {
-  it("round-trips task environments in state.json", () => {
-    const state = {
-      projects: {},
-      environments: {
-        "demo-feat-0a1b": {
-          projectId: "demo",
-          worktree: {
-            path: "/w/demo.worktrees/feat",
-            hostPath: "/src/demo.worktrees/feat",
-            branch: "feat",
-          },
-          containerId: "c2",
-        },
-      },
-    };
-    saveState(dir, state);
-    expect(loadState(dir)).toStrictEqual(state);
   });
 });
 

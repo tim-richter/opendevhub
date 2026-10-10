@@ -501,7 +501,7 @@ export class Environments {
     node: NodeId = LOCAL_NODE,
     setup?: { task: string; variant: number }
   ): Promise<TaskEnv> {
-    const env = this.recordTaskEnv(project, worktree, node);
+    const env = this.recordTaskEnv(project, worktree, node, setup);
     const rt = this.deps.store.runtime(env.id);
     if (rt.containerState === "running" && rt.opencode === "healthy") {
       return env;
@@ -938,11 +938,15 @@ export class Environments {
     await this.adoptRunning(env, info);
   }
 
-  /** Records a worktree's own environment (or returns the one it has). */
+  /**
+   * Records a worktree's own environment (or returns the one it has), for the variant `setup` when one asked for it.
+   * A worktree without a row yet is recorded as unmanaged.
+   */
   private recordTaskEnv(
     project: Project,
     worktree: EnvWorktree,
-    node: NodeId = LOCAL_NODE
+    node: NodeId = LOCAL_NODE,
+    setup?: { task: string; variant: number }
   ): TaskEnv {
     const { store } = this.deps;
     const existing = store
@@ -957,13 +961,40 @@ export class Environments {
     // A remote worktree can sit at the same container path as a local one; its id must not.
     const key =
       node === LOCAL_NODE ? worktree.path : `${node}:${worktree.path}`;
+    const remote = node === LOCAL_NODE ? undefined : node;
+    const { checkouts } = this.deps;
+    const row =
+      checkouts
+        .worktreesOf(project.id)
+        .find((w) => w.path === worktree.path && w.node === remote) ??
+      checkouts.insertWorktree(
+        project.id,
+        {
+          branchId: checkouts.ensureBranch(
+            project.id,
+            worktree.branch,
+            { by: "unmanaged" },
+            USER
+          ).id,
+          hostPath: worktree.hostPath,
+          path: worktree.path,
+          ...(remote ? { node: remote } : {}),
+        },
+        { by: "unmanaged" },
+        USER
+      );
     const rec: EnvRecord = {
       id: envIdFor(project.id, key, worktree.branch),
       projectId: project.id,
       worktree,
-      ...(node === LOCAL_NODE ? {} : { node }),
+      worktreeId: row.id,
+      ...(remote ? { node: remote } : {}),
     };
-    store.putEnvironment(rec);
+    store.putEnvironment(
+      rec,
+      setup ? variantActor(setup.task, setup.variant) : USER,
+      setup?.task
+    );
     return this.taskEnv(project, rec);
   }
 
@@ -1147,7 +1178,7 @@ export class Environments {
         USER
       );
     }
-    store.removeEnvironment(env.id);
+    store.removeEnvironment(env.id, USER);
     this.envLog(env, "environment: removed");
   }
 

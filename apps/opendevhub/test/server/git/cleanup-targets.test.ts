@@ -5,6 +5,7 @@ import type { TaskStore } from "../../../src/server/db/tasks";
 import { BusyError } from "../../../src/server/errors";
 import { rawSession } from "../../helpers/fake-opencode";
 import { project, running, feat, setup, withEnv } from "../../helpers/hub";
+import { worktreeRow } from "../../helpers/stores";
 
 describe("cleanup", () => {
   const featWt = {
@@ -129,11 +130,12 @@ describe("cleanup", () => {
   });
 
   it("removes the worktree's own container first", async () => {
-    const { hub, store, containers } = await running();
+    const { hub, store, containers, dbs } = await running();
     store.putEnvironment({
       id: "env-feat",
       projectId: project.id,
       worktree: featWt,
+      worktreeId: worktreeRow(dbs, project.id, featWt),
     });
     store.updateRuntime("env-feat", { containerId: "c9" });
     await hub.cleanupTargets.cleanupBranch(project.id, {
@@ -251,11 +253,14 @@ describe("cleanup", () => {
   });
 
   it("refuses a session item naming another project's environment", async () => {
-    const { hub, client, store } = await running();
+    const { hub, client, store, dbs } = await running();
+    const other = { ...project, id: "other", path: "/src/other" };
+    dbs.projects.upsertAll([project, other]);
     store.putEnvironment({
       id: "other-env",
       projectId: "other",
       worktree: featWt,
+      worktreeId: worktreeRow(dbs, "other", featWt),
     });
     client.sessions.mockResolvedValue([discarded("ses_d")]);
     const forged = {

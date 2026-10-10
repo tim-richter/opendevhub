@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 
 import open from "open";
 
+import type { NodeId } from "../shared/types";
 import {
   FileForgeStore,
   FileProjectSettings,
@@ -11,10 +12,8 @@ import {
   configDir,
   nodeInUse,
   loadConfig,
-  loadState,
   removeNode,
   saveConfig,
-  saveState,
   stateDir,
   validateRoots,
 } from "./config";
@@ -22,6 +21,7 @@ import type { Config } from "./config";
 import { createDashboardApp } from "./dashboard-api";
 import { CheckoutStore } from "./db/checkouts";
 import { openStateDatabase } from "./db/database";
+import { EnvironmentStore } from "./db/environments";
 import { ProjectStore } from "./db/projects";
 import { TaskStore } from "./db/tasks";
 import { Checks } from "./environments/checks";
@@ -158,7 +158,15 @@ const NODES_USAGE =
 export const runNodesCommand = (
   argv: string[],
   dir: string,
-  out: { log: (s: string) => void; error: (s: string) => void }
+  out: { log: (s: string) => void; error: (s: string) => void },
+  environmentsOn: (id: NodeId) => number = (id) => {
+    const db = openStateDatabase(stateDir());
+    try {
+      return new EnvironmentStore(db).countOnNode(id);
+    } finally {
+      db.close();
+    }
+  }
 ): number => {
   const [sub, ...rest] = argv;
   try {
@@ -197,9 +205,7 @@ export const runNodesCommand = (
       if (!cfg.nodes?.some((n) => n.id === rest[0])) {
         throw new Error(`no node ${rest[0]}`);
       }
-      const environments = Object.values(
-        loadState(dir).environments ?? {}
-      ).filter((e) => e.node === rest[0]).length;
+      const environments = environmentsOn(rest[0]);
       if (environments > 0) {
         throw new Error(nodeInUse(rest[0], environments));
       }
@@ -250,12 +256,12 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const projects = new ProjectStore(db);
   const tasks = new TaskStore(db);
   const checkouts = new CheckoutStore(db);
+  const environments = new EnvironmentStore(db);
   // The jobs that were setting these variants up died with the previous process.
   tasks.failInterrupted();
   const store = new StateStore({
     checkouts,
-    persist: (s) => saveState(dir, s),
-    persisted: loadState(dir),
+    environments,
     port: config.port,
     tasks,
   });
@@ -263,11 +269,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const nodes = new Nodes({
     configDir: dir,
     controlDir: path.join(dir, "ssh"),
-    environmentsOn: (id) =>
-      store
-        .projects()
-        .flatMap((p) => store.environments(p.id))
-        .filter((e) => e.node === id).length,
+    environmentsOn: (id) => environments.countOnNode(id),
     onOffline: (id) =>
       void hub.environments.nodeOffline(id).catch(() => undefined),
     onOnline: (id) =>

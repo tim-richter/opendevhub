@@ -40,6 +40,7 @@ import {
   waiting,
   permission,
 } from "../../helpers/hub";
+import { worktreeRow } from "../../helpers/stores";
 
 describe("environments", () => {
   it("routes terminals to shared, isolated and remote containers and rejects unknown or stopped checkouts", async () => {
@@ -1979,6 +1980,7 @@ describe("environments on another node", () => {
       id: remoteEnv,
       projectId: project.id,
       worktree: remoteFix,
+      worktreeId: worktreeRow(s.dbs, project.id, remoteFix, "box"),
       node: "box",
     });
     await s.hub.environments.startEnv(project.id, remoteEnv);

@@ -62,13 +62,32 @@ CREATE TABLE worktrees (
 );
 CREATE UNIQUE INDEX worktrees_live ON worktrees (project_id, COALESCE(node_id, ''), path) WHERE removed_at IS NULL;
 
+CREATE TABLE environments (
+  id               TEXT PRIMARY KEY,
+  project_id       TEXT NOT NULL REFERENCES projects (id),
+  kind             TEXT NOT NULL CHECK (kind IN ('main', 'task')),
+  worktree_id      INTEGER REFERENCES worktrees (id),
+  node_id          TEXT,
+  container_id     TEXT,
+  workspace_folder TEXT,
+  remote_user      TEXT,
+  image_key        TEXT,
+  image_ref        TEXT,
+  password         TEXT,
+  relay_token      TEXT,
+  created_at       INTEGER NOT NULL,
+  removed_at       INTEGER,
+  CHECK ((kind = 'main') = (worktree_id IS NULL))
+);
+CREATE INDEX environments_project ON environments (project_id, removed_at);
+
 CREATE TABLE variants (
   task_id            TEXT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
   n                  INTEGER NOT NULL,
   model              TEXT,
   agent              TEXT,
   node_id            TEXT,
-  env_id             TEXT,
+  env_id             TEXT REFERENCES environments (id),
   branch             TEXT,
   directory          TEXT,
   branch_id          INTEGER REFERENCES branches (id),

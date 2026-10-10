@@ -56,8 +56,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         tasks: dbs.tasks,
         checkouts: dbs.checkouts,
         port: 0,
-        persisted: { projects: {} },
-        persist: () => {},
+        environments: dbs.environments,
       });
       const containers = new Containers(spawnRunner);
       const clientFor = (ep: { baseUrl: string; password: string }) =>

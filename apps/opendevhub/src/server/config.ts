@@ -2,13 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type {
-  EnvId,
-  EnvWorktree,
-  ForgeKind,
-  NodeId,
-  ProjectId,
-} from "../shared/types";
+import type { ForgeKind, NodeId } from "../shared/types";
 import type { ForgeEntry } from "./git/forge";
 import { LOCAL_NODE } from "./nodes/host";
 
@@ -22,28 +16,6 @@ export interface Config {
   projects?: Record<string, unknown>;
   /** Machines tasks can run on, besides this one. */
   nodes?: NodeConfig[];
-}
-
-export interface PersistedRuntime {
-  containerId?: string;
-  password?: string;
-  workspaceFolder?: string;
-  relayToken?: string;
-  remoteUser?: string;
-}
-
-/** A task environment as state.json keeps it. */
-export interface PersistedEnv extends PersistedRuntime {
-  projectId: ProjectId;
-  worktree: EnvWorktree;
-  image?: { key: string; ref: string };
-  /** Absent for this machine. */
-  node?: NodeId;
-}
-
-export interface PersistedState {
-  projects: Record<ProjectId, PersistedRuntime>;
-  environments?: Record<EnvId, PersistedEnv>;
 }
 
 export const DEFAULT_PORT = 7777;
@@ -320,26 +292,6 @@ export class FileProjectSettings implements ProjectSettingsStore {
     });
   }
 }
-
-export const loadState = (dir: string): PersistedState => {
-  const raw = readJson<Partial<PersistedState>>(
-    path.join(dir, "state.json"),
-    {}
-  );
-  const environments =
-    raw.environments && typeof raw.environments === "object"
-      ? raw.environments
-      : undefined;
-  return {
-    projects:
-      raw.projects && typeof raw.projects === "object" ? raw.projects : {},
-    ...(environments ? { environments } : {}),
-  };
-};
-
-export const saveState = (dir: string, state: PersistedState): void => {
-  writeJson(path.join(dir, "state.json"), state, 0o600);
-};
 
 const expandHome = (p: string): string => {
   if (p === "~") {

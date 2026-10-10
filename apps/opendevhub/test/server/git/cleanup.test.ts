@@ -455,8 +455,7 @@ function service(
   const store = new StateStore({
     tasks: dbs.tasks,
     port: 0,
-    persisted: { projects: {} },
-    persist: () => {},
+    environments: dbs.environments,
   });
   store.setProjects([project]);
   store.updateRuntime(project.id, {
@@ -797,12 +796,12 @@ describe("ended tasks", () => {
     s.tasks.attachSession(
       id,
       1,
-      { directory: "/w", envId: id, sessionId: `ses_${id}` },
+      { directory: "/w", envId: project.id, sessionId: `ses_${id}` },
       SYSTEM
     );
     if (endedAt !== null) {
       s.clock.now = endedAt;
-      s.tasks.markSessionsGone(id, new Set());
+      s.tasks.markSessionsGone(project.id, new Set());
     }
     s.clock.now = NOW;
   };

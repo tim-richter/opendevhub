@@ -49,7 +49,7 @@ import {
 } from "../../src/web/api";
 import { api as rpcApi } from "../../src/web/rpc";
 import { MemorySecretStore } from "../helpers/secrets";
-import { memoryStores } from "../helpers/stores";
+import { memoryStores, stateStores } from "../helpers/stores";
 
 const project: Project = {
   id: "demo-abc123",
@@ -72,10 +72,8 @@ const newProject: Project = {
 
 function setup(webDir?: string) {
   const store = new StateStore({
-    tasks: memoryStores().tasks,
+    ...stateStores(),
     port: 7777,
-    persisted: { projects: {} },
-    persist: () => {},
   });
   store.setProjects([project]);
   store.updateRuntime(project.id, { password: "secret" });

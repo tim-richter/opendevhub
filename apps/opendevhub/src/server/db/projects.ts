@@ -1,6 +1,7 @@
 import type { Project, ProjectId } from "../../shared/types";
 import { transaction } from "./database";
 import type { Db } from "./database";
+import { insertMainIn } from "./environments";
 import { SYSTEM, record } from "./events";
 
 export interface ProjectRow extends Project {
@@ -26,7 +27,10 @@ const toProject = (r: RawProject): ProjectRow => ({
   ...(r.missing_since === null ? {} : { missingSince: r.missing_since }),
 });
 
-/** The projects discovery has found. Rows are never deleted, so a project's tasks survive it going missing. */
+/**
+ * The projects discovery has found, each with its main environment. Rows are never deleted, so a project's tasks
+ * survive it going missing.
+ */
 export class ProjectStore {
   private readonly db: Db;
   private readonly now: () => number;
@@ -65,6 +69,7 @@ export class ProjectStore {
             projectId: p.id,
             verb: "project.discovered",
           });
+          insertMainIn(this.db, p.id, at);
           continue;
         }
         const returned = row.missingSince !== undefined;

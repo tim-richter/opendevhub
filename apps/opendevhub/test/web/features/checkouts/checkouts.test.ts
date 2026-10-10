@@ -242,6 +242,7 @@ describe("checkouts with their own container", () => {
           hostPath: "/src/demo.worktrees/login",
           branch: "feature/login",
         },
+        worktreeId: 1,
         runtime: {
           projectId: "p 1",
           containerState,

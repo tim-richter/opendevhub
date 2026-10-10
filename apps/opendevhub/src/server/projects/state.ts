@@ -18,9 +18,11 @@ import type {
   Worktree,
 } from "../../shared/types";
 import { projectUrl } from "../../shared/urls";
-import type { PersistedEnv, PersistedRuntime, PersistedState } from "../config";
 import { creatorView } from "../db/checkouts";
 import type { CheckoutStore } from "../db/checkouts";
+import type { DurablePatch, EnvironmentStore } from "../db/environments";
+import type { Actor } from "../db/events";
+import { SYSTEM } from "../db/events";
 import type { TaskRecord, TaskStore } from "../db/tasks";
 import type { RunningContainer } from "../environments/resources";
 import { compareSessions } from "../sessions/status";
@@ -31,8 +33,8 @@ export interface StoreOptions {
   tasks: TaskStore;
   /** Who made each worktree, and its branch row; worktrees are listed without them when absent. */
   checkouts?: CheckoutStore;
-  persisted: PersistedState;
-  persist: (state: PersistedState) => void;
+  /** Where environments and their durable runtime fields live; read once at start. */
+  environments: EnvironmentStore;
 }
 
 const DURABLE_KEYS = [
@@ -47,19 +49,13 @@ const DURABLE_KEYS = [
 export interface EnvRecord {
   id: EnvId;
   projectId: ProjectId;
+  /** The worktree row it runs on. */
+  worktreeId: number;
   worktree: EnvWorktree;
   image?: { key: string; ref: string };
   /** Absent for this machine. */
   node?: NodeId;
 }
-
-const durable = (r: ProjectRuntime): PersistedRuntime => ({
-  containerId: r.containerId,
-  password: r.password,
-  relayToken: r.relayToken,
-  workspaceFolder: r.workspaceFolder,
-  ...(r.remoteUser ? { remoteUser: r.remoteUser } : {}),
-});
 
 const publicRuntime = (r: ProjectRuntime): PublicRuntime => {
   const { password: _password, relayToken: _relayToken, ...rest } = r;
@@ -93,24 +89,21 @@ export class StateStore {
     this.opts = opts;
     opts.tasks.subscribe(() => this.emit());
     opts.checkouts?.subscribe(() => this.emit());
-    for (const [id, saved] of Object.entries(opts.persisted.projects)) {
-      this.runtimes.set(id, { ...defaultRuntime(id), ...saved });
-    }
-    for (const [id, saved] of Object.entries(
-      opts.persisted.environments ?? {}
-    )) {
-      if (!saved?.worktree?.path || !saved.projectId) {
-        continue;
-      }
-      const { projectId, worktree, image, node, ...runtime } = saved;
-      this.envs.set(id, {
-        id,
-        projectId,
-        worktree,
-        ...(image ? { image } : {}),
-        ...(node ? { node } : {}),
+    for (const row of opts.environments.listLive()) {
+      this.runtimes.set(row.id, {
+        ...defaultRuntime(row.projectId),
+        ...row.runtime,
       });
-      this.runtimes.set(id, { ...defaultRuntime(projectId), ...runtime });
+      if (row.kind === "task" && row.worktree && row.worktreeId !== undefined) {
+        this.envs.set(row.id, {
+          id: row.id,
+          projectId: row.projectId,
+          worktree: row.worktree,
+          worktreeId: row.worktreeId,
+          ...(row.image ? { image: row.image } : {}),
+          ...(row.node ? { node: row.node } : {}),
+        });
+      }
     }
   }
 
@@ -145,8 +138,14 @@ export class StateStore {
       return;
     }
     this.runtimes.set(id, { ...current, ...patch });
-    if (changed.some((k) => (DURABLE_KEYS as readonly string[]).includes(k))) {
-      this.save();
+    const durable = changed.filter((k) =>
+      (DURABLE_KEYS as readonly string[]).includes(k)
+    ) as (typeof DURABLE_KEYS)[number][];
+    if (durable.length > 0) {
+      this.opts.environments.updateDurable(
+        id,
+        Object.fromEntries(durable.map((k) => [k, patch[k]])) as DurablePatch
+      );
     }
     this.emit();
   }
@@ -231,23 +230,42 @@ export class StateStore {
     return this.envs.get(id);
   }
 
-  putEnvironment(rec: EnvRecord): void {
+  /**
+   * Records a task environment, for the variant of `taskId` when one asked for it, or the image an existing one was
+   * last started from.
+   */
+  putEnvironment(rec: EnvRecord, actor: Actor = SYSTEM, taskId?: string): void {
+    const { environments } = this.opts;
+    if (!this.envs.has(rec.id)) {
+      environments.putTask(
+        {
+          id: rec.id,
+          projectId: rec.projectId,
+          worktreeId: rec.worktreeId,
+          ...(rec.node ? { node: rec.node } : {}),
+        },
+        actor,
+        taskId
+      );
+    }
+    if (rec.image) {
+      environments.updateDurable(rec.id, { image: rec.image });
+    }
     this.envs.set(rec.id, rec);
     if (!this.runtimes.has(rec.id)) {
       this.runtimes.set(rec.id, defaultRuntime(rec.projectId));
     }
-    this.save();
     this.emit();
   }
 
-  removeEnvironment(id: EnvId): void {
+  removeEnvironment(id: EnvId, actor: Actor = SYSTEM): void {
     if (!this.envs.delete(id)) {
       return;
     }
+    this.opts.environments.markRemoved(id, actor);
     this.runtimes.delete(id);
     this.sessions.delete(id);
     delete this.resourceStats[id];
-    this.save();
     this.emit();
   }
 
@@ -343,6 +361,7 @@ export class StateStore {
           environments: envs.map((e) => ({
             id: e.id,
             worktree: e.worktree,
+            worktreeId: e.worktreeId,
             ...(e.node ? { node: e.node } : {}),
             ...(e.image ? { image: e.image } : {}),
             runtime: publicRuntime(this.runtime(e.id)),
@@ -412,33 +431,6 @@ export class StateStore {
         ...(branch?.originUrl ? { origin: branch.originUrl } : {}),
       };
     });
-  }
-
-  private save(): void {
-    const projects: Record<ProjectId, PersistedRuntime> = {};
-    const environments: Record<EnvId, PersistedEnv> = {};
-    for (const [id, r] of this.runtimes) {
-      if (this.envs.has(id)) {
-        continue;
-      }
-      if (r.containerId || r.password || r.workspaceFolder || r.relayToken) {
-        projects[id] = durable(r);
-      }
-    }
-    for (const [id, e] of this.envs) {
-      environments[id] = {
-        projectId: e.projectId,
-        worktree: e.worktree,
-        ...(e.image ? { image: e.image } : {}),
-        ...(e.node ? { node: e.node } : {}),
-        ...durable(this.runtime(id)),
-      };
-    }
-    this.opts.persist(
-      Object.keys(environments).length > 0
-        ? { environments, projects }
-        : { projects }
-    );
   }
 
   private emit(): void {

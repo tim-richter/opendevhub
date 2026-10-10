@@ -43,6 +43,7 @@ describe("openDatabase", () => {
     expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     expect(tables(db)).toStrictEqual([
       "branches",
+      "environments",
       "events",
       "projects",
       "tasks",

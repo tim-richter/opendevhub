@@ -4,7 +4,7 @@ import { eventsSince, variantActor } from "../../../src/server/db/events";
 import type { NewTask } from "../../../src/server/db/tasks";
 import { RESTART_ERROR } from "../../../src/server/db/tasks";
 import type { Project } from "../../../src/shared/types";
-import { memoryStores } from "../../helpers/stores";
+import { memoryStores, taskEnvironment } from "../../helpers/stores";
 
 const project: Project = {
   devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
@@ -131,6 +131,7 @@ describe("TaskStore variants", () => {
   it("records each step, and a failure once with its error", () => {
     const s = setup();
     s.tasks.createTask(s.task({ variants: [{}, {}] }));
+    taskEnvironment(s, project.id, "env-1");
     s.events();
     const actor = variantActor(T1, 1);
     s.tasks.updateVariant(
@@ -306,6 +307,7 @@ describe("TaskStore.markSessionsGone", () => {
     const s = setup();
     s.tasks.createTask(s.task({ variants: [{}, {}] }));
     s.attach(T1, 1, "ses_1");
+    taskEnvironment(s, project.id, "env-2");
     s.attach(T1, 2, "ses_2", "env-2");
     s.events();
     s.tasks.markSessionsGone(project.id, new Set(["other"]));

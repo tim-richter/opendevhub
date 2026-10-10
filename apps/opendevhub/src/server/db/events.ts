@@ -19,7 +19,9 @@ export type EventVerb =
   | "worktree.created"
   | "worktree.adopted"
   | "worktree.switched"
-  | "worktree.removed";
+  | "worktree.removed"
+  | "environment.created"
+  | "environment.removed";
 
 export type ObjectType =
   | "project"
@@ -27,7 +29,8 @@ export type ObjectType =
   | "variant"
   | "session"
   | "branch"
-  | "worktree";
+  | "worktree"
+  | "environment";
 
 /** Who caused a change: the user (an API request), a task's setup job for its variant, or opendevhub itself. */
 export type Actor =

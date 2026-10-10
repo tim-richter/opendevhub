@@ -119,6 +119,8 @@ export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
 export interface EnvironmentView {
   id: EnvId;
   worktree: EnvWorktree;
+  /** The worktree row it runs on. */
+  worktreeId: number;
   /** The node it runs on; absent for this machine. */
   node?: NodeId;
   /** The base image it was last started from. */

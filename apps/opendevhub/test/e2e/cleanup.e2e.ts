@@ -74,8 +74,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
       tasks: dbs.tasks,
       checkouts: dbs.checkouts,
       port: 0,
-      persisted: { projects: {} },
-      persist: () => {},
+      environments: dbs.environments,
     });
     const containers = new Containers(spawnRunner);
     const git = new GitOps({ containers });

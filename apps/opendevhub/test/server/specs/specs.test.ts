@@ -22,7 +22,7 @@ import type {
   SessionSummary,
   VariantSpec,
 } from "../../../src/shared/types";
-import { memoryStores } from "../../helpers/stores";
+import { memoryStores, taskEnvironment } from "../../helpers/stores";
 
 const MARK = "@@opendevhub-spec@@";
 const section = (name: string, body: unknown, code = 0) =>
@@ -108,7 +108,8 @@ const make = (opts: {
   target?: CheckTarget;
   sessions?: SpecSession[];
 }) => {
-  const { projects, tasks } = memoryStores();
+  const dbs = memoryStores();
+  const { projects, tasks } = dbs;
   projects.upsertAll([
     {
       devcontainerPath: "/src/p/.devcontainer.json",
@@ -131,6 +132,9 @@ const make = (opts: {
       variants: [{}],
     });
     tasks.setSpec("tsk_1", 1, s.spec);
+    if (s.envId && s.envId !== "p") {
+      taskEnvironment(dbs, "p", s.envId, s.directory);
+    }
     tasks.attachSession(
       "tsk_1",
       1,

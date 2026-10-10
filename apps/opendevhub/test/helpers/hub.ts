@@ -1,6 +1,5 @@
 import { expect, it, vi } from "vitest";
 
-import type { PersistedState } from "../../src/server/config";
 import { envIdFor } from "../../src/server/environments/config";
 import type {
   ContainerInfo,
@@ -51,7 +50,8 @@ import type {
   SessionSummary,
   UpdateResult,
 } from "../../src/shared/types";
-import { memoryStores } from "./stores";
+import { memoryStores, seed, worktreeRow } from "./stores";
+import type { Seed } from "./stores";
 
 /** A Hub on fakes for the Hub modules' tests: `setup()` builds one, the `with…` helpers bring it to a known state. */
 export const project: Project = {
@@ -289,7 +289,7 @@ export function boxKit() {
 }
 
 export function setup(
-  persisted: PersistedState = { projects: {} },
+  persisted: Seed = {},
   network?: NetworkPort,
   projects = [project],
   nodes?: NodeKitsPort
@@ -298,10 +298,10 @@ export function setup(
   const dbs = memoryStores(() => clock.now);
   // Discovery registers projects before anything refers to them; most tests start from there.
   dbs.projects.upsertAll(projects);
+  seed(dbs, persisted);
   const store = new StateStore({
     port: 7777,
-    persisted,
-    persist: () => {},
+    environments: dbs.environments,
     tasks: dbs.tasks,
     checkouts: dbs.checkouts,
   });
@@ -756,6 +756,8 @@ export function setup(
   });
   return {
     store,
+    dbs,
+    environments: dbs.environments,
     tasks: dbs.tasks,
     checkouts: dbs.checkouts,
     projects: dbs.projects,
@@ -795,6 +797,7 @@ export async function withRemote() {
     id: remoteEnv,
     projectId: project.id,
     worktree: remoteFix,
+    worktreeId: worktreeRow(s.dbs, project.id, remoteFix, "box"),
     node: "box",
   });
   return { ...s, box };
@@ -808,7 +811,7 @@ export async function withRemoteRunning() {
 }
 
 /** A started project whose worktree list has `feat`. */
-export async function withWorktree(persisted?: PersistedState) {
+export async function withWorktree(persisted?: Seed) {
   const s = setup(persisted);
   s.worktrees.list.mockResolvedValue([feat]);
   await s.hub.environments.rescan();

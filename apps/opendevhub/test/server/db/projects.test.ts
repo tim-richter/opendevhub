@@ -25,16 +25,25 @@ const setup = () => {
 };
 
 describe("ProjectStore", () => {
-  it("inserts discovered projects with their first-seen time", () => {
+  it("inserts discovered projects with their first-seen time and main environment", () => {
     const s = setup();
     s.projects.upsertAll([demo, other]);
     expect(s.projects.get(demo.id)).toStrictEqual({
       ...demo,
       firstSeenAt: 1000,
     });
+    expect(s.environments.get(demo.id)).toStrictEqual({
+      createdAt: 1000,
+      id: demo.id,
+      kind: "main",
+      projectId: demo.id,
+      runtime: {},
+    });
     expect(s.verbs()).toStrictEqual([
       "project.discovered demo-abc123",
+      "environment.created demo-abc123",
       "project.discovered other-def456",
+      "environment.created other-def456",
     ]);
   });
 
@@ -49,7 +58,10 @@ describe("ProjectStore", () => {
       firstSeenAt: 1000,
       name: "Demo",
     });
-    expect(s.verbs()).toStrictEqual(["project.discovered demo-abc123"]);
+    expect(s.verbs()).toStrictEqual([
+      "project.discovered demo-abc123",
+      "environment.created demo-abc123",
+    ]);
   });
 
   it("marks a project missing instead of deleting it, keeping its tasks, and clears the mark when it returns", () => {

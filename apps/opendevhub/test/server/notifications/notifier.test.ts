@@ -4,7 +4,7 @@ import { startNotifier } from "../../../src/server/notifications/notifier";
 import { StateStore } from "../../../src/server/projects/state";
 import type { Notice } from "../../../src/shared/notices";
 import type { Project, SessionSummary } from "../../../src/shared/types";
-import { memoryStores } from "../../helpers/stores";
+import { memoryStores, stateStores } from "../../helpers/stores";
 
 const project: Project = {
   id: "demo-abc123",
@@ -37,10 +37,8 @@ const asking = (ids: string[]) =>
 
 function setup() {
   const store = new StateStore({
-    tasks: memoryStores().tasks,
+    ...stateStores(),
     port: 7777,
-    persisted: { projects: {} },
-    persist: () => {},
   });
   store.setProjects([project]);
   const send = vi.fn(async (_notice: Notice) => 1);

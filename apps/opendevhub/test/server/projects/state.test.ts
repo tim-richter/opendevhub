@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { PersistedState } from "../../../src/server/config";
+import { eventsSince } from "../../../src/server/db/events";
 import { StateStore } from "../../../src/server/projects/state";
 import type { Project, SessionSummary } from "../../../src/shared/types";
-import { memoryStores } from "../../helpers/stores";
+import {
+  memoryStores,
+  seed,
+  stateStores,
+  worktreeRow,
+} from "../../helpers/stores";
+import type { Seed } from "../../helpers/stores";
 
 const p = (id: string): Project => ({
   id,
@@ -20,15 +26,14 @@ const session: SessionSummary = {
   status: "idle",
 };
 
-function make(persisted: PersistedState = { projects: {} }) {
-  const saved: PersistedState[] = [];
-  const store = new StateStore({
-    tasks: memoryStores().tasks,
-    port: 7777,
-    persisted,
-    persist: (s) => saved.push(structuredClone(s)),
-  });
-  return { store, saved };
+/** A store on a fresh database that knows projects `a` and `b`; `restart` opens another store on the same one. */
+function make(data: Seed = {}) {
+  const dbs = memoryStores();
+  dbs.projects.upsertAll([p("a"), p("b")]);
+  seed(dbs, data);
+  const open = () => new StateStore({ ...stateStores(dbs), port: 7777 });
+  const row = (id: string) => dbs.environments.get(id);
+  return { store: open(), restart: open, row, dbs };
 }
 
 describe(StateStore, () => {
@@ -51,17 +56,24 @@ describe(StateStore, () => {
     });
   });
 
-  it("persists only durable fields, and only when they change", () => {
-    const { store, saved } = make();
+  it("stores only durable fields, and only when they change", () => {
+    const { store, row, dbs } = make();
     store.setProjects([p("a")]);
-    store.updateRuntime("a", { containerState: "starting" });
-    expect(saved).toHaveLength(0);
-    store.updateRuntime("a", { containerId: "c1", password: "pw" });
-    expect(saved.at(-1)).toEqual({
-      projects: {
-        a: { containerId: "c1", password: "pw", workspaceFolder: undefined },
-      },
+    const write = vi.spyOn(dbs.environments, "updateDurable");
+    store.updateRuntime("a", {
+      containerState: "starting",
+      ports: [],
+      opencode: "starting",
     });
+    expect(write).not.toHaveBeenCalled();
+    store.updateRuntime("a", { containerId: "c1", password: "pw" });
+    expect(write).toHaveBeenCalledOnce();
+    expect(row("a")?.runtime).toStrictEqual({
+      containerId: "c1",
+      password: "pw",
+    });
+    store.updateRuntime("a", { containerId: "c1" });
+    expect(write).toHaveBeenCalledOnce();
   });
 
   it("notifies subscribers on change but not on no-op updates", () => {
@@ -116,11 +128,11 @@ describe(StateStore, () => {
     ]);
   });
 
-  it("persists relayToken and never exposes it in snapshots", () => {
-    const { store, saved } = make();
+  it("stores relayToken and never exposes it in snapshots", () => {
+    const { store, row } = make();
     store.setProjects([p("a")]);
     store.updateRuntime("a", { relayToken: "relay-secret", relay: "active" });
-    expect(saved.at(-1)?.projects.a).toMatchObject({
+    expect(row("a")?.runtime).toMatchObject({
       relayToken: "relay-secret",
     });
     const snap = JSON.stringify(store.snapshot());
@@ -129,12 +141,14 @@ describe(StateStore, () => {
   });
 
   it("lists the containers of running main and task environments", () => {
-    const { store } = make();
+    const { store, dbs } = make();
     store.setProjects([p("a"), p("b")]);
+    const worktree = { path: "/w/x", hostPath: "/h/x", branch: "x" };
     store.putEnvironment({
       id: "env-1",
       projectId: "a",
-      worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" },
+      worktree,
+      worktreeId: worktreeRow(dbs, "a", worktree),
     });
     store.updateRuntime("a", { containerState: "running", containerId: "ca" });
     store.updateRuntime("b", { containerState: "stopped", containerId: "cb" });
@@ -164,12 +178,14 @@ describe(StateStore, () => {
   });
 
   it("drops a removed environment's resources", () => {
-    const { store } = make();
+    const { store, dbs } = make();
     store.setProjects([p("a")]);
+    const worktree = { path: "/w/x", hostPath: "/h/x", branch: "x" };
     store.putEnvironment({
       id: "env-1",
       projectId: "a",
-      worktree: { path: "/w/x", hostPath: "/h/x", branch: "x" },
+      worktree,
+      worktreeId: worktreeRow(dbs, "a", worktree),
     });
     store.setResources({ "env-1": { cpu: 1, memory: 0, memoryLimit: 1 } });
     store.removeEnvironment("env-1");
@@ -178,18 +194,24 @@ describe(StateStore, () => {
 });
 
 describe("task environments", () => {
-  const rec = {
-    id: "a-feat-0a1b",
-    projectId: "a",
-    worktree: {
-      path: "/w/a.worktrees/feat",
-      hostPath: "/src/a.worktrees/feat",
-      branch: "feat",
-    },
+  const worktree = {
+    path: "/w/a.worktrees/feat",
+    hostPath: "/src/a.worktrees/feat",
+    branch: "feat",
+  };
+  const made = () => {
+    const m = make();
+    const rec = {
+      id: "a-feat-0a1b",
+      projectId: "a",
+      worktree,
+      worktreeId: worktreeRow(m.dbs, "a", worktree),
+    };
+    return { ...m, rec };
   };
 
-  it("records an environment, persists it with its durable runtime, and restores it", () => {
-    const { store, saved } = make();
+  it("records an environment on its worktree row with its durable runtime, and restores it", () => {
+    const { store, row, rec, restart } = made();
     store.setProjects([p("a")]);
     store.putEnvironment(rec);
     store.updateRuntime(rec.id, {
@@ -197,14 +219,14 @@ describe("task environments", () => {
       password: "pw2",
       containerState: "running",
     });
-    expect(saved.at(-1)?.environments?.[rec.id]).toMatchObject({
+    expect(row(rec.id)).toMatchObject({
+      kind: "task",
       projectId: "a",
-      worktree: rec.worktree,
-      containerId: "c2",
-      password: "pw2",
+      worktreeId: rec.worktreeId,
+      worktree,
+      runtime: { containerId: "c2", password: "pw2" },
     });
-    expect(saved.at(-1)?.projects).not.toHaveProperty(rec.id);
-    const restored = make(saved.at(-1)).store;
+    const restored = restart();
     restored.setProjects([p("a")]);
     expect(restored.environment(rec.id)).toStrictEqual(rec);
     expect(restored.runtime(rec.id)).toMatchObject({
@@ -215,7 +237,7 @@ describe("task environments", () => {
   });
 
   it("shows environments in the snapshot without secrets, with their own URL", () => {
-    const { store } = make();
+    const { store, rec } = made();
     store.setProjects([p("a")]);
     store.putEnvironment({ ...rec, image: { key: "k", ref: "r" } });
     store.updateRuntime(rec.id, {
@@ -229,6 +251,7 @@ describe("task environments", () => {
       expect.objectContaining({
         id: rec.id,
         worktree: rec.worktree,
+        worktreeId: rec.worktreeId,
         image: { key: "k", ref: "r" },
         openUrl: `http://${rec.id}.localhost:7777/`,
       }),
@@ -238,7 +261,7 @@ describe("task environments", () => {
   });
 
   it("lists a project's sessions from all its environments, newest first", () => {
-    const { store } = make();
+    const { store, rec } = made();
     store.setProjects([p("a")]);
     store.putEnvironment(rec);
     const s = (id: string, updatedAt: number, envId?: string) => ({
@@ -258,8 +281,8 @@ describe("task environments", () => {
     ]);
   });
 
-  it("forgets an environment, its runtime and its sessions", () => {
-    const { store, saved } = make();
+  it("forgets an environment, its runtime and its sessions, and marks its row removed", () => {
+    const { store, row, rec, dbs } = made();
     store.setProjects([p("a")]);
     store.putEnvironment(rec);
     store.setSessions(rec.id, [
@@ -275,7 +298,21 @@ describe("task environments", () => {
     store.removeEnvironment(rec.id);
     expect(store.environments("a")).toStrictEqual([]);
     expect(store.sessionsOf("a")).toStrictEqual([]);
-    expect(saved.at(-1)).not.toHaveProperty("environments");
+    expect(row(rec.id)?.removedAt).toBeDefined();
+    expect(dbs.environments.listLive().map((e) => e.id)).toStrictEqual([
+      "a",
+      "b",
+    ]);
+    expect(
+      eventsSince(dbs.db)
+        .filter((e) => e.object.type === "environment")
+        .map((e) => `${e.verb} ${e.object.id}`)
+    ).toStrictEqual([
+      "environment.created a",
+      "environment.created b",
+      "environment.created a-feat-0a1b",
+      "environment.removed a-feat-0a1b",
+    ]);
   });
 });
 
@@ -299,12 +336,7 @@ describe("usage", () => {
   });
 
   it("publishes nodes in the snapshot and skips no-op updates", () => {
-    const store = new StateStore({
-      tasks: memoryStores().tasks,
-      port: 7777,
-      persisted: { projects: {} },
-      persist: () => {},
-    });
+    const store = new StateStore({ ...stateStores(), port: 7777 });
     const changes = vi.fn();
     store.subscribe(changes);
     expect(store.snapshot().nodes).toBeUndefined();
@@ -324,13 +356,9 @@ describe("usage", () => {
       path: "/src/demo",
       devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
     };
-    const saved: PersistedState[] = [];
-    const store = new StateStore({
-      tasks: memoryStores().tasks,
-      port: 7777,
-      persisted: { projects: {} },
-      persist: (s) => saved.push(structuredClone(s)),
-    });
+    const dbs = memoryStores();
+    dbs.projects.upsertAll([project]);
+    const store = new StateStore({ ...stateStores(dbs), port: 7777 });
     store.setProjects([project]);
     store.updateRuntime(project.id, {
       worktrees: [
@@ -350,10 +378,11 @@ describe("usage", () => {
       id: "demo-abc123-fix-1a2b",
       projectId: project.id,
       worktree,
+      worktreeId: worktreeRow(dbs, project.id, worktree, "box"),
       node: "box",
     });
     store.updateRuntime("demo-abc123-fix-1a2b", { containerId: "r1" });
-    expect(saved.at(-1)?.environments?.["demo-abc123-fix-1a2b"]).toMatchObject({
+    expect(dbs.environments.get("demo-abc123-fix-1a2b")).toMatchObject({
       node: "box",
       worktree,
     });
@@ -369,12 +398,7 @@ describe("usage", () => {
       { path: "/workspaces/demo.worktrees/fix", branch: "fix", node: "box" },
     ]);
 
-    const again = new StateStore({
-      tasks: memoryStores().tasks,
-      port: 7777,
-      persisted: saved.at(-1)!,
-      persist: () => {},
-    });
+    const again = new StateStore({ ...stateStores(dbs), port: 7777 });
     expect(again.environment("demo-abc123-fix-1a2b")?.node).toBe("box");
   });
 
@@ -389,12 +413,7 @@ describe("usage", () => {
     const setupStore = () => {
       const dbs = memoryStores(() => 5);
       dbs.projects.upsertAll([project]);
-      const store = new StateStore({
-        tasks: dbs.tasks,
-        port: 7777,
-        persisted: { projects: {} },
-        persist: () => {},
-      });
+      const store = new StateStore({ ...stateStores(dbs), port: 7777 });
       store.setProjects([project]);
       dbs.tasks.createTask({
         createdAt: 5,

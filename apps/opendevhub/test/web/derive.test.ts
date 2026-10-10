@@ -265,6 +265,7 @@ describe("task environments", () => {
       hostPath: "/p.worktrees/feat",
       branch: "feat",
     },
+    worktreeId: 1,
     runtime: {
       projectId: "p",
       containerState: "running",

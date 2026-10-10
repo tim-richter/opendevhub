@@ -10,9 +10,10 @@ import {
   proxyTargets,
   runNodesCommand,
 } from "../../src/server/cli";
-import { loadConfig, saveConfig, saveState } from "../../src/server/config";
+import { loadConfig, saveConfig } from "../../src/server/config";
+import { USER } from "../../src/server/db/events";
 import { StateStore } from "../../src/server/projects/state";
-import { memoryStores } from "../helpers/stores";
+import { memoryStores, stateStores } from "../helpers/stores";
 
 describe(parseCli, () => {
   it("parses port and --no-open", () => {
@@ -89,10 +90,8 @@ describe(loadAndSaveStartupConfig, () => {
 describe(proxyTargets, () => {
   it("proxies to a running environment's opencode, main or task", () => {
     const store = new StateStore({
-      tasks: memoryStores().tasks,
+      ...stateStores(),
       port: 7777,
-      persisted: { projects: {} },
-      persist: () => {},
     });
     store.updateRuntime("p-feat-0a1b", {
       containerState: "running",
@@ -117,23 +116,38 @@ describe(runNodesCommand, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-nodes-"));
     try {
       saveConfig(dir, { port: 7777, nodes: [{ id: "box", ssh: "tim@box" }] });
-      const worktree = {
-        path: "/workspaces/demo.worktrees/fix",
-        hostPath: "/home/tim/x/fix",
-        branch: "fix",
-      };
-      saveState(dir, {
-        projects: {},
-        environments: {
-          "demo-fix-1a2b": { projectId: "demo", worktree, node: "box" },
+      const dbs = memoryStores();
+      dbs.projects.upsertAll([
+        {
+          id: "demo",
+          name: "demo",
+          path: "/src/demo",
+          devcontainerPath: "/src/demo/.devcontainer.json",
         },
-      });
+      ]);
+      const worktree = dbs.checkouts.insertWorktree(
+        "demo",
+        { path: "/workspaces/demo.worktrees/fix", node: "box" },
+        { by: "manual" },
+        USER
+      );
+      dbs.environments.putTask(
+        {
+          id: "demo-fix-1a2b",
+          projectId: "demo",
+          worktreeId: worktree.id,
+          node: "box",
+        },
+        USER
+      );
       const err: string[] = [];
       expect(
-        runNodesCommand(["remove", "box"], dir, {
-          log: () => {},
-          error: (s) => err.push(s),
-        })
+        runNodesCommand(
+          ["remove", "box"],
+          dir,
+          { log: () => {}, error: (s) => err.push(s) },
+          (id) => dbs.environments.countOnNode(id)
+        )
       ).toBe(2);
       expect(err).toStrictEqual([
         "node box still runs 1 task environment; remove it first",
@@ -147,10 +161,12 @@ describe(runNodesCommand, () => {
   function run(dir: string, ...argv: string[]) {
     const out: string[] = [];
     const err: string[] = [];
-    const code = runNodesCommand(argv, dir, {
-      log: (s) => out.push(s),
-      error: (s) => err.push(s),
-    });
+    const code = runNodesCommand(
+      argv,
+      dir,
+      { log: (s) => out.push(s), error: (s) => err.push(s) },
+      () => 0
+    );
     return { code, out, err };
   }
 
