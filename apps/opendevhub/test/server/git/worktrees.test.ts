@@ -11,9 +11,7 @@ import {
   Worktrees,
   baseKey,
   mountArg,
-  originKey,
   parseGitVersion,
-  parseOrigins,
   parseWorktreeList,
   supportsRelativePaths,
   validateBranch,
@@ -190,7 +188,6 @@ function containerGit(
     head?: string;
     recordedBase?: string;
     list?: string;
-    origins?: string;
   } = {}
 ) {
   const calls: string[][] = [];
@@ -224,9 +221,6 @@ function containerGit(
     if (sub.startsWith("worktree list")) {
       return ok(opts.list ?? "");
     }
-    if (sub.startsWith("config --get-regexp")) {
-      return opts.origins ? ok(opts.origins) : { ...ok(), exitCode: 1 };
-    }
     if (sub.startsWith("config --get")) {
       return opts.recordedBase
         ? ok(`${opts.recordedBase}\n`)
@@ -257,50 +251,6 @@ function hostGit(version = "2.49.0") {
     c.cmd === "git" ? { stdout: `git version ${version}\n` } : {}
   );
 }
-
-describe(parseOrigins, () => {
-  it("maps branches to origins, keeping the branch's case", () => {
-    expect(
-      parseOrigins(
-        [
-          "branch.review/PR-5.opendevhuborigin https://forge.example/o/r/pulls/5",
-          "branch.feat.opendevhuborigin https://acme.atlassian.net/browse/AB-1",
-          "branch.empty.opendevhuborigin ",
-          "",
-        ].join("\n")
-      )
-    ).toStrictEqual(
-      new Map([
-        ["review/PR-5", "https://forge.example/o/r/pulls/5"],
-        ["feat", "https://acme.atlassian.net/browse/AB-1"],
-      ])
-    );
-  });
-
-  it("parses real git output", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "odh-origin-"));
-    const git = (...args: string[]) =>
-      execFileSync("git", ["-C", tmp, ...args], { encoding: "utf-8" });
-    try {
-      git("init", "-q");
-      git("config", originKey("Review/pr-7"), "https://forge.example/pulls/7");
-      git("config", baseKey("Review/pr-7"), "main");
-      expect(
-        parseOrigins(
-          git(
-            "config",
-            "--get-regexp",
-            String.raw`^branch\..*\.opendevhuborigin$`
-          )
-        )
-      ).toStrictEqual(
-        new Map([["Review/pr-7", "https://forge.example/pulls/7"]])
-      );
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-});
 
 describe("Worktrees.add", () => {
   const add = (
@@ -338,6 +288,7 @@ describe("Worktrees.add", () => {
       path: "/workspaces/demo.worktrees/feature-x",
       hostPath: "/src/demo.worktrees/feature-x",
       branch: "feature/x",
+      base: "main",
     });
   });
 
@@ -480,45 +431,54 @@ describe("Worktrees.add", () => {
   });
 });
 
-describe("Worktrees origins", () => {
-  it("records what a worktree was made for and returns it", async () => {
+describe("Worktrees base and origin", () => {
+  it("returns the base it recorded and writes no origin key", async () => {
     const c = containerGit();
-    const pr = "https://forge.example/o/r/pulls/5";
     const wt = await new Worktrees({ containers: c, run: hostGit().run }).add(
       project,
       {
         workspaceFolder: "/workspaces/demo",
         root,
         branch: "review/pr-5",
-        origin: pr,
+        base: "main",
         onLine: () => undefined,
       }
     );
-    expect(wt.origin).toBe(pr);
-    expect(configSets(c).map((x) => x.slice(4))).toContainEqual([
-      "branch.review/pr-5.opendevhubOrigin",
-      pr,
+    expect(wt.base).toBe("main");
+    expect(configSets(c).map((x) => x.slice(4))).toStrictEqual([
+      ["branch.review/pr-5.opendevhubBase", "main"],
     ]);
   });
 
-  it("lists each worktree with its branch's origin", async () => {
+  it("returns the base an existing branch already has", async () => {
+    const c = containerGit({ branchExists: true, recordedBase: "develop" });
+    const wt = await new Worktrees({ containers: c, run: hostGit().run }).add(
+      project,
+      {
+        workspaceFolder: "/workspaces/demo",
+        root,
+        branch: "feature/x",
+        onLine: () => undefined,
+      }
+    );
+    expect(wt.base).toBe("develop");
+  });
+
+  it("lists worktrees without reading git config", async () => {
     const c = containerGit({
       list: [
         "worktree /workspaces/demo\nHEAD aaa\nbranch refs/heads/main\n",
         "worktree /workspaces/demo.worktrees/review-pr-5\nHEAD bbb\nbranch refs/heads/review/pr-5\n",
-        "worktree /workspaces/demo.worktrees/plain\nHEAD ccc\nbranch refs/heads/plain\n",
       ].join("\n"),
-      origins:
-        "branch.review/pr-5.opendevhuborigin https://forge.example/o/r/pulls/5\n",
     });
     const list = await new Worktrees({
       containers: c,
       run: hostGit().run,
     }).list(project, "/workspaces/demo", root);
     expect(list.map((w) => [w.branch, w.origin])).toStrictEqual([
-      ["review/pr-5", "https://forge.example/o/r/pulls/5"],
-      ["plain", undefined],
+      ["review/pr-5", undefined],
     ]);
+    expect(c.calls.some((x) => x[3] === "config")).toBe(false);
   });
 });
 

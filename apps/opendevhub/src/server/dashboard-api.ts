@@ -44,6 +44,7 @@ export interface DashboardHub {
   >;
   checkouts: Pick<
     Checkouts,
+    | "branches"
     | "refreshWorktrees"
     | "createWorktree"
     | "removeWorktree"

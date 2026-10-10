@@ -60,6 +60,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const dbs = memoryStores();
       const store = new StateStore({
         tasks: dbs.tasks,
+        checkouts: dbs.checkouts,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -76,6 +77,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         store,
         projects: dbs.projects,
         tasks: dbs.tasks,
+        checkouts: dbs.checkouts,
         containers,
         runtime,
         forwarder: new PortForwarder(),
@@ -124,9 +126,16 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         expect(git(bare, "rev-parse", "refs/heads/feature/pub").trim()).toBe(
           git(repo, "rev-parse", "HEAD").trim()
         );
+        expect(dbs.checkouts.branch(project.id, "feature/pub")).toMatchObject({
+          publishedRemote: "origin",
+        });
         expect(
-          git(repo, "config", "branch.feature/pub.opendevhubPublished").trim()
-        ).toBe("origin");
+          git(repo, "config", "--list")
+            .split("\n")
+            .filter(
+              (l) => /\.opendevhub/iu.test(l) && !/opendevhubbase=/iu.test(l)
+            )
+        ).toEqual([]);
         expect((await hub.reviews.review(project.id, ws)).pushed).toBe(true);
       } finally {
         await hub.environments.stop(project.id).catch(() => undefined);

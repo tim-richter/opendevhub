@@ -67,6 +67,9 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
     .post("/api/projects/:id/stop", (c) =>
       action(c, () => actions["stop"](param(c, "id")))
     )
+    .get("/api/projects/:id/branches", (c) =>
+      json(c, (id) => ({ branches: hub.checkouts.branches(id) }))
+    )
     .post("/api/projects/:id/worktrees/refresh", (c) =>
       json(c, async (id) => ({
         worktrees: await hub.checkouts.refreshWorktrees(id),

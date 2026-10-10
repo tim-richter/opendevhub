@@ -6,6 +6,7 @@ import type {
   ProjectId,
   SessionCleanupItem,
 } from "../../shared/types";
+import { USER } from "../db/events";
 import type { Environments } from "../environments/environments";
 import type { HubDeps } from "../environments/ports";
 import type { Checkouts } from "./checkouts";
@@ -33,7 +34,7 @@ export class CleanupTargets {
         ws,
         this.deps.store.runtime(id).worktreeRoot
       );
-      this.deps.store.updateRuntime(id, { worktrees });
+      this.envs.setWorktrees(id, worktrees);
       const envs = this.deps.store.environments(id);
       return scanBranches(this.deps.git, {
         envOf: (dir) => envs.find((e) => e.worktree.path === dir)?.id,
@@ -52,13 +53,9 @@ export class CleanupTargets {
     return this.envs.withGit(id, async (p) => {
       const ws = this.envs.workspaceFolder(p);
       const root = this.deps.store.runtime(id).worktreeRoot;
-      const changed = await branchChanged(
-        this.deps.git,
-        p,
-        ws,
-        item,
-        await this.deps.worktrees.list(p, ws, root)
-      );
+      const listed = await this.deps.worktrees.list(p, ws, root);
+      this.envs.setWorktrees(id, listed);
+      const changed = await branchChanged(this.deps.git, p, ws, item, listed);
       if (changed) {
         return { message: changed, outcome: "skipped" };
       }
@@ -77,12 +74,13 @@ export class CleanupTargets {
           item.branch,
           item.why === "upstream-gone"
         );
+        this.deps.checkouts.deleteBranch(id, item.branch, USER);
       } finally {
         const list = await this.deps.worktrees
           .list(p, ws, root)
           .catch(() => undefined);
         if (list) {
-          this.deps.store.updateRuntime(id, { worktrees: list });
+          this.envs.setWorktrees(id, list);
         }
       }
       this.envs.log(
@@ -167,7 +165,10 @@ export class CleanupTargets {
       .flatMap((e) => (e.node ? [e.worktree.path] : []));
     return this.deps.worktrees
       .list(p, ws, this.deps.store.runtime(p.id).worktreeRoot)
-      .then((list) => [...list.map((w) => w.path), ...remote])
+      .then((list) => {
+        this.envs.setWorktrees(p.id, list);
+        return [...list.map((w) => w.path), ...remote];
+      })
       .catch(() => undefined);
   }
 

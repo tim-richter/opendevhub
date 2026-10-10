@@ -83,7 +83,7 @@ describe("worktrees", () => {
   });
 
   it("creates a worktree, refreshes the list and starts a session in it", async () => {
-    const { store, worktrees, client, hub } = setup();
+    const { store, worktrees, client, hub, checkouts } = setup();
     await hub.environments.rescan();
     await hub.environments.start(project.id);
     worktrees.list.mockResolvedValue([known]);
@@ -95,8 +95,10 @@ describe("worktrees", () => {
     expect(worktrees.add.mock.calls[0][1]).toMatchObject({
       branch: "feature/x",
       base: undefined,
-      origin: undefined,
       workspaceFolder: "/workspaces/demo",
+    });
+    expect(checkouts.branch(project.id, "feature/x")?.createdBy).toStrictEqual({
+      by: "manual",
     });
     expect(client.createSession).toHaveBeenCalledWith(res.worktree.path, {
       title: "feature/x",
@@ -106,17 +108,28 @@ describe("worktrees", () => {
   });
 
   it("remembers the pull request a worktree checks out", async () => {
-    const { worktrees, hub } = setup();
+    const { worktrees, hub, checkouts, store } = setup();
     await hub.environments.rescan();
     await hub.environments.start(project.id);
     const url = "https://forge.example/o/r/pulls/5";
+    const path = "/workspaces/demo.worktrees/review-pr-5";
+    worktrees.list.mockResolvedValue([{ branch: "review/pr-5", path }]);
     await hub.checkouts.createWorktree(project.id, {
       branch: "review/pr-5",
       pull: { commitId: "a".repeat(40), number: 5, url },
     });
     expect(worktrees.add.mock.calls[0][1]).toMatchObject({
       base: "a".repeat(40),
+    });
+    expect(checkouts.branch(project.id, "review/pr-5")).toMatchObject({
+      createdBy: { by: "pull" },
+      originUrl: url,
+    });
+    const [listed] = store.snapshot().projects[0].runtime.worktrees ?? [];
+    expect(listed).toMatchObject({
+      createdBy: { by: "pull", url },
       origin: url,
+      path,
     });
   });
 

@@ -54,6 +54,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const dbs = memoryStores();
       const store = new StateStore({
         tasks: dbs.tasks,
+        checkouts: dbs.checkouts,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -70,6 +71,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         store,
         projects: dbs.projects,
         tasks: dbs.tasks,
+        checkouts: dbs.checkouts,
         containers,
         runtime,
         forwarder: new PortForwarder(),
@@ -169,6 +171,18 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         expect(picked.discarded).toEqual([drop.sessionId]);
         expect(picked.removed).toEqual([drop.directory]);
         expect(hostGit("branch", "--list", "e2e-compare-2").trim()).toBe("");
+        expect(dbs.checkouts.branch(project.id, "e2e-compare-2")).toMatchObject(
+          {
+            createdBy: { by: "variant", n: 2, task: two.task },
+            deletedAt: expect.any(Number),
+          }
+        );
+        expect(
+          dbs.checkouts
+            .worktreeHistory(project.id)
+            .filter((w) => w.path === drop.directory)
+            .map((w) => w.removedAt !== undefined)
+        ).toEqual([true]);
         await vi.waitFor(
           () => expect(sessionOf(drop.sessionId)).toBeUndefined(),
           { timeout: 20_000, interval: 500 }

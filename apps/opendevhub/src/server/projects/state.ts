@@ -19,6 +19,8 @@ import type {
 } from "../../shared/types";
 import { projectUrl } from "../../shared/urls";
 import type { PersistedEnv, PersistedRuntime, PersistedState } from "../config";
+import { creatorView } from "../db/checkouts";
+import type { CheckoutStore } from "../db/checkouts";
 import type { TaskRecord, TaskStore } from "../db/tasks";
 import type { RunningContainer } from "../environments/resources";
 import { compareSessions } from "../sessions/status";
@@ -27,6 +29,8 @@ export interface StoreOptions {
   port: number;
   /** Where tasks live; the snapshot lists them and sessions show theirs. */
   tasks: TaskStore;
+  /** Who made each worktree, and its branch row; worktrees are listed without them when absent. */
+  checkouts?: CheckoutStore;
   persisted: PersistedState;
   persist: (state: PersistedState) => void;
 }
@@ -88,6 +92,7 @@ export class StateStore {
   constructor(opts: StoreOptions) {
     this.opts = opts;
     opts.tasks.subscribe(() => this.emit());
+    opts.checkouts?.subscribe(() => this.emit());
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
       this.runtimes.set(id, { ...defaultRuntime(id), ...saved });
     }
@@ -346,10 +351,13 @@ export class StateStore {
           openUrl: projectUrl(project.id, this.opts.port),
           project,
           runtime:
-            remote.length > 0
+            remote.length > 0 || runtime.worktrees
               ? {
                   ...runtime,
-                  worktrees: [...(runtime.worktrees ?? []), ...remote],
+                  worktrees: this.withCreators(project.id, [
+                    ...(runtime.worktrees ?? []),
+                    ...remote,
+                  ]),
                 }
               : runtime,
           sessions: this.sessionsOf(project.id),
@@ -369,6 +377,41 @@ export class StateStore {
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** Worktrees with their branch row, who made them, and what their branch was made for. */
+  private withCreators(projectId: ProjectId, list: Worktree[]): Worktree[] {
+    const { checkouts } = this.opts;
+    if (!checkouts) {
+      return list;
+    }
+    const rows = checkouts.worktreesOf(projectId);
+    const branches = new Map(
+      checkouts.branchesOf(projectId).map((b) => [b.id, b])
+    );
+    return list.map((w) => {
+      const row = rows.find(
+        (r) => r.path === w.path && (r.node ?? "") === (w.node ?? "")
+      );
+      if (!row) {
+        return w;
+      }
+      const branch =
+        row.branchId === undefined ? undefined : branches.get(row.branchId);
+      const { by } = row.createdBy;
+      const createdBy = creatorView(row.createdBy, {
+        ...(by === "variant"
+          ? { title: this.opts.tasks.get(row.createdBy.task)?.title }
+          : {}),
+        ...(branch?.originUrl ? { url: branch.originUrl } : {}),
+      });
+      return {
+        ...w,
+        createdBy,
+        ...(row.branchId === undefined ? {} : { branchId: row.branchId }),
+        ...(branch?.originUrl ? { origin: branch.originUrl } : {}),
+      };
+    });
   }
 
   private save(): void {

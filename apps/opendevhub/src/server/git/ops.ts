@@ -393,23 +393,15 @@ export class GitOps {
     return result4.trim() === "";
   }
 
-  /** Pushed: the branch has an upstream, or publish recorded it. */
-  async isPushed(p: ExecTarget, dir: string, branch: string): Promise<boolean> {
-    const result5 = await this.exec(p, dir, [
+  /** Pushed: the branch has an upstream. Whether opendevhub published it is on its branch row. */
+  async isPushed(p: ExecTarget, dir: string): Promise<boolean> {
+    const r = await this.exec(p, dir, [
       "rev-parse",
       "--abbrev-ref",
       "--symbolic-full-name",
       "@{u}",
     ]);
-    if (result5.exitCode === 0) {
-      return true;
-    }
-    const result6 = await this.exec(p, dir, [
-      "config",
-      "--get",
-      `branch.${branch}.opendevhubPublished`,
-    ]);
-    return result6.exitCode === 0;
+    return r.exitCode === 0;
   }
 
   private async requireIdentity(p: ExecTarget, dir: string): Promise<void> {

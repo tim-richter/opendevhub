@@ -1070,10 +1070,11 @@ describe("task environments", () => {
       "ses_keep",
       true
     );
+    // The listing found `feat` before the task used it, so its branch isn't the task's to delete.
     expect(r).toStrictEqual({
       discarded: ["ses_drop"],
       removed: [feat.path],
-      errors: [],
+      errors: ["feat: kept — not created by this task"],
     });
     expect(containers.remove).toHaveBeenCalledWith("c2");
     expect(store.environment(envId)).toBeUndefined();
@@ -1615,7 +1616,7 @@ describe("environments on another node", () => {
   });
 
   it("publish from the main checkout after bringing the branch home", async () => {
-    const { hub, box, publisher } = await withRemoteRunning();
+    const { hub, box, publisher, checkouts } = await withRemoteRunning();
     const main = { container: "/workspaces/demo", host: project.path };
     await hub.reviews.publishInfo(project.id, remoteFix.path);
     expect(publisher.info).toHaveBeenCalledWith(
@@ -1636,8 +1637,12 @@ describe("environments on another node", () => {
       project,
       main,
       "fix",
-      expect.objectContaining({ remote: "origin" })
+      expect.objectContaining({ remote: "origin" }),
+      undefined
     );
+    expect(checkouts.branch(project.id, "fix")).toMatchObject({
+      publishedRemote: "origin",
+    });
   });
 
   it("don't run checks or open editors yet", async () => {

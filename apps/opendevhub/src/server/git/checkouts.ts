@@ -1,6 +1,13 @@
 import path from "node:path";
 
-import type { Project, ProjectId, Worktree } from "../../shared/types";
+import type {
+  BranchView,
+  Project,
+  ProjectId,
+  Worktree,
+} from "../../shared/types";
+import { creatorView } from "../db/checkouts";
+import { USER } from "../db/events";
 import type { CheckTarget } from "../environments/checks";
 import type { ExecTarget } from "../environments/containers";
 import type { Environments, TaskEnv } from "../environments/environments";
@@ -28,6 +35,28 @@ export class Checkouts {
     this.sessions = sessions;
   }
 
+  /** The project's branch rows, deleted ones and those whose worktrees are gone included. */
+  branches(id: ProjectId): BranchView[] {
+    this.envs.requireProject(id);
+    return this.deps.checkouts.branchesOf(id).map((b) => ({
+      createdAt: b.createdAt,
+      createdBy: creatorView(b.createdBy, {
+        ...(b.createdBy.by === "variant"
+          ? { title: this.deps.tasks.get(b.createdBy.task)?.title }
+          : {}),
+        ...(b.originUrl ? { url: b.originUrl } : {}),
+      }),
+      id: b.id,
+      name: b.name,
+      ...(b.base ? { base: b.base } : {}),
+      ...(b.originUrl ? { origin: b.originUrl } : {}),
+      ...(b.publishedRemote ? { publishedRemote: b.publishedRemote } : {}),
+      ...(b.publishedAt === undefined ? {} : { publishedAt: b.publishedAt }),
+      ...(b.prUrl ? { prUrl: b.prUrl } : {}),
+      ...(b.deletedAt === undefined ? {} : { deletedAt: b.deletedAt }),
+    }));
+  }
+
   /** Re-reads `git worktree list` in the container. */
   refreshWorktrees(id: ProjectId): Promise<Worktree[]> {
     return this.envs.withGit(id, async (p) => {
@@ -37,7 +66,7 @@ export class Checkouts {
         ws,
         this.deps.store.runtime(id).worktreeRoot
       );
-      this.deps.store.updateRuntime(id, { worktrees: list });
+      this.envs.setWorktrees(id, list);
       return list;
     });
   }
@@ -82,19 +111,34 @@ export class Checkouts {
           : base,
         branch,
         onLine: (l) => this.envs.log(id, l),
-        origin: req.pull?.url,
         root,
         workspaceFolder: ws,
       });
-      const list = await this.deps.worktrees
-        .list(p, ws, root)
-        .catch(() => [...(rt.worktrees ?? []), worktree]);
-      this.deps.store.updateRuntime(id, { worktrees: list });
+      this.deps.checkouts.recordCreated(
+        id,
+        {
+          branch,
+          path: worktree.path,
+          ...(worktree.hostPath ? { hostPath: worktree.hostPath } : {}),
+          ...(worktree.base ? { base: worktree.base } : {}),
+          ...(req.pull ? { originUrl: req.pull.url } : {}),
+        },
+        req.pull ? { by: "pull" } : { by: "manual" },
+        USER
+      );
+      const { base: _base, ...created } = worktree;
+      await this.deps.worktrees.list(p, ws, root).then(
+        (list) => this.envs.setWorktrees(id, list),
+        () =>
+          this.deps.store.updateRuntime(id, {
+            worktrees: [...(rt.worktrees ?? []), created],
+          })
+      );
       if (!req.startSession) {
-        return { worktree };
+        return { worktree: created };
       }
       const sessionId = await this.sessions
-        .startSession(id, worktree.path, branch, req.prompt)
+        .startSession(id, created.path, branch, req.prompt)
         .catch((error: unknown) => {
           this.envs.log(
             id,
@@ -102,7 +146,7 @@ export class Checkouts {
           );
           return undefined;
         });
-      return { sessionId, worktree };
+      return { sessionId, worktree: created };
     });
   }
 
@@ -134,13 +178,19 @@ export class Checkouts {
           await this.envs.gitAction(id, `delete branch ${targetBranch}`, () =>
             this.deps.git.deleteBranch(p, ws, targetBranch)
           );
+          this.deps.checkouts.deleteBranch(id, targetBranch, USER);
         }
       } finally {
         // The worktree is gone either way; don't keep listing it when only the branch delete failed.
-        const list = await this.deps.worktrees
+        await this.deps.worktrees
           .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
-          .catch(() => known.filter((w) => w.path !== worktreePath));
-        this.deps.store.updateRuntime(id, { worktrees: list });
+          .then(
+            (list) => this.envs.setWorktrees(id, list),
+            () =>
+              this.deps.store.updateRuntime(id, {
+                worktrees: known.filter((w) => w.path !== worktreePath),
+              })
+          );
       }
     });
   }
@@ -173,6 +223,7 @@ export class Checkouts {
       worktreePath,
       force
     );
+    this.deps.checkouts.removeWorktree(p.id, worktreePath, undefined, USER);
     this.envs.log(p.id, `worktree: removed ${worktreePath}`);
   }
 

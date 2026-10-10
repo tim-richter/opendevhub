@@ -12,9 +12,11 @@ import type {
   SessionSummary,
   UpdateResult,
 } from "../../shared/types";
+import { USER } from "../db/events";
+import type { ExecTarget } from "../environments/containers";
 import type { Environments } from "../environments/environments";
 import { repoOf } from "../environments/ports";
-import type { HubDeps } from "../environments/ports";
+import type { GitPort, HubDeps } from "../environments/ports";
 import { NotFoundError } from "../errors";
 import { OpencodeHttpError } from "../opencode/client";
 import type { RawFileDiff } from "../opencode/client";
@@ -106,7 +108,7 @@ export class ReviewActions {
               .aheadBehind(on.target, directory, base.name)
               .catch(() => ({ ahead: 0, behind: 0 }))
           : { ahead: 0, behind: 0 },
-        branch ? on.git.isPushed(on.target, directory, branch) : false,
+        branch ? this.pushed(id, on.git, on.target, directory, branch) : false,
         git.currentBranch(project, ws),
         git.isClean(project, ws),
       ]);
@@ -347,7 +349,13 @@ export class ReviewActions {
           "commit or discard the uncommitted changes first"
         );
       }
-      const strategy = (await git.isPushed(on.target, directory, branch))
+      const strategy = (await this.pushed(
+        id,
+        git,
+        on.target,
+        directory,
+        branch
+      ))
         ? "merge"
         : "rebase";
       const result = await this.envs.gitAction(
@@ -434,7 +442,30 @@ export class ReviewActions {
       project,
       on.remote ? this.envs.workspaceFolder(project) : directory
     );
-    return this.deps.publisher.info(project, checkout, branch, remote);
+    const info = await this.deps.publisher.info(
+      project,
+      checkout,
+      branch,
+      remote
+    );
+    const pr = branch
+      ? this.deps.checkouts.branch(id, branch)?.prUrl
+      : undefined;
+    return pr ? { ...info, pr } : info;
+  }
+
+  /** Pushed: the branch has an upstream, or opendevhub published it. */
+  private pushed(
+    id: ProjectId,
+    git: GitPort,
+    target: ExecTarget,
+    directory: string,
+    branch: string
+  ): Promise<boolean> {
+    if (this.deps.checkouts.branch(id, branch)?.publishedRemote) {
+      return Promise.resolve(true);
+    }
+    return git.isPushed(target, directory);
   }
 
   /** A PR title and description suggested by the target's latest session; empty when there is none or it fails. */
@@ -502,18 +533,37 @@ export class ReviewActions {
         p,
         on.remote ? this.envs.workspaceFolder(p) : directory
       );
-      return this.envs.gitAction(
+      const strategy = req.strategy as "branch" | "agit";
+      const result = await this.envs.gitAction(
         id,
         `publish ${branch} to ${req.remote} (${req.strategy})`,
         () =>
-          this.deps.publisher.publish(p, checkout, branch, {
-            base,
-            description: req.description,
-            remote: req.remote,
-            strategy: req.strategy as "branch" | "agit",
-            title,
-          })
+          this.deps.publisher.publish(
+            p,
+            checkout,
+            branch,
+            {
+              base,
+              description: req.description,
+              remote: req.remote,
+              strategy,
+              title,
+            },
+            this.deps.checkouts.branch(id, branch)?.prUrl
+          )
       );
+      this.deps.checkouts.updateBranch(
+        id,
+        branch,
+        {
+          publishedAt: (this.deps.now ?? Date.now)(),
+          publishedRemote: req.remote,
+          ...(strategy === "agit" ? { agitTopic: branch } : {}),
+          ...(result.prUrl ? { prUrl: result.prUrl } : {}),
+        },
+        USER
+      );
+      return result;
     });
   }
 }

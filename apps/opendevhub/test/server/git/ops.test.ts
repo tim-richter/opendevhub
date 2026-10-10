@@ -115,16 +115,12 @@ describe("git", () => {
       write(repo, "new.txt", "x\n");
       await expect(ops.isClean(project, repo)).resolves.toBeFalsy();
       git(repo, "checkout", "-q", "-b", "feature");
-      await expect(ops.isPushed(project, repo, "feature")).resolves.toBeFalsy();
-      git(repo, "config", "branch.feature.opendevhubPublished", "true");
-      await expect(
-        ops.isPushed(project, repo, "feature")
-      ).resolves.toBeTruthy();
-      git(repo, "config", "--unset", "branch.feature.opendevhubPublished");
+      await expect(ops.isPushed(project, repo)).resolves.toBeFalsy();
+      // A leftover key from before branch rows doesn't count.
+      git(repo, "config", "branch.feature.opendevhubPublished", "origin");
+      await expect(ops.isPushed(project, repo)).resolves.toBeFalsy();
       git(repo, "branch", "-q", "--set-upstream-to=main", "feature");
-      await expect(
-        ops.isPushed(project, repo, "feature")
-      ).resolves.toBeTruthy();
+      await expect(ops.isPushed(project, repo)).resolves.toBeTruthy();
     });
 
     it("commits everything, untracked files included", async () => {

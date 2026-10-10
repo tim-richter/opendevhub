@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SYSTEM } from "../../../src/server/db/events";
+import { SYSTEM, eventsSince } from "../../../src/server/db/events";
 import { RESTART_ERROR } from "../../../src/server/db/tasks";
 import { CommandError } from "../../../src/server/environments/containers";
 import {
@@ -37,7 +37,7 @@ describe("tasks", () => {
   }
 
   it("associates each created worktree and session with its Jira ticket", async () => {
-    const { hub, client, tasks, worktrees } = await started();
+    const { hub, client, tasks, checkouts } = await started();
     const jira = {
       key: "APP-12",
       instanceUrl: "https://jira.example.com",
@@ -63,7 +63,11 @@ describe("tasks", () => {
     expect(
       result.variants.map((v) => tasks.sessionRef(v.sessionId ?? "")?.id)
     ).toStrictEqual([result.task, result.task]);
-    expect(worktrees.add.mock.calls.map(([, a]) => a.origin)).toStrictEqual([
+    expect(
+      result.variants.map(
+        (v) => checkouts.branch(project.id, v.branch ?? "")?.originUrl
+      )
+    ).toStrictEqual([
       "https://jira.example.com/browse/APP-12",
       "https://jira.example.com/browse/APP-12",
     ]);
@@ -604,7 +608,10 @@ describe("tasks", () => {
 
   /** Records task tsk_1 with a variant per listed one, attached to its session, and lists the sessions. */
   const seed = (
-    s: Pick<Awaited<ReturnType<typeof started>>, "tasks" | "store">,
+    s: Pick<
+      Awaited<ReturnType<typeof started>>,
+      "tasks" | "store" | "checkouts"
+    >,
     sessions: (Variant | SessionSummary)[]
   ) => {
     const variants = sessions.filter((v): v is Variant => "n" in v);
@@ -622,6 +629,12 @@ describe("tasks", () => {
     for (const v of variants) {
       if (v.branch) {
         s.tasks.updateVariant("tsk_1", v.n, { branch: v.branch }, SYSTEM);
+        s.checkouts.recordCreated(
+          project.id,
+          { branch: v.branch, path: v.directory },
+          { by: "variant", n: v.n, task: "tsk_1" },
+          SYSTEM
+        );
       }
       s.tasks.attachSession(
         "tsk_1",
@@ -643,7 +656,8 @@ describe("tasks", () => {
   };
 
   it("keeps one variant: records the discards, then removes their worktrees and branches", async () => {
-    const { hub, client, worktrees, git, store, tasks } = await started();
+    const { hub, client, worktrees, git, store, tasks, checkouts, db } =
+      await started();
     const dirs = [
       "/workspaces/demo.worktrees/fix-1",
       "/workspaces/demo.worktrees/fix-2",
@@ -652,7 +666,7 @@ describe("tasks", () => {
     store.updateRuntime(project.id, {
       worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
     });
-    seed({ store, tasks }, [
+    seed({ checkouts, store, tasks }, [
       variant("s1", 1, dirs[0], "fix-1"),
       variant("s2", 2, dirs[1], "fix-2"),
       variant("s3", 3, dirs[2], "fix-3"),
@@ -677,6 +691,13 @@ describe("tasks", () => {
       removed: [dirs[0]],
       errors: [],
     });
+    expect(checkouts.branch(project.id, "fix-1")?.deletedAt).toBeDefined();
+    expect(checkouts.branch(project.id, "fix-3")?.deletedAt).toBeUndefined();
+    expect(
+      eventsSince(db)
+        .filter((e) => e.verb === "worktree.removed")
+        .map((e) => [e.actor.type, e.taskId, e.data?.path])
+    ).toStrictEqual([["user", "tsk_1", dirs[0]]]);
     expect(client.updateSession).not.toHaveBeenCalled();
     expect(
       tasks.get("tsk_1")?.variants.map((v) => [v.n, v.picked, v.discarded])
@@ -709,8 +730,8 @@ describe("tasks", () => {
   });
 
   it("only discards when worktrees should stay, and reports what failed", async () => {
-    const { hub, client, worktrees, store, tasks } = await started();
-    seed({ store, tasks }, [
+    const { hub, client, worktrees, store, tasks, checkouts } = await started();
+    seed({ checkouts, store, tasks }, [
       variant("s1", 1, "/workspaces/demo", undefined, "running"),
       variant("s2", 2, "/workspaces/demo"),
     ]);
@@ -729,7 +750,8 @@ describe("tasks", () => {
   });
 
   it("removes nothing for variants in the main checkout or in unknown folders", async () => {
-    const { hub, client, worktrees, git, store, tasks } = await started();
+    const { hub, client, worktrees, git, store, tasks, checkouts } =
+      await started();
     const known = [
       "/workspaces/demo.worktrees/s3",
       "/workspaces/demo.worktrees/s4",
@@ -740,7 +762,7 @@ describe("tasks", () => {
         ...known.map((path) => ({ path, branch: path.split("/").at(-1) })),
       ],
     });
-    seed({ store, tasks }, [
+    seed({ checkouts, store, tasks }, [
       variant("s1", 1, "/workspaces/demo"),
       variant("s2", 2, "/workspaces/elsewhere"),
       variant("s4", 3, known[1]),
@@ -756,7 +778,7 @@ describe("tasks", () => {
   });
 
   it("keeps going when one worktree can't be removed", async () => {
-    const { hub, worktrees, store, tasks } = await started();
+    const { hub, worktrees, store, tasks, checkouts } = await started();
     const dirs = [
       "/workspaces/demo.worktrees/a",
       "/workspaces/demo.worktrees/b",
@@ -769,7 +791,7 @@ describe("tasks", () => {
       })),
     });
     seed(
-      { store, tasks },
+      { checkouts, store, tasks },
       dirs.map((d, i) => variant(`s${i + 1}`, i + 1, d, d.split("/").at(-1)))
     );
     worktrees.remove.mockRejectedValueOnce(
@@ -788,11 +810,12 @@ describe("tasks", () => {
     ];
 
     it("interrupts discarded variants that are not idle, before removing any worktree", async () => {
-      const { hub, client, worktrees, store, tasks } = await started();
+      const { hub, client, worktrees, store, tasks, checkouts } =
+        await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      seed({ store, tasks }, [
+      seed({ checkouts, store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1", "running"),
         variant("s2", 2, dirs[1], "fix-2"),
         variant("s3", 3, dirs[2], "fix-3", "idle"),
@@ -811,11 +834,12 @@ describe("tasks", () => {
     });
 
     it("reports a failed interrupt without undoing the discard or stopping the removal", async () => {
-      const { hub, client, worktrees, store, tasks } = await started();
+      const { hub, client, worktrees, store, tasks, checkouts } =
+        await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      seed({ store, tasks }, [
+      seed({ checkouts, store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1", "running"),
         variant("s2", 2, dirs[1], "fix-2"),
         variant("s3", 3, dirs[2], "fix-3", "running"),
@@ -829,7 +853,8 @@ describe("tasks", () => {
     });
 
     it("deletes a branch only when it is the one the task created; otherwise keeps it and says so", async () => {
-      const { hub, client, worktrees, git, store, tasks } = await started();
+      const { hub, client, worktrees, git, store, tasks, checkouts } =
+        await started();
       store.updateRuntime(project.id, {
         worktrees: [
           { path: dirs[0], branch: "fix-1" },
@@ -837,7 +862,7 @@ describe("tasks", () => {
           { path: dirs[2], branch: "switched" },
         ],
       });
-      seed({ store, tasks }, [
+      seed({ checkouts, store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1"),
         variant("s2", 2, dirs[1], "fix-2"),
         variant("s3", 3, dirs[2], "fix-3"),
@@ -858,11 +883,11 @@ describe("tasks", () => {
     });
 
     it("keeps the branch of a legacy variant without recorded branch", async () => {
-      const { hub, client, git, store, tasks } = await started();
+      const { hub, client, git, store, tasks, checkouts } = await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      seed({ store, tasks }, [
+      seed({ checkouts, store, tasks }, [
         variant("s1", 1, dirs[0]),
         variant("s2", 2, dirs[1], "fix-2"),
       ]);
@@ -875,8 +900,8 @@ describe("tasks", () => {
     });
 
     it("refuses to pick a variant that a concurrent pick already discarded", async () => {
-      const { hub, client, store, tasks } = await started();
-      seed({ store, tasks }, [
+      const { hub, client, store, tasks, checkouts } = await started();
+      seed({ checkouts, store, tasks }, [
         variant("s1", 1, "/workspaces/demo"),
         variant("s2", 2, "/workspaces/demo"),
       ]);
@@ -889,11 +914,11 @@ describe("tasks", () => {
     });
 
     it("counts a removed worktree as removed when only its branch delete fails", async () => {
-      const { hub, client, git, store, tasks } = await started();
+      const { hub, client, git, store, tasks, checkouts } = await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      seed({ store, tasks }, [
+      seed({ checkouts, store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1"),
         variant("s2", 2, dirs[1], "fix-2"),
       ]);

@@ -13,7 +13,10 @@ import type {
   NodeKit,
   NodeKitsPort,
 } from "../../src/server/environments/ports";
-import type { AddWorktreeArgs } from "../../src/server/git/worktrees";
+import type {
+  AddedWorktree,
+  AddWorktreeArgs,
+} from "../../src/server/git/worktrees";
 import { createHub } from "../../src/server/hub";
 import type { ForwardTarget } from "../../src/server/network/port-forwarder";
 import type { PortSpec } from "../../src/server/network/ports";
@@ -241,9 +244,7 @@ export function boxKit() {
         })
       ),
       isClean: vi.fn(async (_t: ExecTarget, _dir: string) => true),
-      isPushed: vi.fn(
-        async (_t: ExecTarget, _dir: string, _b: string) => false
-      ),
+      isPushed: vi.fn(async (_t: ExecTarget, _dir: string) => false),
       commit: vi.fn(async (_t: ExecTarget, _dir: string, _m: string) => {}),
       update: vi.fn(
         async (
@@ -302,6 +303,7 @@ export function setup(
     persisted,
     persist: () => {},
     tasks: dbs.tasks,
+    checkouts: dbs.checkouts,
   });
   const monitors: {
     opts: MonitorOptions;
@@ -428,11 +430,13 @@ export function setup(
         _root?: WorktreeRoot
       ): Promise<Worktree[]> => []
     ),
-    add: vi.fn(async (_p: Project, a: AddWorktreeArgs): Promise<Worktree> => ({
-      path: `${a.root.container}/${a.branch.replaceAll("/", "-")}`,
-      hostPath: `${a.root.host}/${a.branch.replaceAll("/", "-")}`,
-      branch: a.branch,
-    })),
+    add: vi.fn(
+      async (_p: Project, a: AddWorktreeArgs): Promise<AddedWorktree> => ({
+        path: `${a.root.container}/${a.branch.replaceAll("/", "-")}`,
+        hostPath: `${a.root.host}/${a.branch.replaceAll("/", "-")}`,
+        branch: a.branch,
+      })
+    ),
     remove: vi.fn(
       async (_p: Project, _ws: string, _path: string, _force: boolean) => {}
     ),
@@ -455,7 +459,7 @@ export function setup(
       behind: 1,
     })),
     isClean: vi.fn(async (_p: Project, _dir: string) => true),
-    isPushed: vi.fn(async (_p: Project, _dir: string, _b: string) => false),
+    isPushed: vi.fn(async (_p: Project, _dir: string) => false),
     commit: vi.fn(async (_p: Project, _dir: string, _m: string) => {}),
     update: vi.fn(
       async (
@@ -707,6 +711,7 @@ export function setup(
     store,
     projects: dbs.projects,
     tasks: dbs.tasks,
+    checkouts: dbs.checkouts,
     containers,
     runtime,
     forwarder,
@@ -752,6 +757,7 @@ export function setup(
   return {
     store,
     tasks: dbs.tasks,
+    checkouts: dbs.checkouts,
     projects: dbs.projects,
     db: dbs.db,
     containers,

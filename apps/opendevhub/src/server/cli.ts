@@ -20,6 +20,7 @@ import {
 } from "./config";
 import type { Config } from "./config";
 import { createDashboardApp } from "./dashboard-api";
+import { CheckoutStore } from "./db/checkouts";
 import { openStateDatabase } from "./db/database";
 import { ProjectStore } from "./db/projects";
 import { TaskStore } from "./db/tasks";
@@ -248,9 +249,11 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const db = openStateDatabase(stateDir());
   const projects = new ProjectStore(db);
   const tasks = new TaskStore(db);
+  const checkouts = new CheckoutStore(db);
   // The jobs that were setting these variants up died with the previous process.
   tasks.failInterrupted();
   const store = new StateStore({
+    checkouts,
     persist: (s) => saveState(dir, s),
     persisted: loadState(dir),
     port: config.port,
@@ -288,6 +291,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     store,
     projects,
     tasks,
+    checkouts,
     containers,
     runtime,
     forwarder: new PortForwarder(),

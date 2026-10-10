@@ -269,6 +269,18 @@ export class Tasks {
               branch,
               remote.base
             );
+            this.deps.checkouts.recordCreated(
+              id,
+              {
+                base: remote.base,
+                branch,
+                hostPath: wt.hostPath,
+                node,
+                path: wt.path,
+              },
+              { by: "variant", n: i + 1, task },
+              variantActor(task, i + 1)
+            );
             result.directory = wt.path;
             step(i, { directory: wt.path });
             own[i] = wt;
@@ -283,10 +295,21 @@ export class Tasks {
               base: req.base,
               branch,
               onLine,
-              origin: req.jira ? jiraTicketUrl(req.jira) : undefined,
               root,
               workspaceFolder: ws,
             });
+            this.deps.checkouts.recordCreated(
+              id,
+              {
+                branch,
+                path: wt.path,
+                ...(wt.hostPath ? { hostPath: wt.hostPath } : {}),
+                ...(wt.base ? { base: wt.base } : {}),
+                ...(req.jira ? { originUrl: jiraTicketUrl(req.jira) } : {}),
+              },
+              { by: "variant", n: i + 1, task },
+              variantActor(task, i + 1)
+            );
             result.directory = wt.path;
             step(i, { directory: wt.path });
             if (isolated && wt.hostPath) {
@@ -315,14 +338,18 @@ export class Tasks {
             ? [{ branch: r.branch, path: r.directory }]
             : []
         );
-        const list = await this.deps.worktrees.list(p, ws, root).catch(() => {
-          const known = rt.worktrees ?? [];
-          return [
-            ...known,
-            ...created.filter((c) => !known.some((w) => w.path === c.path)),
-          ];
-        });
-        store.updateRuntime(id, { worktrees: list });
+        await this.deps.worktrees.list(p, ws, root).then(
+          (list) => this.envs.setWorktrees(id, list),
+          () => {
+            const known = rt.worktrees ?? [];
+            store.updateRuntime(id, {
+              worktrees: [
+                ...known,
+                ...created.filter((c) => !known.some((w) => w.path === c.path)),
+              ],
+            });
+          }
+        );
       }
       return variantResults;
     });
@@ -535,11 +562,6 @@ export class Tasks {
     }
     const all = this.deps.store.sessionsOf(id);
     const others = all.filter((s) => s.task?.id === task && s.id !== keep);
-    const branchOf = new Map(
-      record.variants.flatMap((v) =>
-        v.sessionId && v.branch ? [[v.sessionId, v.branch] as const] : []
-      )
-    );
     const result: PickResult = { discarded: [], errors: [], removed: [] };
     const discard = async () => {
       this.deps.tasks.pick(task, kept.n, USER);
@@ -609,11 +631,10 @@ export class Tasks {
           continue;
         }
         // Only delete a branch this task created: the worktree may have switched to another one since.
-        const ours =
-          wt.branch !== undefined &&
-          gone.some(
-            (s) => s.directory === dir && branchOf.get(s.id) === wt.branch
-          );
+        const creator = wt.branch
+          ? this.deps.checkouts.branch(id, wt.branch)?.createdBy
+          : undefined;
+        const ours = creator?.by === "variant" && creator.task === task;
         const rec = this.deps.store
           .environments(id)
           .find((e) => e.worktree.path === dir);
@@ -634,6 +655,7 @@ export class Tasks {
           result.errors.push(`${wt.branch ?? dir}: ${fail(error)}`);
           continue;
         }
+        this.deps.checkouts.removeWorktree(id, dir, undefined, USER);
         result.removed.push(dir);
         if (wt.branch && !ours) {
           result.errors.push(`${wt.branch}: kept — not created by this task`);
@@ -646,6 +668,7 @@ export class Tasks {
         try {
           if (wt.branch) {
             await this.deps.git.deleteBranch(p, ws, wt.branch, true);
+            this.deps.checkouts.deleteBranch(id, wt.branch, USER);
           }
           this.envs.log(
             id,
@@ -658,10 +681,17 @@ export class Tasks {
         }
       }
       if (dirs.length > 0) {
-        const list = await this.deps.worktrees
+        await this.deps.worktrees
           .list(p, ws, this.deps.store.runtime(id).worktreeRoot)
-          .catch(() => known.filter((w) => !result.removed.includes(w.path)));
-        this.deps.store.updateRuntime(id, { worktrees: list });
+          .then(
+            (list) => this.envs.setWorktrees(id, list),
+            () =>
+              this.deps.store.updateRuntime(id, {
+                worktrees: known.filter(
+                  (w) => !result.removed.includes(w.path)
+                ),
+              })
+          );
       }
       return result;
     });

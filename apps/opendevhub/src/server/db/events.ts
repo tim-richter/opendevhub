@@ -12,9 +12,22 @@ export type EventVerb =
   | "variant.discarded"
   | "session.started"
   | "session.adopted"
-  | "session.removed";
+  | "session.removed"
+  | "branch.created"
+  | "branch.published"
+  | "branch.deleted"
+  | "worktree.created"
+  | "worktree.adopted"
+  | "worktree.switched"
+  | "worktree.removed";
 
-export type ObjectType = "project" | "task" | "variant" | "session";
+export type ObjectType =
+  | "project"
+  | "task"
+  | "variant"
+  | "session"
+  | "branch"
+  | "worktree";
 
 /** Who caused a change: the user (an API request), a task's setup job for its variant, or opendevhub itself. */
 export type Actor =

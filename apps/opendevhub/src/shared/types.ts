@@ -52,6 +52,33 @@ export interface Worktree {
   head?: string;
   /** The pull request or Jira ticket (its web URL) the worktree was created for, when opendevhub made it for one. */
   origin?: string;
+  /** Its branch's row, from `GET /api/projects/:id/branches`. */
+  branchId?: number;
+  /** Who made the worktree; absent until opendevhub has recorded it. */
+  createdBy?: CheckoutCreator;
+}
+
+/** Who made a branch or worktree: a task variant, the checkouts page, a pull request checkout, or not opendevhub. */
+export type CheckoutCreator =
+  | { by: "variant"; task: string; n: number; title: string }
+  | { by: "manual" }
+  | { by: "pull"; url?: string }
+  | { by: "unmanaged" };
+
+/** A branch opendevhub made, published, checked out for a pull request, or found in a worktree. */
+export interface BranchView {
+  id: number;
+  name: string;
+  base?: string;
+  createdBy: CheckoutCreator;
+  /** The pull request or ticket URL it was made for. */
+  origin?: string;
+  publishedRemote?: string;
+  publishedAt?: number;
+  prUrl?: string;
+  createdAt: number;
+  /** When opendevhub deleted it. */
+  deletedAt?: number;
 }
 
 /** Where opendevhub keeps worktrees: a host folder next to the project, mounted next to the workspace. */

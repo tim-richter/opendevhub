@@ -42,10 +42,12 @@ describe("openDatabase", () => {
     const db = openDatabase(":memory:");
     expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     expect(tables(db)).toStrictEqual([
+      "branches",
       "events",
       "projects",
       "tasks",
       "variants",
+      "worktrees",
     ]);
     expect(
       (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number })

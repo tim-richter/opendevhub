@@ -9,10 +9,11 @@ import type {
   NodeId,
   Project,
   ProjectId,
+  Worktree,
   WorktreeRoot,
 } from "../../shared/types";
 import { stateDir } from "../config";
-import { variantActor } from "../db/events";
+import { USER, variantActor } from "../db/events";
 import { BusyError, NotFoundError, UnavailableError } from "../errors";
 import { InvalidRequestError, mountArg, worktreeRoot } from "../git/worktrees";
 import type { ForwardTarget } from "../network/port-forwarder";
@@ -637,6 +638,15 @@ export class Environments {
     );
   }
 
+  /**
+   * A successful listing of the project's linked worktrees on this machine: reconciles their rows, then shows the
+   * list. Fallback lists, made up after a failed listing, go to `updateRuntime` directly.
+   */
+  setWorktrees(id: ProjectId, list: Worktree[]): void {
+    this.deps.checkouts.reconcileWorktrees(id, list);
+    this.deps.store.updateRuntime(id, { worktrees: list });
+  }
+
   log(id: ProjectId, raw: string): void {
     const line = cleanLogLine(raw);
     if (!line) {
@@ -737,7 +747,7 @@ export class Environments {
         this.workspaceFolder(project),
         rt.worktreeRoot
       );
-      this.deps.store.updateRuntime(project.id, { worktrees: list });
+      this.setWorktrees(project.id, list);
     } catch (error) {
       this.log(
         project.id,
@@ -1124,6 +1134,17 @@ export class Environments {
       await repo.removeWorktree(
         repo.layout(env.project, this.workspaceFolder(env.project)),
         env.worktree
+      );
+      this.deps.checkouts.removeWorktree(
+        env.project.id,
+        env.worktree.path,
+        env.node,
+        USER
+      );
+      this.deps.checkouts.deleteBranch(
+        env.project.id,
+        env.worktree.branch,
+        USER
       );
     }
     store.removeEnvironment(env.id);

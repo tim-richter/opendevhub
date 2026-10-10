@@ -58,6 +58,7 @@ CREATE TABLE worktrees (
   path        TEXT NOT NULL,                      -- inside the container
   host_path   TEXT,
   node_id     TEXT,                               -- NULL = this machine
+  created_by  TEXT NOT NULL CHECK (created_by IN ('variant', 'manual', 'pull', 'unmanaged')),
   created_at  INTEGER NOT NULL,
   removed_at  INTEGER
 );
@@ -69,6 +70,8 @@ CREATE UNIQUE INDEX worktrees_live ON worktrees (project_id, COALESCE(node_id, '
 ```
 
 `branches` and `worktrees` are created before `variants` in migration 1, and `branches` references `variants` through `created_by_task`/`created_by_variant`. SQLite resolves foreign keys when rows are written, not when tables are created, so the circular reference is fine.
+
+A worktree has its own `created_by` because it can differ from its branch's: `git worktree add` on a branch a task made gives an unmanaged worktree on a variant's branch. The variant that made a worktree is the one whose `worktree_id` points at it.
 
 Both tables use integer ids because the natural keys (name, path) change or get reused. A path that is reused after removal gets a new worktree row, which keeps history accurate.
 
@@ -86,6 +89,10 @@ Both tables use integer ids because the natural keys (name, path) change or get 
 4. A live row whose path is missing → `removed_at`.
 
 A failed listing changes nothing, same as session reconcile.
+
+Reconcile covers one node at a time. This machine's `git worktree list` doesn't show worktrees on nodes, so it only reconciles rows with no `node_id`. A node's worktree row gets `removed_at`, and its branch `deleted_at`, when its environment is destroyed, because that is the only way opendevhub removes one.
+
+A worktree that reconcile adopted just before its creator recorded it (a listing that ran between `git worktree add` and the insert) is claimed by the creator rather than duplicated. Its branch row keeps the creator it already has.
 
 ### Events
 

@@ -212,9 +212,6 @@ export class Publisher {
       [chosen] = remotes;
     }
     const { forge } = await this.forge(p, loc, chosen);
-    const pr = branch
-      ? await this.config(p, loc, `branch.${branch}.opendevhubPr`)
-      : undefined;
     return {
       ...(branch ? { branch } : {}),
       remotes,
@@ -223,16 +220,19 @@ export class Publisher {
       strategies: strategiesFor(forge.kind),
       strategy: defaultStrategy(forge.kind),
       pushFrom: loc.where,
-      ...(pr ? { pr } : {}),
     };
   }
 
-  /** Pushes the branch (or an AGit ref) and records what the forge said. Never force-pushes. */
+  /**
+   * Pushes the branch (or an AGit ref) and reports what the forge said; the caller records it. `previousPr` is the
+   * pull request the branch was published to before, if any. Never force-pushes.
+   */
   async publish(
     p: Project,
     checkout: Checkout,
     branch: string,
-    req: PublishRequest
+    req: PublishRequest,
+    previousPr?: string
   ): Promise<PublishResult> {
     const loc = await this.location(p, checkout);
     const { forge } = await this.forge(p, loc, req.remote);
@@ -275,26 +275,6 @@ export class Publisher {
 
     const urls = pushUrls(output);
     const prUrl = urls.find(isPrUrl);
-    const previous = await this.config(p, loc, `branch.${branch}.opendevhubPr`);
-    await this.exec(p, loc, [
-      "config",
-      `branch.${branch}.opendevhubPublished`,
-      req.remote,
-    ]);
-    if (req.strategy === "agit") {
-      await this.exec(p, loc, [
-        "config",
-        `branch.${branch}.opendevhubTopic`,
-        branch,
-      ]);
-    }
-    if (prUrl) {
-      await this.exec(p, loc, [
-        "config",
-        `branch.${branch}.opendevhubPr`,
-        prUrl,
-      ]);
-    }
     const compare =
       req.strategy === "branch"
         ? compareUrl(forge, {
@@ -311,7 +291,7 @@ export class Publisher {
       ...((prUrl ?? compare ?? urls[0])
         ? { openUrl: prUrl ?? compare ?? urls[0] }
         : {}),
-      ...(previous && prUrl && previous !== prUrl
+      ...(previousPr && prUrl && previousPr !== prUrl
         ? {
             notice:
               "The earlier pull request was closed or merged; this opened a new one.",

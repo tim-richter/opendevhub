@@ -254,12 +254,21 @@ export const webProject: ProjectView = {
     worktrees: [
       {
         branch: "feat/rate-limit",
+        branchId: 1,
+        createdBy: {
+          by: "variant",
+          n: 1,
+          task: "tsk_rate",
+          title: "Add burst limit to the login rate limiter",
+        },
         head: "7c9d2f4",
         hostPath: "/home/dev/code/.worktrees/acme-web/rate-limit",
         path: WEB_WORKTREE,
       },
       {
         branch: "feat/dark-mode",
+        branchId: 2,
+        createdBy: { by: "unmanaged" },
         head: "1a2b3c4",
         hostPath: "/home/dev/code/.worktrees/acme-web/dark-mode",
         path: WEB_ISOLATED_WORKTREE,
@@ -385,12 +394,24 @@ export const apiProject: ProjectView = {
     worktrees: [
       {
         branch: "fix/invoice-rounding",
+        branchId: 3,
+        createdBy: {
+          by: "pull",
+          url: "https://git.acme.dev/acme/billing/pulls/31",
+        },
         head: "9f8e7d6",
         origin: "https://git.acme.dev/acme/billing/pulls/31",
         path: "/workspaces/.worktrees/billing-api/v1",
       },
       {
         branch: "fix/invoice-rounding-2",
+        branchId: 4,
+        createdBy: {
+          by: "variant",
+          n: 2,
+          task: "tsk_round",
+          title: "Fix invoice rounding for JPY",
+        },
         head: "6d7e8f9",
         path: "/workspaces/.worktrees/billing-api/v2",
       },

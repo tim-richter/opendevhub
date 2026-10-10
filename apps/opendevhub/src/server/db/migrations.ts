@@ -30,6 +30,38 @@ CREATE TABLE tasks (
 );
 CREATE INDEX tasks_project ON tasks (project_id, archived_at);
 
+CREATE TABLE branches (
+  id                 INTEGER PRIMARY KEY,
+  project_id         TEXT NOT NULL REFERENCES projects (id),
+  name               TEXT NOT NULL,
+  base               TEXT,
+  created_by         TEXT NOT NULL CHECK (created_by IN ('variant', 'manual', 'pull', 'unmanaged')),
+  created_by_task    TEXT,
+  created_by_variant INTEGER,
+  origin_url         TEXT,
+  published_remote   TEXT,
+  published_at       INTEGER,
+  agit_topic         TEXT,
+  pr_url             TEXT,
+  created_at         INTEGER NOT NULL,
+  deleted_at         INTEGER,
+  UNIQUE (project_id, name),
+  FOREIGN KEY (created_by_task, created_by_variant) REFERENCES variants (task_id, n)
+);
+
+CREATE TABLE worktrees (
+  id         INTEGER PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  branch_id  INTEGER REFERENCES branches (id),
+  path       TEXT NOT NULL,
+  host_path  TEXT,
+  node_id    TEXT,
+  created_by TEXT NOT NULL CHECK (created_by IN ('variant', 'manual', 'pull', 'unmanaged')),
+  created_at INTEGER NOT NULL,
+  removed_at INTEGER
+);
+CREATE UNIQUE INDEX worktrees_live ON worktrees (project_id, COALESCE(node_id, ''), path) WHERE removed_at IS NULL;
+
 CREATE TABLE variants (
   task_id            TEXT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
   n                  INTEGER NOT NULL,
@@ -39,6 +71,8 @@ CREATE TABLE variants (
   env_id             TEXT,
   branch             TEXT,
   directory          TEXT,
+  branch_id          INTEGER REFERENCES branches (id),
+  worktree_id        INTEGER REFERENCES worktrees (id),
   step               TEXT NOT NULL,
   error              TEXT,
   session_id         TEXT,

@@ -53,6 +53,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const dbs = memoryStores();
       const store = new StateStore({
         tasks: dbs.tasks,
+        checkouts: dbs.checkouts,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -69,6 +70,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         store,
         projects: dbs.projects,
         tasks: dbs.tasks,
+        checkouts: dbs.checkouts,
         containers,
         runtime,
         forwarder: new PortForwarder(),

@@ -36,7 +36,7 @@ import {
 } from "../checkouts/checkouts";
 import type { Checkout, ProjectTask } from "../checkouts/checkouts";
 import { OpenInMenu } from "../checkouts/open-in-menu";
-import { WorktreeOrigin } from "../checkouts/worktree-origin";
+import { WorktreeCreator } from "../checkouts/worktree-creator";
 import {
   checkoutReady,
   ContainerMenu,
@@ -288,9 +288,12 @@ const CheckoutRow = ({
               <EnvBadge env={env} />
             </span>
           )}
-          {c.worktree?.origin && (
-            <span className="relative">
-              <WorktreeOrigin origin={c.worktree.origin} />
+          {c.worktree && (
+            <span className="relative flex min-w-0 items-center gap-2">
+              <WorktreeCreator
+                projectId={view.project.id}
+                worktree={c.worktree}
+              />
             </span>
           )}
         </div>

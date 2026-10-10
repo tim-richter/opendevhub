@@ -1,4 +1,5 @@
 import type { NodeId, Project, ProjectId } from "../../shared/types";
+import type { CheckoutStore } from "../db/checkouts";
 import type { ProjectStore } from "../db/projects";
 import type { TaskStore } from "../db/tasks";
 import { UnavailableError } from "../errors";
@@ -134,6 +135,8 @@ export interface HubDeps {
   projects: ProjectStore;
   /** Tasks and their variants, the only record of which session belongs to which task. */
   tasks: TaskStore;
+  /** Branches and worktrees: who made them, and what a branch was published as. */
+  checkouts: CheckoutStore;
   containers: ContainersPort;
   runtime: RuntimePort;
   forwarder: ForwarderPort;

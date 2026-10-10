@@ -255,6 +255,11 @@ describe(Publisher, () => {
   afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
   const checkout = () => ({ container: repo, host: repo });
+  /** opendevhub's keys in the repo's git config other than the base, which stays there. */
+  const opendevhubKeys = () =>
+    git(repo, "config", "--list")
+      .split("\n")
+      .filter((l) => /\.opendevhub/iu.test(l) && !/opendevhubbase=/iu.test(l));
   const req = {
     remote: "origin",
     base: "main",
@@ -292,7 +297,7 @@ describe(Publisher, () => {
     ).rejects.toBeInstanceOf(CommandError);
   });
 
-  it("describes the remotes, the forge and the stored PR", async () => {
+  it("describes the remotes and the forge, ignoring leftover PR keys", async () => {
     git(repo, "remote", "add", "fork", "git@github.com:me/app.git");
     git(
       repo,
@@ -309,14 +314,13 @@ describe(Publisher, () => {
       strategies: ["branch"],
       strategy: "branch",
       pushFrom: "host",
-      pr: "https://forge.example.com/me/app/pulls/3",
     });
     expect(
       (await publisher().info(project, checkout(), "feature/x", "fork")).forge
     ).toStrictEqual({ kind: "github", webBase: "https://github.com/me/app" });
   });
 
-  it("pushes the branch with its upstream, records it, and stores the PR the remote printed", async () => {
+  it("pushes the branch with its upstream and reports the PR the remote printed, writing no git config", async () => {
     const result = await publisher().publish(
       project,
       checkout(),
@@ -329,18 +333,13 @@ describe(Publisher, () => {
     expect(git(repo, "rev-parse", "--abbrev-ref", "feature/x@{u}").trim()).toBe(
       "origin/feature/x"
     );
-    expect(
-      git(repo, "config", "branch.feature/x.opendevhubPublished").trim()
-    ).toBe("origin");
+    expect(opendevhubKeys()).toStrictEqual([]);
     expect(result).toMatchObject({
       strategy: "branch",
       pushedFrom: "host",
       prUrl: "https://forge.example.com/me/app/pulls/7",
       openUrl: "https://forge.example.com/me/app/pulls/7",
     });
-    expect(git(repo, "config", "branch.feature/x.opendevhubPr").trim()).toBe(
-      "https://forge.example.com/me/app/pulls/7"
-    );
     expect(hostRuns.some((r) => r.includes("push"))).toBeTruthy();
   });
 
@@ -369,9 +368,7 @@ describe(Publisher, () => {
     expect(result.output.join("\n")).toContain(
       "option description=Adds b. And more."
     );
-    expect(git(repo, "config", "branch.feature/x.opendevhubTopic").trim()).toBe(
-      "feature/x"
-    );
+    expect(opendevhubKeys()).toStrictEqual([]);
     await expect(
       publisher().publish(project, checkout(), "feature/x", {
         ...req,
@@ -380,18 +377,13 @@ describe(Publisher, () => {
     ).rejects.toThrow(/AGit/u);
   });
 
-  it("says when a stored PR was replaced by a new one", async () => {
-    git(
-      repo,
-      "config",
-      "branch.feature/x.opendevhubPr",
-      "https://forge.example.com/me/app/pulls/3"
-    );
+  it("says when the earlier PR was replaced by a new one", async () => {
     const result = await publisher().publish(
       project,
       checkout(),
       "feature/x",
-      req
+      req,
+      "https://forge.example.com/me/app/pulls/3"
     );
     expect(result.notice).toMatch(/closed or merged/u);
   });

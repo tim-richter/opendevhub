@@ -100,6 +100,15 @@ function setup(webDir?: string) {
       onLog: vi.fn(() => () => {}),
     },
     checkouts: {
+      branches: vi.fn((_id: string) => [
+        {
+          createdAt: 1,
+          createdBy: { by: "pull" as const, url: "https://f.example/pulls/1" },
+          id: 1,
+          name: "review/pr-1",
+          prUrl: "https://f.example/pulls/1",
+        },
+      ]),
       bringHome: vi.fn(async (_id: string, _dir: string) => ({
         branch: "fix",
       })),
@@ -1035,6 +1044,11 @@ describe("dashboard API", () => {
       "/d"
     );
     expect((await post("worktrees/refresh", {})).status).toBe(200);
+    const branches = await app.request(`/api/projects/${project.id}/branches`);
+    await expect(branches.json()).resolves.toMatchObject({
+      branches: [{ name: "review/pr-1", prUrl: "https://f.example/pulls/1" }],
+    });
+    expect(hub.checkouts.branches).toHaveBeenCalledWith(project.id);
   });
 
   it.each([

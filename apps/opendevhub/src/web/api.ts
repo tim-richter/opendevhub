@@ -297,6 +297,16 @@ export const removeWorktree = (
     "remove worktree"
   );
 
+/** The project's branches, with their base, creator, published remote and pull request; deleted ones included. */
+export const fetchBranches = (projectId: string) =>
+  read(
+    project.branches.$get(
+      { param: projectParam(projectId) },
+      { init: { cache: "no-store" } }
+    ),
+    "branches"
+  );
+
 export const refreshWorktrees = (projectId: string) =>
   read(
     project.worktrees.refresh.$post({ param: projectParam(projectId) }),
