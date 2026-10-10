@@ -501,6 +501,18 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           );
         })
     )
+    .post(
+      "/api/projects/:id/spec/archive",
+      validateJson(bodies.archiveSpec),
+      (c) =>
+        ok(c, (id) => {
+          if (!deps.specs) {
+            throw new UnavailableError("the spec view isn't set up");
+          }
+          const b = c.req.valid("json");
+          return deps.specs.archive(id, str(b.directory) ?? "", b.change);
+        })
+    )
     .get("/api/projects/:id/logs", (c) =>
       c.json({ lines: hub.environments.logLines(c.req.param("id")) }, 200)
     );

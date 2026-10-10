@@ -35,17 +35,26 @@ const TITLES: Record<string, string> = {
   "tasks.md": "Tasks",
 };
 
-/** The change's documents as tabs: proposal, design and tasks, then any other markdown outside `specs/`. */
+/**
+ * The change's documents as tabs: proposal, design and tasks, then any other markdown outside `specs/`. Once
+ * archived, the main specs it updated follow, as `openspec/specs/<capability>/spec.md`.
+ */
 export const documentTabs = (
   change: SpecChange
-): { id: string; label: string; content: string }[] =>
-  change.documents
+): { id: string; label: string; content: string }[] => [
+  ...change.documents
     .filter((d) => !d.path.startsWith("specs/"))
     .map((d) => ({
       content: d.content,
       id: d.path,
       label: TITLES[d.path] ?? d.path.replace(/\.md$/u, ""),
-    }));
+    })),
+  ...(change.updatedSpecs ?? []).map((d) => ({
+    content: d.content,
+    id: `openspec/specs/${d.path}`,
+    label: `${d.path.replace(/\/spec\.md$/u, "")} spec`,
+  })),
+];
 
 /** An artifact's name as the chain shows it: `specs` → `Specs`. */
 export const artifactLabel = (artifact: SpecArtifact): string =>
@@ -235,3 +244,8 @@ export const taskProgress = (
   }
   return { completed: summary.completedTasks, total: summary.totalTasks };
 };
+
+/** Every one of the change's tasks is done, so it can be archived. */
+export const tasksDone = (
+  progress: { completed: number; total: number } | undefined
+): boolean => progress !== undefined && progress.completed >= progress.total;

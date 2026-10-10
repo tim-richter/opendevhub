@@ -8,6 +8,7 @@ import type { CheckTarget } from "../../../src/server/environments/checks";
 import { InvalidRequestError } from "../../../src/server/git/worktrees";
 import type { RunResult } from "../../../src/server/nodes/exec";
 import {
+  parseArchive,
   parseSections,
   parseStatus,
   parseValidation,
@@ -83,8 +84,9 @@ const target = (over: Partial<CheckTarget> = {}): CheckTarget => ({
 
 const taskSession = (
   spec: {
-    phase: "propose" | "implement";
+    phase: "propose" | "implement" | "archived";
     change?: string;
+    archived?: string;
   },
   status: SessionSummary["status"] = "idle"
 ): SessionSummary =>
@@ -249,12 +251,14 @@ describe(Specs, () => {
       "list",
       "base",
       "",
+      "",
     ]);
     expect(exec.mock.calls[1][1].slice(4)).toStrictEqual([
       "/workspaces/wt",
       "",
       "",
       "add-login",
+      "",
     ]);
     expect(client.updateSession).toHaveBeenCalledWith(
       "ses_1",
@@ -458,6 +462,7 @@ describe("Specs.approve", () => {
       "list",
       "",
       "add-login",
+      "",
     ]);
     expect(client.updateSession).toHaveBeenCalledWith(
       "ses_1",
@@ -550,5 +555,214 @@ describe("Specs.approve", () => {
             .metadata.opendevhub.spec.phase
       )
     ).toStrictEqual(["implement", "propose"]);
+  });
+});
+
+const done = (name: string) => ({
+  changes: [{ completedTasks: 3, name, totalTasks: 3 }],
+});
+const ARCHIVED = {
+  archive: { archivedAs: "2026-10-10-add-login", change: "add-login" },
+};
+/** What `openspec archive` leaves: the change in the archive, its delta merged into the main spec. */
+const archiveOnDisk = async () => {
+  const archive = path.join(host, "openspec/changes/archive");
+  await fs.mkdir(archive, { recursive: true });
+  await fs.rename(
+    path.join(host, "openspec/changes/add-login"),
+    path.join(archive, "2026-10-10-add-login")
+  );
+  await fs.writeFile(
+    path.join(host, "openspec/specs/auth/spec.md"),
+    "## Requirements\n### Requirement: Timeout\nAfter 15 minutes.\n"
+  );
+};
+
+describe(parseArchive, () => {
+  it("reads the archive folder, or the CLI's errors", () => {
+    expect(
+      parseArchive({ code: 0, text: JSON.stringify(ARCHIVED) })
+    ).toStrictEqual({ archived: "2026-10-10-add-login" });
+    expect(
+      parseArchive({
+        code: 1,
+        text: JSON.stringify({
+          archive: null,
+          status: [
+            { message: "auth MODIFIED failed", severity: "error" },
+            { message: "just so you know", severity: "warning" },
+          ],
+        }),
+      })
+    ).toStrictEqual({ error: "auth MODIFIED failed" });
+    expect(parseArchive({ code: 1, text: "boom\nreal error" })).toStrictEqual({
+      error: "real error",
+    });
+  });
+});
+
+describe("Specs.archive", () => {
+  it("archives the finished change with the CLI and records the archived phase", async () => {
+    const { client, exec, reconcile, specs } = make({
+      outputs: [
+        section("list", done("add-login")),
+        section("archive", ARCHIVED),
+      ],
+      sessions: [taskSession({ change: "add-login", phase: "implement" })],
+    });
+    await specs.archive("p", "/workspaces/wt", "add-login");
+    expect(exec.mock.calls.map((c) => c[1].slice(4))).toStrictEqual([
+      ["/workspaces/wt", "list", "", "", ""],
+      ["/workspaces/wt", "", "", "add-login", "archive"],
+    ]);
+    expect(client.updateSession).toHaveBeenCalledWith(
+      "ses_1",
+      {
+        metadata: {
+          opendevhub: {
+            spec: {
+              archived: "2026-10-10-add-login",
+              change: "add-login",
+              phase: "archived",
+            },
+            task: "tsk_1",
+          },
+          x: 1,
+        },
+      },
+      "/workspaces/wt"
+    );
+    expect(client.command).not.toHaveBeenCalled();
+    expect(reconcile).toHaveBeenCalledWith("p");
+  });
+
+  it("refuses before approval, once archived, while the agent works, or with tasks left", async () => {
+    const cases: [ReturnType<typeof make>, string][] = [
+      [
+        make({ outputs: [], sessions: [taskSession({ phase: "propose" })] }),
+        "before archiving it",
+      ],
+      [
+        make({
+          outputs: [],
+          sessions: [taskSession({ change: "add-login", phase: "archived" })],
+        }),
+        "already archived",
+      ],
+      [
+        make({
+          outputs: [],
+          sessions: [
+            taskSession({ change: "add-login", phase: "implement" }, "running"),
+          ],
+        }),
+        "still busy",
+      ],
+      [
+        make({
+          outputs: [section("list", list("add-login"))],
+          sessions: [taskSession({ change: "add-login", phase: "implement" })],
+        }),
+        "1 of 3 tasks are done",
+      ],
+      [
+        make({
+          outputs: [section("list", done("other"))],
+          sessions: [taskSession({ change: "add-login", phase: "implement" })],
+        }),
+        "no OpenSpec change add-login",
+      ],
+    ];
+    for (const [m, message] of cases) {
+      await expect(
+        m.specs.archive("p", "/workspaces/wt", "add-login")
+      ).rejects.toThrow(message);
+      expect(m.exec.mock.calls.some((c) => c[1].includes("archive"))).toBe(
+        false
+      );
+      expect(m.client.updateSession).not.toHaveBeenCalled();
+    }
+  });
+
+  it("reports the CLI's error and keeps the phase when archiving fails", async () => {
+    const { client, specs } = make({
+      outputs: [
+        section("list", done("add-login")),
+        section(
+          "archive",
+          {
+            archive: null,
+            status: [
+              {
+                message:
+                  'auth MODIFIED failed for header "### Requirement: Nope"',
+                severity: "error",
+              },
+            ],
+          },
+          1
+        ),
+      ],
+      sessions: [taskSession({ change: "add-login", phase: "implement" })],
+    });
+    await expect(
+      specs.archive("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("openspec archive failed: auth MODIFIED failed");
+    expect(client.updateSession).not.toHaveBeenCalled();
+  });
+
+  it("shows the archived change from the archive, with the main specs it updated", async () => {
+    await archiveOnDisk();
+    const { exec, specs } = make({
+      outputs: [section("base", "") + section("list", list("other"))],
+      sessions: [
+        taskSession({
+          archived: "2026-10-10-add-login",
+          change: "add-login",
+          phase: "archived",
+        }),
+      ],
+    });
+    const view = await specs.view("p", "/workspaces/wt");
+    // Only the list: the CLI no longer knows the change.
+    expect(exec.mock.calls.map((c) => c[1].slice(4))).toStrictEqual([
+      ["/workspaces/wt", "list", "base", "", ""],
+    ]);
+    expect(view.change).toMatchObject({
+      archived: "2026-10-10-add-login",
+      name: "add-login",
+      planningComplete: true,
+      updatedSpecs: [
+        {
+          content:
+            "## Requirements\n### Requirement: Timeout\nAfter 15 minutes.\n",
+          path: "auth/spec.md",
+        },
+      ],
+    });
+    // The main spec already has the change, so there's no before to compare with.
+    expect(view.change?.requirements).toStrictEqual([
+      {
+        capability: "auth",
+        delta: "### Requirement: Timeout\nAfter 15 minutes.",
+        name: "Timeout",
+        operation: "MODIFIED",
+      },
+    ]);
+  });
+
+  it("finds the change in the archive before the task's phase says so", async () => {
+    await archiveOnDisk();
+    const { specs } = make({
+      outputs: [
+        section("base", "") +
+          section("list", list("other")) +
+          section("status", "change not found", 1) +
+          section("validate", "change not found", 1),
+      ],
+      sessions: [taskSession({ change: "add-login", phase: "implement" })],
+    });
+    const view = await specs.view("p", "/workspaces/wt");
+    expect(view.change?.archived).toBe("2026-10-10-add-login");
   });
 });

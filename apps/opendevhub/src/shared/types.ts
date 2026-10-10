@@ -403,6 +403,8 @@ export interface TaskSpec {
   phase: SpecPhase;
   /** The OpenSpec change the task works on, once the Spec view found it. */
   change?: string;
+  /** The change's folder under `openspec/changes/archive/` once it's archived, e.g. `2026-10-10-add-login`. */
+  archived?: string;
 }
 
 /** A change in `openspec list`; `isNew` when the checkout's base doesn't have it, so the task made it. */
@@ -447,6 +449,10 @@ export interface SpecChange {
   documents: { path: string; content: string }[];
   requirements: RequirementChange[];
   validation: { valid: boolean; issues: string[] };
+  /** Once archived: its folder under `openspec/changes/archive/`. */
+  archived?: string;
+  /** Once archived: the main specs it updated, `<capability>/spec.md` as they are now. */
+  updatedSpecs?: { path: string; content: string }[];
 }
 
 /** A checkout's OpenSpec changes and the one shown. */

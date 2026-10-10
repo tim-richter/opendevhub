@@ -27,6 +27,7 @@ import { muted, Section, Segmented } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import { variantName } from "../tasks/tasks";
 import { ApproveSpec, TaskProgress } from "./spec-approve";
+import { ArchiveSpec } from "./spec-archive";
 import {
   AnchorComments,
   CommentButton,
@@ -45,6 +46,7 @@ import {
   requirementAnchor,
   requirementBody,
   taskProgress,
+  tasksDone,
 } from "./specs";
 import type { SpecAnchor } from "./specs";
 
@@ -150,12 +152,15 @@ const ChangeBody = ({
   projectId,
   directory,
   review,
+  archive,
 }: {
   change: SpecChange;
   projectId: string;
   directory: string;
   /** Present while the spec is proposed: whether the agent is working, and code it changed outside `openspec/`. */
   review?: { busy: boolean; code?: string[] };
+  /** Present once every task of the implemented change is done: whether the agent is working. */
+  archive?: { busy: boolean };
 }) => {
   const tabs = documentTabs(change);
   const [tab, setTab] = useState<string>();
@@ -255,6 +260,14 @@ const ChangeBody = ({
           code={review.code}
         />
       )}
+      {archive && (
+        <ArchiveSpec
+          projectId={projectId}
+          directory={directory}
+          change={change.name}
+          busy={archive.busy}
+        />
+      )}
     </div>
   );
 };
@@ -296,7 +309,9 @@ export const SpecPanel = (props: {
     return <p className={cn(muted, "px-4 py-3")}>{view.unavailable}</p>;
   }
   const { change } = view;
-  const progress = props.phase === "implement" ? taskProgress(view) : undefined;
+  // The change can be archived before the task's phase catches up.
+  const phase = change?.archived ? "archived" : props.phase;
+  const progress = phase === "implement" ? taskProgress(view) : undefined;
   const fresh = view.changes.filter((c) => c.isNew);
   const choices = fresh.length > 1 ? fresh : [];
   return (
@@ -314,8 +329,13 @@ export const SpecPanel = (props: {
             {change?.name ?? "No change yet"}
           </strong>
         )}
-        <Badge variant="secondary">{PHASE_LABEL[props.phase]}</Badge>
+        <Badge variant="secondary">{PHASE_LABEL[phase]}</Badge>
         {progress && <TaskProgress {...progress} />}
+        {change?.archived && (
+          <span className="text-muted-foreground font-mono text-xs">
+            openspec/changes/archive/{change.archived}
+          </span>
+        )}
         {change && change.artifacts.length > 0 && (
           <span className="flex flex-wrap items-center gap-1.5">
             {change.artifacts.map((a, i) => (
@@ -336,7 +356,7 @@ export const SpecPanel = (props: {
           projectId={props.projectId}
           directory={props.directory}
           review={
-            props.phase === "propose"
+            phase === "propose"
               ? {
                   busy: props.busy ?? false,
                   code:
@@ -344,6 +364,11 @@ export const SpecPanel = (props: {
                       ? undefined
                       : codeChanges(props.checkout),
                 }
+              : undefined
+          }
+          archive={
+            phase === "implement" && tasksDone(progress)
+              ? { busy: props.busy ?? false }
               : undefined
           }
         />

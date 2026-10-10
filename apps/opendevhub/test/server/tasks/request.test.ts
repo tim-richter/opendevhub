@@ -305,6 +305,22 @@ describe("spec-first task metadata", () => {
         opendevhub: { ...meta, spec: { change: 3, phase: "archived" } },
       })?.spec
     ).toStrictEqual({ phase: "archived" });
+    expect(
+      parseTaskMeta({
+        opendevhub: {
+          ...meta,
+          spec: {
+            archived: "2026-10-10-add-login",
+            change: "add-login",
+            phase: "archived",
+          },
+        },
+      })?.spec
+    ).toStrictEqual({
+      archived: "2026-10-10-add-login",
+      change: "add-login",
+      phase: "archived",
+    });
   });
 
   it("patches the task's metadata, keeping every other key", () => {

@@ -24,18 +24,21 @@ const EXEC_TIMEOUT_MS = 60_000;
 const MARK = "@@opendevhub-spec@@";
 /** The CLI's exit code when it isn't installed, from the script's own `openspec_`. */
 const NOT_FOUND = 127;
+const NO_CLI = "the container has no openspec CLI; add it to the devcontainer";
 /** A capability's delta spec inside a change folder. */
 const DELTA_SPEC = /^specs\/(?<cap>[^/]+)\/spec\.md$/u;
 const CHANGE_NAME = /^[A-Za-z0-9][\w.-]*$/u;
+/** `openspec archive` names a change's folder `<date>-<change>`. */
+const ARCHIVED_DATE = /^\d{4}-\d{2}-\d{2}-/u;
 /** Markdown read per change, so a runaway agent can't fill the page. */
 const MAX_DOCUMENTS = 200;
 const MAX_DOCUMENT_BYTES = 512 * 1024;
 
 /**
  * Lists a checkout's OpenSpec changes and reports on one, in a single exec. Arguments: the checkout, then
- * `list` to run `openspec list`, `base` to list the changes on the branch's recorded base, and a change name
- * for its `status` and `validate`. `openspec` is found on PATH or through a login shell, where npm, nvm and
- * mise usually put it.
+ * `list` to run `openspec list`, `base` to list the changes on the branch's recorded base, a change name
+ * for its `status` and `validate`, and `archive` to archive that change instead. `openspec` is found on PATH
+ * or through a login shell, where npm, nvm and mise usually put it.
  */
 const SPEC_SCRIPT = [
   'cd "$1" || exit 125',
@@ -56,7 +59,9 @@ const SPEC_SCRIPT = [
   '  if [ -n "$base" ]; then git ls-tree -d --name-only "$base" openspec/changes/ 2>/dev/null; mark base $?; else mark base 1; fi',
   "fi",
   'if [ "$2" = list ]; then openspec_ list --json 2>&1; mark list $?; fi',
-  'if [ -n "$4" ]; then',
+  'if [ -n "$4" ] && [ "$5" = archive ]; then',
+  '  openspec_ archive "$4" --yes --json 2>&1; mark archive $?',
+  'elif [ -n "$4" ]; then',
   '  openspec_ status --change "$4" --json 2>&1; mark status $?',
   '  openspec_ validate "$4" --json 2>&1; mark validate $?',
   "fi",
@@ -113,6 +118,19 @@ const lastLine = (section: Section | undefined): string =>
     .split("\n")
     .findLast((l) => l.trim())
     ?.trim() ?? "no output";
+
+/** The changes from a run with `list`; throws when the CLI is missing or fails. */
+const listedChanges = (sections: Map<string, Section>): SpecChangeSummary[] => {
+  const list = sections.get("list");
+  if (list?.code === NOT_FOUND) {
+    throw new UnavailableError(NO_CLI);
+  }
+  const listJson = list?.code === 0 ? sectionJson(list) : undefined;
+  if (!listJson) {
+    throw new UnavailableError(`openspec list failed: ${lastLine(list)}`);
+  }
+  return parseChangeList(listJson, undefined);
+};
 
 const num = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -203,6 +221,24 @@ export const parseValidation = (
   return { issues, valid: item.valid === true };
 };
 
+/** `openspec archive --json`: the folder the change went to, or why it didn't. */
+export const parseArchive = (
+  section: Section | undefined
+): { archived: string } | { error: string } => {
+  const json = sectionJson(section);
+  const archived = record(json?.archive).archivedAs;
+  if (section?.code === 0 && typeof archived === "string" && archived) {
+    return { archived };
+  }
+  const messages = (Array.isArray(json?.status) ? json.status : [])
+    .map(record)
+    .filter((s) => s.severity === "error" && typeof s.message === "string")
+    .map((s) => String(s.message));
+  return {
+    error: messages.length > 0 ? messages.join("; ") : lastLine(section),
+  };
+};
+
 /** The change a view shows: the asked one, the only new one, else the most recently modified (new ones first). */
 export const pickChange = (
   changes: SpecChangeSummary[],
@@ -265,22 +301,19 @@ export class Specs {
       .filter(
         (s) => s.directory === directory && s.task?.spec && !s.task.discarded
       );
-    const recorded = tasks.find((s) => s.task?.spec?.change)?.task?.spec
-      ?.change;
-    const wanted = change ?? recorded;
+    const spec = tasks.find((s) => s.task?.spec?.change)?.task?.spec;
+    const wanted = change ?? spec?.change;
+    // An archived change has left `openspec list`, so the CLI can't report on it.
+    const archived = spec?.phase === "archived" && wanted === spec.change;
 
     let sections = await this.run(target, directory, {
       base: !target.isMain,
-      change: wanted,
+      change: archived ? undefined : wanted,
       list: true,
     });
     const list = sections.get("list");
     if (list?.code === NOT_FOUND) {
-      return {
-        changes: [],
-        unavailable:
-          "the container has no openspec CLI; add it to the devcontainer",
-      };
+      return { changes: [], unavailable: NO_CLI };
     }
     const listJson = list?.code === 0 ? sectionJson(list) : undefined;
     if (!listJson) {
@@ -291,6 +324,12 @@ export class Specs {
     }
     const base = baseChanges(sections.get("base"));
     const changes = parseChangeList(listJson, base);
+    if (wanted && !changes.some((c) => c.name === wanted)) {
+      const folder = await archiveFolder(host, wanted, spec?.archived);
+      if (folder) {
+        return { changes, change: await archivedChange(host, wanted, folder) };
+      }
+    }
     const picked = pickChange(changes, wanted, base !== undefined);
     if (!picked) {
       return { changes };
@@ -360,17 +399,7 @@ export class Specs {
       }
     );
     const sections = await this.run(target, directory, { change, list: true });
-    const list = sections.get("list");
-    if (list?.code === NOT_FOUND) {
-      throw new UnavailableError(
-        "the container has no openspec CLI; add it to the devcontainer"
-      );
-    }
-    const listJson = list?.code === 0 ? sectionJson(list) : undefined;
-    if (!listJson) {
-      throw new UnavailableError(`openspec list failed: ${lastLine(list)}`);
-    }
-    if (!parseChangeList(listJson, undefined).some((c) => c.name === change)) {
+    if (!listedChanges(sections).some((c) => c.name === change)) {
       throw new InvalidRequestError(`no OpenSpec change ${change} here`);
     }
     const statusJson = sectionJson(sections.get("status"));
@@ -425,12 +454,103 @@ export class Specs {
     );
   }
 
+  /**
+   * Archives the checkout's implemented change with the CLI, without an agent turn: `openspec archive` merges its
+   * delta specs into `openspec/specs/` and moves it under `openspec/changes/archive/`, then the task's phase becomes
+   * `archived`. Only once every task is done, since `--yes` archives an unfinished change too.
+   */
+  async archive(
+    projectId: ProjectId,
+    directory: string,
+    change: string
+  ): Promise<void> {
+    const { session, envId, client, target } = this.task(
+      projectId,
+      directory,
+      change,
+      {
+        busy: "the agent is still busy; archive the change when its turn ends",
+        phase: (current) =>
+          current === "archived"
+            ? "the change is already archived"
+            : "approve the spec and implement it before archiving it",
+        wants: "implement",
+      }
+    );
+    const summary = listedChanges(
+      await this.run(target, directory, { list: true })
+    ).find((c) => c.name === change);
+    if (!summary) {
+      throw new InvalidRequestError(`no OpenSpec change ${change} here`);
+    }
+    const { completedTasks: done, totalTasks: total } = summary;
+    if (total === 0 || done < total) {
+      throw new InvalidRequestError(
+        `${done} of ${total} tasks are done; archive the change once they all are`
+      );
+    }
+    const archived = await this.run(target, directory, {
+      archive: true,
+      change,
+    });
+    const result = parseArchive(archived.get("archive"));
+    if ("error" in result) {
+      throw new InvalidRequestError(`openspec archive failed: ${result.error}`);
+    }
+    this.deps.log(projectId, `spec: archived ${change} as ${result.archived}`);
+    const spec = session.task?.spec ?? { phase: "implement" as const };
+    try {
+      const raw = await client.session(session.id);
+      await client.updateSession(
+        session.id,
+        {
+          metadata: patchTaskMetadata(raw.metadata, {
+            spec: {
+              ...spec,
+              archived: result.archived,
+              change,
+              phase: "archived",
+            },
+          }),
+        },
+        directory
+      );
+    } finally {
+      this.deps.reconcile?.(envId);
+    }
+  }
+
   /** The checkout's spec-first task, while its spec is proposed, its agent idle and opencode has `command`. */
   private async proposed(
     projectId: ProjectId,
     directory: string,
     change: string,
     refuse: { phase: string; busy: string; command: string }
+  ) {
+    const found = this.task(projectId, directory, change, {
+      busy: refuse.busy,
+      phase: () => refuse.phase,
+      wants: "propose",
+    });
+    const commands = await found.client.commands(directory);
+    if (!commands.some((c) => c.name === refuse.command)) {
+      throw new UnavailableError(
+        `opencode has no ${refuse.command} command here; run \`openspec update\` in the repository`
+      );
+    }
+    return found;
+  }
+
+  /** The checkout's spec-first task, while it's in the `wants` phase and its agent is idle. */
+  private task(
+    projectId: ProjectId,
+    directory: string,
+    change: string,
+    refuse: {
+      wants: SpecPhase;
+      phase: (current: SpecPhase | undefined) => string;
+      busy: string;
+    }
   ) {
     if (!CHANGE_NAME.test(change)) {
       throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
@@ -444,27 +564,21 @@ export class Specs {
     if (!session) {
       throw new InvalidRequestError(`no spec-first task works in ${directory}`);
     }
-    if (session.task?.spec?.phase !== "propose") {
-      throw new InvalidRequestError(refuse.phase);
+    const current = session.task?.spec?.phase;
+    if (current !== refuse.wants) {
+      throw new InvalidRequestError(refuse.phase(current));
     }
     if (session.status !== "idle") {
       throw new BusyError(session.id, refuse.busy);
     }
     const envId = session.envId ?? projectId;
-    const client = this.deps.client(envId);
-    const commands = await client.commands(directory);
-    if (!commands.some((c) => c.name === refuse.command)) {
-      throw new UnavailableError(
-        `opencode has no ${refuse.command} command here; run \`openspec update\` in the repository`
-      );
-    }
-    return { client, envId, session, target };
+    return { client: this.deps.client(envId), envId, session, target };
   }
 
   private async run(
     target: CheckTarget,
     directory: string,
-    opts: { list?: boolean; base?: boolean; change?: string }
+    opts: { list?: boolean; base?: boolean; change?: string; archive?: boolean }
   ): Promise<Map<string, Section>> {
     const r = await this.deps.containers.exec(
       target.exec,
@@ -477,6 +591,7 @@ export class Specs {
         opts.list ? "list" : "",
         opts.base ? "base" : "",
         opts.change ?? "",
+        opts.archive ? "archive" : "",
       ],
       { timeoutMs: EXEC_TIMEOUT_MS }
     );
@@ -502,19 +617,11 @@ export class Specs {
       path.join(host, "openspec", "changes", name)
     );
     const perCapability = await Promise.all(
-      documents.flatMap((d) => {
-        const capability = DELTA_SPEC.exec(d.path)?.groups?.cap;
-        if (!capability) {
-          return [];
-        }
-        return [
-          readText(
-            path.join(host, "openspec", "specs", capability, "spec.md")
-          ).then((current) =>
-            requirementChanges(capability, d.content, current)
-          ),
-        ];
-      })
+      deltaSpecs(documents).map(({ capability, content }) =>
+        readText(mainSpec(host, capability)).then((current) =>
+          requirementChanges(capability, content, current)
+        )
+      )
     );
     const requirements = perCapability.flat();
     return {
@@ -610,4 +717,68 @@ const DOC_ORDER = ["proposal.md", "design.md", "tasks.md"];
 const docRank = (file: string): number => {
   const i = DOC_ORDER.indexOf(file);
   return i === -1 ? DOC_ORDER.length : i;
+};
+
+/** The capabilities a change's delta specs touch, with each delta's markdown. */
+const deltaSpecs = (
+  documents: { path: string; content: string }[]
+): { capability: string; content: string }[] =>
+  documents.flatMap((d) => {
+    const capability = DELTA_SPEC.exec(d.path)?.groups?.cap;
+    return capability ? [{ capability, content: d.content }] : [];
+  });
+
+const mainSpec = (host: string, capability: string): string =>
+  path.join(host, "openspec", "specs", capability, "spec.md");
+
+const archiveDir = (host: string): string =>
+  path.join(host, "openspec", "changes", "archive");
+
+/** The change's folder in the archive: the recorded one, else the newest `<date>-<change>`. */
+const archiveFolder = async (
+  host: string,
+  change: string,
+  recorded: string | undefined
+): Promise<string | undefined> => {
+  const names = await fs.readdir(archiveDir(host)).catch((): string[] => []);
+  if (recorded && names.includes(recorded)) {
+    return recorded;
+  }
+  return names
+    .filter(
+      (n) => ARCHIVED_DATE.test(n) && n.replace(ARCHIVED_DATE, "") === change
+    )
+    .toSorted()
+    .at(-1);
+};
+
+/**
+ * An archived change, read from the archive. Its deltas are already merged into the main specs, so requirements show
+ * without a before, and the specs it updated come as they are now.
+ */
+const archivedChange = async (
+  host: string,
+  name: string,
+  folder: string
+): Promise<SpecChange> => {
+  const documents = await readDocuments(path.join(archiveDir(host), folder));
+  const deltas = deltaSpecs(documents);
+  const updatedSpecs = await Promise.all(
+    deltas.map(async ({ capability }) => ({
+      content: (await readText(mainSpec(host, capability))) ?? "",
+      path: `${capability}/spec.md`,
+    }))
+  );
+  return {
+    archived: folder,
+    artifacts: [],
+    documents,
+    name,
+    planningComplete: true,
+    requirements: deltas.flatMap(({ capability, content }) =>
+      requirementChanges(capability, content, undefined)
+    ),
+    updatedSpecs,
+    validation: { issues: [], valid: true },
+  };
 };

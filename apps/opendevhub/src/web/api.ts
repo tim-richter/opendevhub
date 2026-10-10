@@ -624,6 +624,17 @@ export const approveSpec = async (
   );
 };
 
+/** Archives the checkout's implemented change with `openspec archive`, updating its main specs. */
+export const archiveSpec = async (
+  projectId: string,
+  body: { directory: string; change: string }
+) => {
+  await complete(
+    project.spec.archive.$post({ param: projectParam(projectId), json: body }),
+    "archive the change"
+  );
+};
+
 export const fetchCheckRun = async (
   projectId: string,
   directory: string,

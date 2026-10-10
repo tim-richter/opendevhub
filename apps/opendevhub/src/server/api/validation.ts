@@ -172,6 +172,7 @@ export const bodies = {
     change: z.string(),
     force: z.boolean().optional(),
   }),
+  archiveSpec: directory.extend({ change: z.string() }),
 };
 
 const page = z.object({ page: text });

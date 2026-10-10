@@ -17,7 +17,8 @@ export interface ReviewOptions {
   from?: string;
 }
 
-const reviewKey = (projectId: string, directory: string) =>
+/** A checkout's diffs, whichever options they were read with. */
+export const reviewKey = (projectId: string, directory: string) =>
   ["review", projectId, directory] as const;
 
 /** A checkout's changes. Diffs can be large, so they leave memory soon after the page does. */

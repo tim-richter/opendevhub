@@ -18,6 +18,7 @@ import {
   requirementBody,
   specSessions,
   taskProgress,
+  tasksDone,
 } from "../../../../src/web/features/specs/specs";
 
 const change = (paths: string[]): SpecChange => ({
@@ -41,6 +42,20 @@ describe(documentTabs, () => {
         ])
       ).map((t) => t.label)
     ).toStrictEqual(["Proposal", "Tasks", "notes/extra"]);
+  });
+});
+
+describe("documentTabs once archived", () => {
+  it("adds the main specs the change updated", () => {
+    const tabs = documentTabs({
+      ...change(["proposal.md"]),
+      archived: "2026-10-10-c",
+      updatedSpecs: [{ content: "# auth", path: "auth/spec.md" }],
+    });
+    expect(tabs.map((t) => [t.id, t.label])).toStrictEqual([
+      ["proposal.md", "Proposal"],
+      ["openspec/specs/auth/spec.md", "auth spec"],
+    ]);
   });
 });
 
@@ -264,5 +279,13 @@ describe(taskProgress, () => {
       })
     ).toBeUndefined();
     expect(taskProgress(undefined)).toBeUndefined();
+  });
+});
+
+describe(tasksDone, () => {
+  it("is done once every task is", () => {
+    expect(tasksDone({ completed: 3, total: 3 })).toBe(true);
+    expect(tasksDone({ completed: 2, total: 3 })).toBe(false);
+    expect(tasksDone(undefined)).toBe(false);
   });
 });

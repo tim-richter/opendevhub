@@ -190,13 +190,14 @@ const parseTaskSpec = (spec: unknown): TaskSpec | undefined => {
   if (!spec || typeof spec !== "object") {
     return undefined;
   }
-  const { phase, change } = spec as Record<string, unknown>;
+  const { phase, change, archived } = spec as Record<string, unknown>;
   if (typeof phase !== "string" || !SPEC_PHASES.has(phase)) {
     return undefined;
   }
   return {
     phase: phase as SpecPhase,
     ...(typeof change === "string" && change ? { change } : {}),
+    ...(typeof archived === "string" && archived ? { archived } : {}),
   };
 };
 

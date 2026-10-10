@@ -5,6 +5,7 @@ import type {
   ReviewData,
   SessionSummary,
   SpecView,
+  TaskSpec,
 } from "../../../shared/types";
 import { specView } from "../../mocks/fixtures";
 import { failing } from "../../mocks/handlers";
@@ -100,19 +101,64 @@ export const CodeBeforeApproval = meta.story({
   },
 });
 
+const inPhase = (taskSpec: TaskSpec): SessionSummary => {
+  const s = variant(1, "claude-opus-5-5");
+  return { ...s, task: s.task && { ...s.task, spec: taskSpec } };
+};
+
 /** Once approved, the spec is read-only, and the bar follows the tasks the agent ticks off. */
 export const Implementing = meta.story({
   args: {
     sessions: [
-      {
-        ...variant(1, "claude-opus-5-5"),
-        task: {
-          ...variant(1, "claude-opus-5-5").task,
-          spec: { change: "add-login-burst-limit", phase: "implement" },
-        } as SessionSummary["task"],
-      },
+      inPhase({ change: "add-login-burst-limit", phase: "implement" }),
     ],
   },
+});
+
+/** Every task is done, so the change can be archived into the main specs. */
+export const ReadyToArchive = meta.story({
+  args: Implementing.input.args,
+  beforeEach: spec({
+    ...specView,
+    changes: specView.changes.map((c) =>
+      c.isNew ? { ...c, completedTasks: c.totalTasks } : c
+    ),
+  }),
+});
+
+const archivedChange = specView.change && {
+  ...specView.change,
+  archived: "2026-10-10-add-login-burst-limit",
+  artifacts: [],
+  // The main spec already has the change, so there's no before.
+  requirements: specView.change.requirements.map((r) => ({
+    ...r,
+    before: undefined,
+  })),
+  updatedSpecs: [
+    {
+      content:
+        "# auth Specification\n\n## Purpose\nHow users sign in.\n\n## Requirements\n### Requirement: Failed login response\nThe system SHALL answer a failed login with `401` after 1 second, and count it towards the attempt limit.\n\n#### Scenario: Wrong password\n- **WHEN** the password is wrong\n- **THEN** the response is `401`\n- **AND** the attempt counts towards the limit\n\n### Requirement: Login attempt limit\nThe system SHALL reject more than 5 login attempts per minute from one IP or for one account with `429`.\n\n#### Scenario: Burst from one IP\n- **WHEN** an IP sends a 6th attempt within a minute\n- **THEN** the response is `429` with `Retry-After`",
+      path: "auth/spec.md",
+    },
+  ],
+};
+
+/** Archived: the change lives under `openspec/changes/archive/`, and its specs are merged into the main ones. */
+export const Archived = meta.story({
+  args: {
+    sessions: [
+      inPhase({
+        archived: "2026-10-10-add-login-burst-limit",
+        change: "add-login-burst-limit",
+        phase: "archived",
+      }),
+    ],
+  },
+  beforeEach: spec({
+    change: archivedChange,
+    changes: specView.changes.filter((c) => !c.isNew),
+  }),
 });
 
 /** Several variants proposed a change each: one tab per variant. */
