@@ -168,6 +168,10 @@ export const bodies = {
   }),
   runChecks: directory.extend({ names: strings, approve: strings }),
   reviseSpec: directory.extend({ change: z.string(), feedback: z.string() }),
+  approveSpec: directory.extend({
+    change: z.string(),
+    force: z.boolean().optional(),
+  }),
 };
 
 const page = z.object({ page: text });

@@ -8,6 +8,7 @@ import type {
   SpecArtifact,
   SpecChange,
   SpecChangeSummary,
+  SpecPhase,
   SpecView,
 } from "../../shared/types";
 import type { CheckTarget } from "../environments/checks";
@@ -15,7 +16,7 @@ import type { Containers } from "../environments/containers";
 import { BusyError, UnavailableError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import type { OpencodeClient } from "../opencode/client";
-import { UPDATE_COMMAND } from "../tasks/openspec";
+import { APPLY_COMMAND, UPDATE_COMMAND } from "../tasks/openspec";
 import { patchTaskMetadata } from "../tasks/request";
 
 const EXEC_TIMEOUT_MS = 60_000;
@@ -314,13 +315,127 @@ export class Specs {
     change: string,
     feedback: string
   ): Promise<void> {
-    if (!CHANGE_NAME.test(change)) {
-      throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
-    }
     if (!feedback.trim()) {
       throw new InvalidRequestError("the feedback is empty");
     }
-    this.deps.target(projectId, directory);
+    const { session, envId, client } = await this.proposed(
+      projectId,
+      directory,
+      change,
+      {
+        busy: "the agent is still busy; send the comments when its turn ends",
+        command: UPDATE_COMMAND,
+        phase:
+          "the spec is approved; it can only be revised while it's proposed",
+      }
+    );
+    await client.command(
+      session.id,
+      UPDATE_COMMAND,
+      `${change}\n\n${feedback.trim()}`,
+      directory
+    );
+    this.deps.reconcile?.(envId);
+  }
+
+  /**
+   * Approves the checkout's proposed change and starts implementing it: the task's phase becomes `implement`, then
+   * its session runs `/opsx-apply <change>`. The CLI is asked again first, so the change must exist, have every
+   * artifact implementing needs, and pass `openspec validate` unless `force` is set.
+   */
+  async approve(
+    projectId: ProjectId,
+    directory: string,
+    change: string,
+    force = false
+  ): Promise<void> {
+    const { session, envId, client, target } = await this.proposed(
+      projectId,
+      directory,
+      change,
+      {
+        busy: "the agent is still busy; approve the spec when its turn ends",
+        command: APPLY_COMMAND,
+        phase: "the spec is already approved",
+      }
+    );
+    const sections = await this.run(target, directory, { change, list: true });
+    const list = sections.get("list");
+    if (list?.code === NOT_FOUND) {
+      throw new UnavailableError(
+        "the container has no openspec CLI; add it to the devcontainer"
+      );
+    }
+    const listJson = list?.code === 0 ? sectionJson(list) : undefined;
+    if (!listJson) {
+      throw new UnavailableError(`openspec list failed: ${lastLine(list)}`);
+    }
+    if (!parseChangeList(listJson, undefined).some((c) => c.name === change)) {
+      throw new InvalidRequestError(`no OpenSpec change ${change} here`);
+    }
+    const statusJson = sectionJson(sections.get("status"));
+    const { artifacts, planningComplete } = statusJson
+      ? parseStatus(statusJson)
+      : { artifacts: [], planningComplete: false };
+    if (!planningComplete) {
+      const missing = artifacts
+        .filter((a) => a.status !== "done")
+        .map((a) => a.id);
+      throw new InvalidRequestError(
+        missing.length > 0
+          ? `the change isn't ready to implement: ${missing.join(", ")} not done`
+          : "the change isn't ready to implement"
+      );
+    }
+    const validateJson = sectionJson(sections.get("validate"));
+    const validation = validateJson
+      ? parseValidation(validateJson, change)
+      : { issues: ["openspec validate failed"], valid: false };
+    if (!validation.valid && !force) {
+      throw new InvalidRequestError(
+        `openspec validate finds problems: ${validation.issues.join("; ")}`
+      );
+    }
+
+    const spec = session.task?.spec ?? { phase: "propose" as const };
+    const raw = await client.session(session.id);
+    const write = (phase: SpecPhase) =>
+      client.updateSession(
+        session.id,
+        {
+          metadata: patchTaskMetadata(raw.metadata, {
+            spec: { ...spec, change, phase },
+          }),
+        },
+        directory
+      );
+    // The phase changes first, so nothing can revise the spec while the agent implements it.
+    await write("implement");
+    try {
+      await client.command(session.id, APPLY_COMMAND, change, directory);
+    } catch (error) {
+      await write("propose").catch(() => undefined);
+      throw error;
+    } finally {
+      this.deps.reconcile?.(envId);
+    }
+    this.deps.log(
+      projectId,
+      `spec: approved ${change}, running /${APPLY_COMMAND}`
+    );
+  }
+
+  /** The checkout's spec-first task, while its spec is proposed, its agent idle and opencode has `command`. */
+  private async proposed(
+    projectId: ProjectId,
+    directory: string,
+    change: string,
+    refuse: { phase: string; busy: string; command: string }
+  ) {
+    if (!CHANGE_NAME.test(change)) {
+      throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
+    }
+    const target = this.deps.target(projectId, directory);
     const session = this.deps
       .sessions(projectId)
       .find(
@@ -330,31 +445,20 @@ export class Specs {
       throw new InvalidRequestError(`no spec-first task works in ${directory}`);
     }
     if (session.task?.spec?.phase !== "propose") {
-      throw new InvalidRequestError(
-        "the spec is approved; it can only be revised while it's proposed"
-      );
+      throw new InvalidRequestError(refuse.phase);
     }
     if (session.status !== "idle") {
-      throw new BusyError(
-        session.id,
-        "the agent is still busy; send the comments when its turn ends"
-      );
+      throw new BusyError(session.id, refuse.busy);
     }
     const envId = session.envId ?? projectId;
     const client = this.deps.client(envId);
     const commands = await client.commands(directory);
-    if (!commands.some((c) => c.name === UPDATE_COMMAND)) {
+    if (!commands.some((c) => c.name === refuse.command)) {
       throw new UnavailableError(
-        `opencode has no ${UPDATE_COMMAND} command here; run \`openspec update\` in the repository`
+        `opencode has no ${refuse.command} command here; run \`openspec update\` in the repository`
       );
     }
-    await client.command(
-      session.id,
-      UPDATE_COMMAND,
-      `${change}\n\n${feedback.trim()}`,
-      directory
-    );
-    this.deps.reconcile?.(envId);
+    return { client, envId, session, target };
   }
 
   private async run(

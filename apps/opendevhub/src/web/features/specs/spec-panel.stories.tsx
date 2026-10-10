@@ -1,7 +1,11 @@
 import { http, HttpResponse } from "msw";
 
 import preview from "../../../../.storybook/preview";
-import type { SessionSummary, SpecView } from "../../../shared/types";
+import type {
+  ReviewData,
+  SessionSummary,
+  SpecView,
+} from "../../../shared/types";
 import { specView } from "../../mocks/fixtures";
 import { failing } from "../../mocks/handlers";
 import { mockApi } from "../../mocks/story";
@@ -81,7 +85,22 @@ export const AgentWorking = meta.story({
   },
 });
 
-/** Once approved, the spec is read-only: no comments. */
+/** The agent wrote code while proposing, so approving asks first. */
+export const CodeBeforeApproval = meta.story({
+  args: {
+    reviews: {
+      [variant(1, "claude-opus-5-5").directory]: {
+        files: [
+          { file: "openspec/changes/add-login-burst-limit/proposal.md" },
+          { file: "src/auth/rate-limiter.ts" },
+          { file: "src/routes/login.ts" },
+        ],
+      } as ReviewData,
+    },
+  },
+});
+
+/** Once approved, the spec is read-only, and the bar follows the tasks the agent ticks off. */
 export const Implementing = meta.story({
   args: {
     sessions: [

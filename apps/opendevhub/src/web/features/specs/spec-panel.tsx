@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import type {
   RequirementChange,
   RequirementOperation,
+  ReviewData,
   SessionSummary,
   SpecArtifact,
   SpecChange,
@@ -25,6 +26,7 @@ import type { MarkdownBlock } from "../../components/markdown-body";
 import { muted, Section, Segmented } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import { variantName } from "../tasks/tasks";
+import { ApproveSpec, TaskProgress } from "./spec-approve";
 import {
   AnchorComments,
   CommentButton,
@@ -37,12 +39,16 @@ import {
   artifactLabel,
   blockAnchor,
   byCapability,
+  codeChanges,
   documentTabs,
   PHASE_LABEL,
   requirementAnchor,
   requirementBody,
+  taskProgress,
 } from "./specs";
 import type { SpecAnchor } from "./specs";
+
+const PROGRESS_POLL_MS = 15_000;
 
 // The diff highlighter is large; load it with the first modified requirement on screen.
 const RequirementDiff = lazy(() => import("./requirement-diff"));
@@ -148,8 +154,8 @@ const ChangeBody = ({
   change: SpecChange;
   projectId: string;
   directory: string;
-  /** Present while the spec can be commented on: why sending waits, if it does. */
-  review?: { blocked?: string };
+  /** Present while the spec is proposed: whether the agent is working, and code it changed outside `openspec/`. */
+  review?: { busy: boolean; code?: string[] };
 }) => {
   const tabs = documentTabs(change);
   const [tab, setTab] = useState<string>();
@@ -233,7 +239,20 @@ const ChangeBody = ({
           directory={directory}
           change={change.name}
           comments={drafts}
-          blocked={review.blocked}
+          blocked={
+            review.busy
+              ? "The agent is working; send when its turn ends."
+              : undefined
+          }
+        />
+      )}
+      {review && (
+        <ApproveSpec
+          projectId={projectId}
+          directory={directory}
+          change={change}
+          busy={review.busy}
+          code={review.code}
         />
       )}
     </div>
@@ -245,11 +264,18 @@ export const SpecPanel = (props: {
   projectId: string;
   directory: string;
   phase: SpecPhase;
-  /** The task's agent is working, so comments wait for its turn to end. */
+  /** The task's agent is working, so comments and approval wait for its turn to end. */
   busy?: boolean;
+  /** The checkout's changes, for code written before approval; undefined while loading, null if unreadable. */
+  checkout?: ReviewData | null;
 }) => {
   const [picked, setPicked] = useState<string>();
-  const query = useQuery(specQuery(props.projectId, props.directory, picked));
+  const implementing = props.phase === "implement" && props.busy === true;
+  const query = useQuery({
+    ...specQuery(props.projectId, props.directory, picked),
+    // Tasks get ticked off during the agent's turn; follow them while it implements.
+    refetchInterval: implementing ? PROGRESS_POLL_MS : false,
+  });
   if (query.isError) {
     return (
       <p className="text-destructive px-4 py-3 text-sm">
@@ -270,6 +296,7 @@ export const SpecPanel = (props: {
     return <p className={cn(muted, "px-4 py-3")}>{view.unavailable}</p>;
   }
   const { change } = view;
+  const progress = props.phase === "implement" ? taskProgress(view) : undefined;
   const fresh = view.changes.filter((c) => c.isNew);
   const choices = fresh.length > 1 ? fresh : [];
   return (
@@ -288,6 +315,7 @@ export const SpecPanel = (props: {
           </strong>
         )}
         <Badge variant="secondary">{PHASE_LABEL[props.phase]}</Badge>
+        {progress && <TaskProgress {...progress} />}
         {change && change.artifacts.length > 0 && (
           <span className="flex flex-wrap items-center gap-1.5">
             {change.artifacts.map((a, i) => (
@@ -310,9 +338,11 @@ export const SpecPanel = (props: {
           review={
             props.phase === "propose"
               ? {
-                  blocked: props.busy
-                    ? "The agent is working; send when its turn ends."
-                    : undefined,
+                  busy: props.busy ?? false,
+                  code:
+                    props.checkout === undefined
+                      ? undefined
+                      : codeChanges(props.checkout),
                 }
               : undefined
           }
@@ -330,6 +360,8 @@ export const SpecPanel = (props: {
 export const SpecSection = (props: {
   projectId: string;
   sessions: SessionSummary[];
+  /** Each checkout's changes, by directory. */
+  reviews?: Record<string, ReviewData | null>;
 }) => {
   const { sessions } = props;
   const [directory, setDirectory] = useState<string>();
@@ -362,6 +394,7 @@ export const SpecSection = (props: {
         directory={shown.directory}
         phase={phase}
         busy={shown.status !== "idle"}
+        checkout={props.reviews?.[shown.directory]}
       />
     </Section>
   );

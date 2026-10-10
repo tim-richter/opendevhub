@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionSummary, SpecChange } from "../../../../src/shared/types";
+import type {
+  ReviewData,
+  SessionSummary,
+  SpecChange,
+} from "../../../../src/shared/types";
 import {
+  approveBlocker,
+  approveWarnings,
   blockAnchor,
   byCapability,
+  codeChanges,
   composeSpecFeedback,
   documentTabs,
   isAt,
   requirementAnchor,
   requirementBody,
   specSessions,
+  taskProgress,
 } from "../../../../src/web/features/specs/specs";
 
 const change = (paths: string[]): SpecChange => ({
@@ -186,5 +194,75 @@ describe(composeSpecFeedback, () => {
         "3. General: Split it in two.",
       ].join("\n")
     );
+  });
+});
+
+describe(codeChanges, () => {
+  it("lists the files outside openspec/", () => {
+    const review = {
+      files: [
+        { file: "openspec/changes/c/proposal.md" },
+        { file: "src/login.ts" },
+      ],
+    } as ReviewData;
+    expect(codeChanges(review)).toStrictEqual(["src/login.ts"]);
+    expect(codeChanges(undefined)).toStrictEqual([]);
+  });
+});
+
+describe(approveBlocker, () => {
+  it("waits for the agent's turn, then for the artifacts implementing needs", () => {
+    const ready = { ...change([]), planningComplete: true };
+    expect(approveBlocker(ready, true)).toContain("agent is working");
+    expect(approveBlocker(ready, false)).toBeUndefined();
+    expect(
+      approveBlocker(
+        {
+          ...change([]),
+          artifacts: [
+            { id: "proposal", outputPath: "proposal.md", status: "done" },
+            { id: "tasks", outputPath: "tasks.md", status: "blocked" },
+          ],
+        },
+        false
+      )
+    ).toBe("Waits for Tasks.");
+  });
+});
+
+describe(approveWarnings, () => {
+  it("warns about code written before approval and a change that doesn't validate", () => {
+    expect(approveWarnings(change([]), [])).toStrictEqual([]);
+    const invalid = {
+      ...change([]),
+      validation: { issues: ["a", "b"], valid: false },
+    };
+    expect(
+      approveWarnings(invalid, ["1", "2", "3", "4", "5", "6", "7"])
+    ).toStrictEqual([
+      "The agent changed code before approval: 1, 2, 3, 4, 5 and 2 more.",
+      "openspec validate finds 2 problems.",
+    ]);
+  });
+});
+
+describe(taskProgress, () => {
+  it("counts the shown change's tasks", () => {
+    const summary = {
+      completedTasks: 2,
+      isNew: true,
+      name: "c",
+      totalTasks: 5,
+    };
+    expect(
+      taskProgress({ change: change([]), changes: [summary] })
+    ).toStrictEqual({ completed: 2, total: 5 });
+    expect(
+      taskProgress({
+        change: change([]),
+        changes: [{ ...summary, totalTasks: 0 }],
+      })
+    ).toBeUndefined();
+    expect(taskProgress(undefined)).toBeUndefined();
   });
 });

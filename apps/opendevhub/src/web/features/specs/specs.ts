@@ -1,9 +1,11 @@
 import type {
   RequirementChange,
+  ReviewData,
   SessionSummary,
   SpecArtifact,
   SpecChange,
   SpecPhase,
+  SpecView,
 } from "../../../shared/types";
 import type { MarkdownBlock } from "../../components/markdown-body";
 import { linesLabel } from "../review/review";
@@ -171,4 +173,65 @@ export const composeSpecFeedback = (
     ].join("\n");
   });
   return `Review feedback on the proposed change. Revise its planning artifacts to address each point and keep them coherent, without touching any code, then reply with what you changed.\n\n${items.join("\n\n")}`;
+};
+
+/** Files the checkout changes outside `openspec/`: code the agent wrote before the spec was approved. */
+export const codeChanges = (review: ReviewData | null | undefined): string[] =>
+  (review?.files ?? [])
+    .map((f) => f.file)
+    .filter((f) => !f.startsWith("openspec/"));
+
+/** Why the shown change can't be approved yet, if it can't. */
+export const approveBlocker = (
+  change: SpecChange,
+  busy: boolean
+): string | undefined => {
+  if (busy) {
+    return "The agent is working; approve when its turn ends.";
+  }
+  if (!change.planningComplete) {
+    const missing = change.artifacts
+      .filter((a) => a.status !== "done")
+      .map(artifactLabel);
+    return missing.length > 0
+      ? `Waits for ${missing.join(", ")}.`
+      : "The change isn't ready to implement yet.";
+  }
+  return undefined;
+};
+
+const MAX_LISTED_FILES = 5;
+
+/** What approving has to confirm first: code written before approval, and a change that doesn't validate. */
+export const approveWarnings = (
+  change: SpecChange,
+  code: string[]
+): string[] => {
+  const warnings: string[] = [];
+  if (code.length > 0) {
+    const listed = code.slice(0, MAX_LISTED_FILES).join(", ");
+    const more =
+      code.length > MAX_LISTED_FILES
+        ? ` and ${code.length - MAX_LISTED_FILES} more`
+        : "";
+    warnings.push(`The agent changed code before approval: ${listed}${more}.`);
+  }
+  if (!change.validation.valid) {
+    warnings.push(
+      `openspec validate finds ${change.validation.issues.length === 1 ? "a problem" : `${change.validation.issues.length} problems`}.`
+    );
+  }
+  return warnings;
+};
+
+/** The shown change's tasks: how many of them the agent has ticked off. */
+export const taskProgress = (
+  view: SpecView | null | undefined
+): { completed: number; total: number } | undefined => {
+  const name = view?.change?.name;
+  const summary = view?.changes.find((c) => c.name === name);
+  if (!summary || summary.totalTasks === 0) {
+    return undefined;
+  }
+  return { completed: summary.completedTasks, total: summary.totalTasks };
 };

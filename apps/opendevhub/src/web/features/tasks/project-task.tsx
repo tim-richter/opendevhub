@@ -21,6 +21,7 @@ import type {
   ProjectView,
   ReviewData,
   SessionSummary,
+  SpecView,
   StartingVariant,
 } from "../../../shared/types";
 import { dismissStarting, pickVariant } from "../../api";
@@ -37,8 +38,10 @@ import { checksQuery } from "../checks/checks-queries";
 import { JiraSourceCard } from "../jira/jira-source-card";
 import { useProjectView } from "../projects/project-layout";
 import { reviewQuery } from "../review/review-queries";
+import { TaskProgress } from "../specs/spec-approve";
 import { SpecSection } from "../specs/spec-panel";
-import { specSessions } from "../specs/specs";
+import { specQuery } from "../specs/spec-queries";
+import { PHASE_LABEL, specSessions, taskProgress } from "../specs/specs";
 import { formatUsage, taskUsage } from "../usage/usage";
 import {
   diffStats,
@@ -133,6 +136,14 @@ export const ProjectTask = () => {
     directories,
     useQueries({
       queries: directories.map((d) => reviewQuery(view.project.id, d)),
+    })
+  );
+  const specDirectories = specVariants.map((s) => s.directory);
+  // The same queries as each checkout's Spec panel, for the tasks done in Compare.
+  const specs = byDirectory(
+    specDirectories,
+    useQueries({
+      queries: specDirectories.map((d) => specQuery(view.project.id, d)),
     })
   );
   const checks = byDirectory(
@@ -293,7 +304,11 @@ export const ProjectTask = () => {
         </div>
       )}
       {specVariants.length > 0 && (
-        <SpecSection projectId={view.project.id} sessions={specVariants} />
+        <SpecSection
+          projectId={view.project.id}
+          sessions={specVariants}
+          reviews={reviews}
+        />
       )}
       {sessions.length > 0 && (
         <Compare
@@ -301,6 +316,7 @@ export const ProjectTask = () => {
           sessions={sessions}
           reviews={reviews}
           checks={checks}
+          specs={specs}
           picking={picking}
           onPick={(s) => void pick(s)}
         />
@@ -335,10 +351,11 @@ const Compare = (props: {
   sessions: SessionSummary[];
   reviews: Record<string, ReviewData | null>;
   checks: Record<string, ChecksView | null>;
+  specs: Record<string, SpecView | null>;
   picking: boolean;
   onPick: (s: SessionSummary) => void;
 }) => {
-  const { view, sessions, reviews, checks } = props;
+  const { view, sessions, reviews, checks, specs } = props;
   const several = sessions.length > 1;
   const files = fileMatrix(sessions.map((s) => reviews[s.directory]));
   const differ = files.filter((f) => !f.same).length;
@@ -387,6 +404,23 @@ const Compare = (props: {
               </tr>
             </thead>
             <tbody>
+              {sessions.some((s) => s.task?.spec) &&
+                row("Spec", (s) => {
+                  const phase = s.task?.spec?.phase;
+                  if (!phase) {
+                    return "—";
+                  }
+                  const progress =
+                    phase === "implement"
+                      ? taskProgress(specs[s.directory])
+                      : undefined;
+                  return (
+                    <span className="flex flex-col gap-1">
+                      {PHASE_LABEL[phase]}
+                      {progress && <TaskProgress {...progress} />}
+                    </span>
+                  );
+                })}
               {row("Checks", (s) => {
                 const c = checks[s.directory];
                 if (c === undefined) {

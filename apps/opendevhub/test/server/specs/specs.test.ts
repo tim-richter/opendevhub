@@ -106,11 +106,16 @@ const make = (opts: {
   );
   const client = {
     command: vi.fn(async () => undefined),
-    commands: vi.fn(async () => [{ name: "opsx-update" }]),
+    commands: vi.fn(async () => [
+      { name: "opsx-update" },
+      { name: "opsx-apply" },
+    ]),
     session: vi.fn(async () => ({
       metadata: { opendevhub: { task: "tsk_1" }, x: 1 },
     })),
-    updateSession: vi.fn(async () => undefined),
+    updateSession: vi.fn(
+      async (_id: string, _body: unknown, _directory?: string) => undefined
+    ),
   };
   const reconcile = vi.fn();
   const deps: SpecsDeps = {
@@ -416,5 +421,134 @@ describe("Specs.revise", () => {
     await expect(
       specs.revise("p", "/workspaces/wt", "add-login", "x")
     ).rejects.toThrow("no spec-first task");
+  });
+});
+
+const READY = {
+  ...STATUS,
+  artifacts: STATUS.artifacts.map((a) => ({
+    id: a.id,
+    outputPath: a.outputPath,
+    status: "done",
+  })),
+};
+const INVALID = {
+  items: [
+    {
+      id: "add-login",
+      issues: [{ message: "no scenarios", path: "auth" }],
+      valid: false,
+    },
+  ],
+};
+const report = (status: unknown, validate: unknown) =>
+  section("list", list("add-login")) +
+  section("status", status) +
+  section("validate", validate);
+
+describe("Specs.approve", () => {
+  it("records the implement phase, then runs /opsx-apply with the change", async () => {
+    const { client, exec, reconcile, specs } = make({
+      outputs: [report(READY, VALID)],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    await specs.approve("p", "/workspaces/wt", "add-login");
+    expect(exec.mock.calls[0][1].slice(4)).toStrictEqual([
+      "/workspaces/wt",
+      "list",
+      "",
+      "add-login",
+    ]);
+    expect(client.updateSession).toHaveBeenCalledWith(
+      "ses_1",
+      {
+        metadata: {
+          opendevhub: {
+            spec: { change: "add-login", phase: "implement" },
+            task: "tsk_1",
+          },
+          x: 1,
+        },
+      },
+      "/workspaces/wt"
+    );
+    expect(client.command).toHaveBeenCalledWith(
+      "ses_1",
+      "opsx-apply",
+      "add-login",
+      "/workspaces/wt"
+    );
+    expect(client.updateSession.mock.invocationCallOrder[0]).toBeLessThan(
+      client.command.mock.invocationCallOrder[0]
+    );
+    expect(reconcile).toHaveBeenCalledWith("p");
+  });
+
+  it("refuses an unfinished or unknown change, and an invalid one unless forced", async () => {
+    const unfinished = make({
+      outputs: [report(STATUS, VALID)],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    await expect(
+      unfinished.specs.approve("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("tasks not done");
+
+    const unknown = make({
+      outputs: [section("list", list("other"))],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    await expect(
+      unknown.specs.approve("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("no OpenSpec change add-login");
+
+    const invalid = make({
+      outputs: [report(READY, INVALID), report(READY, INVALID)],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    await expect(
+      invalid.specs.approve("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("auth: no scenarios");
+    expect(invalid.client.updateSession).not.toHaveBeenCalled();
+    await invalid.specs.approve("p", "/workspaces/wt", "add-login", true);
+    expect(invalid.client.command).toHaveBeenCalledOnce();
+
+    for (const m of [unfinished, unknown]) {
+      expect(m.client.updateSession).not.toHaveBeenCalled();
+      expect(m.client.command).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses once approved or while the agent works, and goes back to propose when the command fails", async () => {
+    const approved = make({
+      outputs: [],
+      sessions: [taskSession({ change: "add-login", phase: "implement" })],
+    });
+    await expect(
+      approved.specs.approve("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("already approved");
+
+    const busy = make({
+      outputs: [],
+      sessions: [taskSession({ phase: "propose" }, "running")],
+    });
+    await expect(
+      busy.specs.approve("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("still busy");
+
+    const failing = make({
+      outputs: [report(READY, VALID)],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    failing.client.command.mockRejectedValue(new Error("opencode is down"));
+    await expect(
+      failing.specs.approve("p", "/workspaces/wt", "add-login")
+    ).rejects.toThrow("opencode is down");
+    expect(
+      failing.client.updateSession.mock.calls.map(
+        (c) =>
+          (c[1] as { metadata: { opendevhub: { spec: { phase: string } } } })
+            .metadata.opendevhub.spec.phase
+      )
+    ).toStrictEqual(["implement", "propose"]);
   });
 });

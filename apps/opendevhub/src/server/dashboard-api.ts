@@ -92,7 +92,7 @@ export interface DashboardDeps {
   cleanup: Pick<Cleanup, "scan" | "apply">;
   checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;
   /** Absent in tests that don't need it. */
-  specs?: Pick<Specs, "view" | "revise">;
+  specs?: Pick<Specs, "view" | "revise" | "approve">;
   /** Absent when the usage ledger couldn't be opened. */
   usage?: Pick<UsageStore, "report">;
   /** Absent in tests that don't need it. */
