@@ -1,6 +1,6 @@
 ## Context
 
-- **Jira**: a task can start from a ticket (`TaskRequest.jira`: key, instanceUrl, title, description). `persist-tasks` stores that as JSON in `tasks.jira`. The Jira page finds linked tasks by scanning `snapshot.projects[].sessions[].task.jira`.
+- **Jira**: a task can start from a ticket (`TaskRequest.jira`: key, instanceUrl, title, description). `persist-tasks` stores that as JSON in `tasks.jira`. The Jira page finds linked tasks by scanning every project's `tasks[].jira` in the snapshot.
 - **Forgejo**:
   - The PR page can check a PR out into a worktree (`POST …/worktree`), which `link-branches-and-worktrees` records as `branches.created_by = 'pull'` with `origin_url`.
   - The PR page can start an AI review session in a checkout (`POST …/ai-review/session` → `Sessions.startSession` with `aiReviewTitle`), or ask for findings (`POST …/ai-review` → `generateIn`, in that session or in a quick diff-only session).
@@ -15,6 +15,7 @@
 - Every way opendevhub touches a PR or ticket records the link: starting a task from a ticket, publishing, checking out a PR, and an AI review.
 - Both directions can be looked up cheaply, without scanning sessions.
 - AI review findings are kept and can be listed again.
+- Linking a ticket or pull request and running a review are recorded as events.
 
 **Non-Goals:**
 
@@ -22,10 +23,11 @@
 - Linking PRs that opendevhub never touched (pushed by hand) by matching head branch names. See Open Questions.
 - API clients for GitHub or GitLab. Their PRs get rows from publish output, keyed by URL, with no snapshot.
 - Posting stored findings back to the forge (that's already the review dialog's job).
+- Importing links from existing tasks and branches, or converting earlier review sessions. opendevhub has no users yet.
 
 ## Decisions
 
-### Schema (migration 4)
+### Schema (added to migration 1)
 
 ```sql
 CREATE TABLE tickets (
@@ -64,7 +66,7 @@ CREATE TABLE reviews (
 CREATE INDEX reviews_pull ON reviews (pull_request_id, created_at);
 ```
 
-`tasks` is rebuilt to add `ticket_id` and `pull_request_id` (foreign keys) and to widen `kind` to `('task', 'manual', 'review')`. `tasks.jira` stays as the immutable snapshot taken when the task started, because the prompt was built from it. `branches` gets `pull_request_id` and `pr_role CHECK (pr_role IN ('head', 'checkout'))`, and loses `pr_url` and `origin_url` once their values are copied over.
+`tickets` and `pull_requests` are created before `tasks` and `branches` in migration 1. `tasks` gains `ticket_id` and `pull_request_id` (foreign keys), and its `kind` check becomes `('task', 'manual', 'review')`. `tasks.jira` stays as the immutable snapshot taken when the task started, because the prompt was built from it. `branches` gains `pull_request_id` and `pr_role CHECK (pr_role IN ('head', 'checkout'))`, which replace its `pr_url` and `origin_url` columns. Since migration 1 is edited in place, nothing is rebuilt or copied.
 
 ### PR identity is the web URL
 
@@ -85,6 +87,10 @@ Both paths insert a `reviews` row from `parseAiReview`'s result together with `h
 
 Commit-message sessions (`generateIn` from publish) stay `manual`. This resolves the open question in `persist-tasks`.
 
+### Events
+
+The link repository writes its events in the same transaction as the change, as `persist-tasks` set up: `ticket.linked` (a task started from a ticket, object the ticket, with the task id), `pull_request.linked` (a branch linked with role `head` or `checkout`, with the variant's task id when the branch has a creating variant) and `review.run` (a stored review, with the review task's id). Refreshing a ticket's or pull request's title and state is not an event.
+
 ### Lookups
 
 `links.ts` has `forPull(url)` and `forTicket(instance, key)`, each a handful of joins:
@@ -94,22 +100,11 @@ Commit-message sessions (`generateIn` from publish) stay `manual`. This resolves
 
 `TaskView` gets `ticket` and `pullRequests` from the same joins when the snapshot is built. The tables are small, and the snapshot is already rebuilt on each change.
 
-### Backfill (once, after migration 4)
-
-- `tasks.jira` → ticket rows and `ticket_id`.
-- `branches.pr_url` → pull request rows, `pr_role = 'head'`. `branches.origin_url` → pull request rows, `pr_role = 'checkout'`.
-- A manual task becomes a `review` task when its title matches `AI review: PR #<n> …` **and** one of its variants' worktree is on a branch with `pr_role = 'checkout'` whose PR has number `n`. Quick reviews before this change had no checkout and left no findings, so they stay manual.
-
 ## Risks / Trade-offs
 
 - **Findings hold model output about private code** → they're stored in the same 0600 database as everything else and never leave the machine. Findings for a PR that no longer exists are cleared by the cleanup plan in `show-provenance`, not by this change.
 - **The PR URL as key breaks if a forge changes URL shape** (for example, a host rename) → a duplicate row instead of a wrong link. Acceptable.
 - **Snapshots go stale** (a PR merged while nobody looked) → the UI shows `fetched_at` next to the state, and opening the PR refreshes it.
-- **Title-based backfill can misfire** → it requires the checkout branch link too, so a session merely titled like a review isn't converted.
-
-## Migration Plan
-
-Migration 4, then a one-time backfill marked in `meta`. Rollback: older builds ignore the new tables. Review tasks look like manual tasks to them (they read `TaskMeta`, which review sessions don't have), which matches today's behaviour.
 
 ## Open Questions
 

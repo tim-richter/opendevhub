@@ -21,7 +21,7 @@ The system SHALL keep a branch row for every branch it creates, checks out for a
 
 ### Requirement: Branch facts live in the database
 
-The system SHALL store a branch's origin URL, published remote, publish time, AGit topic and pull request URL on its branch row. It SHALL read them from there, and SHALL NOT write the `opendevhubOrigin`, `opendevhubPublished`, `opendevhubTopic` or `opendevhubPr` git config keys.
+The system SHALL store a branch's origin URL, published remote, publish time, AGit topic and pull request URL on its branch row. It SHALL read them only from there, and SHALL neither write nor read the `opendevhubOrigin`, `opendevhubPublished`, `opendevhubTopic` or `opendevhubPr` git config keys.
 
 #### Scenario: Publishing records the pull request
 
@@ -32,6 +32,11 @@ The system SHALL store a branch's origin URL, published remote, publish time, AG
 
 - **WHEN** the user publishes with the AGit strategy
 - **THEN** the branch row records the topic
+
+#### Scenario: Leftover git config keys
+
+- **WHEN** a checkout has a `branch.feature/x.opendevhubPr` key and no branch row for `feature/x` has a pull request URL
+- **THEN** the publish dialog shows no pull request for `feature/x`
 
 ### Requirement: Base branch stays in git config
 
@@ -75,16 +80,16 @@ When a pick removes discarded variants' worktrees, the system SHALL delete a wor
 - **WHEN** a discarded variant's worktree is on a branch with a different creator
 - **THEN** the worktree is removed, the branch is kept, and the result says it was not created by this task
 
-### Requirement: Backfill from git config
+### Requirement: Branch changes are recorded as events
 
-On the first worktree listing of each project after the upgrade, the system SHALL read every `branch.*.opendevhub*` git config key once. It SHALL fill in the matching branch rows' base, origin, published remote, topic and pull request URL where those are empty. The backfill SHALL run at most once per project.
+The system SHALL append an event when a branch row is created, published or deleted, in the same transaction as the change. The event SHALL name the branch, its project and who caused it: the task variant that created it, the user, or opendevhub itself.
 
-#### Scenario: Upgrade with a published branch
+#### Scenario: Task creates and user publishes a branch
 
-- **WHEN** a project has `branch.feature/x.opendevhubPr` set before the upgrade
-- **THEN** after its first listing the branch row for `feature/x` has that pull request URL
+- **WHEN** variant 2 of a task creates branch `task/add-login-2` and the user later publishes it
+- **THEN** the events table holds `branch.created` with actor variant 2 of that task and `branch.published` with actor `user`
 
-#### Scenario: Backfill runs once
+#### Scenario: Existing branch is not recreated
 
-- **WHEN** the project's worktrees are listed again
-- **THEN** git config is not read again for backfill
+- **WHEN** a task creates a worktree on a branch that already has a row
+- **THEN** no `branch.created` event is recorded

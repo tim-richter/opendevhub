@@ -23,7 +23,7 @@ The system SHALL keep a worktree row for each linked worktree of a project, on t
 
 After every successful worktree listing, the system SHALL:
 
-- add a row for each path that has no live row, linking it to a variant whose directory matches and that has no worktree yet, or else marking it unmanaged;
+- add a row for each path that has no live row and mark it unmanaged;
 - mark rows whose path is gone as removed;
 - point a worktree at its new branch when its checkout switched branches.
 
@@ -33,6 +33,11 @@ A failed listing SHALL change nothing.
 
 - **WHEN** the user runs `git worktree add` in the container and the worktrees are listed
 - **THEN** the worktree gets a row whose creator is unmanaged
+
+#### Scenario: Worktree opendevhub created
+
+- **WHEN** a task variant has created a worktree and the worktrees are listed
+- **THEN** reconcile finds its existing row and adds no unmanaged row for it
 
 #### Scenario: Worktree removed outside opendevhub
 
@@ -49,14 +54,19 @@ A failed listing SHALL change nothing.
 - **WHEN** the container is stopped and the worktree listing fails
 - **THEN** no worktree row is added or marked removed
 
-### Requirement: Backfilled tasks link to their worktrees
+### Requirement: Worktree changes are recorded as events
 
-When reconcile finds a worktree whose path equals the directory of a variant without a worktree, the system SHALL link that variant to the worktree and its branch.
+The system SHALL append an event when a worktree row is created, adopted as unmanaged, switched to another branch or marked removed, in the same transaction as the change. The event SHALL name the worktree, its project, the task when a variant created it, and who caused it.
 
-#### Scenario: Task from before the upgrade
+#### Scenario: Unmanaged worktree adopted
 
-- **WHEN** a task created before this change has a variant whose session runs in `/workspaces/.worktrees/add-login-1`
-- **THEN** after the first listing that variant points at the worktree row for that path and its branch row
+- **WHEN** reconcile adds a row for a worktree made outside opendevhub
+- **THEN** a `worktree.adopted` event with actor `system` is recorded
+
+#### Scenario: Task worktree removed on pick
+
+- **WHEN** the user picks a variant and a discarded variant's worktree is removed
+- **THEN** a `worktree.removed` event with actor `user` and that task's id is recorded
 
 ### Requirement: Worktree creators in the dashboard
 

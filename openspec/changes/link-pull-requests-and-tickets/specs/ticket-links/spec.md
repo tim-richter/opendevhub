@@ -35,7 +35,7 @@ The system SHALL return, for a ticket: the tasks started from it (archived ones 
 
 ### Requirement: Jira page uses the lookup
 
-The Jira ticket page SHALL list the ticket's tasks and pull requests from the lookup, and SHALL NOT scan session metadata.
+The Jira ticket page SHALL list the ticket's tasks and pull requests from the lookup, and SHALL NOT scan the tasks in the snapshot.
 
 #### Scenario: Ticket with tasks in two projects
 
@@ -56,11 +56,11 @@ Each task in the snapshot that was started from a ticket SHALL include the ticke
 - **WHEN** the user opens a task started from `APP-42`
 - **THEN** the task page shows `APP-42` with its status, linking to the ticket
 
-### Requirement: Backfill tickets
+### Requirement: Ticket links are recorded as events
 
-After the upgrade, the system SHALL create ticket rows from the Jira snapshots of existing tasks and link those tasks to them, once.
+The system SHALL append a `ticket.linked` event when a task is started from a ticket, in the same transaction as the link, with the task's id. Refreshing a ticket's title or status SHALL NOT be recorded as an event.
 
-#### Scenario: Task from before the upgrade
+#### Scenario: Task from a ticket
 
-- **WHEN** a task created before the upgrade has a Jira snapshot for `APP-42`
-- **THEN** after the backfill it references the ticket row for `APP-42`
+- **WHEN** the user starts a task from ticket `APP-42`
+- **THEN** a `ticket.linked` event for `APP-42` with the task's id is recorded

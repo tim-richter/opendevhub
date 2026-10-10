@@ -1,42 +1,18 @@
 ## ADDED Requirements
 
-### Requirement: Events are recorded with each change
+### Requirement: Every recorded verb is rendered
 
-The system SHALL record an event, in the same transaction, whenever it changes a task, variant, branch, worktree, environment, session record, pull request link, ticket link or review. Each event SHALL have its time, project, actor (`user`, a task variant, or `system`), verb, object type and id, and related task. Runtime-only changes (container state, opencode health, ports) SHALL NOT be recorded.
+The activity views SHALL render every event verb the system records, with a label for its actor and object. Adopted entities SHALL be shown as tracked since their `adopted` event, without earlier history.
 
-#### Scenario: Task started
+#### Scenario: Worktree adopted
 
-- **WHEN** the user starts a task with two variants
-- **THEN** a `task.started` event with actor `user` and one `variant.queued` event per variant are recorded
+- **WHEN** the feed contains a `worktree.adopted` event
+- **THEN** it reads as the worktree being found outside opendevhub, by opendevhub, at that time
 
-#### Scenario: Variant fails
+#### Scenario: New verb without a renderer
 
-- **WHEN** variant 2's worktree cannot be created
-- **THEN** a `variant.failed` event is recorded with the error, actor variant 2, and the task id
-
-#### Scenario: Reconcile finds a removed worktree
-
-- **WHEN** reconcile marks a worktree removed
-- **THEN** a `worktree.removed` event with actor `system` is recorded
-
-#### Scenario: Failed change leaves no event
-
-- **WHEN** a repository change fails and its transaction rolls back
-- **THEN** no event for it is recorded
-
-#### Scenario: Steady state
-
-- **WHEN** reconcile runs and nothing changed
-- **THEN** no event is recorded
-
-### Requirement: Adopted entities are not given a made-up history
-
-When the system adopts or backfills an entity, it SHALL record a single `adopted` event dated at the time of adoption, and SHALL NOT invent earlier events.
-
-#### Scenario: Unmanaged worktree adopted
-
-- **WHEN** reconcile adopts a worktree created outside opendevhub
-- **THEN** one `worktree.adopted` event with actor `system` is recorded
+- **WHEN** a verb is added to the recorded verbs without a renderer
+- **THEN** the test suite fails
 
 ### Requirement: Activity feed
 

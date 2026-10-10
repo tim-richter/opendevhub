@@ -1,6 +1,6 @@
 ## Context
 
-At this point, the database has `projects`, `tasks`, `variants`, `branches`, `worktrees`, `environments`, `tickets`, `pull_requests` and `reviews`, linked by foreign keys. Rows have creation and removal times but no history: a variant that was discarded only shows `discarded_at`, not who discarded it or what else happened. The web app has separate pages for sessions, tasks, checkouts, the Forgejo PR and the Jira ticket. The links between them are only those added in the previous change.
+At this point, the database has `projects`, `tasks`, `variants`, `branches`, `worktrees`, `environments`, `tickets`, `pull_requests` and `reviews`, linked by foreign keys, plus the `events` table that every repository writes to in the same transaction as its change. Nothing reads the events yet. The web app has separate pages for sessions, tasks, checkouts, the Forgejo PR and the Jira ticket. The links between them are only those added in the previous change.
 
 ## Goals / Non-Goals
 
@@ -19,35 +19,9 @@ At this point, the database has `projects`, `tasks`, `variants`, `branches`, `wo
 
 ## Decisions
 
-### Schema (migration 5)
+### Events come from the earlier changes
 
-```sql
-CREATE TABLE events (
-  id          INTEGER PRIMARY KEY,           -- monotonic, used as cursor
-  at          INTEGER NOT NULL,
-  project_id  TEXT REFERENCES projects (id),  -- NULL for events with no project (e.g. a ticket refresh)
-  actor_type  TEXT NOT NULL CHECK (actor_type IN ('user', 'variant', 'system')),
-  actor_id    TEXT,                          -- variant: '<task>/<n>'
-  verb        TEXT NOT NULL,                 -- e.g. 'task.started', 'worktree.removed'
-  object_type TEXT NOT NULL,                 -- task | variant | branch | worktree | environment | session | pull_request | ticket | review
-  object_id   TEXT NOT NULL,
-  task_id     TEXT,                          -- denormalised for the task feed
-  data        TEXT                           -- JSON, small: names, URLs, error text
-);
-CREATE INDEX events_project ON events (project_id, id);
-CREATE INDEX events_object  ON events (object_type, object_id, id);
-CREATE INDEX events_task    ON events (task_id, id) WHERE task_id IS NOT NULL;
-```
-
-Verbs are a closed TypeScript union, so the UI can render each one deliberately.
-
-### Events are written inside the repositories
-
-Each repository method that changes state (`createTask`, `markSessionsGone`, `pick`, `insertWorktree`, `reconcileWorktrees`, `linkBranch`, `insertReview`, …) inserts its event in the same transaction. Call sites can't forget an event, and a rolled-back change leaves no event behind. The actor is passed in from the API layer (`user` for requests, `variant` for writes a task's setup job makes for its variant, `system` for reconcile and backfill). _Alternative considered:_ SQLite triggers. Rejected: triggers don't know the actor, and verbs like `session.adopted` vs `session.started` depend on the code path.
-
-### Backfill is not replayed as events
-
-Backfill and adoption of existing rows write a single `system` event per entity (`*.adopted`), dated now, not a fake history. Earlier history isn't known, and the UI says so ("tracked since …").
+The `events` table, the `EventVerb` union and the writes inside the repositories already exist: `persist-tasks` created them, and each later change added its verbs. Adoption already writes a single `*.adopted` event dated at adoption, with no made-up earlier history. This change only reads the table: it adds `page(filter, before, limit)` and `prune(olderThan)` to `src/server/db/events.ts`, and a renderer for every verb. A test fails when a verb in the union has no renderer, so a later change can't add a verb the UI ignores.
 
 ### Feed API and live updates
 
@@ -59,7 +33,7 @@ Backfill and adoption of existing rows write a single `system` event per entity 
 
 ### Task page as hub
 
-The existing task page (variant comparison) becomes a tab of the hub. The header has the title, kind, ticket chip and state. Variants show as rows: model, state, cost/tokens, branch, worktree/environment, session, PR. Other sections are reviews (for review tasks and for the task's PRs) and the spec chain (`proposedIn` / `implementedIn`, still read from `TaskSpec`), plus the task's activity feed. Manual tasks render the same page with a single row and no comparison tab.
+The existing task page (variant comparison) becomes a tab of the hub. The header has the title, kind, ticket chip and state. Variants show as rows: model, state, cost/tokens, branch, worktree/environment, session, PR. Other sections are reviews (for review tasks and for the task's PRs) and the spec chain (`proposed_in` / `implemented_in` on the task rows, phase and change on the variants), plus the task's activity feed. Manual tasks render the same page with a single row and no comparison tab.
 
 ### Retention
 
@@ -71,10 +45,6 @@ At startup, delete events older than 180 days in batches of 1000. The cleanup pl
 - **The snapshot changes on every event and makes all clients re-render** → `latestId` is one number. Only the activity view refetches, and other views ignore the change because their memoised selectors don't depend on it.
 - **Provenance walks get slow** → each walk is at most about 8 joins on indexed keys over small tables. Measure in tests with 10k tasks and add a cache only if needed.
 - **The UI rework touches many pages** → the breadcrumb is one component, and pages adopt it one at a time behind the same data, so tasks can land page by page.
-
-## Migration Plan
-
-Migration 5 adds `events`. No backfill of history. Each existing entity gets an `adopted` event lazily, the first time a repository touches it, or not at all. Rollback: older builds ignore the table.
 
 ## Open Questions
 

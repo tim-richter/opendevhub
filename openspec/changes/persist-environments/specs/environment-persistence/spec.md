@@ -2,7 +2,7 @@
 
 ### Requirement: Environment records
 
-The system SHALL keep an environment row for each project's main environment and for each task environment. Each row SHALL hold its container id, workspace folder, remote user, node, base image key and ref, container password and relay token. A task environment SHALL reference its worktree row, and a main environment SHALL reference none.
+The system SHALL keep an environment row for each project's main environment and for each task environment. Each row SHALL hold its container id, workspace folder, remote user, node, base image key and ref, container password and relay token. Every environment SHALL reference its project row. A task environment SHALL reference its worktree row, and a main environment SHALL reference none. The system SHALL NOT read or write `state.json`.
 
 #### Scenario: Isolated variant
 
@@ -18,6 +18,11 @@ The system SHALL keep an environment row for each project's main environment and
 
 - **WHEN** a task environment's container is removed
 - **THEN** its row records when it was removed
+
+#### Scenario: Restart reattaches from the database
+
+- **WHEN** opendevhub restarts while a task environment's container is running
+- **THEN** it finds the container through the environment row and reattaches to it
 
 ### Requirement: Only durable runtime fields are stored
 
@@ -42,28 +47,19 @@ The database file SHALL be readable only by its owner. Container passwords and r
 - **WHEN** the dashboard snapshot is built
 - **THEN** no environment's runtime has a password or relay token
 
-### Requirement: Import from state.json
+### Requirement: Environment changes are recorded as events
 
-On the first start after the upgrade, the system SHALL import every project runtime and environment from `state.json` in one transaction. A task environment SHALL be matched to the live worktree row at its path, or else to a new worktree row for that path marked unmanaged. The import SHALL run only once.
+The system SHALL append an event when an environment row is created or marked removed, in the same transaction as the change. A task environment's event SHALL carry the task of the variant it was created for. Changes to runtime fields, such as a new container id, SHALL NOT be recorded as events.
 
-#### Scenario: Upgrade with running containers
+#### Scenario: Isolated variant gets a container
 
-- **WHEN** opendevhub starts for the first time after the upgrade and `state.json` lists a project runtime and two task environments
-- **THEN** the database has a main environment and two task environments with the same container ids, and opendevhub reattaches to those containers
+- **WHEN** a task variant's own environment is created
+- **THEN** an `environment.created` event with that task's id is recorded
 
-#### Scenario: Import runs once
+#### Scenario: Container recreated
 
-- **WHEN** opendevhub restarts after the import
-- **THEN** `state.json` is not imported again
-
-### Requirement: Export to state.json for rollback
-
-For one minor release, whenever an environment row changes, the system SHALL write `state.json` from the database in its existing format, with mode 0600.
-
-#### Scenario: Rollback after creating an environment
-
-- **WHEN** a task environment is created after the upgrade and the user then starts an older opendevhub
-- **THEN** the older build finds that environment in `state.json`
+- **WHEN** an environment's container is recreated with a new id
+- **THEN** no event is recorded
 
 ### Requirement: Nodes CLI checks the database
 

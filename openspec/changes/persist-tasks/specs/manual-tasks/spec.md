@@ -35,17 +35,17 @@ When opendevhub creates a session outside a task, it SHALL create a manual task 
 
 ### Requirement: Adopting sessions created elsewhere
 
-When reconcile lists a top-level session that has no task row and no `TaskMeta`, the system SHALL adopt it into a new manual task whose creation time is the session's creation time. A session that carries `TaskMeta` SHALL NOT be adopted as a manual task.
+When reconcile lists a top-level session that has no variant row, the system SHALL adopt it into a new manual task whose creation time is the session's creation time. While opendevhub is creating a session in a directory, for a task variant or a manual task, reconcile SHALL NOT adopt unknown sessions in that directory. It SHALL leave them for a later reconcile.
 
 #### Scenario: Session started in opencode directly
 
 - **WHEN** the user creates a session in an environment's opencode outside opendevhub and the environment is reconciled
 - **THEN** the session belongs to a new manual task created at the session's creation time
 
-#### Scenario: Task session seen before it is attached
+#### Scenario: Task session listed while it is being created
 
-- **WHEN** reconcile lists a session whose metadata has `TaskMeta` before the task has recorded that session id on its variant
-- **THEN** the session is attached to that task's variant and no manual task is created
+- **WHEN** reconcile lists a new session in a directory where a task variant is creating its session, before the variant has recorded the session id
+- **THEN** no manual task is created for it, and once the variant records the session id the session belongs to that variant
 
 ### Requirement: Manual task titles follow their session
 

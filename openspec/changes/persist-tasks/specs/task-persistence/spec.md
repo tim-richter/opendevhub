@@ -2,7 +2,7 @@
 
 ### Requirement: Local task database
 
-The system SHALL keep tasks and their variants in a SQLite database at `opendevhub.db` in the opendevhub state directory, created with owner-only permissions. Schema changes SHALL be applied through numbered migrations that are tracked in the database.
+The system SHALL keep its records in a SQLite database at `opendevhub.db` in the opendevhub state directory, created with owner-only permissions. Schema changes SHALL be applied through numbered migrations that are tracked in the database.
 
 #### Scenario: First start creates the database
 
@@ -19,9 +19,28 @@ The system SHALL keep tasks and their variants in a SQLite database at `opendevh
 - **WHEN** opendevhub starts with a database whose schema version is higher than the latest migration it knows
 - **THEN** it refuses to start and reports that the database was written by a newer opendevhub
 
+### Requirement: Projects are registered
+
+The system SHALL keep one row per discovered project with its id, path, name, devcontainer path and the time it was first seen. Discovery SHALL insert new projects and update known ones. A project that discovery no longer finds SHALL be marked missing, with the time, and SHALL NOT be deleted. Tasks and other records SHALL reference their project's row.
+
+#### Scenario: New project discovered
+
+- **WHEN** discovery finds a project that has no row
+- **THEN** a project row is created with its path, name, devcontainer path and first-seen time
+
+#### Scenario: Project disappears
+
+- **WHEN** a project's folder is removed and discovery runs again
+- **THEN** its row records when it went missing, the project leaves the snapshot, and its tasks remain in the database
+
+#### Scenario: Project comes back
+
+- **WHEN** a missing project's folder reappears at the same path
+- **THEN** its row is no longer marked missing and its existing tasks belong to it again
+
 ### Requirement: Tasks are recorded when they start
 
-The system SHALL create a task row and one variant row per requested variant before it sets up any variant. The task row holds the task id, project, kind `task`, title, prompt, Jira source and creation time. The variant row holds its number, model, agent, node and step `queued`. The system SHALL keep writing `TaskMeta` to each variant's session as before.
+The system SHALL create a task row and one variant row per requested variant before it sets up any variant. The task row holds the task id, project, kind `task`, title, prompt, Jira source, whether the task is spec-first, and creation time. The variant row holds its number, model, agent, node and step `queued`. Sessions SHALL NOT carry task metadata; the variant row is the only link between a session and its task.
 
 #### Scenario: A task with three variants
 
@@ -31,12 +50,45 @@ The system SHALL create a task row and one variant row per requested variant bef
 #### Scenario: Variant progress is recorded
 
 - **WHEN** a variant moves through its setup steps and its session is created
-- **THEN** its row records each step, its branch, directory, environment and session id, and the session's metadata still carries `TaskMeta` with the same task id and variant number
+- **THEN** its row records each step, its branch, directory, environment and session id, and the session itself has no `opendevhub` metadata
 
 #### Scenario: Variant fails to start
 
 - **WHEN** creating a variant's worktree fails
 - **THEN** its row has step `failed` and the error message, and the other variants continue
+
+### Requirement: Sessions show their task
+
+Each top-level session in the dashboard snapshot SHALL carry its task's id and kind, its variant number, and whether that variant is discarded, all read from the database.
+
+#### Scenario: Task session in the snapshot
+
+- **WHEN** variant 2 of a task has a live session
+- **THEN** that session in the snapshot carries the task's id, kind `task` and variant number 2
+
+#### Scenario: Cost attributed to a task
+
+- **WHEN** a task's sessions spend money
+- **THEN** the usage totals attribute that spend to the task found through the sessions' variant rows
+
+### Requirement: Spec chain on tasks and variants
+
+The system SHALL record a spec-first task's chain in the database: on the task, whether it is spec-first, the task that proposed its change and the task implementing its change; on each variant, the spec phase, the OpenSpec change it works on and the change's archive folder.
+
+#### Scenario: Spec view finds the change
+
+- **WHEN** the Spec view finds the OpenSpec change a spec-first variant created
+- **THEN** that variant records the change name, and the task page shows it
+
+#### Scenario: Implementing in new worktrees
+
+- **WHEN** the user implements a proposed change in new worktrees, which starts a new task
+- **THEN** the new task records the proposing task, and the proposing task records the new task as implementing its change
+
+#### Scenario: Change archived
+
+- **WHEN** a variant's change is archived
+- **THEN** the variant records phase `archived` and the archive folder
 
 ### Requirement: Starting progress survives a restart
 
@@ -78,17 +130,17 @@ The system SHALL mark a variant's session as removed when a successful session l
 
 ### Requirement: Picks are recorded on variants
 
-The system SHALL record the time a variant was picked on that variant, and the time of the discard on each other variant of the task. It SHALL keep setting `discarded` in the discarded sessions' metadata.
+The system SHALL record the time a variant was picked on that variant, and the time of the discard on each other variant of the task. The discard SHALL be read from the variant row wherever a session's discarded state is needed, such as hiding it from the session list or cleanup.
 
 #### Scenario: Picking a variant
 
 - **WHEN** the user keeps variant 2 of a three-variant task
-- **THEN** variant 2 records when it was picked, variants 1 and 3 record when they were discarded, and their sessions' metadata has `discarded` set
+- **THEN** variant 2 records when it was picked, and variants 1 and 3 record when they were discarded
 
-#### Scenario: Discard made by an older build
+#### Scenario: Cleanup sees discards
 
-- **WHEN** a session's metadata has `discarded` set and its variant has neither a pick nor a discard recorded
-- **THEN** the next reconcile records the variant as discarded
+- **WHEN** cleanup plans which sessions to offer for removal
+- **THEN** it treats sessions of discarded variants as discarded, based on the variant rows
 
 ### Requirement: Archiving tasks
 
@@ -104,28 +156,28 @@ The system SHALL let the user archive a task. Archived tasks SHALL be left out o
 - **WHEN** the user archives a task that still has a live session
 - **THEN** the task is hidden, and its session and worktree are left as they are
 
-### Requirement: Backfill from session metadata
+### Requirement: Task changes are recorded as events
 
-The system SHALL bring existing tasks into the database from the sessions each environment lists. A session with `TaskMeta` SHALL create or update its task and variant: the task's creation time is the oldest of its sessions' creation times, and the variant gets its number, branch, model and discard state. Backfill SHALL be idempotent and SHALL run whenever an environment's sessions are reconciled.
+The system SHALL append an event for each change to a project, task, variant or session: project discovered or missing, task started, ended or archived, variant failed, picked or discarded, and session started, adopted or removed. Each event SHALL record when it happened, the project, who caused it (the user, a task variant, or opendevhub itself), the verb, the object and, where there is one, the task. An event SHALL be written in the same transaction as the change it records, and a reconcile that changes nothing SHALL write no events.
 
-#### Scenario: Upgrade with existing tasks
+#### Scenario: Picking writes events
 
-- **WHEN** opendevhub starts for the first time with the database while an environment has two sessions sharing one `TaskMeta.task`
-- **THEN** after that environment's first reconcile the database holds one task of kind `task` with variants matching the sessions' variant numbers
+- **WHEN** the user picks variant 2 of a three-variant task
+- **THEN** the events table holds a `variant.picked` event for variant 2 and `variant.discarded` events for variants 1 and 3, each with actor `user` and the task's id
 
-#### Scenario: Environment offline at upgrade
+#### Scenario: Adoption is attributed to the system
 
-- **WHEN** a task environment is unreachable during the first start and comes back later
-- **THEN** its sessions are backfilled on its first successful reconcile
+- **WHEN** reconcile adopts a session created directly in opencode
+- **THEN** a `session.adopted` event with actor `system` is recorded for it
 
-#### Scenario: Repeated reconcile
+#### Scenario: Steady state is quiet
 
-- **WHEN** the same sessions are reconciled again
-- **THEN** no duplicate tasks or variants are created
+- **WHEN** an environment is reconciled twice with the same sessions
+- **THEN** the second reconcile records no events
 
 ### Requirement: Tasks in the dashboard snapshot
 
-Each project in the dashboard snapshot SHALL list its tasks that are not archived. Each task SHALL have its id, kind, title, Jira source, creation time and state (`starting`, `running` or `ended`). Each variant SHALL have its number, model, agent, node, branch, directory, environment, step, error, session id, and its session-removed, picked and discarded flags.
+Each project in the dashboard snapshot SHALL list its tasks that are not archived. Each task SHALL have its id, kind, title, Jira source, spec chain, creation time and state (`starting`, `running` or `ended`). Each variant SHALL have its number, model, agent, node, branch, directory, environment, step, error, session id, spec phase, change and archive folder, and its session-removed, picked and discarded flags.
 
 #### Scenario: Task page reads tasks from the snapshot
 

@@ -47,16 +47,11 @@ The system SHALL list a pull request's stored reviews, newest first. The pull re
 - **WHEN** pull request #12 has new commits after a review
 - **THEN** that review is marked outdated
 
-### Requirement: Backfill review tasks
+### Requirement: Review runs are recorded as events
 
-After the upgrade, the system SHALL convert a manual task into a review task of pull request #n, once, only when its title starts with `AI review: PR #n` and one of its variants' worktrees is on a branch linked to that pull request with role `checkout`.
+The system SHALL append a `review.run` event, with the review task's id and the pull request, in the same transaction as each stored review.
 
-#### Scenario: Old review session in a checkout
+#### Scenario: Review stored
 
-- **WHEN** a manual task titled `AI review: PR #12 Fix login` has its session in the checkout worktree of pull request #12
-- **THEN** after the backfill it is a review task referencing pull request #12
-
-#### Scenario: Title alone is not enough
-
-- **WHEN** a manual task is titled `AI review: PR #12 …` but its session runs in the main checkout
-- **THEN** it stays a manual task
+- **WHEN** a review of pull request #12 is stored
+- **THEN** a `review.run` event for that review, with the review task's id, is recorded

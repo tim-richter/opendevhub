@@ -75,11 +75,16 @@ Each task in the snapshot SHALL list the pull requests linked to its variants' b
 - **WHEN** a task's variant 2 was published as a pull request
 - **THEN** the task page shows that pull request next to variant 2
 
-### Requirement: Backfill pull requests
+### Requirement: Pull request links are recorded as events
 
-After the upgrade, the system SHALL create pull request rows from the branches' recorded pull request URLs (role `head`) and origin URLs (role `checkout`), and link those branches to them, once.
+The system SHALL append a `pull_request.linked` event when a branch is linked to a pull request, in the same transaction as the link. The event SHALL record the role and, when a task variant created the branch, that task. Refreshing a pull request's title, state or branches SHALL NOT be recorded as an event.
 
-#### Scenario: Branch published before the upgrade
+#### Scenario: Task branch published as a PR
 
-- **WHEN** a branch recorded a pull request URL before the upgrade
-- **THEN** after the backfill the branch references a pull request row for that URL with role `head`
+- **WHEN** a task variant's branch is published and linked to a pull request with role `head`
+- **THEN** a `pull_request.linked` event with role `head` and that task's id is recorded
+
+#### Scenario: PR snapshot refreshed
+
+- **WHEN** opening a pull request updates its title and state
+- **THEN** no event is recorded
