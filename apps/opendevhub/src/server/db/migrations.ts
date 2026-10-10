@@ -15,13 +15,40 @@ CREATE TABLE projects (
   missing_since     INTEGER
 );
 
+CREATE TABLE tickets (
+  id           INTEGER PRIMARY KEY,
+  instance_url TEXT NOT NULL,
+  key          TEXT NOT NULL,
+  url          TEXT NOT NULL,
+  title        TEXT,
+  status       TEXT,
+  fetched_at   INTEGER,
+  UNIQUE (instance_url, key)
+);
+
+CREATE TABLE pull_requests (
+  id          INTEGER PRIMARY KEY,
+  url         TEXT NOT NULL UNIQUE,
+  forge       TEXT NOT NULL,
+  owner       TEXT,
+  repo        TEXT,
+  number      INTEGER,
+  title       TEXT,
+  state       TEXT,
+  head_branch TEXT,
+  base_branch TEXT,
+  fetched_at  INTEGER
+);
+
 CREATE TABLE tasks (
-  id             TEXT PRIMARY KEY,
-  project_id     TEXT NOT NULL REFERENCES projects (id),
-  kind           TEXT NOT NULL CHECK (kind IN ('task', 'manual')),
-  title          TEXT NOT NULL,
-  prompt         TEXT,
-  jira           TEXT,
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES projects (id),
+  kind            TEXT NOT NULL CHECK (kind IN ('task', 'manual', 'review')),
+  title           TEXT NOT NULL,
+  prompt          TEXT,
+  jira            TEXT,
+  ticket_id       INTEGER REFERENCES tickets (id),
+  pull_request_id INTEGER REFERENCES pull_requests (id),
   spec_first     INTEGER NOT NULL DEFAULT 0,
   proposed_in    TEXT REFERENCES tasks (id),
   implemented_in TEXT REFERENCES tasks (id),
@@ -29,6 +56,8 @@ CREATE TABLE tasks (
   archived_at    INTEGER
 );
 CREATE INDEX tasks_project ON tasks (project_id, archived_at);
+CREATE INDEX tasks_ticket ON tasks (ticket_id) WHERE ticket_id IS NOT NULL;
+CREATE INDEX tasks_pull ON tasks (pull_request_id) WHERE pull_request_id IS NOT NULL;
 
 CREATE TABLE branches (
   id                 INTEGER PRIMARY KEY,
@@ -38,16 +67,18 @@ CREATE TABLE branches (
   created_by         TEXT NOT NULL CHECK (created_by IN ('variant', 'manual', 'pull', 'unmanaged')),
   created_by_task    TEXT,
   created_by_variant INTEGER,
-  origin_url         TEXT,
   published_remote   TEXT,
   published_at       INTEGER,
   agit_topic         TEXT,
-  pr_url             TEXT,
+  pull_request_id    INTEGER REFERENCES pull_requests (id),
+  pr_role            TEXT CHECK (pr_role IN ('head', 'checkout')),
   created_at         INTEGER NOT NULL,
   deleted_at         INTEGER,
   UNIQUE (project_id, name),
-  FOREIGN KEY (created_by_task, created_by_variant) REFERENCES variants (task_id, n)
+  FOREIGN KEY (created_by_task, created_by_variant) REFERENCES variants (task_id, n),
+  CHECK ((pull_request_id IS NULL) = (pr_role IS NULL))
 );
+CREATE INDEX branches_pull ON branches (pull_request_id) WHERE pull_request_id IS NOT NULL;
 
 CREATE TABLE worktrees (
   id         INTEGER PRIMARY KEY,
@@ -104,6 +135,19 @@ CREATE TABLE variants (
   PRIMARY KEY (task_id, n)
 );
 CREATE UNIQUE INDEX variants_session ON variants (session_id) WHERE session_id IS NOT NULL;
+
+CREATE TABLE reviews (
+  id              INTEGER PRIMARY KEY,
+  pull_request_id INTEGER NOT NULL REFERENCES pull_requests (id),
+  task_id         TEXT REFERENCES tasks (id),
+  session_id      TEXT,
+  mode            TEXT NOT NULL CHECK (mode IN ('session', 'quick')),
+  head_sha        TEXT NOT NULL,
+  summary         TEXT,
+  findings        TEXT NOT NULL,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX reviews_pull ON reviews (pull_request_id, created_at);
 
 CREATE TABLE events (
   id          INTEGER PRIMARY KEY,

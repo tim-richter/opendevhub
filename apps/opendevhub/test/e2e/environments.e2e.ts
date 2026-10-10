@@ -94,6 +94,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         projects: dbs.projects,
         tasks: dbs.tasks,
         checkouts: dbs.checkouts,
+        links: dbs.links,
         containers,
         runtime,
         forwarder: new PortForwarder(),

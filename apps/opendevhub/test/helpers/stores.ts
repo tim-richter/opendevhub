@@ -3,6 +3,7 @@ import { openDatabase } from "../../src/server/db/database";
 import { EnvironmentStore } from "../../src/server/db/environments";
 import type { DurableRuntime } from "../../src/server/db/environments";
 import { SYSTEM } from "../../src/server/db/events";
+import { LinkStore } from "../../src/server/db/links";
 import { ProjectStore } from "../../src/server/db/projects";
 import { TaskStore } from "../../src/server/db/tasks";
 import type {
@@ -19,6 +20,7 @@ export const memoryStores = (now?: () => number) => {
     checkouts: new CheckoutStore(db, now),
     db,
     environments: new EnvironmentStore(db, now),
+    links: new LinkStore(db, now),
     projects: new ProjectStore(db, now),
     tasks: new TaskStore(db, now),
   };
@@ -27,6 +29,7 @@ export const memoryStores = (now?: () => number) => {
 /** What a `StateStore` reads from the database, from one in-memory database. */
 export const stateStores = (dbs = memoryStores()) => ({
   environments: dbs.environments,
+  links: dbs.links,
   tasks: dbs.tasks,
 });
 

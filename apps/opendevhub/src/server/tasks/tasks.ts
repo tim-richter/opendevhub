@@ -1,4 +1,3 @@
-import { jiraTicketUrl } from "../../shared/jira";
 import {
   deriveTitle,
   taskBranches,
@@ -305,7 +304,6 @@ export class Tasks {
                 path: wt.path,
                 ...(wt.hostPath ? { hostPath: wt.hostPath } : {}),
                 ...(wt.base ? { base: wt.base } : {}),
-                ...(req.jira ? { originUrl: jiraTicketUrl(req.jira) } : {}),
               },
               { by: "variant", n: i + 1, task },
               variantActor(task, i + 1)

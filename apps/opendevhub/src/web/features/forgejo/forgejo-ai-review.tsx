@@ -29,7 +29,11 @@ import type {
   ForgejoComment,
   ForgejoPullDetails,
 } from "../../../shared/forgejo";
-import type { ProjectView, SessionSummary } from "../../../shared/types";
+import type {
+  ProjectView,
+  SessionSummary,
+  StoredAiReview,
+} from "../../../shared/types";
 import {
   collectAiReview,
   createForgejoWorktree,
@@ -80,6 +84,8 @@ export interface AiReview {
   clear: () => void;
   /** Marks a suggestion accepted or dismissed, so it leaves the diff. */
   handle: (id: string) => void;
+  /** Shows a stored earlier review's findings in the diff, in place of the current run. */
+  open: (review: StoredAiReview) => void;
 }
 
 /**
@@ -272,6 +278,21 @@ export const useAiReview = (details: ForgejoPullDetails): AiReview => {
       } else {
         setRun({ ...current, error: undefined, stage: "waiting" });
       }
+    },
+    open: (review) => {
+      setRun({
+        directory: "",
+        findings: review.findings,
+        handled: [],
+        headSha,
+        id: `stored-${review.id}`,
+        kind: review.mode === "session" ? "agent" : "quick",
+        projectId: "",
+        stage: "done",
+        startedAt: review.createdAt,
+        summary: review.summary,
+        ...(review.sessionId ? { sessionId: review.sessionId } : {}),
+      });
     },
     run,
     session,

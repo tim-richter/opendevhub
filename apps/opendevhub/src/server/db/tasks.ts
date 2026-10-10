@@ -1,3 +1,4 @@
+import { jiraTicketUrl } from "../../shared/jira";
 import type { JiraTaskSource } from "../../shared/jira";
 import type {
   EnvId,
@@ -19,15 +20,8 @@ import { transaction } from "./database";
 import type { Db } from "./database";
 import { SYSTEM, USER, record } from "./events";
 import type { Actor, EventVerb } from "./events";
-
-/** Steps a variant passes through before its session is created. */
-const SETUP_STEPS: ReadonlySet<StartStep> = new Set([
-  "queued",
-  "pushing",
-  "worktree",
-  "image",
-  "container",
-]);
+import { ensureTicketIn, linkTicketIn } from "./links";
+import { settingUp, taskState } from "./task-state";
 
 export const RESTART_ERROR = "interrupted: opendevhub restarted";
 
@@ -49,7 +43,10 @@ export interface NewTask {
   variants: { model?: ModelRef; agent?: string; node?: NodeId }[];
 }
 
-/** A session that gets a manual task: one opendevhub started outside a task, or one found in opencode. */
+/**
+ * A session that gets a task of its own: one opendevhub started outside a task, or one found in opencode (a manual
+ * task), or an AI review of a pull request (a review task).
+ */
 export interface ManualSession {
   projectId: ProjectId;
   sessionId: string;
@@ -58,6 +55,8 @@ export interface ManualSession {
   envId: EnvId;
   branch?: string;
   createdAt: number;
+  /** The pull request row it reviews; the task is then a review task. */
+  reviewOf?: number;
 }
 
 export type VariantPatch = Partial<{
@@ -75,6 +74,8 @@ interface RawTask {
   title: string;
   prompt: string | null;
   jira: string | null;
+  ticket_id: number | null;
+  pull_request_id: number | null;
   spec_first: number;
   proposed_in: string | null;
   implemented_in: string | null;
@@ -138,26 +139,6 @@ const toVariant = (r: RawVariant): VariantView => {
     ...(r.discarded_at === null ? {} : { discarded: true }),
     ...(spec ? { spec } : {}),
   };
-};
-
-/** Being set up: its job hasn't created its session yet. */
-const settingUp = (v: RawVariant): boolean =>
-  SETUP_STEPS.has(v.step) || (v.step === "session" && v.session_id === null);
-
-const live = (v: RawVariant): boolean =>
-  v.session_id !== null &&
-  v.session_removed_at === null &&
-  v.discarded_at === null;
-
-export const taskState = (variants: RawVariant[]): TaskState => {
-  if (
-    variants.some(
-      (v) => settingUp(v) || (v.step === "failed" && v.discarded_at === null)
-    )
-  ) {
-    return "starting";
-  }
-  return variants.some(live) ? "running" : "ended";
 };
 
 const toTask = (t: RawTask, variants: RawVariant[]): TaskRecord => {
@@ -258,6 +239,15 @@ export class TaskStore {
         },
         { kind: "task", title: task.title, variants: task.variants.length }
       );
+      if (task.jira) {
+        const ticket = ensureTicketIn(this.db, {
+          instanceUrl: task.jira.instanceUrl,
+          key: task.jira.key,
+          title: task.jira.title,
+          url: jiraTicketUrl(task.jira),
+        });
+        linkTicketIn(this.db, at, actor, task.projectId, task.id, ticket);
+      }
     });
   }
 
@@ -360,7 +350,7 @@ export class TaskStore {
     });
   }
 
-  /** A manual task for a session opendevhub just started outside a task. Returns the session's task id. */
+  /** A manual (or, with `reviewOf`, review) task for a session opendevhub just started outside a task. Returns its id. */
   startManual(session: ManualSession, actor: Actor = USER): string {
     return this.manual(session, actor, "session.started");
   }
@@ -378,12 +368,13 @@ export class TaskStore {
     const at = this.now();
     // Ordered by when its session was created, as a task is by when it started.
     const id = newTaskId(s.createdAt);
+    const kind: TaskKind = s.reviewOf === undefined ? "manual" : "review";
     this.write(() => {
       this.db
         .prepare(
-          "INSERT INTO tasks (id, project_id, kind, title, created_at) VALUES (?, ?, 'manual', ?, ?)"
+          "INSERT INTO tasks (id, project_id, kind, title, pull_request_id, created_at) VALUES (?, ?, ?, ?, ?, ?)"
         )
-        .run(id, s.projectId, s.title, s.createdAt);
+        .run(id, s.projectId, kind, s.title, s.reviewOf ?? null, s.createdAt);
       this.db
         .prepare(
           `INSERT INTO variants (task_id, n, env_id, branch, directory, step, session_id)
@@ -400,7 +391,7 @@ export class TaskStore {
           id,
           type: "task",
         },
-        { kind: "manual", title: s.title }
+        { kind, title: s.title }
       );
       this.event(
         at,

@@ -304,6 +304,7 @@ export function setup(
     environments: dbs.environments,
     tasks: dbs.tasks,
     checkouts: dbs.checkouts,
+    links: dbs.links,
   });
   const monitors: {
     opts: MonitorOptions;
@@ -712,6 +713,7 @@ export function setup(
     projects: dbs.projects,
     tasks: dbs.tasks,
     checkouts: dbs.checkouts,
+    links: dbs.links,
     containers,
     runtime,
     forwarder,
@@ -760,6 +762,7 @@ export function setup(
     environments: dbs.environments,
     tasks: dbs.tasks,
     checkouts: dbs.checkouts,
+    links: dbs.links,
     projects: dbs.projects,
     db: dbs.db,
     containers,

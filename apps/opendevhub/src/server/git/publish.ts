@@ -285,6 +285,7 @@ export class Publisher {
           })
         : undefined;
     return {
+      forge: forge.kind,
       strategy: req.strategy,
       pushedFrom: loc.where,
       ...(prUrl ? { prUrl } : {}),

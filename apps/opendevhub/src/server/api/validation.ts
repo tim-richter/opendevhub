@@ -1,7 +1,12 @@
 import { validator } from "hono/validator";
 import { z } from "zod";
 
-import { JIRA_SCOPES, JIRA_SORTS, JIRA_STATUSES } from "../../shared/jira";
+import {
+  JIRA_KEY,
+  JIRA_SCOPES,
+  JIRA_SORTS,
+  JIRA_STATUSES,
+} from "../../shared/jira";
 import { STACK_IDS } from "../../shared/stacks";
 import { parseCleanupItems } from "../git/cleanup";
 import { errorResponse } from "./helpers";
@@ -30,6 +35,10 @@ export const validateQuery = <T>(schema: z.ZodType<T>) =>
   });
 
 const text = z.string().optional();
+const webUrl = z
+  .string()
+  .max(2000)
+  .refine((value) => /^https?:\/\//iu.test(value) && URL.canParse(value));
 const flag = z.boolean().optional();
 // Only literal true enables these options; preserve the existing conservative coercion.
 const actionFlag = z
@@ -221,4 +230,9 @@ export const queries = {
   forgejoImage: z.object({ side: z.enum(["old", "new"]), file: z.string() }),
   publish: directory.extend({ remote: text }),
   spec: directory.extend({ change: text }),
+  linkPull: z.object({ url: webUrl }),
+  linkTicket: z.object({
+    instance: webUrl,
+    key: z.string().max(200).regex(JIRA_KEY),
+  }),
 };

@@ -1,8 +1,15 @@
-import type { CheckoutCreator, NodeId, ProjectId } from "../../shared/types";
+import type {
+  CheckoutCreator,
+  NodeId,
+  ProjectId,
+  PullRole,
+} from "../../shared/types";
 import { transaction } from "./database";
 import type { Db } from "./database";
 import { SYSTEM, record } from "./events";
 import type { Actor, EventVerb } from "./events";
+import { ensurePullIn, linkBranchIn } from "./links";
+import type { PullFacts } from "./links";
 
 /** Who made a branch or worktree: a task variant, the checkouts page, a pull request checkout, or not opendevhub. */
 export type Creator =
@@ -18,11 +25,14 @@ export interface BranchRecord {
   /** Mirror of `branch.<name>.opendevhubBase`, which stays the source for readers in containers and on nodes. */
   base?: string;
   createdBy: Creator;
-  /** The pull request or ticket URL the branch was made for. */
+  /** The pull request it is linked to: published as its head, or made to check it out. */
+  pullRequest?: { id: number; url: string; role: PullRole };
+  /** The pull request it checks out, or the ticket its creating task started from. */
   originUrl?: string;
   publishedRemote?: string;
   publishedAt?: number;
   agitTopic?: string;
+  /** The pull request it was published as (role `head`). */
   prUrl?: string;
   createdAt: number;
   deletedAt?: number;
@@ -48,12 +58,16 @@ export interface ListedWorktree {
   branch?: string;
 }
 
+/** A pull request by its web URL, with what else is known about it. */
+export type PullRef = PullFacts & { url: string };
+
 export type BranchPatch = Partial<{
   base: string;
   publishedRemote: string;
   publishedAt: number;
   agitTopic: string;
-  prUrl: string;
+  /** The pull request the forge printed on publishing: linked with role `head`. */
+  pull: PullRef;
 }>;
 
 interface RawBranch {
@@ -64,12 +78,15 @@ interface RawBranch {
   created_by: Creator["by"];
   created_by_task: string | null;
   created_by_variant: number | null;
-  origin_url: string | null;
   published_remote: string | null;
   published_at: number | null;
   agit_topic: string | null;
-  pr_url: string | null;
+  pull_request_id: number | null;
+  pr_role: PullRole | null;
   created_at: number;
+  /** Joined: the linked pull request's URL, and the ticket of the task that created the branch. */
+  pull_url: string | null;
+  ticket_url: string | null;
   deleted_at: number | null;
 }
 
@@ -98,22 +115,30 @@ const creatorOf = (
     ? { by, n, task }
     : { by: by === "variant" ? "unmanaged" : by };
 
-const toBranch = (r: RawBranch): BranchRecord => ({
-  createdAt: r.created_at,
-  createdBy: creatorOf(r.created_by, r.created_by_task, r.created_by_variant),
-  id: r.id,
-  name: r.name,
-  projectId: r.project_id,
-  ...(r.base === null ? {} : { base: r.base }),
-  ...(r.origin_url === null ? {} : { originUrl: r.origin_url }),
-  ...(r.published_remote === null
-    ? {}
-    : { publishedRemote: r.published_remote }),
-  ...(r.published_at === null ? {} : { publishedAt: r.published_at }),
-  ...(r.agit_topic === null ? {} : { agitTopic: r.agit_topic }),
-  ...(r.pr_url === null ? {} : { prUrl: r.pr_url }),
-  ...(r.deleted_at === null ? {} : { deletedAt: r.deleted_at }),
-});
+const toBranch = (r: RawBranch): BranchRecord => {
+  const pull =
+    r.pull_request_id !== null && r.pr_role !== null && r.pull_url !== null
+      ? { id: r.pull_request_id, role: r.pr_role, url: r.pull_url }
+      : undefined;
+  const origin = pull?.role === "checkout" ? pull.url : r.ticket_url;
+  return {
+    createdAt: r.created_at,
+    createdBy: creatorOf(r.created_by, r.created_by_task, r.created_by_variant),
+    id: r.id,
+    name: r.name,
+    projectId: r.project_id,
+    ...(r.base === null ? {} : { base: r.base }),
+    ...(pull ? { pullRequest: pull } : {}),
+    ...(origin ? { originUrl: origin } : {}),
+    ...(r.published_remote === null
+      ? {}
+      : { publishedRemote: r.published_remote }),
+    ...(r.published_at === null ? {} : { publishedAt: r.published_at }),
+    ...(r.agit_topic === null ? {} : { agitTopic: r.agit_topic }),
+    ...(pull?.role === "head" ? { prUrl: pull.url } : {}),
+    ...(r.deleted_at === null ? {} : { deletedAt: r.deleted_at }),
+  };
+};
 
 const toWorktree = (r: RawWorktree): WorktreeRecord => ({
   createdAt: r.created_at,
@@ -141,6 +166,12 @@ export const creatorView = (
   }
   return { by: c.by };
 };
+
+const BRANCH_SELECT = `SELECT b.*, p.url AS pull_url, k.url AS ticket_url
+  FROM branches b
+  LEFT JOIN pull_requests p ON p.id = b.pull_request_id
+  LEFT JOIN tasks t ON t.id = b.created_by_task
+  LEFT JOIN tickets k ON k.id = t.ticket_id`;
 
 const WORKTREE_SELECT = `SELECT w.*, b.name AS branch_name, v.task_id AS task_id, v.n AS n
   FROM worktrees w
@@ -172,7 +203,7 @@ export class CheckoutStore {
     name: string,
     creator: Creator,
     actor: Actor,
-    facts: { originUrl?: string; base?: string } = {}
+    facts: { base?: string } = {}
   ): BranchRecord {
     return this.write(() =>
       this.ensureBranchIn(projectId, name, creator, actor, facts)
@@ -210,23 +241,28 @@ export class CheckoutStore {
       if (patch.agitTopic !== undefined) {
         columns.push(["agit_topic", patch.agitTopic]);
       }
-      if (patch.prUrl !== undefined) {
-        columns.push(["pr_url", patch.prUrl]);
-      }
-      if (columns.length === 0) {
+      if (columns.length === 0 && !patch.pull) {
         return row;
       }
-      this.db
-        .prepare(
-          `UPDATE branches SET ${columns.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`
-        )
-        .run(...columns.map(([, v]) => v), row.id);
+      if (columns.length > 0) {
+        this.db
+          .prepare(
+            `UPDATE branches SET ${columns.map(([c]) => `${c} = ?`).join(", ")} WHERE id = ?`
+          )
+          .run(...columns.map(([, v]) => v), row.id);
+      }
+      const pull = patch.pull
+        ? ensurePullIn(this.db, patch.pull.url, patch.pull)
+        : undefined;
       if (patch.publishedRemote !== undefined) {
         this.branchEvent(at, actor, "branch.published", row, {
           remote: patch.publishedRemote,
           ...(patch.agitTopic ? { topic: patch.agitTopic } : {}),
-          ...(patch.prUrl ? { pr: patch.prUrl } : {}),
+          ...(pull ? { pr: pull.url } : {}),
         });
+      }
+      if (pull) {
+        linkBranchIn(this.db, at, actor, row.id, pull.id, "head");
       }
       return this.branchById(row.id) ?? row;
     });
@@ -251,7 +287,7 @@ export class CheckoutStore {
   /** The project's branch row for `name`, deleted or not. */
   branch(projectId: ProjectId, name: string): BranchRecord | undefined {
     const r = this.db
-      .prepare("SELECT * FROM branches WHERE project_id = ? AND name = ?")
+      .prepare(`${BRANCH_SELECT} WHERE b.project_id = ? AND b.name = ?`)
       .get(projectId, name) as RawBranch | undefined;
     return r ? toBranch(r) : undefined;
   }
@@ -260,7 +296,7 @@ export class CheckoutStore {
   branchesOf(projectId: ProjectId): BranchRecord[] {
     return (
       this.db
-        .prepare("SELECT * FROM branches WHERE project_id = ? ORDER BY name")
+        .prepare(`${BRANCH_SELECT} WHERE b.project_id = ? ORDER BY b.name`)
         .all(projectId) as unknown as RawBranch[]
     ).map(toBranch);
   }
@@ -341,7 +377,8 @@ export class CheckoutStore {
 
   /**
    * Records a worktree opendevhub just created on `branch`, in one transaction: the branch row (an existing one keeps
-   * its creator, and gets `base` mirrored), the worktree row, and for a variant the links to both.
+   * its creator, and gets `base` mirrored), the worktree row, for a variant the links to both, and for a pull
+   * request checkout the branch's link to `pull` with role `checkout`.
    */
   recordCreated(
     projectId: ProjectId,
@@ -349,22 +386,31 @@ export class CheckoutStore {
       branch: string;
       node?: NodeId;
       base?: string;
-      originUrl?: string;
+      pull?: PullRef;
     },
     creator: Creator,
     actor: Actor
   ): { branch: BranchRecord; worktree: WorktreeRecord } {
     return this.write(() => {
-      const { base, originUrl, ...listed } = wt;
-      let branch = this.ensureBranchIn(projectId, wt.branch, creator, actor, {
-        ...(base ? { base } : {}),
-        ...(originUrl ? { originUrl } : {}),
-      });
+      const at = this.now();
+      const { base, pull, ...listed } = wt;
+      let branch = this.ensureBranchIn(
+        projectId,
+        wt.branch,
+        creator,
+        actor,
+        base ? { base } : {}
+      );
       if (base && branch.base !== base) {
         this.db
           .prepare("UPDATE branches SET base = ? WHERE id = ?")
           .run(base, branch.id);
         branch = { ...branch, base };
+      }
+      if (pull) {
+        const row = ensurePullIn(this.db, pull.url, pull);
+        linkBranchIn(this.db, at, actor, branch.id, row.id, "checkout");
+        branch = this.branchById(branch.id) ?? branch;
       }
       const worktree = this.insertIn(
         projectId,
@@ -546,7 +592,7 @@ export class CheckoutStore {
     name: string,
     creator: Creator,
     actor: Actor,
-    facts: { originUrl?: string; base?: string } = {}
+    facts: { base?: string } = {}
   ): BranchRecord {
     const at = this.now();
     const existing = this.branch(projectId, name);
@@ -558,36 +604,19 @@ export class CheckoutStore {
     if (existing) {
       this.db
         .prepare(
-          `UPDATE branches SET base = ?, created_by = ?, created_by_task = ?, created_by_variant = ?, origin_url = ?,
-           published_remote = NULL, published_at = NULL, agit_topic = NULL, pr_url = NULL, created_at = ?,
-           deleted_at = NULL WHERE id = ?`
+          `UPDATE branches SET base = ?, created_by = ?, created_by_task = ?, created_by_variant = ?,
+           published_remote = NULL, published_at = NULL, agit_topic = NULL, pull_request_id = NULL, pr_role = NULL,
+           created_at = ?, deleted_at = NULL WHERE id = ?`
         )
-        .run(
-          facts.base ?? null,
-          creator.by,
-          task,
-          n,
-          facts.originUrl ?? null,
-          at,
-          existing.id
-        );
+        .run(facts.base ?? null, creator.by, task, n, at, existing.id);
     } else {
       this.db
         .prepare(
-          `INSERT INTO branches (project_id, name, base, created_by, created_by_task, created_by_variant, origin_url, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO branches (project_id, name, base, created_by, created_by_task, created_by_variant, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (project_id, name) DO NOTHING`
         )
-        .run(
-          projectId,
-          name,
-          facts.base ?? null,
-          creator.by,
-          task,
-          n,
-          facts.originUrl ?? null,
-          at
-        );
+        .run(projectId, name, facts.base ?? null, creator.by, task, n, at);
     }
     const row = this.branch(projectId, name);
     if (!row) {
@@ -595,7 +624,6 @@ export class CheckoutStore {
     }
     this.branchEvent(at, actor, "branch.created", row, {
       createdBy: creator.by,
-      ...(facts.originUrl ? { origin: facts.originUrl } : {}),
     });
     return row;
   }
@@ -663,7 +691,7 @@ export class CheckoutStore {
   }
 
   private branchById(id: number): BranchRecord | undefined {
-    const r = this.db.prepare("SELECT * FROM branches WHERE id = ?").get(id) as
+    const r = this.db.prepare(`${BRANCH_SELECT} WHERE b.id = ?`).get(id) as
       | RawBranch
       | undefined;
     return r ? toBranch(r) : undefined;

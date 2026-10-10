@@ -30,3 +30,13 @@ export const Task = meta.story({
 export const TaskStarting = meta.story({
   parameters: { route: "/p/acme-web/t/tsk_search" },
 });
+
+/** A task started from a Jira ticket, with the ticket's status and the pull request its variant was published as. */
+export const TaskFromTicket = meta.story({
+  parameters: { route: "/p/acme-web/t/tsk_rate" },
+});
+
+/** An AI review task, headed by the pull request it reviewed. */
+export const ReviewTask = meta.story({
+  parameters: { route: "/p/acme-web/t/tsk_review42" },
+});

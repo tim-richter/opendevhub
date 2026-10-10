@@ -169,6 +169,30 @@ export const fetchForgejoReviewComments = (
     "Forgejo request"
   );
 
+/** What opendevhub links to a pull request: the task that made it, its checkouts and its AI reviews. */
+export const fetchPullLinks = (url: string, signal?: AbortSignal) =>
+  read(
+    api.links.pull.$get(
+      { query: { url } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "pull request links"
+  );
+
+/** The tasks started from a ticket and their pull requests. */
+export const fetchTicketLinks = (
+  instance: string,
+  key: string,
+  signal?: AbortSignal
+) =>
+  read(
+    api.links.ticket.$get(
+      { query: { instance, key } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "ticket links"
+  );
+
 export const fetchForgejoChecks = (
   owner: string,
   repo: string,

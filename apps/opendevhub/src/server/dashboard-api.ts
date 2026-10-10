@@ -7,7 +7,9 @@ import { createCoreRoutes } from "./api/core";
 import { createForgejoRoutes } from "./api/forgejo";
 import { errorResponse } from "./api/helpers";
 import { createJiraRoutes } from "./api/jira";
+import { createLinksRoutes } from "./api/links";
 import { createProjectsRoutes } from "./api/projects";
+import type { LinkStore } from "./db/links";
 import type { Checks } from "./environments/checks";
 import type { Environments } from "./environments/environments";
 import type { Checkouts } from "./git/checkouts";
@@ -117,10 +119,23 @@ export interface DashboardDeps {
     | "checks"
     | "test"
   > &
-    Partial<Pick<Forgejo, "review" | "organizations" | "teams" | "image">>;
+    Partial<
+      Pick<Forgejo, "review" | "organizations" | "teams" | "image" | "pullUrl">
+    >;
   jira?: Pick<
     Jira,
     "view" | "save" | "tickets" | "ticket" | "catalog" | "columns"
+  >;
+  /** Tickets, pull requests and AI reviews; absent in tests that don't need them. */
+  links?: Pick<
+    LinkStore,
+    | "ensurePull"
+    | "refreshPulls"
+    | "refreshTickets"
+    | "insertReview"
+    | "reviewsOf"
+    | "forPull"
+    | "forTicket"
   >;
   webDir?: string;
 }
@@ -162,6 +177,7 @@ export const createDashboardApp = (deps: DashboardDeps) => {
     .route("/", createCoreRoutes(deps))
     .route("/", createForgejoRoutes(deps))
     .route("/", createJiraRoutes(deps))
+    .route("/", createLinksRoutes(deps))
     .route("/", createProjectsRoutes(deps));
   const { webDir } = deps;
   if (!webDir) {

@@ -23,6 +23,7 @@ import type { CheckoutStore } from "../db/checkouts";
 import type { DurablePatch, EnvironmentStore } from "../db/environments";
 import type { Actor } from "../db/events";
 import { SYSTEM } from "../db/events";
+import type { LinkStore, TaskLinks } from "../db/links";
 import type { TaskRecord, TaskStore } from "../db/tasks";
 import type { RunningContainer } from "../environments/resources";
 import { compareSessions } from "../sessions/status";
@@ -33,6 +34,8 @@ export interface StoreOptions {
   tasks: TaskStore;
   /** Who made each worktree, and its branch row; worktrees are listed without them when absent. */
   checkouts?: CheckoutStore;
+  /** Each task's ticket and pull requests; tasks are listed without them when absent. */
+  links?: LinkStore;
   /** Where environments and their durable runtime fields live; read once at start. */
   environments: EnvironmentStore;
 }
@@ -89,6 +92,7 @@ export class StateStore {
     this.opts = opts;
     opts.tasks.subscribe(() => this.emit());
     opts.checkouts?.subscribe(() => this.emit());
+    opts.links?.subscribe(() => this.emit());
     for (const row of opts.environments.listLive()) {
       this.runtimes.set(row.id, {
         ...defaultRuntime(row.projectId),
@@ -175,10 +179,13 @@ export class StateStore {
 
   /** The project's tasks that are not archived, as the snapshot lists them. */
   tasksOf(id: ProjectId): TaskView[] {
-    return this.opts.tasks.listForProject(id).map((t) => this.taskView(t));
+    const links = this.opts.links?.taskLinks(id);
+    return this.opts.tasks
+      .listForProject(id)
+      .map((t) => this.taskView(t, links?.get(t.id)));
   }
 
-  private taskView(t: TaskRecord): TaskView {
+  private taskView(t: TaskRecord, links: TaskLinks = {}): TaskView {
     const {
       projectId: _projectId,
       prompt: _prompt,
@@ -187,6 +194,7 @@ export class StateStore {
     } = t;
     return {
       ...view,
+      ...links,
       variants: view.variants.map((v) => {
         const log =
           v.step === "session"

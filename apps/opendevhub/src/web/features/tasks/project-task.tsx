@@ -36,6 +36,7 @@ import { checkoutOf, checkoutPath } from "../checkouts/checkouts";
 import { checksState, failedNames } from "../checks/checks";
 import type { ChecksState } from "../checks/checks";
 import { checksQuery } from "../checks/checks-queries";
+import { PullRequestBadge } from "../forgejo/pull-request-badge";
 import { JiraSourceCard } from "../jira/jira-source-card";
 import { useProjectView } from "../projects/project-layout";
 import { reviewQuery } from "../review/review-queries";
@@ -123,8 +124,25 @@ const StartingCard = (props: {
   );
 };
 
+/** The pull requests a variant's branch was published as. */
+const VariantPulls = (props: { task: TaskView; n: number | undefined }) => {
+  const pulls = (props.task.pullRequests ?? []).filter(
+    (p) => p.variant === props.n
+  );
+  if (pulls.length === 0) {
+    return null;
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {pulls.map((p) => (
+        <PullRequestBadge key={p.url} pull={p} />
+      ))}
+    </span>
+  );
+};
+
 /** Variants whose session is gone: what they were, so the task's history stays readable. */
-const EndedVariants = (props: { variants: VariantView[] }) => (
+const EndedVariants = (props: { task: TaskView; variants: VariantView[] }) => (
   <Section title="Ended variants" hint="their sessions are gone from opencode">
     <ul>
       {props.variants.map((v) => (
@@ -138,6 +156,7 @@ const EndedVariants = (props: { variants: VariantView[] }) => (
           </span>
           {v.picked && <span className={muted}>picked</span>}
           {v.node && <span className={muted}>on {v.node}</span>}
+          <VariantPulls task={props.task} n={v.n} />
         </li>
       ))}
     </ul>
@@ -313,7 +332,8 @@ export const ProjectTask = () => {
         >
           {view.project.name}
         </Link>
-        <ChevronRightIcon className="size-3.5" /> Task
+        <ChevronRightIcon className="size-3.5" />{" "}
+        {record.kind === "review" ? "Review" : "Task"}
       </nav>
       <div className="flex items-baseline gap-2.5">
         <h2 className="text-lg font-semibold">{record.title || "Task"}</h2>
@@ -332,7 +352,24 @@ export const ProjectTask = () => {
           )}
         </span>
       </div>
-      {jiraSource && <JiraSourceCard source={jiraSource} />}
+      {record.reviewOf && (
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <span className={muted}>
+            Review of{" "}
+            {record.reviewOf.number === undefined
+              ? "a pull request"
+              : `PR #${record.reviewOf.number}`}
+            {record.reviewOf.title && `: ${record.reviewOf.title}`}
+          </span>
+          <PullRequestBadge pull={record.reviewOf} />
+        </p>
+      )}
+      {jiraSource && (
+        <JiraSourceCard
+          source={jiraSource}
+          {...(record.ticket ? { ticket: record.ticket } : {})}
+        />
+      )}
       {notice && (
         <Alert className="border-ok/40 bg-ok/10">
           <AlertDescription className="text-ok">{notice}</AlertDescription>
@@ -371,7 +408,7 @@ export const ProjectTask = () => {
           onPick={(s) => void pick(s)}
         />
       )}
-      {ended.length > 0 && <EndedVariants variants={ended} />}
+      {ended.length > 0 && <EndedVariants task={record} variants={ended} />}
     </div>
   );
 };
@@ -475,6 +512,13 @@ const Compare = (props: {
                     </span>
                   );
                 })}
+              {!!task.pullRequests?.length &&
+                row("Pull request", (s) => (
+                  <VariantPulls
+                    task={task}
+                    n={task.variants.find((v) => v.sessionId === s.id)?.n}
+                  />
+                ))}
               {row("Checks", (s) => {
                 const c = checks[s.directory];
                 if (c === undefined) {

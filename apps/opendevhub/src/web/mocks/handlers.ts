@@ -28,10 +28,12 @@ import {
   models,
   PATCH,
   publishInfo,
+  pullLinks,
   reviewData,
   sessionDetail,
   turnReviewData,
   snapshot,
+  ticketLinks,
   usageReport,
 } from "./fixtures";
 
@@ -162,6 +164,19 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
       await delay(800);
       return HttpResponse.json(aiReview);
     }),
+    http.get("/api/forgejo/pulls/:owner/:repo/:number/ai-reviews", () =>
+      HttpResponse.json({ reviews: pullLinks(forgejoDetails.pull.url).reviews })
+    ),
+    http.get("/api/links/pull", ({ request }) =>
+      HttpResponse.json(
+        pullLinks(new URL(request.url).searchParams.get("url") ?? "")
+      )
+    ),
+    http.get("/api/links/ticket", ({ request }) =>
+      HttpResponse.json(
+        ticketLinks(new URL(request.url).searchParams.get("key") ?? "")
+      )
+    ),
     http.get("/api/forgejo/checks/:owner/:repo/:sha", () =>
       HttpResponse.json(forgejoChecks)
     ),

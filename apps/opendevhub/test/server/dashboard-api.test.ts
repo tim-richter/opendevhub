@@ -39,7 +39,9 @@ import type {
   PickResult,
   Project,
   SessionDetail,
+  StoredAiReview,
   TaskResult,
+  TicketLinks,
 } from "../../src/shared/types";
 import {
   createTask as createTaskViaRpc,
@@ -119,15 +121,25 @@ function setup(webDir?: string) {
     },
     sessions: {
       startSession: vi.fn(
-        async (_id: string, _dir: string, _title?: string, _prompt?: string) =>
-          "ses_1"
+        async (
+          _id: string,
+          _dir: string,
+          _title?: string,
+          _prompt?: string,
+          _options?: { reviewOf?: number }
+        ) => "ses_1"
       ),
       generateIn: vi.fn(
         async (
           _id: string,
           _dir: string,
           _prompt: string,
-          options: { sessionId?: string; title: string; timeoutMs?: number }
+          options: {
+            sessionId?: string;
+            title: string;
+            timeoutMs?: number;
+            reviewOf?: number;
+          }
         ) => ({
           sessionId: options.sessionId ?? "ses_ai",
           text: '```json\n{"summary":"ok","findings":[{"file":"a.ts","line":3,"severity":"major","body":"Off by one"}]}\n```',
@@ -552,6 +564,8 @@ describe("dashboard API", () => {
         async () =>
           ({
             pull: {
+              owner: "team",
+              repo: "repo",
               state: "open",
               url: "https://forge.example/team/repo/pulls/7",
               number: 7,
@@ -618,6 +632,7 @@ describe("dashboard API", () => {
         url: "https://forge.example/team/repo/pulls/7",
         number: 7,
         commitId: sha,
+        repo: { owner: "team", repo: "repo" },
       },
     });
   });
@@ -654,6 +669,7 @@ describe("dashboard API", () => {
       approvals: vi.fn(),
       checks: vi.fn(),
     };
+    const { links } = memoryStores();
     const app = createDashboardApp({
       store,
       hub,
@@ -662,6 +678,7 @@ describe("dashboard API", () => {
       cleanup,
       checks,
       forgejo,
+      links,
     });
     const post = (route: string, body: unknown) =>
       app.request(`/api/forgejo/pulls/team/repo/7/${route}`, {
@@ -681,9 +698,20 @@ describe("dashboard API", () => {
       commitId: sha,
     });
     expect(await started.json()).toEqual({ sessionId: "ses_1" });
-    const [, , title, prompt] = hub.sessions.startSession.mock.calls[0];
+    const [, , title, prompt, options] =
+      hub.sessions.startSession.mock.calls[0];
     expect(title).toBe("AI review: PR #7 Fix it");
     expect(prompt).toContain(`First check that HEAD is ${sha}`);
+    const pull = links.pull("https://forge.example/team/repo/pulls/7");
+    expect(pull).toMatchObject({
+      baseBranch: "main",
+      forge: "forgejo",
+      headBranch: "fix",
+      number: 7,
+      state: "open",
+      title: "Fix it",
+    });
+    expect(options).toStrictEqual({ reviewOf: pull?.id });
 
     const collected = await post("ai-review", {
       ...where,
@@ -707,9 +735,85 @@ describe("dashboard API", () => {
 
     const quick = await post("ai-review", { ...where, commitId: sha });
     expect((await quick.json()).sessionId).toBe("ses_ai");
-    const [, , quickPrompt, options] = hub.sessions.generateIn.mock.calls[1];
+    const [, , quickPrompt, quickOptions] =
+      hub.sessions.generateIn.mock.calls[1];
     expect(quickPrompt).toContain("diff --git a/a.ts b/a.ts");
-    expect(options.sessionId).toBeUndefined();
+    expect(quickOptions.sessionId).toBeUndefined();
+    expect(quickOptions.reviewOf).toBe(pull?.id);
+    const listed = await app.request(
+      "/api/forgejo/pulls/team/repo/7/ai-reviews"
+    );
+    expect(
+      ((await listed.json()) as { reviews: StoredAiReview[] }).reviews.map(
+        (r) => [r.mode, r.sessionId, r.headSha, r.findings.length]
+      )
+    ).toStrictEqual([
+      ["quick", "ses_ai", sha, 1],
+      ["session", "ses_1", sha, 1],
+    ]);
+  });
+
+  it("answers link lookups, empty for what opendevhub never touched", async () => {
+    const { store, hub, onboarding, push, cleanup, checks } = setup();
+    const dbs = memoryStores();
+    dbs.projects.upsertAll([
+      {
+        devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
+        id: "demo",
+        name: "demo",
+        path: "/src/demo",
+      },
+    ]);
+    dbs.tasks.createTask({
+      createdAt: 1,
+      id: "tsk_01JA0000000000000000000001",
+      jira: {
+        description: "",
+        instanceUrl: "https://jira.example",
+        key: "APP-42",
+        title: "Add login",
+      },
+      projectId: "demo",
+      prompt: "Add login",
+      title: "Add login",
+      variants: [{}],
+    });
+    const app = createDashboardApp({
+      store,
+      hub,
+      onboarding,
+      push,
+      cleanup,
+      checks,
+      links: dbs.links,
+    });
+    const ticket = await app.request(
+      "/api/links/ticket?instance=https%3A%2F%2Fjira.example&key=APP-42"
+    );
+    expect(ticket.status).toBe(200);
+    expect(
+      ((await ticket.json()) as TicketLinks).tasks.map((t) => t.title)
+    ).toStrictEqual(["Add login"]);
+    await expect(
+      (
+        await app.request(
+          "/api/links/pull?url=https%3A%2F%2Fforge.example%2Fo%2Fr%2Fpulls%2F1"
+        )
+      ).json()
+    ).resolves.toStrictEqual({ branches: [], reviewTasks: [], reviews: [] });
+    expect(
+      (await app.request("/api/links/ticket?instance=x&key=APP-42")).status
+    ).toBe(400);
+    expect(
+      (
+        await app.request(
+          "/api/links/ticket?instance=https%3A%2F%2Fjira.example&key=nope"
+        )
+      ).status
+    ).toBe(400);
+    expect((await app.request("/api/links/pull?url=javascript:1")).status).toBe(
+      400
+    );
   });
 
   it("routes Forgejo PR lists and selected diffs", async () => {

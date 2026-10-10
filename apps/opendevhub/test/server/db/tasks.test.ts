@@ -87,7 +87,10 @@ describe("TaskStore.createTask", () => {
         { n: 3, step: "queued" },
       ],
     });
-    expect(s.events()).toStrictEqual([`task.started ${T1} user`]);
+    expect(s.events()).toStrictEqual([
+      `task.started ${T1} user`,
+      "ticket.linked 1 user",
+    ]);
   });
 
   it("records a spec-first task and links an implementing task both ways", () => {

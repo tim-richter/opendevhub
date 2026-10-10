@@ -396,6 +396,15 @@ export class Forgejo {
     };
   }
 
+  /** A pull request's web URL on the configured instance, without asking Forgejo. */
+  async pullUrl(owner: string, repo: string, number: string): Promise<string> {
+    if (!/^[1-9]\d{0,14}$/u.test(number)) {
+      throw new ForgejoError("Invalid pull request number.");
+    }
+    const connection = await this.connection();
+    return `${connection.url}/${segment(owner)}/${segment(repo)}/pulls/${number}`;
+  }
+
   /** Test unsaved credentials without changing the stored connection. */
   async test(
     input: Record<string, unknown>,

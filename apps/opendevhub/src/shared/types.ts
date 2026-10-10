@@ -1,3 +1,4 @@
+import type { AiFinding } from "./forgejo";
 import type { JiraTaskSource } from "./jira";
 import type { StackId } from "./stacks";
 
@@ -71,10 +72,11 @@ export interface BranchView {
   name: string;
   base?: string;
   createdBy: CheckoutCreator;
-  /** The pull request or ticket URL it was made for. */
+  /** The pull request it checks out, or the ticket its task started from. */
   origin?: string;
   publishedRemote?: string;
   publishedAt?: number;
+  /** The pull request it was published as. */
   prUrl?: string;
   createdAt: number;
   /** When opendevhub deleted it. */
@@ -363,8 +365,10 @@ export interface PublishRequest {
 export interface PublishResult {
   strategy: PublishStrategy;
   pushedFrom: "host" | "container";
-  /** An existing pull request the forge printed (stored for "View PR"). */
+  /** An existing pull request the forge printed (linked to the branch for "View PR"). */
   prUrl?: string;
+  /** The remote's forge, as detected. */
+  forge?: ForgeKind;
   /** Where to go next: the PR, the forge's new-PR page, or whatever URL the remote printed. */
   openUrl?: string;
   notice?: string;
@@ -641,8 +645,42 @@ export type StartStep =
   | "session"
   | "failed";
 
-/** `task`: started from the New task dialog. `manual`: a session started on its own, here or in opencode. */
-export type TaskKind = "task" | "manual";
+/**
+ * `task`: started from the New task dialog. `manual`: a session started on its own, here or in opencode. `review`:
+ * an AI review of a pull request.
+ */
+export type TaskKind = "task" | "manual" | "review";
+
+/** How a branch relates to a pull request: published as its head, or made to check it out. */
+export type PullRole = "head" | "checkout";
+
+/** A pull request opendevhub published, checked out or reviewed. Title and state are as last fetched from its forge. */
+export interface PullRequestRef {
+  url: string;
+  forge: ForgeKind;
+  owner?: string;
+  repo?: string;
+  number?: number;
+  title?: string;
+  state?: "open" | "closed" | "merged";
+  /** When the title and state were fetched; absent when they never were (no API client for the forge). */
+  fetchedAt?: number;
+}
+
+/** A Jira ticket a task was started from. Title and status are as last fetched from Jira. */
+export interface TicketRef {
+  instanceUrl: string;
+  key: string;
+  url: string;
+  title?: string;
+  status?: string;
+  fetchedAt?: number;
+}
+
+/** A pull request a task variant's branch was published as. */
+export interface VariantPullRequest extends PullRequestRef {
+  variant: number;
+}
 
 /**
  * Starting while a variant is being set up or failed without being dismissed; running while a variant has a live
@@ -696,6 +734,66 @@ export interface TaskView {
   createdAt: number;
   state: TaskState;
   variants: VariantView[];
+  /** The ticket it was started from, as last fetched; `jira` keeps what the prompt was built from. */
+  ticket?: TicketRef;
+  /** The pull requests its variants' branches were published as; absent when there are none. */
+  pullRequests?: VariantPullRequest[];
+  /** Review tasks: the pull request under review. */
+  reviewOf?: PullRequestRef;
+}
+
+/** What a pull request is linked to in opendevhub, from `GET /api/links/pull`. Empty for one it never touched. */
+export interface PullLinks {
+  pull?: PullRequestRef;
+  branches: {
+    projectId: ProjectId;
+    id: number;
+    name: string;
+    role: PullRole;
+    deleted?: boolean;
+    /** The task variant that created the branch. */
+    task?: { id: string; title: string; n: number };
+    /** Its worktrees, live and removed, newest first. */
+    worktrees: { path: string; node?: NodeId; removed?: boolean }[];
+  }[];
+  /** The review tasks of the pull request, newest first. */
+  reviewTasks: {
+    projectId: ProjectId;
+    id: string;
+    title: string;
+    createdAt: number;
+  }[];
+  /** Stored AI reviews, newest first. */
+  reviews: StoredAiReview[];
+}
+
+/** What a ticket is linked to in opendevhub, from `GET /api/links/ticket`. Empty for one no task started from. */
+export interface TicketLinks {
+  ticket?: TicketRef;
+  /** The tasks started from it, archived ones included, newest first, each with its variants' pull requests. */
+  tasks: {
+    projectId: ProjectId;
+    id: string;
+    title: string;
+    state: TaskState;
+    createdAt: number;
+    archived?: boolean;
+    pullRequests: VariantPullRequest[];
+  }[];
+}
+
+/** One stored AI review run of a pull request. */
+export interface StoredAiReview {
+  id: number;
+  /** The head commit the review was checked against. */
+  headSha: string;
+  mode: "session" | "quick";
+  sessionId?: string;
+  /** The review task it ran in. */
+  taskId?: string;
+  summary: string;
+  findings: AiFinding[];
+  createdAt: number;
 }
 
 /** The task a session belongs to. */

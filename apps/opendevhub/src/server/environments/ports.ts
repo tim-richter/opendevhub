@@ -1,5 +1,6 @@
 import type { NodeId, Project, ProjectId } from "../../shared/types";
 import type { CheckoutStore } from "../db/checkouts";
+import type { LinkStore } from "../db/links";
 import type { ProjectStore } from "../db/projects";
 import type { TaskStore } from "../db/tasks";
 import { UnavailableError } from "../errors";
@@ -137,6 +138,8 @@ export interface HubDeps {
   tasks: TaskStore;
   /** Branches and worktrees: who made them, and what a branch was published as. */
   checkouts: CheckoutStore;
+  /** Tickets, pull requests and AI reviews, and their links to tasks and branches. */
+  links: LinkStore;
   containers: ContainersPort;
   runtime: RuntimePort;
   forwarder: ForwarderPort;

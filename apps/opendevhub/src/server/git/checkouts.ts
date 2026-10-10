@@ -78,7 +78,13 @@ export class Checkouts {
       base?: string;
       startSession?: boolean;
       prompt?: string;
-      pull?: { url: string; number: number; commitId: string };
+      /** A Forgejo pull request to check out; the new branch is linked to it with role `checkout`. */
+      pull?: {
+        url: string;
+        number: number;
+        commitId: string;
+        repo?: { owner: string; repo: string };
+      };
     }
   ): Promise<{ worktree: Worktree; sessionId?: string }> {
     const branch = validateBranch(req.branch);
@@ -121,7 +127,16 @@ export class Checkouts {
           path: worktree.path,
           ...(worktree.hostPath ? { hostPath: worktree.hostPath } : {}),
           ...(worktree.base ? { base: worktree.base } : {}),
-          ...(req.pull ? { originUrl: req.pull.url } : {}),
+          ...(req.pull
+            ? {
+                pull: {
+                  forge: "forgejo" as const,
+                  number: req.pull.number,
+                  url: req.pull.url,
+                  ...req.pull.repo,
+                },
+              }
+            : {}),
         },
         req.pull ? { by: "pull" } : { by: "manual" },
         USER

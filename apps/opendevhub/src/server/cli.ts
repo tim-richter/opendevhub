@@ -22,6 +22,7 @@ import { createDashboardApp } from "./dashboard-api";
 import { CheckoutStore } from "./db/checkouts";
 import { openStateDatabase } from "./db/database";
 import { EnvironmentStore } from "./db/environments";
+import { LinkStore } from "./db/links";
 import { ProjectStore } from "./db/projects";
 import { TaskStore } from "./db/tasks";
 import { Checks } from "./environments/checks";
@@ -257,11 +258,13 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const tasks = new TaskStore(db);
   const checkouts = new CheckoutStore(db);
   const environments = new EnvironmentStore(db);
+  const links = new LinkStore(db);
   // The jobs that were setting these variants up died with the previous process.
   tasks.failInterrupted();
   const store = new StateStore({
     checkouts,
     environments,
+    links,
     port: config.port,
     tasks,
   });
@@ -294,6 +297,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     projects,
     tasks,
     checkouts,
+    links,
     containers,
     runtime,
     forwarder: new PortForwarder(),
@@ -389,6 +393,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     },
     forgejo: new Forgejo(new FileForgejoSettings(dir)),
     jira: new Jira(new FileJiraSettings(dir)),
+    links,
     ...(usage ? { usage } : {}),
     webDir: findWebDir(),
   });

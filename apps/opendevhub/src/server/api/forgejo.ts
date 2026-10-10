@@ -1,8 +1,14 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 
-import type { AiReviewResult } from "../../shared/forgejo";
+import type {
+  AiReviewResult,
+  ForgejoPullDetails,
+  ForgejoPullRequest,
+} from "../../shared/forgejo";
+import type { StoredAiReview } from "../../shared/types";
 import type { DashboardDeps } from "../dashboard-api";
+import { USER } from "../db/events";
 import { UnavailableError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import {
@@ -17,8 +23,42 @@ import { ForgejoError } from "../integrations/forgejo";
 import { errorStatus, imageResponse, json, param, str } from "./helpers";
 import { bodies, queries, validateJson, validateQuery } from "./validation";
 
+/** What the forge says about a pull request, as a snapshot for its row. */
+const pullFacts = (pull: ForgejoPullRequest) => ({
+  forge: "forgejo" as const,
+  number: pull.number,
+  owner: pull.owner,
+  repo: pull.repo,
+  state: pull.state,
+  title: pull.title,
+  url: pull.url,
+});
+
+const detailFacts = (details: ForgejoPullDetails) => ({
+  ...pullFacts(details.pull),
+  baseBranch: details.base,
+  headBranch: details.head,
+});
+
 export const createForgejoRoutes = (deps: DashboardDeps) => {
-  const { hub } = deps;
+  const { hub, links } = deps;
+  /** Refreshes the snapshot of the pull requests opendevhub knows; a failure never fails the request. */
+  const refresh = (
+    list: () => Parameters<NonNullable<typeof links>["refreshPulls"]>[0]
+  ) => {
+    try {
+      links?.refreshPulls(list());
+    } catch {
+      // A stale snapshot is shown with when it was fetched.
+    }
+  };
+  /** The row of a pull request opendevhub is about to review, with its snapshot. */
+  const reviewedPull = (details: ForgejoPullDetails) => {
+    const facts = detailFacts(details);
+    const row = links?.ensurePull(facts.url, facts);
+    refresh(() => [facts]);
+    return row;
+  };
   const requireForgejo = () => {
     if (!deps.forgejo) {
       throw new UnavailableError("Forgejo is not available");
@@ -57,8 +97,8 @@ export const createForgejoRoutes = (deps: DashboardDeps) => {
       })
     )
     .get("/api/forgejo/pulls", validateQuery(queries.pulls), (c) =>
-      json(c, () =>
-        requireForgejo().inbox(
+      json(c, async () => {
+        const inbox = await requireForgejo().inbox(
           {
             inbox: c.req.valid("query").inbox ?? "authored",
             page: Number(c.req.valid("query").page ?? 1),
@@ -69,8 +109,10 @@ export const createForgejoRoutes = (deps: DashboardDeps) => {
             state: c.req.valid("query").state ?? "all",
           },
           c.req.raw.signal
-        )
-      )
+        );
+        refresh(() => inbox.pulls.map(pullFacts));
+        return inbox;
+      })
     )
     .get("/api/forgejo/orgs", (c) =>
       json(c, () => {
@@ -115,12 +157,14 @@ export const createForgejoRoutes = (deps: DashboardDeps) => {
         json(c, async (_id) => {
           const b = c.req.valid("json");
           const details = await pullAt(c, b.commitId);
+          const pull = reviewedPull(details);
           return {
             sessionId: await hub.sessions.startSession(
               str(b.projectId) ?? "",
               str(b.directory) ?? "",
               aiReviewTitle(details),
-              aiReviewPrompt(details)
+              aiReviewPrompt(details),
+              pull ? { reviewOf: pull.id } : {}
             ),
           };
         })
@@ -142,6 +186,7 @@ export const createForgejoRoutes = (deps: DashboardDeps) => {
             );
             prompt = aiQuickReviewPrompt(details, diff.patch);
           }
+          const pull = reviewedPull(details);
           const generated = await hub.sessions.generateIn(
             str(b.projectId) ?? "",
             str(b.directory) ?? "",
@@ -150,19 +195,32 @@ export const createForgejoRoutes = (deps: DashboardDeps) => {
               sessionId,
               timeoutMs: AI_REVIEW_TIMEOUT_MS,
               title: aiReviewTitle(details),
+              ...(pull ? { reviewOf: pull.id } : {}),
             }
           );
+          let review: ReturnType<typeof parseAiReview>;
           try {
-            return {
-              sessionId: generated.sessionId,
-              ...parseAiReview(generated.text),
-            };
+            review = parseAiReview(generated.text);
           } catch (error) {
             throw new ForgejoError(
               error instanceof Error ? error.message : String(error),
               502
             );
           }
+          if (pull && links) {
+            links.insertReview(
+              {
+                findings: review.findings,
+                headSha: details.headSha,
+                mode: sessionId ? "session" : "quick",
+                pullRequestId: pull.id,
+                sessionId: generated.sessionId,
+                summary: review.summary,
+              },
+              USER
+            );
+          }
+          return { sessionId: generated.sessionId, ...review };
         })
     )
     .post(
@@ -189,20 +247,50 @@ export const createForgejoRoutes = (deps: DashboardDeps) => {
             pull: {
               commitId: diff.commitId ?? "",
               number: diff.pull.number,
+              repo: { owner: diff.pull.owner, repo: diff.pull.repo },
               url: diff.pull.url,
             },
           });
         })
     )
     .get("/api/forgejo/pulls/:owner/:repo/:number", (c) =>
-      json(c, () =>
-        requireForgejo().details(
+      json(c, async () => {
+        const details = await requireForgejo().details(
           param(c, "owner"),
           param(c, "repo"),
           param(c, "number"),
           c.req.raw.signal
-        )
-      )
+        );
+        refresh(() => [detailFacts(details)]);
+        return details;
+      })
+    )
+    .get("/api/forgejo/pulls/:owner/:repo/:number/ai-reviews", (c) =>
+      json(c, async (): Promise<{ reviews: StoredAiReview[] }> => {
+        if (!links) {
+          return { reviews: [] };
+        }
+        const forgejo = requireForgejo();
+        const [owner, repo, number] = [
+          param(c, "owner"),
+          param(c, "repo"),
+          param(c, "number"),
+        ];
+        if (forgejo.pullUrl) {
+          return {
+            reviews: links.reviewsOf(
+              await forgejo.pullUrl(owner, repo, number)
+            ),
+          };
+        }
+        const details = await forgejo.details(
+          owner,
+          repo,
+          number,
+          c.req.raw.signal
+        );
+        return { reviews: links.reviewsOf(details.pull.url) };
+      })
     )
     .get("/api/forgejo/pulls/:owner/:repo/:number/approvals", (c) =>
       json(c, () =>

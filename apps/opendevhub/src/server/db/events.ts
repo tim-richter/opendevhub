@@ -21,7 +21,10 @@ export type EventVerb =
   | "worktree.switched"
   | "worktree.removed"
   | "environment.created"
-  | "environment.removed";
+  | "environment.removed"
+  | "ticket.linked"
+  | "pull_request.linked"
+  | "review.run";
 
 export type ObjectType =
   | "project"
@@ -30,7 +33,10 @@ export type ObjectType =
   | "session"
   | "branch"
   | "worktree"
-  | "environment";
+  | "environment"
+  | "ticket"
+  | "pull_request"
+  | "review";
 
 /** Who caused a change: the user (an API request), a task's setup job for its variant, or opendevhub itself. */
 export type Actor =

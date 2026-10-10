@@ -559,7 +559,16 @@ export class ReviewActions {
           publishedAt: (this.deps.now ?? Date.now)(),
           publishedRemote: req.remote,
           ...(strategy === "agit" ? { agitTopic: branch } : {}),
-          ...(result.prUrl ? { prUrl: result.prUrl } : {}),
+          ...(result.prUrl
+            ? {
+                pull: {
+                  url: result.prUrl,
+                  ...(result.forge && result.forge !== "unknown"
+                    ? { forge: result.forge }
+                    : {}),
+                },
+              }
+            : {}),
         },
         USER
       );

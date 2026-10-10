@@ -17,6 +17,10 @@ import type {
 } from "../../shared/jira";
 import type {
   CandidateList,
+  PullLinks,
+  PullRequestRef,
+  TicketLinks,
+  TicketRef,
   ChecksView,
   SpecView,
   CleanupPlan,
@@ -82,6 +86,27 @@ export const PATCH = `${RATE_LIMIT_PATCH}${ROUTES_PATCH}`;
 
 const WEB_WORKSPACE = "/workspaces/acme-web";
 const WEB_WORKTREE = "/workspaces/.worktrees/acme-web/rate-limit";
+
+/** PR #42 as opendevhub last fetched it: published from tsk_rate's only variant. */
+const RATE_LIMIT_PR: PullRequestRef = {
+  fetchedAt: ago(10 * MINUTE),
+  forge: "forgejo",
+  number: 42,
+  owner: "acme",
+  repo: "web",
+  state: "open",
+  title: "Add burst limit to the login rate limiter",
+  url: "https://git.acme.dev/acme/web/pulls/42",
+};
+
+const ACME_118: TicketRef = {
+  fetchedAt: ago(5 * MINUTE),
+  instanceUrl: "https://acme.atlassian.net",
+  key: "ACME-118",
+  status: "In Progress",
+  title: "Login endpoint needs burst protection",
+  url: "https://acme.atlassian.net/browse/ACME-118",
+};
 const WEB_ISOLATED_WORKTREE = "/workspaces/.worktrees/acme-web/dark-mode";
 
 const webSessions: SessionSummary[] = [
@@ -296,10 +321,37 @@ export const webProject: ProjectView = {
       ],
     },
     {
+      createdAt: ago(2 * HOUR),
+      id: "tsk_review42",
+      kind: "review",
+      reviewOf: RATE_LIMIT_PR,
+      state: "ended",
+      title: "AI review: PR #42 Add burst limit to the login rate limiter",
+      variants: [
+        {
+          directory: WEB_WORKTREE,
+          envId: "acme-web",
+          n: 1,
+          sessionId: "ses_ai00",
+          sessionRemoved: true,
+          step: "session",
+        },
+      ],
+    },
+    {
       createdAt: ago(40 * MINUTE),
       id: "tsk_rate",
+      jira: {
+        description:
+          "Attackers can hammer `/login` within the per-minute window.",
+        instanceUrl: "https://acme.atlassian.net",
+        key: "ACME-118",
+        title: "Login endpoint needs burst protection",
+      },
       kind: "task",
+      pullRequests: [{ ...RATE_LIMIT_PR, variant: 1 }],
       state: "running",
+      ticket: ACME_118,
       title: "Add burst limit to the login rate limiter",
       variants: [
         {
@@ -1386,3 +1438,85 @@ export const logLines: string[] = [
   "[ports] Forwarded 5173 -> 45173 (web)",
   "[ports] 9229: port in use",
 ];
+
+/** What opendevhub links to PR #42: tsk_rate made it, it is checked out once, and an AI review ran on it twice. */
+export const pullLinks = (url: string): PullLinks =>
+  url === RATE_LIMIT_PR.url
+    ? {
+        branches: [
+          {
+            id: 1,
+            name: "feat/rate-limit",
+            projectId: "acme-web",
+            role: "head",
+            task: {
+              id: "tsk_rate",
+              n: 1,
+              title: "Add burst limit to the login rate limiter",
+            },
+            worktrees: [{ path: WEB_WORKTREE }],
+          },
+        ],
+        pull: RATE_LIMIT_PR,
+        reviewTasks: [
+          {
+            createdAt: ago(2 * HOUR),
+            id: "tsk_review42",
+            projectId: "acme-web",
+            title:
+              "AI review: PR #42 Add burst limit to the login rate limiter",
+          },
+        ],
+        reviews: [
+          {
+            createdAt: ago(90 * MINUTE),
+            findings: [
+              {
+                body: "`limit` is created but never applied to `/login`.",
+                file: "src/server/routes.ts",
+                line: 11,
+                severity: "blocker",
+                side: "new",
+              },
+            ],
+            headSha: forgejoDetails.headSha,
+            id: 2,
+            mode: "session",
+            sessionId: "ses_ai00",
+            summary: "The limiter is never wired into the login route.",
+            taskId: "tsk_review42",
+          },
+          {
+            createdAt: ago(DAY),
+            findings: [
+              {
+                body: "Consider documenting the 429 behaviour.",
+                severity: "nit",
+              },
+            ],
+            headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+            id: 1,
+            mode: "quick",
+            summary: "Looks reasonable; one doc nit.",
+          },
+        ],
+      }
+    : { branches: [], reviewTasks: [], reviews: [] };
+
+/** The tasks started from ACME-118: tsk_rate, published as PR #42. */
+export const ticketLinks = (key: string): TicketLinks =>
+  key === ACME_118.key
+    ? {
+        tasks: [
+          {
+            createdAt: ago(40 * MINUTE),
+            id: "tsk_rate",
+            projectId: "acme-web",
+            pullRequests: [{ ...RATE_LIMIT_PR, variant: 1 }],
+            state: "running",
+            title: "Add burst limit to the login rate limiter",
+          },
+        ],
+        ticket: ACME_118,
+      }
+    : { tasks: [] };

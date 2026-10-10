@@ -274,6 +274,29 @@ describe("manual tasks", () => {
     });
   });
 
+  it("gives an AI review session, in a checkout or quick, a review task of its pull request", async () => {
+    const s = await started();
+    const pull = s.links.ensurePull("https://forge.example/o/r/pulls/12");
+    await s.hub.sessions.startSession(
+      project.id,
+      "/workspaces/demo",
+      "AI review: PR #12",
+      undefined,
+      { reviewOf: pull.id }
+    );
+    expect(onlyTask(s)).toMatchObject({ kind: "review" });
+    const [task] = s.tasks.listForProject(project.id);
+    s.tasks.archive(task.id);
+    await s.hub.sessions.generateIn(
+      project.id,
+      "/workspaces/demo",
+      "Review the diff",
+      { reviewOf: pull.id, title: "AI review: PR #12" }
+    );
+    expect(onlyTask(s)).toMatchObject({ kind: "review" });
+    expect(s.links.forPull(pull.url).reviewTasks).toHaveLength(2);
+  });
+
   it("leaves no task or claim behind when opencode refuses the session", async () => {
     const s = await started();
     s.client.createSession.mockRejectedValueOnce(new Error("down"));

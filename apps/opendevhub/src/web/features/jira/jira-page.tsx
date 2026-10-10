@@ -59,8 +59,9 @@ import {
 import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { Link, useSearchParams } from "../../routing";
+import { PullRequestBadge } from "../forgejo/pull-request-badge";
 import { taskPath } from "../tasks/tasks";
-import { useJiraQuery } from "./use-jira";
+import { useJiraQuery, useTicketLinks } from "./use-jira";
 
 /** Shows cached data while it refreshes; "loading" only until the first result arrives. */
 const useJiraResource = <T,>(
@@ -662,23 +663,12 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         title: data.title,
       }
     : undefined;
-  const linked = new Map<string, { projectId: string; title: string }>();
-  if (source) {
-    for (const view of snapshot?.projects ?? []) {
-      for (const task of view.tasks) {
-        if (
-          task.jira?.key === source.key &&
-          task.jira.instanceUrl === source.instanceUrl
-        ) {
-          linked.set(taskPath(view.project.id, task.id), {
-            projectId: view.project.name,
-            title: task.title,
-          });
-        }
-      }
-    }
-  }
-  const [firstTask] = linked.keys();
+  const { data: links } = useTicketLinks(data);
+  const projectName = (id: string) =>
+    snapshot?.projects.find((v) => v.project.id === id)?.project.name ?? id;
+  const linked = links?.tasks ?? [];
+  const open = linked.find((t) => !t.archived);
+  const firstTask = open ? taskPath(open.projectId, open.id) : undefined;
   const tooLarge =
     source &&
     (jiraTaskPrompt(source).length > 100_000 || source.title.length > 1000);
@@ -753,17 +743,32 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {data && (
           <>
-            {linked.size > 0 && (
-              <Section title="Tasks from this ticket" hint={linked.size}>
+            {linked.length > 0 && (
+              <Section title="Tasks from this ticket" hint={linked.length}>
                 <ul className="divide-y">
-                  {[...linked].map(([url, task]) => (
-                    <li key={url}>
+                  {linked.map((task) => (
+                    <li
+                      key={task.id}
+                      className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
+                    >
                       <Link
-                        className="hover:bg-muted/50 block px-4 py-3 text-sm"
-                        to={url}
+                        className="min-w-0 flex-1 truncate hover:underline"
+                        to={taskPath(task.projectId, task.id)}
                       >
-                        {task.projectId} · {task.title}
+                        {projectName(task.projectId)} · {task.title}
                       </Link>
+                      <span className="text-muted-foreground text-xs">
+                        {task.archived ? "archived" : task.state}
+                      </span>
+                      {task.pullRequests.map((pull) => (
+                        <PullRequestBadge
+                          key={`${pull.variant}-${pull.url}`}
+                          pull={pull}
+                          {...(task.pullRequests.length > 1
+                            ? { prefix: `variant ${pull.variant}` }
+                            : {})}
+                        />
+                      ))}
                     </li>
                   ))}
                 </ul>

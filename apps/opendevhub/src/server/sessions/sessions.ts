@@ -52,7 +52,8 @@ export class Sessions {
     id: ProjectId,
     directory: string,
     title?: string,
-    prompt?: string
+    prompt?: string,
+    options: { reviewOf?: number } = {}
   ): Promise<string> {
     const project = this.envs.requireProject(id);
     this.envs.checkDirectory(id, directory);
@@ -63,7 +64,8 @@ export class Sessions {
       env.id,
       client,
       directory,
-      title
+      title,
+      options.reviewOf
     );
     if (prompt?.trim()) {
       await client.prompt(session.id, prompt, undefined, directory);
@@ -74,13 +76,19 @@ export class Sessions {
 
   /**
    * Text generated in a checkout without adding to a session's history: in the given idle session of that
-   * checkout, or in a new empty session titled `title` that stays around to follow up in.
+   * checkout, or in a new empty session titled `title` that stays around to follow up in. With `reviewOf` (a pull
+   * request row), the new session gets a review task instead of a manual one.
    */
   async generateIn(
     id: ProjectId,
     directory: string,
     prompt: string,
-    options: { sessionId?: string; title: string; timeoutMs?: number }
+    options: {
+      sessionId?: string;
+      title: string;
+      timeoutMs?: number;
+      reviewOf?: number;
+    }
   ): Promise<{ sessionId: string; text: string }> {
     const project = this.envs.requireProject(id);
     this.envs.checkDirectory(id, directory);
@@ -106,7 +114,8 @@ export class Sessions {
       env.id,
       client,
       directory,
-      options.title
+      options.title,
+      options.reviewOf
     );
     this.envs.reconcile(env.id);
     const text = await client.generate(
@@ -119,15 +128,16 @@ export class Sessions {
   }
 
   /**
-   * Creates a session outside a task and its manual task, before anything reconciles the environment: the directory
-   * is claimed meanwhile, so that reconcile doesn't adopt the session first.
+   * Creates a session outside a task and its manual task (a review task with `reviewOf`), before anything reconciles
+   * the environment: the directory is claimed meanwhile, so that reconcile doesn't adopt the session first.
    */
   private async createManual(
     project: Project,
     envId: EnvId,
     client: OpencodeClient,
     directory: string,
-    title: string | undefined
+    title: string | undefined,
+    reviewOf?: number
   ): Promise<RawSession> {
     const { tasks, store } = this.deps;
     const release = tasks.claim(envId, directory);
@@ -151,6 +161,7 @@ export class Sessions {
         projectId: project.id,
         sessionId: session.id,
         title: session.title?.trim() || title?.trim() || "Untitled session",
+        ...(reviewOf === undefined ? {} : { reviewOf }),
       });
       return session;
     } finally {

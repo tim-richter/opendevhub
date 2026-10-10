@@ -369,6 +369,17 @@ const OPENCODE_PILL: Record<ProjectView["runtime"]["opencode"], string> = {
   unhealthy: "border-destructive/45 text-destructive",
 };
 
+/** What a task row says it holds: a session, an AI review, or its variants. */
+const taskSize = (t: ProjectTask): string => {
+  if (t.kind === "manual") {
+    return "session";
+  }
+  if (t.kind === "review") {
+    return "AI review";
+  }
+  return `${t.variants} variant${t.variants === 1 ? "" : "s"}`;
+};
+
 const TaskRow = (props: {
   projectId: string;
   task: ProjectTask;
@@ -385,9 +396,7 @@ const TaskRow = (props: {
         <span className="flex-1 truncate">{t.title || "Task"}</span>
         <span className={muted}>
           {t.state === "starting" && "starting · "}
-          {t.kind === "manual"
-            ? "session"
-            : `${t.variants} variant${t.variants === 1 ? "" : "s"}`}
+          {taskSize(t)}
         </span>
       </Link>
       {props.action && <span className="pr-3">{props.action}</span>}

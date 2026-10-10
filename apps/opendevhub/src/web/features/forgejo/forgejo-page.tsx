@@ -115,6 +115,7 @@ import {
 } from "./forgejo-review-dialogs";
 import { ForgejoStack } from "./forgejo-stack";
 import { LocalCheckouts } from "./local-checkouts";
+import { EarlierAiReviews, PullOrigins, usePullLinks } from "./pull-links";
 import { useForgejoQuery } from "./use-forgejo";
 import { FAILED_CHECK, usePullFeedback } from "./use-pull-feedback";
 
@@ -300,6 +301,10 @@ const PullView = ({
   );
   const feedback = usePullFeedback(details);
   const ai = useAiReview(details);
+  const pullLinks = usePullLinks(details.pull.url, ai.run?.stage);
+  const openStored = ai.run?.id.startsWith("stored-")
+    ? Number(ai.run.id.slice("stored-".length))
+    : undefined;
 
   const run = ai.run?.stage === "done" ? ai.run : undefined;
   const placed = useMemo(
@@ -578,6 +583,7 @@ const PullView = ({
           </div>
         </div>
         <LocalCheckouts details={details} />
+        {pullLinks.data && <PullOrigins links={pullLinks.data} />}
         <p className="text-muted-foreground -mt-2 text-sm">
           {reviewing
             ? "Write your review: comment on lines, and accept or dismiss what an AI review suggests."
@@ -589,6 +595,12 @@ const PullView = ({
           inline={inlineAi.length}
           renderGeneral={(s) => suggestionCard(s, false)}
           onRerun={() => setDialog("ai")}
+        />
+        <EarlierAiReviews
+          reviews={pullLinks.data?.reviews ?? []}
+          details={details}
+          openId={openStored}
+          onOpen={(review) => ai.open(review)}
         />
         <ForgejoContext
           key={mode}

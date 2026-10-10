@@ -46,7 +46,10 @@ describe("openDatabase", () => {
       "environments",
       "events",
       "projects",
+      "pull_requests",
+      "reviews",
       "tasks",
+      "tickets",
       "variants",
       "worktrees",
     ]);

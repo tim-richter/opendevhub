@@ -65,19 +65,58 @@ describe("CheckoutStore branches", () => {
     expect(events()).toEqual([]);
   });
 
-  it("records a pull request checkout's origin", () => {
-    const { checkouts } = setup();
-    const row = checkouts.ensureBranch(
+  it("links a pull request checkout's branch with role checkout", () => {
+    const { checkouts, events } = setup();
+    events();
+    const { branch } = checkouts.recordCreated(
       project.id,
-      "pr-12",
+      {
+        branch: "pr-12",
+        path: `${WT}/pr-12`,
+        pull: { url: "https://forge.example/o/r/pulls/12/" },
+      },
       { by: "pull" },
-      USER,
-      { originUrl: "https://forge.example/o/r/pulls/12" }
+      USER
     );
-    expect(row).toMatchObject({
+    expect(branch).toMatchObject({
       createdBy: { by: "pull" },
       originUrl: "https://forge.example/o/r/pulls/12",
+      pullRequest: {
+        role: "checkout",
+        url: "https://forge.example/o/r/pulls/12",
+      },
     });
+    expect(branch.prUrl).toBeUndefined();
+    expect(events()).toEqual([
+      "branch.created user",
+      "pull_request.linked user",
+      "worktree.created user",
+    ]);
+  });
+
+  it("gives a task's branch its ticket as origin", () => {
+    const { checkouts, tasks } = setup();
+    tasks.createTask({
+      createdAt: 1000,
+      id: "tsk_01JA0000000000000000000003",
+      jira: {
+        description: "",
+        instanceUrl: "https://jira.example",
+        key: "APP-42",
+        title: "Add login",
+      },
+      projectId: project.id,
+      prompt: "Add login",
+      title: "Add login",
+      variants: [{}],
+    });
+    const row = checkouts.ensureBranch(
+      project.id,
+      "task/add-login",
+      { by: "variant", n: 1, task: "tsk_01JA0000000000000000000003" },
+      USER
+    );
+    expect(row.originUrl).toBe("https://jira.example/browse/APP-42");
   });
 
   it("records publishing, creating a row for a branch it didn't know", () => {
@@ -87,7 +126,7 @@ describe("CheckoutStore branches", () => {
       "feature/x",
       {
         agitTopic: "feature/x",
-        prUrl: "https://forge.example/o/r/pulls/3",
+        pull: { forge: "forgejo", url: "https://forge.example/o/r/pulls/3" },
         publishedAt: 1000,
         publishedRemote: "origin",
       },
@@ -100,7 +139,12 @@ describe("CheckoutStore branches", () => {
       publishedAt: 1000,
       publishedRemote: "origin",
     });
-    expect(events()).toEqual(["branch.created user", "branch.published user"]);
+    expect(row.pullRequest?.role).toBe("head");
+    expect(events()).toEqual([
+      "branch.created user",
+      "branch.published user",
+      "pull_request.linked user",
+    ]);
     checkouts.updateBranch(project.id, "feature/x", { base: "main" }, USER);
     expect(events()).toEqual([]);
     expect(checkouts.branch(project.id, "feature/x")?.base).toBe("main");
@@ -109,7 +153,12 @@ describe("CheckoutStore branches", () => {
   it("marks a deleted branch and makes it anew when the name comes back", () => {
     const { checkouts, events, clock } = setup();
     checkouts.ensureBranch(project.id, "b", { by: "manual" }, USER);
-    checkouts.updateBranch(project.id, "b", { prUrl: "u" }, USER);
+    checkouts.updateBranch(
+      project.id,
+      "b",
+      { pull: { url: "https://forge.example/o/r/pulls/9" } },
+      USER
+    );
     events();
     expect(checkouts.deleteBranch(project.id, "b", USER)).toBe(true);
     expect(checkouts.deleteBranch(project.id, "b", USER)).toBe(false);
@@ -128,6 +177,7 @@ describe("CheckoutStore branches", () => {
     });
     expect(back.deletedAt).toBeUndefined();
     expect(back.prUrl).toBeUndefined();
+    expect(back.pullRequest).toBeUndefined();
   });
 });
 

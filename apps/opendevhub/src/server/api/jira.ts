@@ -1,13 +1,36 @@
 import { Hono } from "hono";
 
 import { parseJiraQuery } from "../../shared/jira";
+import type { JiraTicketSummary } from "../../shared/jira";
 import type { DashboardDeps } from "../dashboard-api";
 import { UnavailableError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import { json, param } from "./helpers";
 import { bodies, queries, validateJson, validateQuery } from "./validation";
 
+/** The instance a listed ticket lives on: its URL without `/browse/<key>`. */
+const instanceOf = (t: JiraTicketSummary): string | undefined => {
+  const suffix = `/browse/${encodeURIComponent(t.key)}`;
+  return t.url.endsWith(suffix) ? t.url.slice(0, -suffix.length) : undefined;
+};
+
 export const createJiraRoutes = (deps: DashboardDeps) => {
+  /** Refreshes the title and status of the tickets opendevhub knows; a failure never fails the request. */
+  const refresh = (
+    list: {
+      instanceUrl: string;
+      key: string;
+      title: string;
+      status: string;
+      url: string;
+    }[]
+  ) => {
+    try {
+      deps.links?.refreshTickets(list);
+    } catch {
+      // A stale snapshot is shown with when it was fetched.
+    }
+  };
   const requireJira = () => {
     if (!deps.jira) {
       throw new UnavailableError("Jira is not available");
@@ -27,12 +50,19 @@ export const createJiraRoutes = (deps: DashboardDeps) => {
       })
     )
     .get("/api/jira/tickets", validateQuery(queries.jira), (c) =>
-      json(c, () => {
+      json(c, async () => {
         const query = parseJiraQuery(new URL(c.req.url).searchParams);
         if (!query) {
           throw new InvalidRequestError("Invalid Jira search or page.");
         }
-        return requireJira().tickets(query);
+        const result = await requireJira().tickets(query);
+        refresh(
+          result.tickets.flatMap((t) => {
+            const instanceUrl = instanceOf(t);
+            return instanceUrl ? [{ ...t, instanceUrl }] : [];
+          })
+        );
+        return result;
       })
     )
     .get("/api/jira/catalog", (c) => json(c, () => requireJira().catalog()))
@@ -46,6 +76,10 @@ export const createJiraRoutes = (deps: DashboardDeps) => {
       })
     )
     .get("/api/jira/tickets/:key", (c) =>
-      json(c, () => requireJira().ticket(param(c, "key")))
+      json(c, async () => {
+        const ticket = await requireJira().ticket(param(c, "key"));
+        refresh([ticket]);
+        return ticket;
+      })
     );
 };

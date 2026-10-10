@@ -195,8 +195,8 @@ export const pickPrompts = (
 };
 
 /**
- * The task chip on a session row; it links to the task page when the task has several variants. A manual task is
- * the session itself, so it gets none.
+ * The task chip on a session row; it links to the task page when the task has several variants, or is an AI review
+ * (whose page shows the pull request). A manual task is the session itself, so it gets none.
  */
 export const taskChip = (
   view: ProjectView,
@@ -209,6 +209,13 @@ export const taskChip = (
     return undefined;
   }
   const { task, variant } = found;
+  if (task.kind === "review") {
+    return {
+      label: "AI review",
+      title: task.title,
+      to: taskPath(view.project.id, task.id),
+    };
+  }
   const title = `Task: ${task.title}`;
   const of = task.variants.length;
   if (of === 1) {
