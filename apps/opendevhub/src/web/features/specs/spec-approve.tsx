@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import type { SpecChange } from "../../../shared/types";
 import { approveSpec } from "../../api";
 import { muted } from "../../components/page";
+import { ImplementWithModels } from "./spec-implement";
 import { specKey } from "./spec-queries";
 import { approveBlocker, approveWarnings } from "./specs";
 
@@ -54,8 +55,11 @@ export const ApproveSpec = (props: {
   busy: boolean;
   /** Files changed outside `openspec/`; undefined while the checkout's changes load. */
   code?: string[];
+  /** The spec is in a worktree of its own, so new worktrees can branch from it to compare models. */
+  worktree?: boolean;
 }) => {
   const { change, code = [] } = props;
+  const [comparing, setComparing] = useState(false);
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string>();
   const approve = useMutation({
@@ -108,6 +112,15 @@ export const ApproveSpec = (props: {
         >
           {approve.isPending ? "Approving…" : "Approve and implement"}
         </Button>
+        {props.worktree && (
+          <Button
+            variant="outline"
+            disabled={blocker !== undefined || approve.isPending}
+            onClick={() => setComparing(true)}
+          >
+            Implement with several models…
+          </Button>
+        )}
         {blocker ? (
           <span className={muted}>{blocker}</span>
         ) : (
@@ -122,6 +135,15 @@ export const ApproveSpec = (props: {
         )}
         {notice && <span className="text-ok">{notice}</span>}
       </div>
+      {comparing && (
+        <ImplementWithModels
+          projectId={props.projectId}
+          directory={props.directory}
+          change={change}
+          code={code}
+          onClose={() => setComparing(false)}
+        />
+      )}
     </div>
   );
 };

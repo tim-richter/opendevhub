@@ -17,7 +17,8 @@ import type {
   PermissionDecision,
   PublishRequest,
   ReviewMode,
-  TaskRequest,
+  NewTaskBody,
+  TaskVariantSpec,
 } from "../shared/types";
 import { api, complete, read, reply } from "./rpc";
 
@@ -262,7 +263,7 @@ export const createWorktree = (
 export const fetchModels = (projectId: string) =>
   read(project.models.$get({ param: projectParam(projectId) }), "models");
 
-export const createTask = (projectId: string, req: TaskRequest) =>
+export const createTask = (projectId: string, req: NewTaskBody) =>
   read(
     project.tasks.$post({ param: projectParam(projectId), json: req }),
     "start task"
@@ -623,6 +624,24 @@ export const approveSpec = async (
     "approve the spec"
   );
 };
+
+/** Approves the checkout's proposed change and implements it in a new task, one worktree per variant. */
+export const implementSpec = (
+  projectId: string,
+  body: {
+    directory: string;
+    change: string;
+    variants: TaskVariantSpec[];
+    force?: boolean;
+  }
+) =>
+  read(
+    project.spec.implement.$post({
+      param: projectParam(projectId),
+      json: body,
+    }),
+    "implement the spec"
+  );
 
 /** Archives the checkout's implemented change with `openspec archive`, updating its main specs. */
 export const archiveSpec = async (

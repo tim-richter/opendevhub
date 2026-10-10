@@ -332,10 +332,13 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
 
   const specs = new Specs({
     client: (envId) => hub.environments.opencodeClient(envId),
+    commitPaths: (id, directory, message, paths) =>
+      hub.reviews.commitPaths(id, directory, message, paths),
     containers,
     log: (id, line) => hub.environments.note(id, line),
     reconcile: (envId) => hub.environments.reconcile(envId),
     sessions: (id) => store.sessionsOf(id),
+    startTask: (id, body, spec) => hub.tasks.startTask(id, body, spec),
     target: (id, directory) => hub.checkouts.checkTarget(id, directory),
   });
 

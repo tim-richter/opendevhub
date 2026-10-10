@@ -379,8 +379,17 @@ export class GitOps {
     );
   }
 
-  async isClean(p: ExecTarget, dir: string): Promise<boolean> {
-    const result4 = await this.git(p, dir, ["status", "--porcelain"]);
+  /** No uncommitted change, or none under `paths` when given. */
+  async isClean(
+    p: ExecTarget,
+    dir: string,
+    paths: readonly string[] = []
+  ): Promise<boolean> {
+    const result4 = await this.git(p, dir, [
+      "status",
+      "--porcelain",
+      ...(paths.length > 0 ? ["--", ...paths] : []),
+    ]);
     return result4.trim() === "";
   }
 
@@ -412,10 +421,17 @@ export class GitOps {
     }
   }
 
-  async commit(p: ExecTarget, dir: string, message: string): Promise<void> {
+  /** Commits every change, or only those under `paths` when given. */
+  async commit(
+    p: ExecTarget,
+    dir: string,
+    message: string,
+    paths: readonly string[] = []
+  ): Promise<void> {
     await this.requireIdentity(p, dir);
-    await this.git(p, dir, ["add", "-A"]);
-    await this.git(p, dir, ["commit", "-q", "-m", message]);
+    const only = paths.length > 0 ? ["--", ...paths] : [];
+    await this.git(p, dir, ["add", "-A", ...only]);
+    await this.git(p, dir, ["commit", "-q", "-m", message, ...only]);
   }
 
   /**

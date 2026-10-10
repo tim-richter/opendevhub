@@ -120,15 +120,37 @@ const make = (opts: {
     ),
   };
   const reconcile = vi.fn();
+  const commitPaths = vi.fn(
+    async (
+      _id: string,
+      _directory: string,
+      _message: string,
+      _paths: readonly string[]
+    ) => ({ branch: "login", committed: true })
+  );
+  const startTask = vi.fn(
+    async (_id: string, _body: Record<string, unknown>, _spec: unknown) => ({
+      task: "tsk_2",
+    })
+  );
   const deps: SpecsDeps = {
     client: () => client as never,
+    commitPaths,
     containers: { exec },
     log: vi.fn(),
     reconcile,
     sessions: () => opts.sessions ?? [],
+    startTask,
     target: () => opts.target ?? target(),
   };
-  return { client, exec, reconcile, specs: new Specs(deps) };
+  return {
+    client,
+    commitPaths,
+    exec,
+    reconcile,
+    specs: new Specs(deps),
+    startTask,
+  };
 };
 
 describe(parseSections, () => {
@@ -555,6 +577,121 @@ describe("Specs.approve", () => {
             .metadata.opendevhub.spec.phase
       )
     ).toStrictEqual(["implement", "propose"]);
+  });
+});
+
+describe("Specs.implement", () => {
+  const variants = [
+    { model: { id: "opus", providerID: "anthropic" } },
+    { model: { id: "gpt", providerID: "openai" } },
+  ];
+
+  it("commits openspec/, starts a task from that branch running /opsx-apply per variant, and links the two", async () => {
+    const { client, commitPaths, reconcile, specs, startTask } = make({
+      outputs: [report(READY, VALID)],
+      sessions: [taskSession({ change: "add-login", phase: "propose" })],
+    });
+    await expect(
+      specs.implement("p", "/workspaces/wt", "add-login", variants)
+    ).resolves.toStrictEqual({ task: "tsk_2" });
+    expect(commitPaths).toHaveBeenCalledWith(
+      "p",
+      "/workspaces/wt",
+      "docs: propose OpenSpec change add-login",
+      ["openspec"]
+    );
+    expect(startTask).toHaveBeenCalledWith(
+      "p",
+      {
+        base: "login",
+        environment: "shared",
+        prompt: "add-login",
+        title: "Login",
+        variants,
+        where: "worktree",
+      },
+      { change: "add-login", phase: "implement", proposedIn: "tsk_1" }
+    );
+    expect(commitPaths.mock.invocationCallOrder[0]).toBeLessThan(
+      startTask.mock.invocationCallOrder[0]
+    );
+    expect(client.updateSession).toHaveBeenCalledWith(
+      "ses_1",
+      {
+        metadata: {
+          opendevhub: {
+            spec: {
+              change: "add-login",
+              implementedIn: "tsk_2",
+              phase: "implement",
+            },
+            task: "tsk_1",
+          },
+          x: 1,
+        },
+      },
+      "/workspaces/wt"
+    );
+    // The new task's sessions run /opsx-apply; this one doesn't.
+    expect(client.command).not.toHaveBeenCalled();
+    expect(reconcile).toHaveBeenCalledWith("p");
+  });
+
+  it("runs isolated variants when the spec's task has its own container", async () => {
+    const own = { ...taskSession({ phase: "propose" }), envId: "p~login" };
+    const { specs, startTask } = make({
+      outputs: [report(READY, VALID)],
+      sessions: [own as SessionSummary],
+    });
+    await specs.implement("p", "/workspaces/wt", "add-login", variants);
+    expect(startTask.mock.calls[0][1]).toMatchObject({
+      environment: "isolated",
+    });
+  });
+
+  it("refuses the main checkout, an unready change, or once approved, before committing anything", async () => {
+    const main = make({
+      outputs: [],
+      sessions: [taskSession({ phase: "propose" })],
+      target: target({ isMain: true }),
+    });
+    await expect(
+      main.specs.implement("p", "/workspaces/wt", "add-login", variants)
+    ).rejects.toThrow("main checkout");
+
+    const invalid = make({
+      outputs: [report(READY, INVALID)],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    await expect(
+      invalid.specs.implement("p", "/workspaces/wt", "add-login", variants)
+    ).rejects.toThrow("auth: no scenarios");
+
+    const approved = make({
+      outputs: [],
+      sessions: [taskSession({ change: "add-login", phase: "implement" })],
+    });
+    await expect(
+      approved.specs.implement("p", "/workspaces/wt", "add-login", variants)
+    ).rejects.toThrow("already approved");
+
+    for (const m of [main, invalid, approved]) {
+      expect(m.commitPaths).not.toHaveBeenCalled();
+      expect(m.startTask).not.toHaveBeenCalled();
+      expect(m.client.updateSession).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps the proposing task's phase when the new task can't start", async () => {
+    const { client, specs, startTask } = make({
+      outputs: [report(READY, VALID)],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    startTask.mockRejectedValue(new InvalidRequestError("bad variant"));
+    await expect(
+      specs.implement("p", "/workspaces/wt", "add-login", variants)
+    ).rejects.toThrow("bad variant");
+    expect(client.updateSession).not.toHaveBeenCalled();
   });
 });
 

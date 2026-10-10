@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, PlayIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
@@ -25,18 +25,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 
 import { jiraTaskPrompt } from "../../../shared/jira";
-import {
-  branchSlug,
-  deriveTitle,
-  MAX_VARIANTS,
-  taskBranches,
-} from "../../../shared/tasks";
-import type {
-  Isolation,
-  ModelsInfo,
-  TaskVariantSpec,
-  TaskWhere,
-} from "../../../shared/types";
+import { branchSlug, deriveTitle, taskBranches } from "../../../shared/tasks";
+import type { Isolation, ModelsInfo, TaskWhere } from "../../../shared/types";
 import { createTask, fetchModels } from "../../api";
 import { Choice } from "../../components/choice";
 import { useDash } from "../../dashboard-context";
@@ -44,14 +34,10 @@ import type { NewTaskDraft } from "../../dashboard-context";
 import { useNavigate } from "../../routing";
 import { nodeChoices } from "../nodes/nodes";
 import { projectFlags } from "../projects/project-actions";
-import { modelFromKey, modelKey, specUnavailable, taskPath } from "./tasks";
+import { specUnavailable, taskPath } from "./tasks";
+import { EMPTY_ROW, rowsToVariants, VariantRows } from "./variant-rows";
+import type { VariantRow } from "./variant-rows";
 
-interface Row {
-  model: string;
-  variant: string;
-  agent: string;
-}
-const EMPTY_ROW: Row = { agent: "", model: "", variant: "" };
 const NO_MODELS: ModelsInfo = { agents: [], models: [] };
 
 export const NewTaskDialog = () => {
@@ -108,7 +94,7 @@ const TaskForm = ({
   const [where, setWhere] = useState<TaskWhere>("worktree");
   const [environment, setEnvironment] = useState<Isolation>();
   const [node, setNode] = useState("local");
-  const [rows, setRows] = useState<Row[]>([EMPTY_ROW]);
+  const [rows, setRows] = useState<VariantRow[]>([EMPTY_ROW]);
   const [specFirst, setSpecFirst] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -154,19 +140,7 @@ const TaskForm = ({
   const models: ModelsInfo | undefined =
     modelsQuery.data ?? (modelsQuery.isError ? NO_MODELS : undefined);
 
-  const variants: TaskVariantSpec[] = shownRows.map((r) => {
-    // Only what the current project's lists offer, so what is sent matches what is shown.
-    const chosen = models?.models.find((m) => modelKey(m) === r.model);
-    const model = chosen ? modelFromKey(r.model) : undefined;
-    const variant = chosen?.variants.includes(r.variant) ? r.variant : "";
-    const agent = models?.agents.some((a) => a.id === r.agent) ? r.agent : "";
-    return {
-      ...(model
-        ? { model: { ...model, ...(variant ? { variant } : {}) } }
-        : {}),
-      ...(agent ? { agent } : {}),
-    };
-  });
+  const variants = rowsToVariants(shownRows, models);
   const specBlocked = models?.spec ? specUnavailable(models.spec) : undefined;
   const spec = specFirst && !!models?.spec && !specBlocked;
   const shownTitle = title.trim() || deriveTitle(prompt);
@@ -178,15 +152,6 @@ const TaskForm = ({
           variants,
         })
       : [];
-  const defaultModel = models?.default;
-  const defaultName = defaultModel
-    ? (models?.models.find(
-        (m) =>
-          m.id === defaultModel.id && m.providerID === defaultModel.providerID
-      )?.name ?? defaultModel.id)
-    : undefined;
-  const setRow = (i: number, patch: Partial<Row>) =>
-    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -398,85 +363,12 @@ const TaskForm = ({
             </div>
           )}
 
-          <div className="flex flex-col items-start gap-2">
-            {shownRows.map((row, i) => {
-              const chosen = models?.models.find(
-                (m) => modelKey(m) === row.model
-              );
-              return (
-                <div className="flex flex-wrap items-center gap-2" key={i}>
-                  <Choice
-                    label={`Model ${i + 1}`}
-                    value={row.model}
-                    onChange={(model) => setRow(i, { model, variant: "" })}
-                    options={[
-                      {
-                        label: defaultName
-                          ? `Default (${defaultName})`
-                          : "Default model",
-                        value: "",
-                      },
-                      ...(models?.models.map((m) => ({
-                        label: m.name,
-                        value: modelKey(m),
-                      })) ?? []),
-                    ]}
-                  />
-                  {chosen && chosen.variants.length > 0 && (
-                    <Choice
-                      label={`Reasoning ${i + 1}`}
-                      value={row.variant}
-                      onChange={(variant) => setRow(i, { variant })}
-                      options={[
-                        { label: "Default effort", value: "" },
-                        ...chosen.variants.map((v) => ({ label: v, value: v })),
-                      ]}
-                    />
-                  )}
-                  {models && models.agents.length > 1 && (
-                    <Choice
-                      label={`Agent ${i + 1}`}
-                      value={row.agent}
-                      onChange={(agent) => setRow(i, { agent })}
-                      options={[
-                        { label: "Default agent", value: "" },
-                        ...models.agents.map((a) => ({
-                          label: a.name,
-                          title: a.description,
-                          value: a.id,
-                        })),
-                      ]}
-                    />
-                  )}
-                  {shownRows.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground"
-                      aria-label={`Remove model ${i + 1}`}
-                      onClick={() =>
-                        setRows((rs) => rs.filter((_, j) => j !== i))
-                      }
-                    >
-                      <XIcon />
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-            {effectiveWhere === "worktree" && rows.length < MAX_VARIANTS && (
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                className="px-0"
-                onClick={() => setRows((rs) => [...rs, EMPTY_ROW])}
-              >
-                <PlusIcon /> Compare with another model
-              </Button>
-            )}
-          </div>
+          <VariantRows
+            rows={shownRows}
+            setRows={setRows}
+            models={models}
+            canAdd={effectiveWhere === "worktree"}
+          />
 
           <Collapsible className="group/options flex flex-col gap-3">
             <CollapsibleTrigger className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-sm">

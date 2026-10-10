@@ -148,7 +148,7 @@ export const parseTaskRequest = (
   if (body.spec !== undefined && typeof body.spec !== "boolean") {
     throw new InvalidRequestError("spec must be true or false");
   }
-  const spec = body.spec === true;
+  const spec = body.spec === true ? { phase: "propose" as const } : undefined;
   if (where === "workspace") {
     if (environment === "isolated") {
       throw new InvalidRequestError(
@@ -190,14 +190,23 @@ const parseTaskSpec = (spec: unknown): TaskSpec | undefined => {
   if (!spec || typeof spec !== "object") {
     return undefined;
   }
-  const { phase, change, archived } = spec as Record<string, unknown>;
+  const { phase, change, archived, proposedIn, implementedIn } = spec as Record<
+    string,
+    unknown
+  >;
   if (typeof phase !== "string" || !SPEC_PHASES.has(phase)) {
     return undefined;
   }
+  const taskId = (value: unknown) =>
+    typeof value === "string" && value.startsWith("tsk_") ? value : undefined;
+  const from = taskId(proposedIn);
+  const to = taskId(implementedIn);
   return {
     phase: phase as SpecPhase,
     ...(typeof change === "string" && change ? { change } : {}),
     ...(typeof archived === "string" && archived ? { archived } : {}),
+    ...(from ? { proposedIn: from } : {}),
+    ...(to ? { implementedIn: to } : {}),
   };
 };
 

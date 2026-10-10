@@ -10,6 +10,7 @@ import type {
   SpecChangeSummary,
   SpecPhase,
   SpecView,
+  TaskStartSpec,
 } from "../../shared/types";
 import type { CheckTarget } from "../environments/checks";
 import type { Containers } from "../environments/containers";
@@ -254,6 +255,12 @@ export const pickChange = (
   )[0]?.name;
 };
 
+const APPROVE_REFUSALS = {
+  busy: "the agent is still busy; approve the spec when its turn ends",
+  command: APPLY_COMMAND,
+  phase: "the spec is already approved",
+};
+
 export interface SpecsDeps {
   /** Validates the directory and finds its environment; throws for unknown projects and directories. */
   target: (projectId: ProjectId, directory: string) => CheckTarget;
@@ -267,6 +274,19 @@ export interface SpecsDeps {
   >;
   /** Re-reads an environment's sessions after their metadata changed. */
   reconcile?: (envId: string) => void;
+  /** Commits a checkout's changes under `paths` on its branch, as `ReviewActions.commitPaths`. */
+  commitPaths: (
+    projectId: ProjectId,
+    directory: string,
+    message: string,
+    paths: readonly string[]
+  ) => Promise<{ branch: string; committed: boolean }>;
+  /** Starts a task, as `Tasks.startTask`. */
+  startTask: (
+    projectId: ProjectId,
+    body: Record<string, unknown>,
+    spec: TaskStartSpec
+  ) => Promise<{ task: string }>;
   log: (projectId: ProjectId, line: string) => void;
 }
 
@@ -392,39 +412,9 @@ export class Specs {
       projectId,
       directory,
       change,
-      {
-        busy: "the agent is still busy; approve the spec when its turn ends",
-        command: APPLY_COMMAND,
-        phase: "the spec is already approved",
-      }
+      APPROVE_REFUSALS
     );
-    const sections = await this.run(target, directory, { change, list: true });
-    if (!listedChanges(sections).some((c) => c.name === change)) {
-      throw new InvalidRequestError(`no OpenSpec change ${change} here`);
-    }
-    const statusJson = sectionJson(sections.get("status"));
-    const { artifacts, planningComplete } = statusJson
-      ? parseStatus(statusJson)
-      : { artifacts: [], planningComplete: false };
-    if (!planningComplete) {
-      const missing = artifacts
-        .filter((a) => a.status !== "done")
-        .map((a) => a.id);
-      throw new InvalidRequestError(
-        missing.length > 0
-          ? `the change isn't ready to implement: ${missing.join(", ")} not done`
-          : "the change isn't ready to implement"
-      );
-    }
-    const validateJson = sectionJson(sections.get("validate"));
-    const validation = validateJson
-      ? parseValidation(validateJson, change)
-      : { issues: ["openspec validate failed"], valid: false };
-    if (!validation.valid && !force) {
-      throw new InvalidRequestError(
-        `openspec validate finds problems: ${validation.issues.join("; ")}`
-      );
-    }
+    await this.ready(target, directory, change, force);
 
     const spec = session.task?.spec ?? { phase: "propose" as const };
     const raw = await client.session(session.id);
@@ -452,6 +442,124 @@ export class Specs {
       projectId,
       `spec: approved ${change}, running /${APPLY_COMMAND}`
     );
+  }
+
+  /**
+   * Approves the checkout's proposed change and implements it in a new task, one worktree per variant (a model
+   * and agent), to compare them: `openspec/` is committed on the checkout's branch, each new worktree branches
+   * from it, and each variant runs `/opsx-apply <change>`. The proposing task's phase becomes `implement`, linked
+   * to the new task, which is returned. The same checks as approving apply.
+   */
+  async implement(
+    projectId: ProjectId,
+    directory: string,
+    change: string,
+    variants: unknown[],
+    force = false
+  ): Promise<{ task: string }> {
+    const { session, envId, client, target } = await this.proposed(
+      projectId,
+      directory,
+      change,
+      APPROVE_REFUSALS
+    );
+    if (target.isMain) {
+      throw new InvalidRequestError(
+        "the spec is in the main checkout; implement it here, or propose it in a new worktree to compare models"
+      );
+    }
+    const meta = session.task;
+    if (!meta) {
+      throw new InvalidRequestError(`no spec-first task works in ${directory}`);
+    }
+    await this.ready(target, directory, change, force);
+    const { branch, committed } = await this.deps.commitPaths(
+      projectId,
+      directory,
+      `docs: propose OpenSpec change ${change}`,
+      ["openspec"]
+    );
+    if (committed) {
+      this.deps.log(projectId, `spec: committed openspec/ on ${branch}`);
+    }
+    const { task } = await this.deps.startTask(
+      projectId,
+      {
+        base: branch,
+        environment: session.envId ? "isolated" : "shared",
+        ...(meta.jira ? { jira: meta.jira } : {}),
+        prompt: change,
+        ...(meta.title ? { title: meta.title } : {}),
+        variants,
+        where: "worktree",
+      },
+      { change, phase: "implement", proposedIn: meta.task }
+    );
+    try {
+      const raw = await client.session(session.id);
+      await client.updateSession(
+        session.id,
+        {
+          metadata: patchTaskMetadata(raw.metadata, {
+            spec: {
+              ...meta.spec,
+              change,
+              implementedIn: task,
+              phase: "implement",
+            },
+          }),
+        },
+        directory
+      );
+    } catch (error) {
+      this.deps.log(
+        projectId,
+        `spec: could not link ${session.title} to task ${task}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      this.deps.reconcile?.(envId);
+    }
+    this.deps.log(
+      projectId,
+      `spec: approved ${change}, implementing it in task ${task} with ${variants.length} variant${variants.length === 1 ? "" : "s"}`
+    );
+    return { task };
+  }
+
+  /** Throws unless the change is listed, has every artifact implementing needs, and validates (unless `force`). */
+  private async ready(
+    target: CheckTarget,
+    directory: string,
+    change: string,
+    force: boolean
+  ): Promise<void> {
+    const sections = await this.run(target, directory, { change, list: true });
+    if (!listedChanges(sections).some((c) => c.name === change)) {
+      throw new InvalidRequestError(`no OpenSpec change ${change} here`);
+    }
+    const statusJson = sectionJson(sections.get("status"));
+    const { artifacts, planningComplete } = statusJson
+      ? parseStatus(statusJson)
+      : { artifacts: [], planningComplete: false };
+    if (!planningComplete) {
+      const missing = artifacts
+        .filter((a) => a.status !== "done")
+        .map((a) => a.id);
+      throw new InvalidRequestError(
+        missing.length > 0
+          ? `the change isn't ready to implement: ${missing.join(", ")} not done`
+          : "the change isn't ready to implement"
+      );
+    }
+    const validateJson = sectionJson(sections.get("validate"));
+    const validation = validateJson
+      ? parseValidation(validateJson, change)
+      : { issues: ["openspec validate failed"], valid: false };
+    if (!validation.valid && !force) {
+      throw new InvalidRequestError(
+        `openspec validate finds problems: ${validation.issues.join("; ")}`
+      );
+    }
   }
 
   /**

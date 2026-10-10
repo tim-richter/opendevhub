@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowRightIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleDashedIcon,
   LockIcon,
 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -20,12 +22,14 @@ import type {
   SpecArtifact,
   SpecChange,
   SpecPhase,
+  TaskSpec,
 } from "../../../shared/types";
 import { MarkdownBody } from "../../components/markdown-body";
 import type { MarkdownBlock } from "../../components/markdown-body";
 import { muted, Section, Segmented } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
-import { variantName } from "../tasks/tasks";
+import { Link } from "../../routing";
+import { taskPath, variantName } from "../tasks/tasks";
 import { ApproveSpec, TaskProgress } from "./spec-approve";
 import { ArchiveSpec } from "./spec-archive";
 import {
@@ -157,8 +161,11 @@ const ChangeBody = ({
   change: SpecChange;
   projectId: string;
   directory: string;
-  /** Present while the spec is proposed: whether the agent is working, and code it changed outside `openspec/`. */
-  review?: { busy: boolean; code?: string[] };
+  /**
+   * Present while the spec is proposed: whether the agent is working, code it changed outside `openspec/`, and
+   * whether the checkout is a worktree of its own.
+   */
+  review?: { busy: boolean; code?: string[]; worktree: boolean };
   /** Present once every task of the implemented change is done: whether the agent is working. */
   archive?: { busy: boolean };
 }) => {
@@ -258,6 +265,7 @@ const ChangeBody = ({
           change={change}
           busy={review.busy}
           code={review.code}
+          worktree={review.worktree}
         />
       )}
       {archive && (
@@ -281,7 +289,12 @@ export const SpecPanel = (props: {
   busy?: boolean;
   /** The checkout's changes, for code written before approval; undefined while loading, null if unreadable. */
   checkout?: ReviewData | null;
+  /** The checkout is a worktree of its own, so the change can be implemented in new ones to compare models. */
+  worktree?: boolean;
+  /** The task that implements this checkout's change in new worktrees, or that proposed the change this one implements. */
+  links?: Pick<TaskSpec, "implementedIn" | "proposedIn">;
 }) => {
+  const { implementedIn, proposedIn } = props.links ?? {};
   const [picked, setPicked] = useState<string>();
   const implementing = props.phase === "implement" && props.busy === true;
   const query = useQuery({
@@ -311,7 +324,9 @@ export const SpecPanel = (props: {
   const { change } = view;
   // The change can be archived before the task's phase catches up.
   const phase = change?.archived ? "archived" : props.phase;
-  const progress = phase === "implement" ? taskProgress(view) : undefined;
+  // Implemented in another task's worktrees, this checkout's tasks stay unticked.
+  const progress =
+    phase === "implement" && !implementedIn ? taskProgress(view) : undefined;
   const fresh = view.changes.filter((c) => c.isNew);
   const choices = fresh.length > 1 ? fresh : [];
   return (
@@ -331,6 +346,16 @@ export const SpecPanel = (props: {
         )}
         <Badge variant="secondary">{PHASE_LABEL[phase]}</Badge>
         {progress && <TaskProgress {...progress} />}
+        {implementedIn && phase === "implement" && (
+          <TaskLink projectId={props.projectId} task={implementedIn}>
+            Implemented in a task per model
+          </TaskLink>
+        )}
+        {proposedIn && (
+          <TaskLink projectId={props.projectId} task={proposedIn}>
+            Proposed in its own task
+          </TaskLink>
+        )}
         {change?.archived && (
           <span className="text-muted-foreground font-mono text-xs">
             openspec/changes/archive/{change.archived}
@@ -359,6 +384,7 @@ export const SpecPanel = (props: {
             phase === "propose"
               ? {
                   busy: props.busy ?? false,
+                  worktree: props.worktree ?? false,
                   code:
                     props.checkout === undefined
                       ? undefined
@@ -367,7 +393,7 @@ export const SpecPanel = (props: {
               : undefined
           }
           archive={
-            phase === "implement" && tasksDone(progress)
+            progress && tasksDone(progress)
               ? { busy: props.busy ?? false }
               : undefined
           }
@@ -380,6 +406,20 @@ export const SpecPanel = (props: {
     </div>
   );
 };
+
+const TaskLink = (props: {
+  projectId: string;
+  task: string;
+  children: ReactNode;
+}) => (
+  <Link
+    to={taskPath(props.projectId, props.task)}
+    className="text-primary inline-flex items-center gap-1 text-xs hover:underline"
+  >
+    {props.children}
+    <ArrowRightIcon className="size-3" />
+  </Link>
+);
 
 /** A spec-first task's Spec section: one tab per variant's checkout. */
 export const SpecSection = (props: {
@@ -420,6 +460,8 @@ export const SpecSection = (props: {
         phase={phase}
         busy={shown.status !== "idle"}
         checkout={props.reviews?.[shown.directory]}
+        worktree={shown.task?.branch !== undefined}
+        links={shown.task?.spec}
       />
     </Section>
   );

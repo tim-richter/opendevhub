@@ -49,6 +49,15 @@ const strings = z
   )
   .optional();
 
+const variants = z.array(
+  z.object({
+    agent: text,
+    model: z
+      .object({ id: z.string(), providerID: z.string(), variant: text })
+      .optional(),
+  })
+);
+
 export const bodies = {
   integration: z.object({
     enabled: z.boolean(),
@@ -121,16 +130,7 @@ export const bodies = {
         description: z.string(),
       })
       .optional(),
-    variants: z
-      .array(
-        z.object({
-          agent: text,
-          model: z
-            .object({ id: z.string(), providerID: z.string(), variant: text })
-            .optional(),
-        })
-      )
-      .optional(),
+    variants: variants.optional(),
   }),
   pick: z.object({ sessionId: text, removeWorktrees: actionFlag }),
   permission: z.object({
@@ -173,6 +173,11 @@ export const bodies = {
     force: z.boolean().optional(),
   }),
   archiveSpec: directory.extend({ change: z.string() }),
+  implementSpec: directory.extend({
+    change: z.string(),
+    variants,
+    force: z.boolean().optional(),
+  }),
 };
 
 const page = z.object({ page: text });

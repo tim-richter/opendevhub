@@ -421,6 +421,39 @@ describe("tasks", () => {
     });
   });
 
+  it("starts a task implementing an approved change by running opsx-apply in each variant's worktree", async () => {
+    const { hub, client, worktrees } = await started();
+    client.commands.mockResolvedValue([{ name: "opsx-apply" }]);
+    const spec = {
+      change: "add-dark-mode",
+      phase: "implement",
+      proposedIn: "tsk_1",
+    } as const;
+    await hub.tasks.startTask(
+      project.id,
+      {
+        base: "dark-mode",
+        prompt: "add-dark-mode",
+        variants: [{}, {}],
+        where: "worktree",
+      },
+      spec
+    );
+    await vi.waitFor(() => expect(client.command).toHaveBeenCalledTimes(2));
+    expect(worktrees.add.mock.calls.map(([, a]) => a.base)).toStrictEqual([
+      "dark-mode",
+      "dark-mode",
+    ]);
+    expect(client.command.mock.calls.map((c) => c.slice(1, 3))).toStrictEqual([
+      ["opsx-apply", "add-dark-mode"],
+      ["opsx-apply", "add-dark-mode"],
+    ]);
+    expect(client.prompt).not.toHaveBeenCalled();
+    expect(client.createSession.mock.calls[0][1]?.metadata).toMatchObject({
+      opendevhub: { spec },
+    });
+  });
+
   it("fails a spec-first variant whose opencode has no opsx-propose, before creating its session", async () => {
     const { hub, client } = await started();
     const result = await hub.tasks.createTask(project.id, {

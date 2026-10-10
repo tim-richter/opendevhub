@@ -286,6 +286,36 @@ export class ReviewActions {
     });
   }
 
+  /**
+   * Commits what changed under `paths`, if anything did, so that a new worktree based on the checkout's branch
+   * has it; other changes stay uncommitted. Returns that branch; a detached HEAD is refused.
+   */
+  // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
+  async commitPaths(
+    id: ProjectId,
+    directory: string,
+    message: string,
+    paths: readonly string[]
+  ): Promise<{ branch: string; committed: boolean }> {
+    this.envs.checkDirectory(id, directory);
+    return this.envs.withGit(id, async (p) => {
+      const on = this.checkouts.gitFor(p, directory);
+      const branch = await on.git.currentBranch(on.target, directory);
+      if (!branch) {
+        throw new InvalidRequestError(`${directory} is on a detached HEAD`);
+      }
+      if (await on.git.isClean(on.target, directory, paths)) {
+        return { branch, committed: false };
+      }
+      await this.envs.gitAction(
+        id,
+        `commit ${paths.join(", ")} in ${directory}`,
+        () => on.git.commit(on.target, directory, message, paths)
+      );
+      return { branch, committed: true };
+    });
+  }
+
   /** Rebases the target onto its base, or merges the base in when the branch was pushed. Conflicts are aborted. */
   // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
   async updateFromBase(

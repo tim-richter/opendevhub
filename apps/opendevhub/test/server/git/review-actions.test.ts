@@ -537,6 +537,26 @@ describe("review", () => {
     );
   });
 
+  it("commits only the given paths, when they changed, and says on which branch", async () => {
+    const { hub, git } = await running();
+    await expect(
+      hub.reviews.commitPaths(project.id, wt, "docs: x", ["openspec"])
+    ).resolves.toStrictEqual({ branch: "x", committed: false });
+    expect(git.isClean).toHaveBeenLastCalledWith(project, wt, ["openspec"]);
+    expect(git.commit).not.toHaveBeenCalled();
+    git.isClean.mockResolvedValue(false);
+    await expect(
+      hub.reviews.commitPaths(project.id, wt, "docs: x", ["openspec"])
+    ).resolves.toStrictEqual({ branch: "x", committed: true });
+    expect(git.commit).toHaveBeenCalledWith(project, wt, "docs: x", [
+      "openspec",
+    ]);
+    git.currentBranch.mockResolvedValue(undefined);
+    await expect(
+      hub.reviews.commitPaths(project.id, wt, "docs: x", ["openspec"])
+    ).rejects.toThrow("detached HEAD");
+  });
+
   it("rebases an unpushed branch, merges a pushed one, and reports conflicts", async () => {
     const { hub, git } = await running();
     await expect(

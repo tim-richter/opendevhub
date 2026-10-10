@@ -411,7 +411,7 @@ const Compare = (props: {
                     return "—";
                   }
                   const progress =
-                    phase === "implement"
+                    phase === "implement" && !s.task?.spec?.implementedIn
                       ? taskProgress(specs[s.directory])
                       : undefined;
                   return (

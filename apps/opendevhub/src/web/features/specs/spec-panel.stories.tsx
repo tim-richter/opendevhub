@@ -22,6 +22,7 @@ const variant = (n: number, model: string): SessionSummary => ({
   projectId: "acme-web",
   status: "idle",
   task: {
+    branch: `login-limit-${n}`,
     of: 2,
     spec: { phase: "propose" },
     task: "tsk_spec",
@@ -111,6 +112,32 @@ export const Implementing = meta.story({
   args: {
     sessions: [
       inPhase({ change: "add-login-burst-limit", phase: "implement" }),
+    ],
+  },
+});
+
+/** Approved with "Implement with several models…": a new task implements it, one worktree per model. */
+export const ImplementedInTask = meta.story({
+  args: {
+    sessions: [
+      inPhase({
+        change: "add-login-burst-limit",
+        implementedIn: "tsk_impl",
+        phase: "implement",
+      }),
+    ],
+  },
+});
+
+/** One of the models implementing a change another task proposed, which it links back to. */
+export const ImplementingProposedChange = meta.story({
+  args: {
+    sessions: [
+      inPhase({
+        change: "add-login-burst-limit",
+        phase: "implement",
+        proposedIn: "tsk_spec",
+      }),
     ],
   },
 });

@@ -298,6 +298,9 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.post("/api/projects/:id/spec/approve", () =>
       HttpResponse.json({ ok: true })
     ),
+    http.post("/api/projects/:id/spec/implement", () =>
+      HttpResponse.json({ task: "tsk_impl" })
+    ),
     http.post("/api/projects/:id/spec/archive", () =>
       HttpResponse.json({ ok: true })
     ),

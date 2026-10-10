@@ -405,6 +405,10 @@ export interface TaskSpec {
   change?: string;
   /** The change's folder under `openspec/changes/archive/` once it's archived, e.g. `2026-10-10-add-login`. */
   archived?: string;
+  /** Implementing: the task that proposed the change, when this one implements it in new worktrees. */
+  proposedIn?: string;
+  /** The task implementing this task's change in new worktrees, one per model, instead of this checkout. */
+  implementedIn?: string;
 }
 
 /** A change in `openspec list`; `isNew` when the checkout's base doesn't have it, so the task made it. */
@@ -482,10 +486,20 @@ export interface TaskRequest {
   environment?: Isolation;
   /** The node isolated variants run on; absent for this machine. */
   node?: NodeId;
-  /** Start with OpenSpec's `opsx-propose`, the prompt being what to propose. */
-  spec?: true;
+  /**
+   * Propose: start with OpenSpec's `opsx-propose`, the prompt being what to propose. Implement: start with
+   * `opsx-apply <change>`, for a change another task proposed and committed on the base.
+   */
+  spec?: TaskStartSpec;
   variants: TaskVariantSpec[];
 }
+
+export type TaskStartSpec =
+  | { phase: "propose" }
+  | { phase: "implement"; change: string; proposedIn: string };
+
+/** `POST …/tasks`: spec-first tasks start by proposing; implementing one needs the spec approved first. */
+export type NewTaskBody = Omit<TaskRequest, "spec"> & { spec?: true };
 
 export interface TaskVariantResult {
   branch?: string;

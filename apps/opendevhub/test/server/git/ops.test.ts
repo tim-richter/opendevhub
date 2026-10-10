@@ -137,6 +137,23 @@ describe("git", () => {
       await expect(ops.isClean(project, repo)).resolves.toBeTruthy();
     });
 
+    it("commits only the changes under the paths it's given", async () => {
+      fs.mkdirSync(path.join(repo, "openspec/changes/x"), { recursive: true });
+      write(repo, "openspec/changes/x/proposal.md", "## Why\n");
+      write(repo, "a.txt", "changed\n");
+      await expect(
+        ops.isClean(project, repo, ["openspec"])
+      ).resolves.toBeFalsy();
+      await ops.commit(project, repo, "docs: propose x", ["openspec"]);
+      expect(git(repo, "show", "--name-only", "--format=", "HEAD").trim()).toBe(
+        "openspec/changes/x/proposal.md"
+      );
+      await expect(
+        ops.isClean(project, repo, ["openspec"])
+      ).resolves.toBeTruthy();
+      await expect(ops.isClean(project, repo)).resolves.toBeFalsy();
+    });
+
     it("refuses to commit without an identity and says how to fix it", async () => {
       git(repo, "config", "--unset", "user.name");
       git(repo, "config", "--unset", "user.email");

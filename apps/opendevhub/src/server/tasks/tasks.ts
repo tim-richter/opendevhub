@@ -16,6 +16,7 @@ import type {
   TaskMeta,
   TaskRequest,
   TaskResult,
+  TaskStartSpec,
   TaskVariantResult,
   TaskVariantSpec,
 } from "../../shared/types";
@@ -29,8 +30,18 @@ import { LOCAL_NODE } from "../nodes/host";
 import type { NodeRepoLayout } from "../nodes/repo";
 import type { OpencodeClient } from "../opencode/client";
 import { newTaskId } from "../projects/ids";
-import { PROPOSE_COMMAND } from "./openspec";
+import { APPLY_COMMAND, PROPOSE_COMMAND } from "./openspec";
 import { discardMetadata, parseTaskMeta, parseTaskRequest } from "./request";
+
+/** What a variant's session starts with: the prompt, `opsx-propose <prompt>`, or `opsx-apply <change>`. */
+const firstTurn = (req: TaskRequest): { command?: string; text: string } => {
+  if (req.spec?.phase === "implement") {
+    return { command: APPLY_COMMAND, text: req.spec.change };
+  }
+  return req.spec
+    ? { command: PROPOSE_COMMAND, text: req.prompt }
+    : { text: req.prompt };
+};
 
 const NO_WORKTREE_MOUNT =
   "this container was created before opendevhub mounted a worktrees folder — rebuild the container to enable worktrees";
@@ -60,13 +71,15 @@ export class Tasks {
 
   /**
    * Like createTask, but answers once the request is checked: the variants are set up in the background, and
-   * the snapshot's `starting` shows each one's step and log until its session appears.
+   * the snapshot's `starting` shows each one's step and log until its session appears. `spec` replaces the
+   * body's: only the server starts a task implementing a change, once its spec is approved.
    */
   async startTask(
     id: ProjectId,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    spec?: TaskStartSpec
   ): Promise<TaskResult> {
-    const { task, done } = await this.beginTask(id, body);
+    const { task, done } = await this.beginTask(id, body, spec);
     void done.catch(() => undefined);
     return { task, variants: [] };
   }
@@ -82,9 +95,11 @@ export class Tasks {
   /** The checks a task request must pass before anything is created; then the job that sets it up. */
   private async beginTask(
     id: ProjectId,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    spec?: TaskStartSpec
   ): Promise<{ task: string; done: Promise<TaskResult> }> {
-    const req = parseTaskRequest(body);
+    const parsed = parseTaskRequest(body);
+    const req = spec ? { ...parsed, spec } : parsed;
     const client = this.envs.opencodeClient(id);
     const project = this.envs.requireProject(id);
     const node = req.node ?? LOCAL_NODE;
@@ -261,7 +276,7 @@ export class Tasks {
             variant: i + 1,
             ...(req.jira ? { jira: req.jira } : {}),
             ...(branch ? { branch } : {}),
-            ...(req.spec ? { spec: { phase: "propose" as const } } : {}),
+            ...(req.spec ? { spec: req.spec } : {}),
           };
           await this.startVariant(
             client,
@@ -270,7 +285,7 @@ export class Tasks {
             meta,
             variantTitle(title, labels[i], of),
             v,
-            req.prompt
+            firstTurn(req)
           );
           step(i, { sessionId: result.sessionId });
         } catch (error) {
@@ -321,7 +336,7 @@ export class Tasks {
             title,
             ...(req.jira ? { jira: req.jira } : {}),
             branch: worktree.branch,
-            ...(req.spec ? { spec: { phase: "propose" as const } } : {}),
+            ...(req.spec ? { spec: req.spec } : {}),
           };
           await this.startVariant(
             this.envs.opencodeClient(env.id),
@@ -330,7 +345,7 @@ export class Tasks {
             meta,
             variantTitle(title, labels[i], of),
             req.variants[i],
-            req.prompt
+            firstTurn(req)
           );
           step(i, { sessionId: result.sessionId });
         } catch (error) {
@@ -425,8 +440,8 @@ export class Tasks {
   }
 
   /**
-   * Creates a variant's session (recorded on the result at once) and sends the prompt. A spec-first variant runs
-   * `opsx-propose` with the prompt as its arguments instead, checked first so that a missing command leaves no session.
+   * Creates a variant's session (recorded on the result at once) and sends its first turn: the prompt, or for a
+   * spec-first variant an OpenSpec command, checked first so that a missing command leaves no session.
    */
   private async startVariant(
     client: OpencodeClient,
@@ -435,13 +450,14 @@ export class Tasks {
     meta: TaskMeta,
     title: string,
     v: TaskVariantSpec,
-    prompt: string
+    turn: { command?: string; text: string }
   ): Promise<void> {
-    if (meta.spec) {
+    const { command } = turn;
+    if (command) {
       const commands = await client.commands(directory);
-      if (!commands.some((c) => c.name === PROPOSE_COMMAND)) {
+      if (!commands.some((c) => c.name === command)) {
         throw new UnavailableError(
-          `opencode has no ${PROPOSE_COMMAND} command here; run \`openspec init --tools opencode\` in the repository`
+          `opencode has no ${command} command here; run \`openspec init --tools opencode\` in the repository`
         );
       }
     }
@@ -452,9 +468,9 @@ export class Tasks {
       metadata: { opendevhub: meta },
     });
     result.sessionId = session.id;
-    await (meta.spec
-      ? client.command(session.id, PROPOSE_COMMAND, prompt, directory)
-      : client.prompt(session.id, prompt, undefined, directory));
+    await (command
+      ? client.command(session.id, command, turn.text, directory)
+      : client.prompt(session.id, turn.text, undefined, directory));
   }
 
   private variantFailed(

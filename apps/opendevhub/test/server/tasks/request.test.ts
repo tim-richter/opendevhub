@@ -73,8 +73,16 @@ describe(parseTaskRequest, () => {
     });
   });
 
-  it("reads spec-first, which must be a boolean", () => {
-    expect(parseTaskRequest({ prompt: "x", spec: true }).spec).toBe(true);
+  it("reads spec-first, which must be a boolean: implementing needs an approved spec", () => {
+    expect(parseTaskRequest({ prompt: "x", spec: true }).spec).toStrictEqual({
+      phase: "propose",
+    });
+    expect(() =>
+      parseTaskRequest({
+        prompt: "x",
+        spec: { change: "add-login", phase: "implement", proposedIn: "tsk_1" },
+      })
+    ).toThrow(InvalidRequestError);
     expect(parseTaskRequest({ prompt: "x", spec: false })).not.toHaveProperty(
       "spec"
     );
@@ -320,6 +328,30 @@ describe("spec-first task metadata", () => {
       archived: "2026-10-10-add-login",
       change: "add-login",
       phase: "archived",
+    });
+  });
+
+  it("reads the links between a proposing task and the task implementing it", () => {
+    const spec = (links: Record<string, unknown>) =>
+      parseTaskMeta({
+        opendevhub: {
+          ...meta,
+          spec: { change: "add-login", phase: "implement", ...links },
+        },
+      })?.spec;
+    expect(spec({ implementedIn: "tsk_2" })).toStrictEqual({
+      change: "add-login",
+      implementedIn: "tsk_2",
+      phase: "implement",
+    });
+    expect(spec({ proposedIn: "tsk_1" })).toStrictEqual({
+      change: "add-login",
+      phase: "implement",
+      proposedIn: "tsk_1",
+    });
+    expect(spec({ implementedIn: "ses_2", proposedIn: 1 })).toStrictEqual({
+      change: "add-login",
+      phase: "implement",
     });
   });
 
