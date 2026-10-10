@@ -13,18 +13,20 @@ import type {
   PublicRuntime,
   ResourceStats,
   SessionSummary,
-  StartingTask,
-  StartingVariant,
+  TaskView,
   UsageTotals,
   Worktree,
 } from "../../shared/types";
 import { projectUrl } from "../../shared/urls";
 import type { PersistedEnv, PersistedRuntime, PersistedState } from "../config";
+import type { TaskRecord, TaskStore } from "../db/tasks";
 import type { RunningContainer } from "../environments/resources";
 import { compareSessions } from "../sessions/status";
 
 export interface StoreOptions {
   port: number;
+  /** Where tasks live; the snapshot lists them and sessions show theirs. */
+  tasks: TaskStore;
   persisted: PersistedState;
   persist: (state: PersistedState) => void;
 }
@@ -79,11 +81,13 @@ export class StateStore {
   private usageTotals?: UsageTotals;
   private resourceStats: Record<EnvId, ResourceStats> = {};
   private nodeViews: NodeView[] = [];
-  private startingTasks = new Map<ProjectId, StartingTask[]>();
+  /** The last lines each starting variant's setup wrote, by `<task>/<n>`. Not worth keeping across restarts. */
+  private setupLogs = new Map<string, string[]>();
 
   private readonly opts: StoreOptions;
   constructor(opts: StoreOptions) {
     this.opts = opts;
+    opts.tasks.subscribe(() => this.emit());
     for (const [id, saved] of Object.entries(opts.persisted.projects)) {
       this.runtimes.set(id, { ...defaultRuntime(id), ...saved });
     }
@@ -148,98 +152,56 @@ export class StateStore {
       return;
     }
     this.sessions.set(id, list);
-    const owner = this.envs.get(id)?.projectId ?? id;
-    this.pruneStarting(owner);
     this.emit();
   }
 
-  /** Records a task whose variants are being set up. */
-  putStarting(projectId: ProjectId, task: StartingTask): void {
-    this.startingTasks.set(projectId, [
-      ...(this.startingTasks.get(projectId) ?? []).filter(
-        (t) => t.task !== task.task
-      ),
-      task,
-    ]);
-    this.emit();
-  }
-
-  startingTask(projectId: ProjectId, task: string): StartingTask | undefined {
-    return this.startingTasks.get(projectId)?.find((t) => t.task === task);
-  }
-
-  updateStarting(
-    projectId: ProjectId,
-    task: string,
-    variant: number,
-    patch: Partial<Omit<StartingVariant, "variant" | "log">>
-  ): void {
-    const v = this.startingVariant(projectId, task, variant);
-    if (!v) {
-      return;
-    }
-    Object.assign(v, patch);
-    this.pruneStarting(projectId);
-    this.emit();
-  }
-
-  /** Keeps the last 30 lines. */
-  appendStartingLog(
-    projectId: ProjectId,
-    task: string,
-    variant: number,
-    line: string
-  ): void {
-    const v = this.startingVariant(projectId, task, variant);
-    if (!v) {
-      return;
-    }
-    v.log = [...v.log, line].slice(-30);
-    this.emit();
-  }
-
-  /** Drops the variants that failed or got their session; false when the task isn't listed. */
-  dismissStarting(projectId: ProjectId, task: string): boolean {
-    const t = this.startingTask(projectId, task);
-    if (!t) {
-      return false;
-    }
-    t.variants = t.variants.filter(
-      (v) => v.step !== "failed" && v.step !== "session"
+  /** Keeps the last 30 lines of a starting variant's setup. */
+  appendStartingLog(task: string, variant: number, line: string): void {
+    const key = `${task}/${variant}`;
+    this.setupLogs.set(
+      key,
+      [...(this.setupLogs.get(key) ?? []), line].slice(-30)
     );
-    this.pruneStarting(projectId);
     this.emit();
-    return true;
   }
 
-  private startingVariant(
-    projectId: ProjectId,
-    task: string,
-    variant: number
-  ): StartingVariant | undefined {
-    return this.startingTask(projectId, task)?.variants.find(
-      (v) => v.variant === variant
-    );
+  /** The id of the task a session belongs to. */
+  readonly taskOf = (sessionId: string): string | undefined =>
+    this.opts.tasks.sessionRef(sessionId)?.id;
+
+  /** The project's tasks that are not archived, as the snapshot lists them. */
+  tasksOf(id: ProjectId): TaskView[] {
+    return this.opts.tasks.listForProject(id).map((t) => this.taskView(t));
   }
 
-  /** Variants whose session is listed are running; tasks without variants are done. */
-  private pruneStarting(projectId: ProjectId): void {
-    const tasks = this.startingTasks.get(projectId);
-    if (!tasks) {
-      return;
-    }
-    const listed = new Set(this.sessionsOf(projectId).map((s) => s.id));
-    for (const t of tasks) {
-      t.variants = t.variants.filter(
-        (v) => !v.sessionId || !listed.has(v.sessionId)
-      );
-    }
-    const left = tasks.filter((t) => t.variants.length > 0);
-    if (left.length > 0) {
-      this.startingTasks.set(projectId, left);
-    } else {
-      this.startingTasks.delete(projectId);
-    }
+  private taskView(t: TaskRecord): TaskView {
+    const {
+      projectId: _projectId,
+      prompt: _prompt,
+      archivedAt: _archivedAt,
+      ...view
+    } = t;
+    return {
+      ...view,
+      variants: view.variants.map((v) => {
+        const log =
+          v.step === "session"
+            ? undefined
+            : this.setupLogs.get(`${t.id}/${v.n}`);
+        return log ? { ...v, log } : v;
+      }),
+    };
+  }
+
+  /** Sessions as listed, with their task; discarded variants are hidden, the way archiving would. */
+  private withTasks(list: SessionSummary[]): SessionSummary[] {
+    return list.flatMap((s) => {
+      const task = this.opts.tasks.sessionRef(s.id);
+      if (task?.discarded) {
+        return [];
+      }
+      return [task ? { ...s, task } : s];
+    });
   }
 
   /** The project's sessions across its main and task environments. */
@@ -247,12 +209,13 @@ export class StateStore {
     const main = this.sessions.get(id) ?? [];
     const envs = this.environments(id);
     if (envs.length === 0) {
-      return main;
+      return this.withTasks(main);
     }
-    return [
-      ...main,
-      ...envs.flatMap((e) => this.sessions.get(e.id) ?? []),
-    ].toSorted(compareSessions);
+    return this.withTasks(
+      [...main, ...envs.flatMap((e) => this.sessions.get(e.id) ?? [])].toSorted(
+        compareSessions
+      )
+    );
   }
 
   environments(projectId: ProjectId): EnvRecord[] {
@@ -371,7 +334,6 @@ export class StateStore {
             : []
         );
         const runtime = publicRuntime(this.runtime(project.id));
-        const starting = this.startingTasks.get(project.id);
         return {
           environments: envs.map((e) => ({
             id: e.id,
@@ -391,8 +353,8 @@ export class StateStore {
                 }
               : runtime,
           sessions: this.sessionsOf(project.id),
+          tasks: this.tasksOf(project.id),
           ...(isolation ? { isolation } : {}),
-          ...(starting ? { starting: structuredClone(starting) } : {}),
         };
       }),
       roots: this.roots,

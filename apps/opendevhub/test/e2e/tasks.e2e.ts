@@ -21,13 +21,14 @@ import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { projectId } from "../../src/server/projects/ids";
 import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
+import { memoryStores } from "../helpers/stores";
 
 const PROMPT = "Reply with the word ok. Do not change any files.";
 
 describe.skipIf(!process.env.OPENDEVHUB_E2E)(
   "e2e: tasks in a real container",
   () => {
-    it("starts a task in a new worktree with a tagged session, then compares two variants and picks one", async () => {
+    it("starts a task in a new worktree with a recorded session, then compares two variants and picks one", async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "odh-tasks-"));
       const repo = path.join(tmp, "tasks-demo");
       fs.mkdirSync(path.join(repo, ".devcontainer"), { recursive: true });
@@ -50,7 +51,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         path: repo,
         devcontainerPath: path.join(repo, ".devcontainer/devcontainer.json"),
       };
+      const dbs = memoryStores();
       const store = new StateStore({
+        tasks: dbs.tasks,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -65,6 +68,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       });
       const hub = createHub({
         store,
+        projects: dbs.projects,
+        tasks: dbs.tasks,
         containers,
         runtime,
         forwarder: new PortForwarder(),
@@ -117,14 +122,23 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         await vi.waitFor(
           () =>
             expect(sessionOf(v.sessionId)?.task).toEqual({
-              task: one.task,
-              variant: 1,
-              of: 1,
-              title: "e2e task",
-              branch: "e2e-task",
+              discarded: false,
+              id: one.task,
+              kind: "task",
+              n: 1,
             }),
           { timeout: 20_000, interval: 500 }
         );
+        expect(dbs.tasks.get(one.task)).toMatchObject({
+          state: "running",
+          title: "e2e task",
+          variants: [{ branch: "e2e-task", directory: v.directory, n: 1 }],
+        });
+        // The session itself carries no task metadata.
+        const created = await hub.environments
+          .opencodeClient(project.id)
+          .session(v.sessionId!);
+        expect(created.metadata?.opendevhub).toBeUndefined();
 
         const two = await hub.tasks.createTask(project.id, {
           prompt: PROMPT,
@@ -160,10 +174,28 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           { timeout: 20_000, interval: 500 }
         );
         expect(sessionOf(keep.sessionId)?.task).toMatchObject({
-          task: two.task,
-          variant: 1,
-          of: 2,
+          id: two.task,
+          n: 1,
         });
+        expect(
+          dbs.tasks.get(two.task)?.variants.map((x) => [x.picked, x.discarded])
+        ).toEqual([
+          [true, undefined],
+          [undefined, true],
+        ]);
+
+        // A session made in opencode directly becomes a manual task on the next reconcile.
+        const stray = await hub.environments
+          .opencodeClient(project.id)
+          .createSession(v.directory!, { title: "made in opencode" });
+        hub.environments.reconcile(project.id);
+        await vi.waitFor(
+          () =>
+            expect(dbs.tasks.bySession(stray.id)?.task).toMatchObject({
+              kind: "manual",
+            }),
+          { timeout: 20_000, interval: 500 }
+        );
       } finally {
         await hub.environments.stop(project.id).catch(() => undefined);
         await hub.environments.shutdown();

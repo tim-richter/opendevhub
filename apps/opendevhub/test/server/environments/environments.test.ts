@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SYSTEM } from "../../../src/server/db/events";
 import { envIdFor } from "../../../src/server/environments/config";
 import {
   CommandError,
@@ -876,9 +877,13 @@ describe("task environments", () => {
       variants: [{}],
     });
     expect(result.variants[0].envId).toBeDefined();
-    expect(s.client.createSession.mock.calls[0][1]?.metadata).toMatchObject({
-      opendevhub: { jira },
-    });
+    expect(s.client.createSession.mock.calls[0][1]?.metadata).toBeUndefined();
+    expect(s.tasks.bySession(result.variants[0].sessionId ?? "")).toMatchObject(
+      {
+        task: { id: result.task, jira },
+        variant: { envId: result.variants[0].envId, n: 1 },
+      }
+    );
   });
 
   it("starts each variant of an isolated task in its own container", async () => {
@@ -1012,14 +1017,32 @@ describe("task environments", () => {
   });
 
   it("Pick removes a discarded variant's container with its worktree", async () => {
-    const { hub, store, containers, envId } = await withEnv();
-    const meta = (variant: number, branch?: string) => ({
-      task: "tsk_1",
-      variant,
-      of: 2,
+    const { hub, store, containers, envId, tasks } = await withEnv();
+    tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: project.id,
+      prompt: "T",
       title: "T",
-      ...(branch ? { branch } : {}),
+      variants: [{}, {}],
     });
+    tasks.attachSession(
+      "tsk_1",
+      1,
+      {
+        directory: "/workspaces/demo",
+        envId: project.id,
+        sessionId: "ses_keep",
+      },
+      SYSTEM
+    );
+    tasks.updateVariant("tsk_1", 2, { branch: "feat" }, SYSTEM);
+    tasks.attachSession(
+      "tsk_1",
+      2,
+      { directory: feat.path, envId, sessionId: "ses_drop" },
+      SYSTEM
+    );
     store.setSessions(project.id, [
       {
         id: "ses_keep",
@@ -1028,7 +1051,6 @@ describe("task environments", () => {
         directory: "/workspaces/demo",
         updatedAt: 1,
         status: "idle",
-        task: meta(1),
       },
     ]);
     store.setSessions(envId, [
@@ -1040,7 +1062,6 @@ describe("task environments", () => {
         directory: feat.path,
         updatedAt: 1,
         status: "idle",
-        task: meta(2, "feat"),
       },
     ]);
     const r = await hub.tasks.pickVariant(
@@ -1665,21 +1686,40 @@ describe("environments on another node", () => {
   });
 
   it("are removed when another variant is picked", async () => {
-    const { hub, store, box } = await withRemoteRunning();
+    const { hub, store, box, tasks } = await withRemoteRunning();
     const local = {
       ...waiting({ permissions: [], forms: [] }),
       id: "ses_keep",
       status: "idle" as const,
       directory: "/workspaces/demo",
-      task: { task: "tsk_1", variant: 1, of: 2, title: "t" },
     };
     const remote = {
       ...local,
       id: "ses_r",
       envId: remoteEnv,
       directory: remoteFix.path,
-      task: { task: "tsk_1", variant: 2, of: 2, title: "t", branch: "fix" },
     };
+    tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: project.id,
+      prompt: "t",
+      title: "t",
+      variants: [{}, { node: "box" }],
+    });
+    tasks.attachSession(
+      "tsk_1",
+      1,
+      { directory: local.directory, envId: project.id, sessionId: "ses_keep" },
+      SYSTEM
+    );
+    tasks.updateVariant("tsk_1", 2, { branch: "fix" }, SYSTEM);
+    tasks.attachSession(
+      "tsk_1",
+      2,
+      { directory: remote.directory, envId: remoteEnv, sessionId: "ses_r" },
+      SYSTEM
+    );
     store.setSessions(project.id, [local]);
     store.setSessions(remoteEnv, [remote]);
     const result = await hub.tasks.pickVariant(

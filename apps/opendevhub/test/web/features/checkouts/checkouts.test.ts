@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   ProjectView,
   SessionSummary,
-  TaskMeta,
+  TaskView,
 } from "../../../../src/shared/types";
 import {
   checkoutCounts,
@@ -33,8 +33,12 @@ const session = (
   ...over,
 });
 
-function view(sessions: SessionSummary[] = []): ProjectView {
+function view(
+  sessions: SessionSummary[] = [],
+  tasks: TaskView[] = []
+): ProjectView {
   return {
+    tasks,
     project: {
       id: "p 1",
       name: "demo",
@@ -123,87 +127,93 @@ describe(checkouts, () => {
     expect(orphanSessions(v).map((s) => s.id)).toStrictEqual(["b"]);
   });
 
+  const ref = (id: string, n: number) => ({
+    discarded: false,
+    id,
+    kind: "task" as const,
+    n,
+  });
+  const task = (
+    id: string,
+    variants: Partial<TaskView["variants"][number]>[],
+    over: Partial<TaskView> = {}
+  ): TaskView => ({
+    createdAt: 1,
+    id,
+    kind: "task",
+    state: "running",
+    title: `T ${id}`,
+    variants: variants.map((v, i) => ({ n: i + 1, step: "session", ...v })),
+    ...over,
+  });
+
   it("lists multi-variant tasks once, needing attention when any variant does", () => {
-    const meta = (task: string, variant: number, of: number): TaskMeta => ({
-      task,
-      variant,
-      of,
-      title: `T ${task}`,
-    });
-    const v = view([
-      session("a", wt("login"), { task: meta("t1", 1, 2), updatedAt: 5 }),
-      session("b", wt("main"), {
-        task: meta("t1", 2, 2),
-        status: "needs-permission",
-        updatedAt: 3,
-      }),
-      session("c", "/workspaces/demo", { task: meta("t2", 1, 1) }),
-      session("d", wt("login"), { task: meta("t3", 1, 3), updatedAt: 9 }),
-    ]);
+    const v = view(
+      [
+        session("a", wt("login"), { task: ref("t1", 1), updatedAt: 5 }),
+        session("b", wt("main"), {
+          task: ref("t1", 2),
+          status: "needs-permission",
+          updatedAt: 3,
+        }),
+        session("c", "/workspaces/demo", { task: ref("t2", 1) }),
+        session("d", wt("login"), { task: ref("t3", 1), updatedAt: 9 }),
+      ],
+      [
+        task("t1", [{ sessionId: "a" }, { sessionId: "b" }]),
+        // One variant: the session stands for it, in its checkout.
+        task("t2", [{ sessionId: "c" }]),
+        task("t3", [{ sessionId: "d" }, {}, {}], { state: "starting" }),
+        // A manual task is its session.
+        task("t4", [{ sessionId: "e" }], { kind: "manual" }),
+      ]
+    );
     expect(projectTasks(v)).toStrictEqual([
       {
+        attention: false,
+        kind: "task",
+        running: true,
+        state: "starting",
         task: "t3",
         title: "T t3",
-        variants: 1,
-        attention: false,
-        running: false,
         updatedAt: 9,
+        variants: 3,
       },
       {
+        attention: true,
+        kind: "task",
+        running: false,
+        state: "running",
         task: "t1",
         title: "T t1",
-        variants: 2,
-        attention: true,
-        running: false,
         updatedAt: 5,
+        variants: 2,
       },
     ]);
   });
 
-  it("lists starting tasks, single-variant ones too, until their variants run", () => {
-    const v: ProjectView = {
-      ...view([
-        session("a", wt("x"), {
-          task: { task: "t1", variant: 1, of: 2, title: "T t1" },
-          updatedAt: 5,
-        }),
-      ]),
-      starting: [
-        {
-          task: "t1",
-          title: "T t1",
-          of: 2,
-          createdAt: 3,
-          variants: [{ variant: 2, step: "image", log: [] }],
-        },
-        {
-          task: "t9",
-          title: "Fix",
-          of: 1,
+  it("lists starting tasks with one variant, failed starts, and ended tasks of either kind", () => {
+    const v = view(
+      [],
+      [
+        task("t1", [{ step: "image" }], { createdAt: 3, state: "starting" }),
+        task("t9", [{ error: "boom", step: "failed" }], {
           createdAt: 7,
-          variants: [{ variant: 1, step: "failed", error: "boom", log: [] }],
-        },
-      ],
-    };
-    expect(projectTasks(v)).toStrictEqual([
-      {
-        task: "t9",
-        title: "Fix",
-        variants: 1,
-        attention: true,
-        running: false,
-        updatedAt: 7,
-        starting: true,
-      },
-      {
-        task: "t1",
-        title: "T t1",
-        variants: 2,
-        attention: false,
-        running: true,
-        updatedAt: 5,
-        starting: true,
-      },
+          state: "starting",
+        }),
+        task("t5", [{ sessionId: "gone", sessionRemoved: true }], {
+          createdAt: 1,
+          kind: "manual",
+          state: "ended",
+        }),
+      ]
+    );
+    expect(
+      projectTasks(v).map((t) => [t.task, t.state, t.attention, t.running])
+    ).toStrictEqual([
+      ["t9", "starting", true, true],
+      ["t1", "starting", false, true],
+      ["t5", "ended", false, false],
     ]);
   });
 

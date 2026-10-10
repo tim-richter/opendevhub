@@ -49,6 +49,7 @@ import {
 } from "../../src/web/api";
 import { api as rpcApi } from "../../src/web/rpc";
 import { MemorySecretStore } from "../helpers/secrets";
+import { memoryStores } from "../helpers/stores";
 
 const project: Project = {
   id: "demo-abc123",
@@ -71,6 +72,7 @@ const newProject: Project = {
 
 function setup(webDir?: string) {
   const store = new StateStore({
+    tasks: memoryStores().tasks,
     port: 7777,
     persisted: { projects: {} },
     persist: () => {},
@@ -216,6 +218,7 @@ function setup(webDir?: string) {
         ): Promise<TaskResult> => ({ task: "tsk_1", variants: [] })
       ),
       dismissStarting: vi.fn((_id: string, _task: string) => {}),
+      archiveTask: vi.fn((_id: string, _task: string) => {}),
       pickVariant: vi.fn(
         async (
           _id: string,
@@ -1557,6 +1560,13 @@ describe("dashboard API", () => {
         project.id,
         "tsk_1"
       );
+      const archived = await post(app, "tasks/tsk_1/archive", {});
+      expect(archived.status).toBe(200);
+      expect(hub.tasks.archiveTask).toHaveBeenCalledWith(project.id, "tsk_1");
+      hub.tasks.archiveTask.mockImplementationOnce(() => {
+        throw new NotFoundError("tsk_2", "task");
+      });
+      expect((await post(app, "tasks/tsk_2/archive", {})).status).toBe(404);
       await expect(
         (await app.request(`/api/projects/${project.id}/models`)).json()
       ).resolves.toStrictEqual({ models: [], agents: [] });

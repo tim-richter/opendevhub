@@ -212,15 +212,13 @@ describe(deriveSessions, () => {
     ]);
   });
 
-  it("carries task metadata, model, cost and tokens, and hides discarded variants", () => {
-    const meta = (variant: number, extra = {}) => ({
-      opendevhub: { task: "tsk_1", variant, of: 2, title: "Fix", ...extra },
-    });
+  it("carries model, cost and tokens, and leaves tasks to the store", () => {
     const out = deriveSessions("p", {
       ...base,
       sessions: [
         rawSession("a", {
-          metadata: meta(1),
+          // Sessions from before the task database still carry this; it is ignored.
+          metadata: { opendevhub: { task: "tsk_1", variant: 1, of: 2 } },
           model: { id: "m", providerID: "p", variant: "default" },
           cost: 0.25,
           tokens: {
@@ -230,22 +228,19 @@ describe(deriveSessions, () => {
             cache: { read: 100, write: 0 },
           },
         }),
-        rawSession("b", { metadata: meta(2, { discarded: true }) }),
         rawSession("c", {
-          metadata: { opendevhub: { task: "nope" } },
           model: { id: "n", providerID: "p", variant: "high" },
         }),
       ],
     });
     expect(out.map((s) => s.id)).toStrictEqual(["a", "c"]);
     expect(out[0]).toMatchObject({
-      task: { task: "tsk_1", variant: 1, of: 2, title: "Fix" },
       model: { id: "m", providerID: "p" },
       cost: 0.25,
       tokens: 116,
     });
+    expect(out[0]).not.toHaveProperty("task");
     expect(out[0].model).not.toHaveProperty("variant");
-    expect(out[1]).not.toHaveProperty("task");
     expect(out[1].model).toStrictEqual({
       id: "n",
       providerID: "p",

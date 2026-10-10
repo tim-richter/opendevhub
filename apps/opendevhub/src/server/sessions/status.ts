@@ -13,7 +13,6 @@ import type {
   RawSession,
   RawTokens,
 } from "../opencode/client";
-import { parseTaskMeta } from "../tasks/request";
 
 export interface StatusInput {
   /** The environment these sessions come from; copied onto each session. */
@@ -201,40 +200,34 @@ export const deriveSessions = (
     itemsOf(p.sessionID).permissions.push(toPermission(p, seen(p.id)));
   }
 
-  return (
-    input.sessions
-      .filter((s) => !s.parentID && s.time.archived === undefined)
-      .map((s) => ({ s, task: parseTaskMeta(s.metadata) }))
-      // A discarded task variant is hidden, the way archiving would (opencode's PATCH can't archive).
-      .filter(({ task }) => !task?.discarded)
-      .map(({ s, task }) => {
-        const items = pending.get(s.id);
-        const model = modelOf(s);
-        const { cost, tokens } = totals.get(s.id) ?? {};
-        const context = input.contexts?.get(s.id);
-        return {
-          id: s.id,
-          projectId,
-          ...(input.envId ? { envId: input.envId } : {}),
-          title: s.title?.trim() || "Untitled session",
-          directory: s.location.directory,
-          updatedAt: s.time.updated,
-          status: flags.get(s.id) ?? "idle",
-          ...(items
-            ? {
-                pending: {
-                  forms: items.forms.toSorted(byAge),
-                  permissions: items.permissions.toSorted(byAge),
-                },
-              }
-            : {}),
-          ...(task ? { task } : {}),
-          ...(model ? { model } : {}),
-          ...(cost === undefined ? {} : { cost }),
-          ...(tokens === undefined ? {} : { tokens }),
-          ...(context === undefined ? {} : { context }),
-        };
-      })
-      .toSorted(compareSessions)
-  );
+  return input.sessions
+    .filter((s) => !s.parentID && s.time.archived === undefined)
+    .map((s) => {
+      const items = pending.get(s.id);
+      const model = modelOf(s);
+      const { cost, tokens } = totals.get(s.id) ?? {};
+      const context = input.contexts?.get(s.id);
+      return {
+        id: s.id,
+        projectId,
+        ...(input.envId ? { envId: input.envId } : {}),
+        title: s.title?.trim() || "Untitled session",
+        directory: s.location.directory,
+        updatedAt: s.time.updated,
+        status: flags.get(s.id) ?? "idle",
+        ...(items
+          ? {
+              pending: {
+                forms: items.forms.toSorted(byAge),
+                permissions: items.permissions.toSorted(byAge),
+              },
+            }
+          : {}),
+        ...(model ? { model } : {}),
+        ...(cost === undefined ? {} : { cost }),
+        ...(tokens === undefined ? {} : { tokens }),
+        ...(context === undefined ? {} : { context }),
+      };
+    })
+    .toSorted(compareSessions);
 };

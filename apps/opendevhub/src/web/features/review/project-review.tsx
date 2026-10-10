@@ -64,6 +64,7 @@ import { useCheckout } from "../checkouts/checkout-page";
 import { fixPrompt, publishWarning, STATE_LABEL } from "../checks/checks";
 import { ChecksIcon, ChecksPanel, useChecks } from "../checks/checks-panel";
 import { JiraSourceCard } from "../jira/jira-source-card";
+import { variantOf } from "../tasks/tasks";
 import { PublishDialog, usePublishInfo } from "./publish-dialog";
 import {
   aheadHint,
@@ -188,8 +189,8 @@ const ReviewTarget = ({
   );
   const ticketSources = new Map<string, JiraTaskSource>();
   for (const session of sessions) {
-    const source = session.task?.jira;
-    if (source && !session.task?.discarded) {
+    const source = variantOf(view, session)?.task.jira;
+    if (source) {
       ticketSources.set(`${source.instanceUrl}/${source.key}`, source);
     }
   }

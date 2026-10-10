@@ -771,6 +771,16 @@ export const dismissStarting = async (projectId: string, task: string) => {
   );
 };
 
+/** Hides a task from the dashboard; its sessions and worktrees stay. */
+export const archiveTask = async (projectId: string, task: string) => {
+  await complete(
+    project.tasks[":task"].archive.$post({
+      param: { ...projectParam(projectId), task: encodeURIComponent(task) },
+    }),
+    "archive task"
+  );
+};
+
 export const sendForgejoReview = async (
   owner: string,
   repo: string,

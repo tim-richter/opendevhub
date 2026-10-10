@@ -3,9 +3,6 @@ import { describe, expect, it } from "vitest";
 import { InvalidRequestError } from "../../../src/server/git/worktrees";
 import type { RawAgent, RawModel } from "../../../src/server/opencode/client";
 import {
-  discardMetadata,
-  parseTaskMeta,
-  patchTaskMetadata,
   parseTaskRequest,
   toModelsInfo,
 } from "../../../src/server/tasks/request";
@@ -161,83 +158,6 @@ describe(parseTaskRequest, () => {
   });
 });
 
-describe("task metadata", () => {
-  it("round trips ticket snapshots from persisted metadata and retains them when discarding", () => {
-    const metadata = {
-      opendevhub: { task: "tsk_1", variant: 1, of: 1, title: "Fix", jira },
-    };
-    expect(
-      parseTaskMeta(JSON.parse(JSON.stringify(metadata)))?.jira
-    ).toStrictEqual(jira);
-    expect(parseTaskMeta(discardMetadata(metadata))?.jira).toStrictEqual(jira);
-    expect(
-      parseTaskMeta({
-        opendevhub: {
-          ...metadata.opendevhub,
-          jira: { ...jira, instanceUrl: "javascript:alert(1)" },
-        },
-      })?.jira
-    ).toBeUndefined();
-    expect(
-      parseTaskMeta({ opendevhub: { ...metadata.opendevhub, jira: null } })
-        ?.task
-    ).toBe("tsk_1");
-  });
-
-  it("reads opendevhub's task metadata and ignores anything else", () => {
-    const meta = { task: "tsk_1", variant: 2, of: 3, title: "Fix" };
-    expect(parseTaskMeta({ opendevhub: meta, other: 1 })).toStrictEqual(meta);
-    expect(
-      parseTaskMeta({ opendevhub: { ...meta, discarded: true } })
-    ).toStrictEqual({ ...meta, discarded: true });
-    expect(
-      parseTaskMeta({ opendevhub: { ...meta, branch: "fix-a" } })
-    ).toStrictEqual({ ...meta, branch: "fix-a" });
-    expect(
-      parseTaskMeta({ opendevhub: { ...meta, spec: "yes" } })
-    ).toStrictEqual(meta);
-    expect(parseTaskMeta({ opendevhub: { ...meta, branch: 5 } })).toStrictEqual(
-      meta
-    );
-    expect(parseTaskMeta({ opendevhub: { ...meta, title: 5 } })).toStrictEqual({
-      ...meta,
-      title: "",
-    });
-    expect(parseTaskMeta(undefined)).toBeUndefined();
-    expect(
-      parseTaskMeta({ opendevhub: { task: "nope", variant: 1, of: 1 } })
-    ).toBeUndefined();
-    expect(
-      parseTaskMeta({ opendevhub: { task: "tsk_1", variant: 4, of: 3 } })
-    ).toBeUndefined();
-    expect(
-      parseTaskMeta({ opendevhub: { task: "tsk_1", variant: 0, of: 3 } })
-    ).toBeUndefined();
-    expect(parseTaskMeta("x")).toBeUndefined();
-  });
-
-  it("marks a variant discarded without dropping any other metadata", () => {
-    const meta = {
-      other: 1,
-      opendevhub: { task: "tsk_1", variant: 2, of: 2, title: "t" },
-    };
-    expect(discardMetadata(meta)).toStrictEqual({
-      other: 1,
-      opendevhub: {
-        task: "tsk_1",
-        variant: 2,
-        of: 2,
-        title: "t",
-        discarded: true,
-      },
-    });
-    expect(meta.opendevhub).not.toHaveProperty("discarded");
-    expect(discardMetadata(undefined)).toStrictEqual({
-      opendevhub: { discarded: true },
-    });
-  });
-});
-
 describe(toModelsInfo, () => {
   it("passes on only names and ids, never provider settings", () => {
     const models = [
@@ -286,83 +206,6 @@ describe(toModelsInfo, () => {
     expect(toModelsInfo([], undefined, [])).toStrictEqual({
       models: [],
       agents: [],
-    });
-  });
-});
-
-describe("spec-first task metadata", () => {
-  const meta = { of: 1, task: "tsk_1", title: "t", variant: 1 };
-
-  it("reads the phase and change, and the older spec: true as proposing", () => {
-    expect(
-      parseTaskMeta({ opendevhub: { ...meta, spec: true } })?.spec
-    ).toStrictEqual({ phase: "propose" });
-    expect(
-      parseTaskMeta({
-        opendevhub: {
-          ...meta,
-          spec: { change: "add-login", phase: "implement" },
-        },
-      })?.spec
-    ).toStrictEqual({ change: "add-login", phase: "implement" });
-    expect(
-      parseTaskMeta({ opendevhub: { ...meta, spec: { phase: "done" } } })
-    ).not.toHaveProperty("spec");
-    expect(
-      parseTaskMeta({
-        opendevhub: { ...meta, spec: { change: 3, phase: "archived" } },
-      })?.spec
-    ).toStrictEqual({ phase: "archived" });
-    expect(
-      parseTaskMeta({
-        opendevhub: {
-          ...meta,
-          spec: {
-            archived: "2026-10-10-add-login",
-            change: "add-login",
-            phase: "archived",
-          },
-        },
-      })?.spec
-    ).toStrictEqual({
-      archived: "2026-10-10-add-login",
-      change: "add-login",
-      phase: "archived",
-    });
-  });
-
-  it("reads the links between a proposing task and the task implementing it", () => {
-    const spec = (links: Record<string, unknown>) =>
-      parseTaskMeta({
-        opendevhub: {
-          ...meta,
-          spec: { change: "add-login", phase: "implement", ...links },
-        },
-      })?.spec;
-    expect(spec({ implementedIn: "tsk_2" })).toStrictEqual({
-      change: "add-login",
-      implementedIn: "tsk_2",
-      phase: "implement",
-    });
-    expect(spec({ proposedIn: "tsk_1" })).toStrictEqual({
-      change: "add-login",
-      phase: "implement",
-      proposedIn: "tsk_1",
-    });
-    expect(spec({ implementedIn: "ses_2", proposedIn: 1 })).toStrictEqual({
-      change: "add-login",
-      phase: "implement",
-    });
-  });
-
-  it("patches the task's metadata, keeping every other key", () => {
-    const patched = patchTaskMetadata(
-      { opendevhub: { ...meta, spec: { phase: "propose" } }, other: 1 },
-      { spec: { change: "add-login", phase: "propose" } }
-    );
-    expect(patched).toStrictEqual({
-      opendevhub: { ...meta, spec: { change: "add-login", phase: "propose" } },
-      other: 1,
     });
   });
 });

@@ -27,6 +27,7 @@ import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { scanRoots } from "../../src/server/projects/discovery";
 import { Onboarding } from "../../src/server/projects/onboarding";
 import { StateStore } from "../../src/server/projects/state";
+import { memoryStores } from "../helpers/stores";
 
 describe.skipIf(!process.env.OPENDEVHUB_E2E)(
   "e2e: add a repo without a devcontainer",
@@ -39,7 +40,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       fs.writeFileSync(path.join(repo, "package.json"), "{}\n");
 
       const roots = () => [root];
+      const dbs = memoryStores();
       const store = new StateStore({
+        tasks: dbs.tasks,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -49,6 +52,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         new OpencodeClient(ep);
       const hub = createHub({
         store,
+        projects: dbs.projects,
+        tasks: dbs.tasks,
         containers,
         runtime: new OpencodeRuntime({ containers, clientFor }),
         forwarder: new PortForwarder(),

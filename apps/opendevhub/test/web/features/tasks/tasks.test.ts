@@ -4,7 +4,7 @@ import type {
   ProjectView,
   ReviewData,
   SessionSummary,
-  TaskMeta,
+  TaskView,
 } from "../../../../src/shared/types";
 import {
   diffStats,
@@ -20,6 +20,8 @@ import {
   projectIdFromPath,
   specUnavailable,
   removals,
+  endedVariants,
+  startingVariants,
   taskChip,
   taskDestination,
   taskFailures,
@@ -27,11 +29,25 @@ import {
   variantName,
 } from "../../../../src/web/features/tasks/tasks";
 
-const meta = (variant: number, of = 3): TaskMeta => ({
-  task: "tsk_1",
-  variant,
-  of,
+/** A session's reference to variant `n` of a task. */
+const ref = (n: number, id = "tsk_1") => ({
+  discarded: false,
+  id,
+  kind: "task" as const,
+  n,
+});
+const task = (
+  id: string,
+  variants: Partial<TaskView["variants"][number]>[],
+  over: Partial<TaskView> = {}
+): TaskView => ({
+  createdAt: 1,
+  id,
+  kind: "task",
+  state: "running",
   title: "Fix",
+  variants: variants.map((v, i) => ({ n: i + 1, step: "session", ...v })),
+  ...over,
 });
 const session = (
   id: string,
@@ -48,8 +64,9 @@ const session = (
 });
 const wt = (b: string) => `/workspaces/demo.worktrees/${b}`;
 
-function view(sessions: SessionSummary[]): ProjectView {
+function view(sessions: SessionSummary[], tasks: TaskView[] = []): ProjectView {
   return {
+    tasks,
     project: {
       id: "p 1",
       name: "demo",
@@ -76,9 +93,9 @@ function view(sessions: SessionSummary[]): ProjectView {
 describe("task sessions", () => {
   it("lists a task's sessions by variant and names them", () => {
     const v = view([
-      session("s3", wt("c"), { task: meta(3) }),
+      session("s3", wt("c"), { task: ref(3) }),
       session("s1", wt("a"), {
-        task: meta(1),
+        task: ref(1),
         model: { id: "anthropic/claude-opus-5-5", providerID: "p" },
       }),
       session("x", "/workspaces/demo"),
@@ -91,20 +108,33 @@ describe("task sessions", () => {
     expect(variantName(taskSessions(v, "tsk_1")[1])).toBe("#3");
   });
 
-  it("shows a chip that links to the task page only for several variants", () => {
-    const v = view([]);
-    expect(taskChip(v, session("s", "/w"))).toBeUndefined();
-    expect(taskChip(v, session("s", "/w", { task: meta(1, 1) }))).toStrictEqual(
-      {
-        label: "task",
-        title: "Task: Fix",
-      }
+  it("shows a chip that links to the task page only for several variants, and none for a manual task", () => {
+    const v = view(
+      [],
+      [
+        task("tsk_1", [{}, {}, {}]),
+        task("tsk_one", [{}]),
+        task("tsk_man", [{}], { kind: "manual" }),
+      ]
     );
+    expect(taskChip(v, session("s", "/w"))).toBeUndefined();
+    expect(
+      taskChip(v, session("s", "/w", { task: ref(1, "tsk_one") }))
+    ).toStrictEqual({
+      label: "task",
+      title: "Task: Fix",
+    });
+    expect(
+      taskChip(
+        v,
+        session("s", "/w", { task: { ...ref(1, "tsk_man"), kind: "manual" } })
+      )
+    ).toBeUndefined();
     expect(
       taskChip(
         v,
         session("s", "/w", {
-          task: meta(2),
+          task: ref(2),
           model: { id: "m-x", providerID: "p", variant: "high" },
         })
       )
@@ -114,6 +144,22 @@ describe("task sessions", () => {
       to: "/p/p%201/t/tsk_1",
       model: "m-x-high",
     });
+  });
+});
+
+describe("a task's variants", () => {
+  it("lists those still starting or failed, and those whose session ended", () => {
+    const t = task("tsk_1", [
+      { step: "image" },
+      { error: "boom", step: "failed" },
+      { discarded: true, error: "x", step: "failed" },
+      { sessionId: "s4", step: "session" },
+      { sessionId: "s5", sessionRemoved: true, step: "session" },
+      { discarded: true, sessionId: "s6", sessionRemoved: true },
+      { step: "session" },
+    ]);
+    expect(startingVariants(t).map((v) => v.n)).toStrictEqual([1, 2, 7]);
+    expect(endedVariants(t).map((v) => v.n)).toStrictEqual([5]);
   });
 });
 
@@ -209,15 +255,23 @@ describe("after starting a task", () => {
 
 describe("picking a variant", () => {
   it("removes other variants' worktrees that no remaining session uses", () => {
-    const v = view([
-      session("s1", wt("a"), { task: { ...meta(1), branch: "fix-a" } }),
-      session("s2", wt("b"), { task: { ...meta(2), branch: "fix-b" } }),
-      session("s3", wt("c"), { task: { ...meta(3), branch: "fix-c" } }),
-      session("other", wt("c")),
-      session("ws", "/workspaces/demo", {
-        task: { ...meta(1), task: "tsk_2" },
-      }),
-    ]);
+    const v = view(
+      [
+        session("s1", wt("a"), { task: ref(1) }),
+        session("s2", wt("b"), { task: ref(2) }),
+        session("s3", wt("c"), { task: ref(3) }),
+        session("other", wt("c")),
+        session("ws", "/workspaces/demo", { task: ref(1, "tsk_2") }),
+      ],
+      [
+        task("tsk_1", [
+          { branch: "fix-a", sessionId: "s1" },
+          { branch: "fix-b", sessionId: "s2" },
+          { branch: "fix-c", sessionId: "s3" },
+        ]),
+        task("tsk_2", [{ sessionId: "ws" }]),
+      ]
+    );
     expect(removals(v, "tsk_1", "s2", { [wt("a")]: true })).toStrictEqual([
       { name: "fix-a", dirty: true },
     ]);
@@ -225,11 +279,20 @@ describe("picking a variant", () => {
   });
 
   it("marks worktrees whose branch would be kept", () => {
-    const v = view([
-      session("s1", wt("a"), { task: { ...meta(1), branch: "fix-a" } }),
-      session("s2", wt("b"), { task: { ...meta(2), branch: "fix-b" } }),
-      session("s3", wt("c"), { task: meta(3) }),
-    ]);
+    const v = view(
+      [
+        session("s1", wt("a"), { task: ref(1) }),
+        session("s2", wt("b"), { task: ref(2) }),
+        session("s3", wt("c"), { task: ref(3) }),
+      ],
+      [
+        task("tsk_1", [
+          { branch: "fix-a", sessionId: "s1" },
+          { branch: "fix-b", sessionId: "s2" },
+          { sessionId: "s3" },
+        ]),
+      ]
+    );
     v.runtime.worktrees = [
       { path: wt("a"), branch: "fix-a" },
       { path: wt("b"), branch: "other" },

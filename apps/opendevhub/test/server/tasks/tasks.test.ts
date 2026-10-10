@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SYSTEM } from "../../../src/server/db/events";
+import { RESTART_ERROR } from "../../../src/server/db/tasks";
 import { CommandError } from "../../../src/server/environments/containers";
 import {
   BusyError,
@@ -13,7 +15,6 @@ import {
   OpencodeHttpError,
 } from "../../../src/server/opencode/client";
 import { StateStore } from "../../../src/server/projects/state";
-import { parseTaskMeta } from "../../../src/server/tasks/request";
 import type {
   EnvWorktree,
   Project,
@@ -36,7 +37,7 @@ describe("tasks", () => {
   }
 
   it("associates each created worktree and session with its Jira ticket", async () => {
-    const { hub, client, store, worktrees } = await started();
+    const { hub, client, tasks, worktrees } = await started();
     const jira = {
       key: "APP-12",
       instanceUrl: "https://jira.example.com",
@@ -53,14 +54,15 @@ describe("tasks", () => {
       result.variants.every((v) => v.directory && v.branch && v.sessionId)
     ).toBeTruthy();
     for (const [directory, options] of client.createSession.mock.calls) {
-      expect(options?.metadata).toMatchObject({
-        opendevhub: { task: result.task, jira },
-      });
+      expect(options?.metadata).toBeUndefined();
       expect(result.variants.some((v) => v.directory === directory)).toBe(true);
     }
-    expect(store.startingTask(project.id, result.task)?.jira).toStrictEqual(
-      jira
-    );
+    const record = tasks.get(result.task);
+    expect(record?.jira).toStrictEqual(jira);
+    expect(record?.prompt).toBe(prompt);
+    expect(
+      result.variants.map((v) => tasks.sessionRef(v.sessionId ?? "")?.id)
+    ).toStrictEqual([result.task, result.task]);
     expect(worktrees.add.mock.calls.map(([, a]) => a.origin)).toStrictEqual([
       "https://jira.example.com/browse/APP-12",
       "https://jira.example.com/browse/APP-12",
@@ -70,8 +72,8 @@ describe("tasks", () => {
     ).toBeTruthy();
   });
 
-  it("starts one variant in a new worktree named after the prompt, tagged with the task", async () => {
-    const { hub, client, worktrees, git, monitors } = await started();
+  it("starts one variant in a new worktree named after the prompt, recorded on the task", async () => {
+    const { hub, client, worktrees, git, monitors, tasks } = await started();
     git.localBranches.mockResolvedValueOnce(["main", "fix-the-login-bug"]);
     const res = await hub.tasks.createTask(project.id, {
       prompt: "Fix the login bug\nIt fails on Safari",
@@ -88,15 +90,21 @@ describe("tasks", () => {
     });
     expect(client.createSession).toHaveBeenCalledWith(dir, {
       title: "Fix the login bug",
-      metadata: {
-        opendevhub: {
-          task: res.task,
-          variant: 1,
-          of: 1,
-          title: "Fix the login bug",
+    });
+    expect(tasks.get(res.task)).toMatchObject({
+      kind: "task",
+      state: "running",
+      title: "Fix the login bug",
+      variants: [
+        {
           branch: "fix-the-login-bug-2",
+          directory: dir,
+          envId: project.id,
+          n: 1,
+          sessionId: "ses_1",
+          step: "session",
         },
-      },
+      ],
     });
     expect(client.prompt).toHaveBeenCalledWith(
       "ses_1",
@@ -134,7 +142,7 @@ describe("tasks", () => {
   });
 
   it("runs several variants, one worktree each, and keeps going when one fails", async () => {
-    const { hub, client, worktrees } = await started();
+    const { hub, client, worktrees, tasks } = await started();
     client.createSession
       .mockImplementationOnce(async (directory: string) => ({
         id: "ses_a",
@@ -180,18 +188,19 @@ describe("tasks", () => {
     expect(
       client.createSession.mock.calls.map((c) => c[1]?.title)
     ).toStrictEqual(["Add caching · a", "Add caching · b", "Add caching · c"]);
-    expect(client.createSession.mock.calls[2][1]).toMatchObject({
+    expect(client.createSession.mock.calls[2][1]).toStrictEqual({
       model: { id: "c", providerID: "p" },
-      metadata: {
-        opendevhub: {
-          task: res.task,
-          variant: 3,
-          of: 3,
-          title: "Add caching",
-          branch: "cache-c",
-        },
-      },
+      title: "Add caching · c",
     });
+    expect(
+      tasks
+        .get(res.task)
+        ?.variants.map((v) => [v.n, v.branch, v.step, v.sessionId])
+    ).toStrictEqual([
+      [1, "cache-a", "session", "ses_a"],
+      [2, "cache-b", "failed", undefined],
+      [3, "cache-c", "session", res.variants[2].sessionId],
+    ]);
     expect(client.prompt).toHaveBeenCalledTimes(2);
     expect(hub.environments.logLines(project.id).join("\n")).toMatch(
       /variant 2 \(cache-b\) failed/u
@@ -298,37 +307,20 @@ describe("tasks", () => {
       expect(res.variants[1].error).toMatch(
         /ModelNotFoundError: unknown model b/u
       );
-      // The fake prepends new sessions: c, then a.
+      // The fake prepends new sessions: c, then a. They carry no task metadata: the variant rows link them.
       expect(fake.state.sessions.map((x) => x.metadata)).toStrictEqual([
-        {
-          opendevhub: {
-            task: res.task,
-            variant: 3,
-            of: 3,
-            title: "Go",
-            jira,
-            branch: "go-c",
-          },
-        },
-        {
-          opendevhub: {
-            task: res.task,
-            variant: 1,
-            of: 3,
-            title: "Go",
-            jira,
-            branch: "go-a",
-          },
-        },
+        undefined,
+        undefined,
       ]);
-      // A new dashboard client recovers the originating ticket from persisted session metadata.
-      const restored = await new OpencodeClient({
-        baseUrl: fake.baseUrl,
-        password: "pw",
-      }).sessions();
       expect(
-        restored.map((session) => parseTaskMeta(session.metadata)?.jira)
-      ).toStrictEqual([jira, jira]);
+        fake.state.sessions.map((x) => {
+          const found = s.tasks.bySession(x.id);
+          return [found?.task.jira, found?.variant.n, found?.variant.branch];
+        })
+      ).toStrictEqual([
+        [jira, 3, "go-c"],
+        [jira, 1, "go-a"],
+      ]);
       expect(fake.state.sessions.map((x) => x.model?.id)).toStrictEqual([
         "c",
         "a",
@@ -396,7 +388,7 @@ describe("tasks", () => {
   });
 
   it("starts a spec-first task by running opsx-propose with the prompt in each variant's session", async () => {
-    const { hub, client } = await started();
+    const { hub, client, tasks } = await started();
     client.commands.mockResolvedValue([{ name: "opsx-propose" }]);
     const result = await hub.tasks.createTask(project.id, {
       prompt: "Add dark mode",
@@ -416,20 +408,30 @@ describe("tasks", () => {
       ])
     );
     expect(client.prompt).not.toHaveBeenCalled();
-    expect(client.createSession.mock.calls[0][1]?.metadata).toMatchObject({
-      opendevhub: { spec: { phase: "propose" } },
-    });
+    const record = tasks.get(result.task);
+    expect(record?.spec).toStrictEqual({ first: true });
+    expect(record?.variants.map((v) => v.spec)).toStrictEqual([
+      { phase: "propose" },
+      { phase: "propose" },
+    ]);
   });
 
   it("starts a task implementing an approved change by running opsx-apply in each variant's worktree", async () => {
-    const { hub, client, worktrees } = await started();
+    const { hub, client, worktrees, tasks } = await started();
     client.commands.mockResolvedValue([{ name: "opsx-apply" }]);
+    const proposing = await hub.tasks.createTask(project.id, {
+      prompt: "Add dark mode",
+      spec: true,
+      variants: [{}],
+      where: "workspace",
+    });
+    client.command.mockClear();
     const spec = {
       change: "add-dark-mode",
       phase: "implement",
-      proposedIn: "tsk_1",
+      proposedIn: proposing.task,
     } as const;
-    await hub.tasks.startTask(
+    const { task } = await hub.tasks.startTask(
       project.id,
       {
         base: "dark-mode",
@@ -449,9 +451,15 @@ describe("tasks", () => {
       ["opsx-apply", "add-dark-mode"],
     ]);
     expect(client.prompt).not.toHaveBeenCalled();
-    expect(client.createSession.mock.calls[0][1]?.metadata).toMatchObject({
-      opendevhub: { spec },
+    expect(tasks.get(task)?.spec).toStrictEqual({
+      first: false,
+      proposedIn: proposing.task,
     });
+    expect(tasks.get(task)?.variants.map((v) => v.spec)).toStrictEqual([
+      { change: "add-dark-mode", phase: "implement" },
+      { change: "add-dark-mode", phase: "implement" },
+    ]);
+    expect(tasks.get(proposing.task)?.spec?.implementedIn).toBe(task);
   });
 
   it("fails a spec-first variant whose opencode has no opsx-propose, before creating its session", async () => {
@@ -576,30 +584,66 @@ describe("tasks", () => {
     expect(client.models).toHaveBeenCalledTimes(3);
   });
 
+  type Variant = SessionSummary & { n: number; branch?: string };
   const variant = (
     id: string,
     n: number,
     directory: string,
     branch?: string,
     status: SessionSummary["status"] = "idle"
-  ): SessionSummary => ({
+  ): Variant => ({
     id,
+    n,
     projectId: project.id,
     title: `Fix · #${n}`,
     directory,
     updatedAt: n,
     status,
-    task: {
-      task: "tsk_1",
-      variant: n,
-      of: 3,
-      title: "Fix",
-      ...(branch ? { branch } : {}),
-    },
+    ...(branch ? { branch } : {}),
   });
 
-  it("keeps one variant: discards the others without losing their metadata, then removes their worktrees and branches", async () => {
-    const { hub, client, worktrees, git, store } = await started();
+  /** Records task tsk_1 with a variant per listed one, attached to its session, and lists the sessions. */
+  const seed = (
+    s: Pick<Awaited<ReturnType<typeof started>>, "tasks" | "store">,
+    sessions: (Variant | SessionSummary)[]
+  ) => {
+    const variants = sessions.filter((v): v is Variant => "n" in v);
+    s.tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: project.id,
+      prompt: "Fix",
+      title: "Fix",
+      variants: Array.from(
+        { length: Math.max(...variants.map((v) => v.n)) },
+        () => ({})
+      ),
+    });
+    for (const v of variants) {
+      if (v.branch) {
+        s.tasks.updateVariant("tsk_1", v.n, { branch: v.branch }, SYSTEM);
+      }
+      s.tasks.attachSession(
+        "tsk_1",
+        v.n,
+        { directory: v.directory, envId: project.id, sessionId: v.id },
+        SYSTEM
+      );
+    }
+    s.store.setSessions(
+      project.id,
+      sessions.map((v) => {
+        if (!("n" in v)) {
+          return v;
+        }
+        const { n: _n, branch: _branch, ...summary } = v;
+        return summary;
+      })
+    );
+  };
+
+  it("keeps one variant: records the discards, then removes their worktrees and branches", async () => {
+    const { hub, client, worktrees, git, store, tasks } = await started();
     const dirs = [
       "/workspaces/demo.worktrees/fix-1",
       "/workspaces/demo.worktrees/fix-2",
@@ -608,7 +652,7 @@ describe("tasks", () => {
     store.updateRuntime(project.id, {
       worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
     });
-    store.setSessions(project.id, [
+    seed({ store, tasks }, [
       variant("s1", 1, dirs[0], "fix-1"),
       variant("s2", 2, dirs[1], "fix-2"),
       variant("s3", 3, dirs[2], "fix-3"),
@@ -621,15 +665,6 @@ describe("tasks", () => {
         status: "idle",
       },
     ]);
-    client.session.mockImplementation(async (sid: string) => ({
-      id: sid,
-      time: { created: 1, updated: 1 },
-      location: { directory: "/w" },
-      metadata: {
-        keep: sid,
-        opendevhub: { task: "tsk_1", variant: 1, of: 3, title: "Fix" },
-      },
-    }));
     worktrees.list.mockResolvedValueOnce([
       { path: dirs[1], branch: "fix-2" },
       { path: dirs[2], branch: "fix-3" },
@@ -642,22 +677,19 @@ describe("tasks", () => {
       removed: [dirs[0]],
       errors: [],
     });
-    expect(client.updateSession).toHaveBeenCalledWith(
-      "s1",
-      {
-        metadata: {
-          keep: "s1",
-          opendevhub: {
-            task: "tsk_1",
-            variant: 1,
-            of: 3,
-            title: "Fix",
-            discarded: true,
-          },
-        },
-      },
-      dirs[0]
-    );
+    expect(client.updateSession).not.toHaveBeenCalled();
+    expect(
+      tasks.get("tsk_1")?.variants.map((v) => [v.n, v.picked, v.discarded])
+    ).toStrictEqual([
+      [1, undefined, true],
+      [2, true, undefined],
+      [3, undefined, true],
+    ]);
+    // The discarded variants' sessions leave the list.
+    expect(store.sessionsOf(project.id).map((x) => x.id)).toStrictEqual([
+      "s2",
+      "other",
+    ]);
     expect(worktrees.remove).toHaveBeenCalledOnce(); // fix-3 still hosts another session
     expect(worktrees.remove).toHaveBeenCalledWith(
       project,
@@ -677,16 +709,16 @@ describe("tasks", () => {
   });
 
   it("only discards when worktrees should stay, and reports what failed", async () => {
-    const { hub, client, worktrees, store } = await started();
-    store.setSessions(project.id, [
-      variant("s1", 1, "/workspaces/demo"),
+    const { hub, client, worktrees, store, tasks } = await started();
+    seed({ store, tasks }, [
+      variant("s1", 1, "/workspaces/demo", undefined, "running"),
       variant("s2", 2, "/workspaces/demo"),
     ]);
-    client.updateSession.mockRejectedValueOnce(new Error("opencode down"));
+    client.interrupt.mockRejectedValueOnce(new Error("opencode down"));
     await expect(
       hub.tasks.pickVariant(project.id, "tsk_1", "s2", false)
     ).resolves.toStrictEqual({
-      discarded: [],
+      discarded: ["s1"],
       removed: [],
       errors: ["Fix · #1: opencode down"],
     });
@@ -696,8 +728,8 @@ describe("tasks", () => {
     ).rejects.toThrow(NotFoundError);
   });
 
-  it("removes nothing for variants in the main checkout, in unknown folders, or whose discard failed", async () => {
-    const { hub, client, worktrees, git, store } = await started();
+  it("removes nothing for variants in the main checkout or in unknown folders", async () => {
+    const { hub, client, worktrees, git, store, tasks } = await started();
     const known = [
       "/workspaces/demo.worktrees/s3",
       "/workspaces/demo.worktrees/s4",
@@ -708,35 +740,23 @@ describe("tasks", () => {
         ...known.map((path) => ({ path, branch: path.split("/").at(-1) })),
       ],
     });
-    store.setSessions(project.id, [
+    seed({ store, tasks }, [
       variant("s1", 1, "/workspaces/demo"),
       variant("s2", 2, "/workspaces/elsewhere"),
-      variant("s3", 3, known[0]),
-      variant("s4", 4, known[1]),
+      variant("s4", 3, known[1]),
     ]);
-    client.session.mockResolvedValue({
-      id: "x",
-      time: { created: 1, updated: 1 },
-      location: { directory: "/w" },
-      metadata: {},
-    });
-    client.updateSession.mockImplementation(async (sid: string) => {
-      if (sid === "s3") {
-        throw new Error("boom");
-      }
-    });
     const res = await hub.tasks.pickVariant(project.id, "tsk_1", "s4", true);
     expect(res).toStrictEqual({
       discarded: ["s1", "s2"],
       removed: [],
-      errors: ["Fix · #3: boom"],
+      errors: [],
     });
     expect(worktrees.remove).not.toHaveBeenCalled();
     expect(git.deleteBranch).not.toHaveBeenCalled();
   });
 
   it("keeps going when one worktree can't be removed", async () => {
-    const { hub, worktrees, store } = await started();
+    const { hub, worktrees, store, tasks } = await started();
     const dirs = [
       "/workspaces/demo.worktrees/a",
       "/workspaces/demo.worktrees/b",
@@ -748,8 +768,8 @@ describe("tasks", () => {
         branch: path.split("/").at(-1),
       })),
     });
-    store.setSessions(
-      project.id,
+    seed(
+      { store, tasks },
       dirs.map((d, i) => variant(`s${i + 1}`, i + 1, d, d.split("/").at(-1)))
     );
     worktrees.remove.mockRejectedValueOnce(
@@ -766,24 +786,17 @@ describe("tasks", () => {
       "/workspaces/demo.worktrees/fix-2",
       "/workspaces/demo.worktrees/fix-3",
     ];
-    const rawOf = (metadata: Record<string, unknown> = {}) => ({
-      id: "x",
-      time: { created: 1, updated: 1 },
-      location: { directory: "/w" },
-      metadata,
-    });
 
     it("interrupts discarded variants that are not idle, before removing any worktree", async () => {
-      const { hub, client, worktrees, store } = await started();
+      const { hub, client, worktrees, store, tasks } = await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      store.setSessions(project.id, [
+      seed({ store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1", "running"),
         variant("s2", 2, dirs[1], "fix-2"),
         variant("s3", 3, dirs[2], "fix-3", "idle"),
       ]);
-      client.session.mockResolvedValue(rawOf());
       const order: string[] = [];
       client.interrupt.mockImplementation(
         async (sid: string) => void order.push(`interrupt ${sid}`)
@@ -798,16 +811,15 @@ describe("tasks", () => {
     });
 
     it("reports a failed interrupt without undoing the discard or stopping the removal", async () => {
-      const { hub, client, worktrees, store } = await started();
+      const { hub, client, worktrees, store, tasks } = await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      store.setSessions(project.id, [
+      seed({ store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1", "running"),
         variant("s2", 2, dirs[1], "fix-2"),
         variant("s3", 3, dirs[2], "fix-3", "running"),
       ]);
-      client.session.mockResolvedValue(rawOf());
       client.interrupt.mockRejectedValueOnce(new Error("nope"));
       const res = await hub.tasks.pickVariant(project.id, "tsk_1", "s2", true);
       expect(res.discarded).toStrictEqual(["s1", "s3"]);
@@ -817,7 +829,7 @@ describe("tasks", () => {
     });
 
     it("deletes a branch only when it is the one the task created; otherwise keeps it and says so", async () => {
-      const { hub, client, worktrees, git, store } = await started();
+      const { hub, client, worktrees, git, store, tasks } = await started();
       store.updateRuntime(project.id, {
         worktrees: [
           { path: dirs[0], branch: "fix-1" },
@@ -825,12 +837,11 @@ describe("tasks", () => {
           { path: dirs[2], branch: "switched" },
         ],
       });
-      store.setSessions(project.id, [
+      seed({ store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1"),
         variant("s2", 2, dirs[1], "fix-2"),
         variant("s3", 3, dirs[2], "fix-3"),
       ]);
-      client.session.mockResolvedValue(rawOf());
       const res = await hub.tasks.pickVariant(project.id, "tsk_1", "s2", true);
       expect(res.removed).toStrictEqual([dirs[0], dirs[2]]);
       expect(worktrees.remove).toHaveBeenCalledTimes(2);
@@ -847,15 +858,14 @@ describe("tasks", () => {
     });
 
     it("keeps the branch of a legacy variant without recorded branch", async () => {
-      const { hub, client, git, store } = await started();
+      const { hub, client, git, store, tasks } = await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      store.setSessions(project.id, [
+      seed({ store, tasks }, [
         variant("s1", 1, dirs[0]),
         variant("s2", 2, dirs[1], "fix-2"),
       ]);
-      client.session.mockResolvedValue(rawOf());
       const res = await hub.tasks.pickVariant(project.id, "tsk_1", "s2", true);
       expect(res.removed).toStrictEqual([dirs[0]]);
       expect(git.deleteBranch).not.toHaveBeenCalled();
@@ -865,38 +875,28 @@ describe("tasks", () => {
     });
 
     it("refuses to pick a variant that a concurrent pick already discarded", async () => {
-      const { hub, client, store } = await started();
-      store.setSessions(project.id, [
+      const { hub, client, store, tasks } = await started();
+      seed({ store, tasks }, [
         variant("s1", 1, "/workspaces/demo"),
         variant("s2", 2, "/workspaces/demo"),
       ]);
-      client.session.mockResolvedValue(
-        rawOf({
-          opendevhub: {
-            task: "tsk_1",
-            variant: 2,
-            of: 3,
-            title: "Fix",
-            discarded: true,
-          },
-        })
-      );
+      // Another tab kept variant 1 since this one saw the task.
+      tasks.pick("tsk_1", 1);
       await expect(
         hub.tasks.pickVariant(project.id, "tsk_1", "s2", true)
       ).rejects.toThrow(InvalidRequestError);
-      expect(client.updateSession).not.toHaveBeenCalled();
+      expect(tasks.get("tsk_1")?.variants[0].picked).toBeTruthy();
     });
 
     it("counts a removed worktree as removed when only its branch delete fails", async () => {
-      const { hub, client, git, store } = await started();
+      const { hub, client, git, store, tasks } = await started();
       store.updateRuntime(project.id, {
         worktrees: dirs.map((path, i) => ({ path, branch: `fix-${i + 1}` })),
       });
-      store.setSessions(project.id, [
+      seed({ store, tasks }, [
         variant("s1", 1, dirs[0], "fix-1"),
         variant("s2", 2, dirs[1], "fix-2"),
       ]);
-      client.session.mockResolvedValue(rawOf());
       git.deleteBranch.mockRejectedValueOnce(new Error("not fully merged"));
       const res = await hub.tasks.pickVariant(project.id, "tsk_1", "s2", true);
       expect(res.removed).toStrictEqual([dirs[0]]);
@@ -920,7 +920,7 @@ describe("starting tasks in the background", () => {
     return s;
   }
   const startingOf = (s: { store: StateStore }, task: string) =>
-    s.store.snapshot().projects[0].starting?.find((t) => t.task === task);
+    s.store.snapshot().projects[0].tasks.find((t) => t.id === task);
 
   it("answers once the request is checked, and reports each variant's steps as it goes", async () => {
     const s = await started();
@@ -949,8 +949,8 @@ describe("starting tasks in the background", () => {
       })
     );
     expect(startingOf(s, result.task)).toMatchObject({
+      state: "starting",
       title: "Fix login",
-      of: 1,
     });
     release();
     await vi.waitFor(() =>
@@ -959,6 +959,26 @@ describe("starting tasks in the background", () => {
         sessionId: "ses_1",
       })
     );
+    expect(startingOf(s, result.task)?.state).toBe("running");
+  });
+
+  it("fails a variant a restart interrupted, and keeps listing it", async () => {
+    const s = await started();
+    s.worktrees.add.mockImplementationOnce(() => new Promise(() => {}));
+    const { task } = await s.hub.tasks.startTask(project.id, {
+      prompt: "Fix login",
+      environment: "shared",
+    });
+    await vi.waitFor(() =>
+      expect(startingOf(s, task)?.variants[0].step).toBe("worktree")
+    );
+    // What the next start does with the same database.
+    s.tasks.failInterrupted();
+    expect(startingOf(s, task)?.variants[0]).toMatchObject({
+      error: RESTART_ERROR,
+      step: "failed",
+    });
+    expect(startingOf(s, task)?.state).toBe("starting");
   });
 
   it("still refuses bad requests right away", async () => {
@@ -970,7 +990,7 @@ describe("starting tasks in the background", () => {
     await expect(
       s.hub.tasks.startTask(project.id, { prompt: "x" })
     ).rejects.toThrow(UnavailableError);
-    expect(s.store.snapshot().projects[0].starting).toBeUndefined();
+    expect(s.store.snapshot().projects[0].tasks).toStrictEqual([]);
   });
 
   it("records a variant's failure and its log, and starts the others", async () => {
@@ -1028,7 +1048,7 @@ describe("starting tasks in the background", () => {
       expect(startingOf(s, task)?.variants[0].step).toBe("image")
     );
     expect(
-      startingOf(s, task)?.variants[0].log.some((l) =>
+      startingOf(s, task)?.variants[0].log?.some((l) =>
         l.includes("image: building")
       )
     ).toBeTruthy();
@@ -1089,9 +1109,33 @@ describe("starting tasks in the background", () => {
       expect(startingOf(s, task)?.variants[0].step).toBe("failed")
     );
     s.hub.tasks.dismissStarting(project.id, task);
-    expect(startingOf(s, task)).toBeUndefined();
-    expect(() => s.hub.tasks.dismissStarting(project.id, task)).toThrow(
+    expect(startingOf(s, task)).toMatchObject({
+      state: "ended",
+      variants: [{ discarded: true, step: "failed" }],
+    });
+    expect(() =>
+      s.hub.tasks.dismissStarting(project.id, "tsk_unknown")
+    ).toThrow(NotFoundError);
+    expect(() => s.hub.tasks.dismissStarting("other", task)).toThrow(
       NotFoundError
     );
+  });
+
+  it("archives a task, hiding it but leaving its sessions alone", async () => {
+    const s = await started();
+    const { task } = await s.hub.tasks.createTask(project.id, {
+      prompt: "x",
+      environment: "shared",
+    });
+    s.hub.tasks.archiveTask(project.id, task);
+    expect(startingOf(s, task)).toBeUndefined();
+    expect(s.tasks.get(task)?.archivedAt).toBeDefined();
+    expect(s.client.deleteSession).not.toHaveBeenCalled();
+    expect(() => s.hub.tasks.archiveTask(project.id, "nope")).toThrow(
+      InvalidRequestError
+    );
+    expect(() =>
+      s.hub.tasks.archiveTask(project.id, "tsk_01JA0000000000000000000009")
+    ).toThrow(NotFoundError);
   });
 });

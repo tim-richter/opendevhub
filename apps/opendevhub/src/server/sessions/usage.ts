@@ -8,7 +8,6 @@ import type {
   UsageTotals,
 } from "../../shared/types";
 import type { RawSession } from "../opencode/client";
-import { parseTaskMeta } from "../tasks/request";
 import { rollUp } from "./status";
 
 /** A root session's spend so far, its subagents included. */
@@ -53,14 +52,17 @@ export const daysBefore = (day: string, n: number): string[] => {
   );
 };
 
+/** Finds the task a session belongs to. */
+export type TaskOf = (sessionId: string) => string | undefined;
+
 /** Each root session among `sessions`, with its subagents rolled in and its task, if any. */
 export const observe = (
   projectId: ProjectId,
-  sessions: RawSession[]
-): Observed[] => {
-  const byId = new Map(sessions.map((s) => [s.id, s]));
-  return [...rollUp(sessions)].map(([sessionId, t]) => {
-    const task = parseTaskMeta(byId.get(sessionId)?.metadata)?.task;
+  sessions: RawSession[],
+  taskOf: TaskOf = () => undefined
+): Observed[] =>
+  [...rollUp(sessions)].map(([sessionId, t]) => {
+    const task = taskOf(sessionId);
     return {
       sessionId,
       projectId,
@@ -70,7 +72,6 @@ export const observe = (
       updatedAt: t.updatedAt,
     };
   });
-};
 
 /**
  * What each session spent since it was last seen, booked to the day it was last updated. A session never seen
@@ -197,8 +198,12 @@ export class UsageStore {
    * Books what `sessions` (one poll of a project's opencode, subagents included) spent since they were last seen.
    * True when anything was booked. A failed write is logged and rolled back, so the next poll retries it.
    */
-  record(projectId: ProjectId, sessions: RawSession[]): boolean {
-    const observed = observe(projectId, sessions);
+  record(
+    projectId: ProjectId,
+    sessions: RawSession[],
+    taskOf?: TaskOf
+  ): boolean {
+    const observed = observe(projectId, sessions, taskOf);
     try {
       const seen = new Map<string, Seen>();
       for (const o of observed) {
@@ -337,10 +342,16 @@ export interface UsageTracker {
 
 const DAY_CHECK_MS = 60_000;
 
-/** Keeps the dashboard's usage totals current: after each booking, and every minute so "today" resets at midnight. */
+/**
+ * Keeps the dashboard's usage totals current: after each booking, and every minute so "today" resets at midnight.
+ * Spend is attributed to the task the store says each session belongs to.
+ */
 export const trackUsage = (
   usage: Pick<UsageStore, "record" | "totals">,
-  store: { setUsage: (totals: UsageTotals | undefined) => void },
+  store: {
+    setUsage: (totals: UsageTotals | undefined) => void;
+    taskOf?: TaskOf;
+  },
   now: () => number = Date.now,
   log: (message: string) => void = console.warn
 ): UsageTracker => {
@@ -356,7 +367,7 @@ export const trackUsage = (
   timer.unref?.();
   return {
     record: (projectId, sessions) => {
-      if (usage.record(projectId, sessions)) {
+      if (usage.record(projectId, sessions, store.taskOf)) {
         refresh();
       }
     },

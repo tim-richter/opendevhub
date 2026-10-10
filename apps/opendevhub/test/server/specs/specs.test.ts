@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SYSTEM } from "../../../src/server/db/events";
 import type { CheckTarget } from "../../../src/server/environments/checks";
 import { InvalidRequestError } from "../../../src/server/git/worktrees";
 import type { RunResult } from "../../../src/server/nodes/exec";
@@ -16,7 +17,12 @@ import {
   Specs,
 } from "../../../src/server/specs/specs";
 import type { SpecsDeps } from "../../../src/server/specs/specs";
-import type { Project, SessionSummary } from "../../../src/shared/types";
+import type {
+  Project,
+  SessionSummary,
+  VariantSpec,
+} from "../../../src/shared/types";
+import { memoryStores } from "../../helpers/stores";
 
 const MARK = "@@opendevhub-spec@@";
 const section = (name: string, body: unknown, code = 0) =>
@@ -82,27 +88,59 @@ const target = (over: Partial<CheckTarget> = {}): CheckTarget => ({
   ...over,
 });
 
+/** A spec-first variant's session; `make` records its task, tsk_1, with the variant in `spec`. */
+type SpecSession = SessionSummary & { spec?: VariantSpec };
+
 const taskSession = (
-  spec: {
-    phase: "propose" | "implement" | "archived";
-    change?: string;
-    archived?: string;
-  },
+  spec: VariantSpec,
   status: SessionSummary["status"] = "idle"
-): SessionSummary =>
+): SpecSession =>
   ({
     directory: "/workspaces/wt",
     id: "ses_1",
+    spec,
     status,
-    task: { of: 1, spec, task: "tsk_1", title: "Login", variant: 1 },
     title: "Login",
-  }) as SessionSummary;
+  }) as SpecSession;
 
 const make = (opts: {
   outputs: string[];
   target?: CheckTarget;
-  sessions?: SessionSummary[];
+  sessions?: SpecSession[];
 }) => {
+  const { projects, tasks } = memoryStores();
+  projects.upsertAll([
+    {
+      devcontainerPath: "/src/p/.devcontainer.json",
+      id: "p",
+      name: "p",
+      path: "/src/p",
+    },
+  ]);
+  for (const s of opts.sessions ?? []) {
+    if (!s.spec) {
+      continue;
+    }
+    tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: "p",
+      prompt: "Login",
+      spec: { phase: "propose" },
+      title: s.title,
+      variants: [{}],
+    });
+    tasks.setSpec("tsk_1", 1, s.spec);
+    tasks.attachSession(
+      "tsk_1",
+      1,
+      { directory: s.directory, envId: s.envId ?? "p", sessionId: s.id },
+      SYSTEM
+    );
+  }
+  const setSpec = vi.spyOn(tasks, "setSpec");
+  /** What the store records for the variant. */
+  const specOf = () => tasks.get("tsk_1")?.variants[0].spec;
   const exec = vi.fn(async (_target: unknown, _argv: string[]) =>
     ok(opts.outputs.shift() ?? "")
   );
@@ -112,12 +150,6 @@ const make = (opts: {
       { name: "opsx-update" },
       { name: "opsx-apply" },
     ]),
-    session: vi.fn(async () => ({
-      metadata: { opendevhub: { task: "tsk_1" }, x: 1 },
-    })),
-    updateSession: vi.fn(
-      async (_id: string, _body: unknown, _directory?: string) => undefined
-    ),
   };
   const reconcile = vi.fn();
   const commitPaths = vi.fn(
@@ -141,6 +173,7 @@ const make = (opts: {
     reconcile,
     sessions: () => opts.sessions ?? [],
     startTask,
+    tasks,
     target: () => opts.target ?? target(),
   };
   return {
@@ -148,6 +181,8 @@ const make = (opts: {
     commitPaths,
     exec,
     reconcile,
+    setSpec,
+    specOf,
     specs: new Specs(deps),
     startTask,
   };
@@ -238,7 +273,7 @@ describe(pickChange, () => {
 
 describe(Specs, () => {
   it("shows the one new change, with its documents and requirements, and records it on the task", async () => {
-    const { specs, exec, client, reconcile } = make({
+    const { specs, exec, specOf } = make({
       outputs: [
         section("base", "openspec/changes/archive\nopenspec/changes/old") +
           section("list", list("old", "add-login")),
@@ -282,24 +317,11 @@ describe(Specs, () => {
       "add-login",
       "",
     ]);
-    expect(client.updateSession).toHaveBeenCalledWith(
-      "ses_1",
-      {
-        metadata: {
-          opendevhub: {
-            spec: { change: "add-login", phase: "propose" },
-            task: "tsk_1",
-          },
-          x: 1,
-        },
-      },
-      "/workspaces/wt"
-    );
-    expect(reconcile).toHaveBeenCalledWith("p");
+    expect(specOf()).toStrictEqual({ change: "add-login", phase: "propose" });
   });
 
   it("reports on the recorded change in one exec, and doesn't record it again", async () => {
-    const { specs, exec, client } = make({
+    const { specs, exec, setSpec } = make({
       outputs: [
         section("base", "") +
           section("list", list("add-login")) +
@@ -311,7 +333,7 @@ describe(Specs, () => {
     const view = await specs.view("p", "/workspaces/wt");
     expect(view.change?.name).toBe("add-login");
     expect(exec).toHaveBeenCalledOnce();
-    expect(client.updateSession).not.toHaveBeenCalled();
+    expect(setSpec).not.toHaveBeenCalled();
   });
 
   it("lists every change in the main checkout, showing the newest", async () => {
@@ -474,7 +496,7 @@ const report = (status: unknown, validate: unknown) =>
 
 describe("Specs.approve", () => {
   it("records the implement phase, then runs /opsx-apply with the change", async () => {
-    const { client, exec, reconcile, specs } = make({
+    const { client, exec, reconcile, specs, setSpec, specOf } = make({
       outputs: [report(READY, VALID)],
       sessions: [taskSession({ phase: "propose" })],
     });
@@ -486,26 +508,14 @@ describe("Specs.approve", () => {
       "add-login",
       "",
     ]);
-    expect(client.updateSession).toHaveBeenCalledWith(
-      "ses_1",
-      {
-        metadata: {
-          opendevhub: {
-            spec: { change: "add-login", phase: "implement" },
-            task: "tsk_1",
-          },
-          x: 1,
-        },
-      },
-      "/workspaces/wt"
-    );
+    expect(specOf()).toStrictEqual({ change: "add-login", phase: "implement" });
     expect(client.command).toHaveBeenCalledWith(
       "ses_1",
       "opsx-apply",
       "add-login",
       "/workspaces/wt"
     );
-    expect(client.updateSession.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(setSpec.mock.invocationCallOrder[0]).toBeLessThan(
       client.command.mock.invocationCallOrder[0]
     );
     expect(reconcile).toHaveBeenCalledWith("p");
@@ -535,12 +545,12 @@ describe("Specs.approve", () => {
     await expect(
       invalid.specs.approve("p", "/workspaces/wt", "add-login")
     ).rejects.toThrow("auth: no scenarios");
-    expect(invalid.client.updateSession).not.toHaveBeenCalled();
+    expect(invalid.setSpec).not.toHaveBeenCalled();
     await invalid.specs.approve("p", "/workspaces/wt", "add-login", true);
     expect(invalid.client.command).toHaveBeenCalledOnce();
 
     for (const m of [unfinished, unknown]) {
-      expect(m.client.updateSession).not.toHaveBeenCalled();
+      expect(m.setSpec).not.toHaveBeenCalled();
       expect(m.client.command).not.toHaveBeenCalled();
     }
   });
@@ -570,13 +580,11 @@ describe("Specs.approve", () => {
     await expect(
       failing.specs.approve("p", "/workspaces/wt", "add-login")
     ).rejects.toThrow("opencode is down");
-    expect(
-      failing.client.updateSession.mock.calls.map(
-        (c) =>
-          (c[1] as { metadata: { opendevhub: { spec: { phase: string } } } })
-            .metadata.opendevhub.spec.phase
-      )
-    ).toStrictEqual(["implement", "propose"]);
+    expect(failing.setSpec.mock.calls.map((c) => c[2].phase)).toStrictEqual([
+      "implement",
+      "propose",
+    ]);
+    expect(failing.specOf()?.phase).toBe("propose");
   });
 });
 
@@ -587,7 +595,7 @@ describe("Specs.implement", () => {
   ];
 
   it("commits openspec/, starts a task from that branch running /opsx-apply per variant, and links the two", async () => {
-    const { client, commitPaths, reconcile, specs, startTask } = make({
+    const { client, commitPaths, reconcile, specs, startTask, specOf } = make({
       outputs: [report(READY, VALID)],
       sessions: [taskSession({ change: "add-login", phase: "propose" })],
     });
@@ -615,23 +623,8 @@ describe("Specs.implement", () => {
     expect(commitPaths.mock.invocationCallOrder[0]).toBeLessThan(
       startTask.mock.invocationCallOrder[0]
     );
-    expect(client.updateSession).toHaveBeenCalledWith(
-      "ses_1",
-      {
-        metadata: {
-          opendevhub: {
-            spec: {
-              change: "add-login",
-              implementedIn: "tsk_2",
-              phase: "implement",
-            },
-            task: "tsk_1",
-          },
-          x: 1,
-        },
-      },
-      "/workspaces/wt"
-    );
+    // The new task's row records the link to tsk_1 (see the Tasks tests); this variant moves on to implement.
+    expect(specOf()).toStrictEqual({ change: "add-login", phase: "implement" });
     // The new task's sessions run /opsx-apply; this one doesn't.
     expect(client.command).not.toHaveBeenCalled();
     expect(reconcile).toHaveBeenCalledWith("p");
@@ -641,7 +634,7 @@ describe("Specs.implement", () => {
     const own = { ...taskSession({ phase: "propose" }), envId: "p~login" };
     const { specs, startTask } = make({
       outputs: [report(READY, VALID)],
-      sessions: [own as SessionSummary],
+      sessions: [own],
     });
     await specs.implement("p", "/workspaces/wt", "add-login", variants);
     expect(startTask.mock.calls[0][1]).toMatchObject({
@@ -678,12 +671,12 @@ describe("Specs.implement", () => {
     for (const m of [main, invalid, approved]) {
       expect(m.commitPaths).not.toHaveBeenCalled();
       expect(m.startTask).not.toHaveBeenCalled();
-      expect(m.client.updateSession).not.toHaveBeenCalled();
+      expect(m.setSpec).not.toHaveBeenCalled();
     }
   });
 
   it("keeps the proposing task's phase when the new task can't start", async () => {
-    const { client, specs, startTask } = make({
+    const { setSpec, specs, startTask } = make({
       outputs: [report(READY, VALID)],
       sessions: [taskSession({ phase: "propose" })],
     });
@@ -691,7 +684,7 @@ describe("Specs.implement", () => {
     await expect(
       specs.implement("p", "/workspaces/wt", "add-login", variants)
     ).rejects.toThrow("bad variant");
-    expect(client.updateSession).not.toHaveBeenCalled();
+    expect(setSpec).not.toHaveBeenCalled();
   });
 });
 
@@ -740,7 +733,7 @@ describe(parseArchive, () => {
 
 describe("Specs.archive", () => {
   it("archives the finished change with the CLI and records the archived phase", async () => {
-    const { client, exec, reconcile, specs } = make({
+    const { client, exec, specs, specOf } = make({
       outputs: [
         section("list", done("add-login")),
         section("archive", ARCHIVED),
@@ -752,25 +745,12 @@ describe("Specs.archive", () => {
       ["/workspaces/wt", "list", "", "", ""],
       ["/workspaces/wt", "", "", "add-login", "archive"],
     ]);
-    expect(client.updateSession).toHaveBeenCalledWith(
-      "ses_1",
-      {
-        metadata: {
-          opendevhub: {
-            spec: {
-              archived: "2026-10-10-add-login",
-              change: "add-login",
-              phase: "archived",
-            },
-            task: "tsk_1",
-          },
-          x: 1,
-        },
-      },
-      "/workspaces/wt"
-    );
+    expect(specOf()).toStrictEqual({
+      archived: "2026-10-10-add-login",
+      change: "add-login",
+      phase: "archived",
+    });
     expect(client.command).not.toHaveBeenCalled();
-    expect(reconcile).toHaveBeenCalledWith("p");
   });
 
   it("refuses before approval, once archived, while the agent works, or with tasks left", async () => {
@@ -817,12 +797,12 @@ describe("Specs.archive", () => {
       expect(m.exec.mock.calls.some((c) => c[1].includes("archive"))).toBe(
         false
       );
-      expect(m.client.updateSession).not.toHaveBeenCalled();
+      expect(m.setSpec).not.toHaveBeenCalled();
     }
   });
 
   it("reports the CLI's error and keeps the phase when archiving fails", async () => {
-    const { client, specs } = make({
+    const { setSpec, specs } = make({
       outputs: [
         section("list", done("add-login")),
         section(
@@ -845,7 +825,7 @@ describe("Specs.archive", () => {
     await expect(
       specs.archive("p", "/workspaces/wt", "add-login")
     ).rejects.toThrow("openspec archive failed: auth MODIFIED failed");
-    expect(client.updateSession).not.toHaveBeenCalled();
+    expect(setSpec).not.toHaveBeenCalled();
   });
 
   it("shows the archived change from the archive, with the main specs it updated", async () => {

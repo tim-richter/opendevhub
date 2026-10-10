@@ -12,6 +12,7 @@ import type {
   WorktreeRoot,
 } from "../../shared/types";
 import { stateDir } from "../config";
+import { variantActor } from "../db/events";
 import { BusyError, NotFoundError, UnavailableError } from "../errors";
 import { InvalidRequestError, mountArg, worktreeRoot } from "../git/worktrees";
 import type { ForwardTarget } from "../network/port-forwarder";
@@ -21,6 +22,7 @@ import type { RelayTarget } from "../network/relay/client";
 import { generateRelayToken } from "../network/relay/runtime";
 import type { HostPort, Route, RouteContainer } from "../network/routes";
 import { LOCAL_NODE } from "../nodes/host";
+import { isGone } from "../opencode/client";
 import type { OpencodeClient } from "../opencode/client";
 import {
   opencodeMount,
@@ -28,6 +30,8 @@ import {
   VOLUME_LABEL,
 } from "../opencode/runtime";
 import type { EnvRecord } from "../projects/state";
+import { reconcileTasks } from "../sessions/reconcile";
+import type { Presence } from "../sessions/reconcile";
 import {
   buildOverrideConfig,
   envIdFor,
@@ -115,7 +119,9 @@ export class Environments {
   }
 
   async rescan(): Promise<void> {
-    this.deps.store.setProjects(await this.deps.scan(this.deps.roots()));
+    const list = await this.deps.scan(this.deps.roots());
+    this.deps.projects.upsertAll(list);
+    this.deps.store.setProjects(list);
   }
 
   /** Where the host reaches an environment's opencode server while its container runs; a main environment's id is its project's. */
@@ -955,11 +961,11 @@ export class Environments {
   private setupStep(env: Env, step: "image" | "container"): void {
     const setup = this.setups.get(env.id);
     if (setup) {
-      this.deps.store.updateStarting(
-        env.project.id,
+      this.deps.tasks.updateVariant(
         setup.task,
         setup.variant,
-        { step }
+        { step },
+        variantActor(setup.task, setup.variant)
       );
     }
   }
@@ -1350,12 +1356,7 @@ export class Environments {
     }
     const setup = this.setups.get(env.id);
     if (setup) {
-      this.deps.store.appendStartingLog(
-        env.project.id,
-        setup.task,
-        setup.variant,
-        line
-      );
+      this.deps.store.appendStartingLog(setup.task, setup.variant, line);
     }
     this.log(
       env.project.id,
@@ -1598,8 +1599,9 @@ export class Environments {
     }
     const factory =
       this.deps.monitorFactory ?? ((opts: MonitorOptions) => new Monitor(opts));
+    const client = clientFor(runtime.endpoint(route.opencode, rt.password));
     const monitor = factory({
-      client: clientFor(runtime.endpoint(route.opencode, rt.password)),
+      client,
       projectId: env.project.id,
       envId: env.id,
       directory: this.envDirectory(env),
@@ -1612,8 +1614,33 @@ export class Environments {
           ...new Set(sessions.map((s) => s.directory)),
         ]);
       },
-      onRawSessions: (sessions) =>
-        this.deps.recordUsage?.(env.project.id, sessions),
+      onRawSessions: (sessions) => {
+        // Before usage, which attributes spend to the tasks reconcile may adopt sessions into.
+        void reconcileTasks(this.deps.tasks, {
+          branchOf: (directory) =>
+            env.worktree?.branch ??
+            (directory === this.envDirectory(env)
+              ? undefined
+              : this.deps.store
+                  .runtime(env.project.id)
+                  .worktrees?.find((w) => w.path === directory)?.branch),
+          envId: env.id,
+          lookup: (id) =>
+            client.session(id).then(
+              (s): Presence =>
+                s.time.archived === undefined ? "alive" : "gone",
+              (error: unknown): Presence => (isGone(error) ? "gone" : "unknown")
+            ),
+          projectId: env.project.id,
+          sessions,
+        }).catch((error: unknown) =>
+          this.log(
+            env.project.id,
+            `tasks: could not reconcile sessions: ${error instanceof Error ? error.message : String(error)}`
+          )
+        );
+        this.deps.recordUsage?.(env.project.id, sessions);
+      },
       onHealth: (healthy) => {
         if (store.runtime(env.id).opencode === "starting") {
           return;

@@ -40,6 +40,7 @@ import { StateStore } from "../../src/server/projects/state";
 import { startServer } from "../../src/server/server";
 import { UsageStore, trackUsage } from "../../src/server/sessions/usage";
 import type { CheckRun, Project } from "../../src/shared/types";
+import { memoryStores } from "../helpers/stores";
 
 const fixture = path.resolve("test/e2e/fixture");
 
@@ -98,7 +99,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         path: fixture,
         devcontainerPath: path.join(fixture, ".devcontainer/devcontainer.json"),
       };
+      const dbs = memoryStores();
       const store = new StateStore({
+        tasks: dbs.tasks,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -116,6 +119,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const usageTracker = trackUsage(usage, store);
       const hub = createHub({
         store,
+        projects: dbs.projects,
+        tasks: dbs.tasks,
         containers,
         runtime,
         forwarder: new PortForwarder(),

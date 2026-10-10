@@ -5,7 +5,8 @@ import type {
   ReviewData,
   SessionSummary,
   SpecView,
-  TaskSpec,
+  TaskView,
+  VariantSpec,
 } from "../../../shared/types";
 import { specView } from "../../mocks/fixtures";
 import { failing } from "../../mocks/handlers";
@@ -21,17 +22,31 @@ const variant = (n: number, model: string): SessionSummary => ({
   model: { id: model, providerID: "anthropic" },
   projectId: "acme-web",
   status: "idle",
-  task: {
-    branch: `login-limit-${n}`,
-    of: 2,
-    spec: { phase: "propose" },
-    task: "tsk_spec",
-    title: "Limit login attempts",
-    variant: n,
-  },
+  task: { discarded: false, id: "tsk_spec", kind: "task", n },
   title: "Limit login attempts",
   tokens: 52_000,
   updatedAt: Date.now(),
+});
+
+/** The spec-first task both variants belong to, with their phase and the task's links. */
+const PROPOSING: VariantSpec = { phase: "propose" };
+const specTask = (
+  spec = PROPOSING,
+  links: { implementedIn?: string; proposedIn?: string } = {}
+): TaskView => ({
+  createdAt: Date.now(),
+  id: "tsk_spec",
+  kind: "task",
+  spec: { first: !links.proposedIn, ...links },
+  state: "running",
+  title: "Limit login attempts",
+  variants: [1, 2].map((n) => ({
+    branch: `login-limit-${n}`,
+    n,
+    sessionId: `ses_spec0${n}`,
+    spec,
+    step: "session" as const,
+  })),
 });
 
 const spec = (view: SpecView) =>
@@ -41,7 +56,11 @@ const spec = (view: SpecView) =>
   );
 
 const meta = preview.meta({
-  args: { projectId: "acme-web", sessions: [variant(1, "claude-opus-5-5")] },
+  args: {
+    projectId: "acme-web",
+    sessions: [variant(1, "claude-opus-5-5")],
+    task: specTask(),
+  },
   component: SpecSection,
   title: "Components/SpecSection",
 });
@@ -102,43 +121,42 @@ export const CodeBeforeApproval = meta.story({
   },
 });
 
-const inPhase = (taskSpec: TaskSpec): SessionSummary => {
-  const s = variant(1, "claude-opus-5-5");
-  return { ...s, task: s.task && { ...s.task, spec: taskSpec } };
+const inPhase = (
+  taskSpec: VariantSpec & { implementedIn?: string; proposedIn?: string }
+): TaskView => {
+  const { implementedIn, proposedIn, ...v } = taskSpec;
+  return specTask(v, {
+    ...(implementedIn ? { implementedIn } : {}),
+    ...(proposedIn ? { proposedIn } : {}),
+  });
 };
 
 /** Once approved, the spec is read-only, and the bar follows the tasks the agent ticks off. */
 export const Implementing = meta.story({
   args: {
-    sessions: [
-      inPhase({ change: "add-login-burst-limit", phase: "implement" }),
-    ],
+    task: inPhase({ change: "add-login-burst-limit", phase: "implement" }),
   },
 });
 
 /** Approved with "Implement with several models…": a new task implements it, one worktree per model. */
 export const ImplementedInTask = meta.story({
   args: {
-    sessions: [
-      inPhase({
-        change: "add-login-burst-limit",
-        implementedIn: "tsk_impl",
-        phase: "implement",
-      }),
-    ],
+    task: inPhase({
+      change: "add-login-burst-limit",
+      implementedIn: "tsk_impl",
+      phase: "implement",
+    }),
   },
 });
 
 /** One of the models implementing a change another task proposed, which it links back to. */
 export const ImplementingProposedChange = meta.story({
   args: {
-    sessions: [
-      inPhase({
-        change: "add-login-burst-limit",
-        phase: "implement",
-        proposedIn: "tsk_spec",
-      }),
-    ],
+    task: inPhase({
+      change: "add-login-burst-limit",
+      phase: "implement",
+      proposedIn: "tsk_spec",
+    }),
   },
 });
 
@@ -174,13 +192,11 @@ const archivedChange = specView.change && {
 /** Archived: the change lives under `openspec/changes/archive/`, and its specs are merged into the main ones. */
 export const Archived = meta.story({
   args: {
-    sessions: [
-      inPhase({
-        archived: "2026-10-10-add-login-burst-limit",
-        change: "add-login-burst-limit",
-        phase: "archived",
-      }),
-    ],
+    task: inPhase({
+      archived: "2026-10-10-add-login-burst-limit",
+      change: "add-login-burst-limit",
+      phase: "archived",
+    }),
   },
   beforeEach: spec({
     change: archivedChange,

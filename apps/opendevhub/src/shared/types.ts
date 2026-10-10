@@ -381,35 +381,8 @@ export interface SpecWorkflow {
   cli?: boolean;
 }
 
-/** What opendevhub writes to `metadata.opendevhub` on each session of a task. */
-export interface TaskMeta {
-  jira?: JiraTaskSource;
-  task: string;
-  /** 1-based. */
-  variant: number;
-  of: number;
-  title: string;
-  /** The branch the task created for this variant's worktree; absent for the main checkout and for older tasks. */
-  branch?: string;
-  /** Started with OpenSpec's `opsx-propose`: the agent writes a change proposal before any code. */
-  spec?: TaskSpec;
-  discarded?: boolean;
-}
-
 /** Where a spec-first task is: proposing (no code yet), implementing the approved change, or archived. */
 export type SpecPhase = "propose" | "implement" | "archived";
-
-export interface TaskSpec {
-  phase: SpecPhase;
-  /** The OpenSpec change the task works on, once the Spec view found it. */
-  change?: string;
-  /** The change's folder under `openspec/changes/archive/` once it's archived, e.g. `2026-10-10-add-login`. */
-  archived?: string;
-  /** Implementing: the task that proposed the change, when this one implements it in new worktrees. */
-  proposedIn?: string;
-  /** The task implementing this task's change in new worktrees, one per model, instead of this checkout. */
-  implementedIn?: string;
-}
 
 /** A change in `openspec list`; `isNew` when the checkout's base doesn't have it, so the task made it. */
 export interface SpecChangeSummary {
@@ -537,8 +510,8 @@ export interface SessionSummary {
   status: SessionStatus;
   /** What the session (or one of its subagents) is waiting on, oldest first. Omitted when nothing is. */
   pending?: PendingItems;
-  /** Set when the session belongs to a task. */
-  task?: TaskMeta;
+  /** Its task; every top-level session has one once it has been reconciled. */
+  task?: SessionTaskRef;
   model?: ModelRef;
   /** USD so far, its subagents included. */
   cost?: number;
@@ -625,8 +598,8 @@ export interface ProjectView {
   environments: EnvironmentView[];
   /** Known once the main container has started. */
   isolation?: IsolationInfo;
-  /** Tasks whose variants are still being set up, newest last. */
-  starting?: StartingTask[];
+  /** Its tasks that are not archived, oldest first. */
+  tasks: TaskView[];
 }
 
 /** Where a starting task variant is: its worktree, its environment (image, container), then its session. */
@@ -639,29 +612,70 @@ export type StartStep =
   | "session"
   | "failed";
 
-export interface StartingVariant {
-  /** 1-based, as in TaskMeta. */
-  variant: number;
-  branch?: string;
+/** `task`: started from the New task dialog. `manual`: a session started on its own, here or in opencode. */
+export type TaskKind = "task" | "manual";
+
+/**
+ * Starting while a variant is being set up or failed without being dismissed; running while a variant has a live
+ * session; ended once none has.
+ */
+export type TaskState = "starting" | "running" | "ended";
+
+/** A spec-first variant's place in the OpenSpec workflow. */
+export interface VariantSpec {
+  phase: SpecPhase;
+  /** The OpenSpec change the variant works on, once the Spec view found it. */
+  change?: string;
+  /** The change's folder under `openspec/changes/archive/` once it's archived, e.g. `2026-10-10-add-login`. */
+  archived?: string;
+}
+
+/** One model/agent attempt at a task, with its checkout and session. */
+export interface VariantView {
+  /** 1-based. */
+  n: number;
+  model?: ModelRef;
+  agent?: string;
   /** Set when it runs on another node. */
   node?: NodeId;
+  /** The environment whose opencode runs its session; the project's id for the main environment. */
+  envId?: EnvId;
+  branch?: string;
+  directory?: string;
   step: StartStep;
   /** Why it failed. */
   error?: string;
-  /** Set once its session exists; the variant leaves the list when the session shows up. */
   sessionId?: string;
-  /** The last lines its setup wrote. */
-  log: string[];
+  /** Its session is gone from opencode. */
+  sessionRemoved?: boolean;
+  picked?: boolean;
+  /** Discarded by a pick, or a failed start that was dismissed. */
+  discarded?: boolean;
+  spec?: VariantSpec;
+  /** The last lines its setup wrote, while it starts. Not kept across restarts. */
+  log?: string[];
 }
 
-/** A task the dashboard started whose variants aren't all running yet. Kept in memory only. */
-export interface StartingTask {
-  jira?: JiraTaskSource;
-  task: string;
+/** A task as the database records it. */
+export interface TaskView {
+  id: string;
+  kind: TaskKind;
   title: string;
-  of: number;
+  jira?: JiraTaskSource;
+  /** Spec-first tasks: `first` when it started with `opsx-propose`, and the tasks that proposed or implement its change. */
+  spec?: { first: boolean; proposedIn?: string; implementedIn?: string };
   createdAt: number;
-  variants: StartingVariant[];
+  state: TaskState;
+  variants: VariantView[];
+}
+
+/** The task a session belongs to. */
+export interface SessionTaskRef {
+  id: string;
+  kind: TaskKind;
+  /** Its variant's number. */
+  n: number;
+  discarded: boolean;
 }
 
 export type EditorTarget = "host" | "container";
@@ -684,7 +698,7 @@ export interface Usage {
 export interface UsageTotals {
   today: Usage;
   projects: Record<ProjectId, { today: Usage; total: Usage }>;
-  /** By TaskMeta.task, discarded variants included. */
+  /** By task id, discarded variants included. */
   tasks: Record<string, Usage>;
 }
 
@@ -840,11 +854,26 @@ export interface SessionCleanupItem {
   why: "discarded" | "worktree-gone" | "idle";
 }
 
+/** An ended task cleanup may archive: hidden from the dashboard, its record kept. */
+export interface TaskCleanupItem {
+  /** `task:<projectId>:<taskId>`. */
+  id: string;
+  kind: "task";
+  checked: boolean;
+  reason: string;
+  projectId: ProjectId;
+  taskId: string;
+  title: string;
+  /** When anything last happened to it, such as its last session going away. */
+  lastActivity: number;
+}
+
 export type CleanupItem =
   | BranchCleanupItem
   | ContainerCleanupItem
   | ImageCleanupItem
-  | SessionCleanupItem;
+  | SessionCleanupItem
+  | TaskCleanupItem;
 
 export interface CleanupProject {
   id: ProjectId;

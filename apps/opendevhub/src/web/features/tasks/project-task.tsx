@@ -22,9 +22,10 @@ import type {
   ReviewData,
   SessionSummary,
   SpecView,
-  StartingVariant,
+  TaskView,
+  VariantView,
 } from "../../../shared/types";
-import { dismissStarting, pickVariant } from "../../api";
+import { archiveTask, dismissStarting, pickVariant } from "../../api";
 import { EnvBadge } from "../../components/env-badge";
 import { Empty, muted, Section } from "../../components/page";
 import { SessionBadge } from "../../components/status";
@@ -48,9 +49,12 @@ import {
   fileMatrix,
   formatCost,
   formatTokens,
+  endedVariants,
   pickPrompts,
   removals,
+  startingVariants,
   startStepLabel,
+  taskOf,
   taskSessions,
   variantName,
 } from "./tasks";
@@ -73,7 +77,7 @@ const byDirectory = <T,>(
 
 /** A variant that is still being set up: where it is, and the last lines its setup wrote. */
 const StartingCard = (props: {
-  variant: StartingVariant;
+  variant: VariantView;
   onDismiss: () => void;
 }) => {
   const { variant: v } = props;
@@ -89,7 +93,7 @@ const StartingCard = (props: {
         {failed ? null : (
           <LoaderCircleIcon className="text-muted-foreground size-4 shrink-0 animate-spin" />
         )}
-        <strong className="truncate">{v.branch ?? `#${v.variant}`}</strong>
+        <strong className="truncate">{v.branch ?? `#${v.n}`}</strong>
         {v.node && <span className={cn(muted, "truncate")}>on {v.node}</span>}
         <span
           className={cn(
@@ -103,7 +107,7 @@ const StartingCard = (props: {
       {v.error && (
         <p className="text-destructive text-sm break-words">{v.error}</p>
       )}
-      {v.log.length > 0 && (
+      {v.log && v.log.length > 0 && (
         <pre className="bg-muted/50 text-muted-foreground max-h-48 overflow-auto rounded-md px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
           {v.log.join("\n")}
         </pre>
@@ -119,18 +123,62 @@ const StartingCard = (props: {
   );
 };
 
+/** Variants whose session is gone: what they were, so the task's history stays readable. */
+const EndedVariants = (props: { variants: VariantView[] }) => (
+  <Section title="Ended variants" hint="their sessions are gone from opencode">
+    <ul>
+      {props.variants.map((v) => (
+        <li
+          key={v.n}
+          className="flex min-w-0 items-center gap-3 border-t px-4 py-2 first:border-t-0"
+        >
+          <strong className="shrink-0">#{v.n}</strong>
+          <span className="truncate font-mono text-xs">
+            {v.branch ?? v.directory ?? "—"}
+          </span>
+          {v.picked && <span className={muted}>picked</span>}
+          {v.node && <span className={muted}>on {v.node}</span>}
+        </li>
+      ))}
+    </ul>
+  </Section>
+);
+
+/** Hides an ended task from the dashboard; its record stays. */
+const ArchiveButton = (props: { view: ProjectView; task: TaskView }) => {
+  const { report } = useDash();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={busy}
+      title="Hide this task; its sessions and worktrees stay as they are"
+      onClick={() => {
+        setBusy(true);
+        void archiveTask(props.view.project.id, props.task.id)
+          .catch(report)
+          .finally(() => setBusy(false));
+      }}
+    >
+      Archive
+    </Button>
+  );
+};
+
 export const ProjectTask = () => {
   const view = useProjectView();
   const { task = "" } = useParams({ strict: false });
   const { report, snapshot } = useDash();
   const total = taskUsage(snapshot, task);
+  const record = taskOf(view, task);
   const sessions = taskSessions(view, task);
-  const starting = view.starting?.find((t) => t.task === task);
-  const jiraSource =
-    starting?.jira ?? sessions.find((s) => s.task?.jira)?.task?.jira;
+  const starting = record ? startingVariants(record) : [];
+  const ended = record ? endedVariants(record) : [];
+  const jiraSource = record?.jira;
   const queryClient = useQueryClient();
   const directories = [...new Set(sessions.map((s) => s.directory))];
-  const specVariants = specSessions(sessions);
+  const specVariants = record ? specSessions(record, sessions) : [];
   // Shared with each checkout's Review, and refreshed when an agent there finishes a turn.
   const reviews = byDirectory(
     directories,
@@ -241,19 +289,17 @@ export const ProjectTask = () => {
     }
   };
 
-  if (sessions.length === 0 && !starting) {
+  if (!record) {
     return (
-      <Empty title="No variants to show">
-        <p className={muted}>
-          This task&apos;s sessions were discarded, or are older than the
-          sessions opencode lists.
-        </p>
+      <Empty title="No such task">
+        <p className={muted}>It was archived, or never existed here.</p>
         <Button asChild variant="link">
           <Link to={projectPath}>Back to {view.project.name}</Link>
         </Button>
       </Empty>
     );
   }
+  const variantCount = record.variants.length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -270,17 +316,19 @@ export const ProjectTask = () => {
         <ChevronRightIcon className="size-3.5" /> Task
       </nav>
       <div className="flex items-baseline gap-2.5">
-        <h2 className="text-lg font-semibold">
-          {starting?.title || sessions[0]?.task?.title || "Task"}
-        </h2>
+        <h2 className="text-lg font-semibold">{record.title || "Task"}</h2>
         <span className={muted}>
-          {starting?.of ?? sessions.length} variant
-          {(starting?.of ?? sessions.length) === 1 ? "" : "s"}
-          {starting &&
-            starting.variants.some((v) => v.step !== "failed") &&
-            " · starting"}
+          {variantCount} variant
+          {variantCount === 1 ? "" : "s"}
+          {starting.some((v) => v.step !== "failed") && " · starting"}
+          {record.state === "ended" && " · ended"}
           {total && (
             <span className="tabular-nums"> · Total {formatUsage(total)}</span>
+          )}
+        </span>
+        <span className="ml-auto">
+          {record.state === "ended" && (
+            <ArchiveButton view={view} task={record} />
           )}
         </span>
       </div>
@@ -290,11 +338,11 @@ export const ProjectTask = () => {
           <AlertDescription className="text-ok">{notice}</AlertDescription>
         </Alert>
       )}
-      {starting && starting.variants.length > 0 && (
+      {starting.length > 0 && (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
-          {starting.variants.map((v) => (
+          {starting.map((v) => (
             <StartingCard
-              key={`starting-${v.variant}`}
+              key={`starting-${v.n}`}
               variant={v}
               onDismiss={() =>
                 void dismissStarting(view.project.id, task).catch(report)
@@ -306,6 +354,7 @@ export const ProjectTask = () => {
       {specVariants.length > 0 && (
         <SpecSection
           projectId={view.project.id}
+          task={record}
           sessions={specVariants}
           reviews={reviews}
         />
@@ -313,6 +362,7 @@ export const ProjectTask = () => {
       {sessions.length > 0 && (
         <Compare
           view={view}
+          task={record}
           sessions={sessions}
           reviews={reviews}
           checks={checks}
@@ -321,6 +371,7 @@ export const ProjectTask = () => {
           onPick={(s) => void pick(s)}
         />
       )}
+      {ended.length > 0 && <EndedVariants variants={ended} />}
     </div>
   );
 };
@@ -348,6 +399,7 @@ const loading = <Skeleton className="h-4 w-20" />;
 /** The variants side by side: one column each, then the files they change. */
 const Compare = (props: {
   view: ProjectView;
+  task: TaskView;
   sessions: SessionSummary[];
   reviews: Record<string, ReviewData | null>;
   checks: Record<string, ChecksView | null>;
@@ -355,8 +407,10 @@ const Compare = (props: {
   picking: boolean;
   onPick: (s: SessionSummary) => void;
 }) => {
-  const { view, sessions, reviews, checks, specs } = props;
+  const { view, task, sessions, reviews, checks, specs } = props;
   const several = sessions.length > 1;
+  const specOf = (s: SessionSummary) =>
+    task.variants.find((v) => v.sessionId === s.id)?.spec;
   const files = fileMatrix(sessions.map((s) => reviews[s.directory]));
   const differ = files.filter((f) => !f.same).length;
   const row = (label: string, cell: (s: SessionSummary) => ReactNode) => (
@@ -404,14 +458,14 @@ const Compare = (props: {
               </tr>
             </thead>
             <tbody>
-              {sessions.some((s) => s.task?.spec) &&
+              {sessions.some((s) => specOf(s)) &&
                 row("Spec", (s) => {
-                  const phase = s.task?.spec?.phase;
+                  const phase = specOf(s)?.phase;
                   if (!phase) {
                     return "—";
                   }
                   const progress =
-                    phase === "implement" && !s.task?.spec?.implementedIn
+                    phase === "implement" && !task.spec?.implementedIn
                       ? taskProgress(specs[s.directory])
                       : undefined;
                   return (

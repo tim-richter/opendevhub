@@ -34,6 +34,7 @@ function snap(statuses: Record<string, SessionStatus>): DashboardSnapshot {
     editors: [],
     projects: [
       {
+        tasks: [],
         project: {
           id: "p",
           name: "demo",
@@ -163,6 +164,7 @@ describe("worktree helpers", () => {
   const view = (
     runtime: Partial<ProjectView["runtime"]> = {}
   ): ProjectView => ({
+    tasks: [],
     project: {
       id: "demo-1",
       name: "demo",

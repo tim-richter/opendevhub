@@ -4,6 +4,7 @@ import { startNotifier } from "../../../src/server/notifications/notifier";
 import { StateStore } from "../../../src/server/projects/state";
 import type { Notice } from "../../../src/shared/notices";
 import type { Project, SessionSummary } from "../../../src/shared/types";
+import { memoryStores } from "../../helpers/stores";
 
 const project: Project = {
   id: "demo-abc123",
@@ -36,6 +37,7 @@ const asking = (ids: string[]) =>
 
 function setup() {
   const store = new StateStore({
+    tasks: memoryStores().tasks,
     port: 7777,
     persisted: { projects: {} },
     persist: () => {},

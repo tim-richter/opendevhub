@@ -32,15 +32,9 @@ const tokens = (input: number) => ({
   reasoning: 0,
   cache: { read: 0, write: 0 },
 });
-const taskMeta = (task: string, discarded = false) => ({
-  opendevhub: {
-    task,
-    variant: 1,
-    of: 2,
-    title: "t",
-    ...(discarded ? { discarded } : {}),
-  },
-});
+/** The task store's answer: both variants of tsk_1, the discarded one included. */
+const taskOf = (sessionId: string) =>
+  ["a", "b", "v1", "v2"].includes(sessionId) ? "tsk_1" : undefined;
 
 describe(localDay, () => {
   it("formats the local date with zero padding", () => {
@@ -93,12 +87,14 @@ describe(observe, () => {
     ]);
   });
 
-  it("tags a task's sessions, discarded ones included", () => {
-    const out = observe("p", [
-      rawSession("a", { metadata: taskMeta("tsk_1") }),
-      rawSession("b", { metadata: taskMeta("tsk_1", true) }),
-    ]);
-    expect(out.map((o) => o.task)).toStrictEqual(["tsk_1", "tsk_1"]);
+  it("tags a task's sessions as the task store says, discarded ones included", () => {
+    const out = observe(
+      "p",
+      [rawSession("a"), rawSession("b"), rawSession("c")],
+      taskOf
+    );
+    expect(out.map((o) => o.task)).toStrictEqual(["tsk_1", "tsk_1", undefined]);
+    expect(observe("p", [rawSession("a")])[0]).not.toHaveProperty("task");
   });
 
   it("counts a missing cost or tokens as 0", () => {
@@ -215,25 +211,15 @@ describe(UsageStore, () => {
 
   it("sums per project (today and all time), per task and for today", () => {
     const u = UsageStore.open(":memory:")!;
-    u.record("p", [
-      s("old", 2, { time: { created: 1, updated: at(2026, 10, 1) } }),
-      s("v1", 1, {
-        metadata: {
-          opendevhub: { task: "tsk_1", variant: 1, of: 2, title: "t" },
-        },
-      }),
-      s("v2", 0.5, {
-        metadata: {
-          opendevhub: {
-            task: "tsk_1",
-            variant: 2,
-            of: 2,
-            title: "t",
-            discarded: true,
-          },
-        },
-      }),
-    ]);
+    u.record(
+      "p",
+      [
+        s("old", 2, { time: { created: 1, updated: at(2026, 10, 1) } }),
+        s("v1", 1),
+        s("v2", 0.5),
+      ],
+      taskOf
+    );
     u.record("q", [s("other", 4)]);
     expect(u.totals(today)).toStrictEqual({
       today: { cost: 5.5, tokens: 550 },
@@ -349,7 +335,7 @@ describe(trackUsage, () => {
   it("sets totals at once, after each booking, and when the day changes without new spend", () => {
     let clock = new Date(2026, 9, 5, 23, 59, 30).getTime();
     const u = UsageStore.open(":memory:")!;
-    const store = { setUsage: vi.fn() };
+    const store = { setUsage: vi.fn(), taskOf };
     const tracker = trackUsage(u, store, () => clock);
     expect(store.setUsage).toHaveBeenLastCalledWith({
       today: { cost: 0, tokens: 0 },
@@ -367,6 +353,10 @@ describe(trackUsage, () => {
     expect(store.setUsage.mock.lastCall![0].today).toStrictEqual({
       cost: 1,
       tokens: 10,
+    });
+    // Booked to the session's task, as the store attributes it.
+    expect(store.setUsage.mock.lastCall![0].tasks).toStrictEqual({
+      tsk_1: { cost: 1, tokens: 10 },
     });
 
     const calls = store.setUsage.mock.calls.length;

@@ -51,6 +51,7 @@ export const selectionSummary = (
   const parts = [
     count(of("branch"), "branch", "branches"),
     count(of("session"), "session", "sessions"),
+    count(of("task"), "task to archive", "tasks to archive"),
     count(of("container"), "container", "containers"),
     count(of("image"), "image", "images"),
   ]
@@ -82,6 +83,9 @@ export const riskyNotes = (
       }
       if (i.kind === "session") {
         return `deletes the session ${i.title}, ${i.reason}`;
+      }
+      if (i.kind === "task") {
+        return `archives the task ${i.title}`;
       }
       return `removes ${i.ref}`;
     });

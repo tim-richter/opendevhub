@@ -11,14 +11,15 @@ import type {
   SpecPhase,
   SpecView,
   TaskStartSpec,
+  VariantView,
 } from "../../shared/types";
+import type { TaskRecord, TaskStore } from "../db/tasks";
 import type { CheckTarget } from "../environments/checks";
 import type { Containers } from "../environments/containers";
 import { BusyError, UnavailableError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import type { OpencodeClient } from "../opencode/client";
 import { APPLY_COMMAND, UPDATE_COMMAND } from "../tasks/openspec";
-import { patchTaskMetadata } from "../tasks/request";
 
 const EXEC_TIMEOUT_MS = 60_000;
 /** Ends each section of the script's output: `<MARK> <section> <exit code>`. */
@@ -266,13 +267,10 @@ export interface SpecsDeps {
   target: (projectId: ProjectId, directory: string) => CheckTarget;
   containers: Pick<Containers, "exec">;
   sessions: (projectId: ProjectId) => SessionSummary[];
-  client: (
-    envId: string
-  ) => Pick<
-    OpencodeClient,
-    "session" | "updateSession" | "command" | "commands"
-  >;
-  /** Re-reads an environment's sessions after their metadata changed. */
+  /** Where each variant's spec phase, change and archive folder are kept. */
+  tasks: Pick<TaskStore, "bySession" | "setSpec">;
+  client: (envId: string) => Pick<OpencodeClient, "command" | "commands">;
+  /** Re-reads an environment's sessions after a command changed them. */
   reconcile?: (envId: string) => void;
   /** Commits a checkout's changes under `paths` on its branch, as `ReviewActions.commitPaths`. */
   commitPaths: (
@@ -290,11 +288,31 @@ export interface SpecsDeps {
   log: (projectId: ProjectId, line: string) => void;
 }
 
+/** A session of a spec-first variant that isn't discarded, with its task and variant. */
+interface SpecSession {
+  session: SessionSummary;
+  task: TaskRecord;
+  variant: VariantView;
+}
+
 /** Reads a checkout's OpenSpec changes for the Spec view: the CLI runs in its container, the files are read here. */
 export class Specs {
   private readonly deps: SpecsDeps;
   constructor(deps: SpecsDeps) {
     this.deps = deps;
+  }
+
+  /** The sessions of spec-first variants working in `directory`. */
+  private specSessions(projectId: ProjectId, directory: string): SpecSession[] {
+    return this.deps
+      .sessions(projectId)
+      .filter((s) => s.directory === directory)
+      .flatMap((session) => {
+        const found = this.deps.tasks.bySession(session.id);
+        return found?.variant.spec && !found.variant.discarded
+          ? [{ session, ...found }]
+          : [];
+      });
   }
 
   async view(
@@ -316,12 +334,8 @@ export class Specs {
     if (target.unavailable) {
       return { changes: [], unavailable: target.unavailable };
     }
-    const tasks = this.deps
-      .sessions(projectId)
-      .filter(
-        (s) => s.directory === directory && s.task?.spec && !s.task.discarded
-      );
-    const spec = tasks.find((s) => s.task?.spec?.change)?.task?.spec;
+    const tasks = this.specSessions(projectId, directory);
+    const spec = tasks.find((t) => t.variant.spec?.change)?.variant.spec;
     const wanted = change ?? spec?.change;
     // An archived change has left `openspec list`, so the CLI can't report on it.
     const archived = spec?.phase === "archived" && wanted === spec.change;
@@ -359,7 +373,7 @@ export class Specs {
     }
     const fresh = changes.filter((c) => c.isNew);
     if (fresh.length === 1 && fresh[0].name === picked) {
-      await this.record(projectId, tasks, picked);
+      this.record(tasks, picked);
     }
     return { changes, change: await this.change(host, picked, sections) };
   }
@@ -408,32 +422,18 @@ export class Specs {
     change: string,
     force = false
   ): Promise<void> {
-    const { session, envId, client, target } = await this.proposed(
-      projectId,
-      directory,
-      change,
-      APPROVE_REFUSALS
-    );
+    const { session, task, variant, envId, client, target } =
+      await this.proposed(projectId, directory, change, APPROVE_REFUSALS);
     await this.ready(target, directory, change, force);
 
-    const spec = session.task?.spec ?? { phase: "propose" as const };
-    const raw = await client.session(session.id);
     const write = (phase: SpecPhase) =>
-      client.updateSession(
-        session.id,
-        {
-          metadata: patchTaskMetadata(raw.metadata, {
-            spec: { ...spec, change, phase },
-          }),
-        },
-        directory
-      );
+      this.deps.tasks.setSpec(task.id, variant.n, { change, phase });
     // The phase changes first, so nothing can revise the spec while the agent implements it.
-    await write("implement");
+    write("implement");
     try {
       await client.command(session.id, APPLY_COMMAND, change, directory);
     } catch (error) {
-      await write("propose").catch(() => undefined);
+      write("propose");
       throw error;
     } finally {
       this.deps.reconcile?.(envId);
@@ -457,20 +457,17 @@ export class Specs {
     variants: unknown[],
     force = false
   ): Promise<{ task: string }> {
-    const { session, envId, client, target } = await this.proposed(
-      projectId,
-      directory,
-      change,
-      APPROVE_REFUSALS
-    );
+    const {
+      session,
+      task: proposing,
+      variant,
+      envId,
+      target,
+    } = await this.proposed(projectId, directory, change, APPROVE_REFUSALS);
     if (target.isMain) {
       throw new InvalidRequestError(
         "the spec is in the main checkout; implement it here, or propose it in a new worktree to compare models"
       );
-    }
-    const meta = session.task;
-    if (!meta) {
-      throw new InvalidRequestError(`no spec-first task works in ${directory}`);
     }
     await this.ready(target, directory, change, force);
     const { branch, committed } = await this.deps.commitPaths(
@@ -487,38 +484,20 @@ export class Specs {
       {
         base: branch,
         environment: session.envId ? "isolated" : "shared",
-        ...(meta.jira ? { jira: meta.jira } : {}),
+        ...(proposing.jira ? { jira: proposing.jira } : {}),
         prompt: change,
-        ...(meta.title ? { title: meta.title } : {}),
+        ...(proposing.title ? { title: proposing.title } : {}),
         variants,
         where: "worktree",
       },
-      { change, phase: "implement", proposedIn: meta.task }
+      { change, phase: "implement", proposedIn: proposing.id }
     );
-    try {
-      const raw = await client.session(session.id);
-      await client.updateSession(
-        session.id,
-        {
-          metadata: patchTaskMetadata(raw.metadata, {
-            spec: {
-              ...meta.spec,
-              change,
-              implementedIn: task,
-              phase: "implement",
-            },
-          }),
-        },
-        directory
-      );
-    } catch (error) {
-      this.deps.log(
-        projectId,
-        `spec: could not link ${session.title} to task ${task}: ${error instanceof Error ? error.message : String(error)}`
-      );
-    } finally {
-      this.deps.reconcile?.(envId);
-    }
+    // The new task's row links both ways; this variant's own phase moves on too.
+    this.deps.tasks.setSpec(proposing.id, variant.n, {
+      change,
+      phase: "implement",
+    });
+    this.deps.reconcile?.(envId);
     this.deps.log(
       projectId,
       `spec: approved ${change}, implementing it in task ${task} with ${variants.length} variant${variants.length === 1 ? "" : "s"}`
@@ -572,19 +551,14 @@ export class Specs {
     directory: string,
     change: string
   ): Promise<void> {
-    const { session, envId, client, target } = this.task(
-      projectId,
-      directory,
-      change,
-      {
-        busy: "the agent is still busy; archive the change when its turn ends",
-        phase: (current) =>
-          current === "archived"
-            ? "the change is already archived"
-            : "approve the spec and implement it before archiving it",
-        wants: "implement",
-      }
-    );
+    const { task, variant, target } = this.task(projectId, directory, change, {
+      busy: "the agent is still busy; archive the change when its turn ends",
+      phase: (current) =>
+        current === "archived"
+          ? "the change is already archived"
+          : "approve the spec and implement it before archiving it",
+      wants: "implement",
+    });
     const summary = listedChanges(
       await this.run(target, directory, { list: true })
     ).find((c) => c.name === change);
@@ -606,26 +580,11 @@ export class Specs {
       throw new InvalidRequestError(`openspec archive failed: ${result.error}`);
     }
     this.deps.log(projectId, `spec: archived ${change} as ${result.archived}`);
-    const spec = session.task?.spec ?? { phase: "implement" as const };
-    try {
-      const raw = await client.session(session.id);
-      await client.updateSession(
-        session.id,
-        {
-          metadata: patchTaskMetadata(raw.metadata, {
-            spec: {
-              ...spec,
-              archived: result.archived,
-              change,
-              phase: "archived",
-            },
-          }),
-        },
-        directory
-      );
-    } finally {
-      this.deps.reconcile?.(envId);
-    }
+    this.deps.tasks.setSpec(task.id, variant.n, {
+      archived: result.archived,
+      change,
+      phase: "archived",
+    });
   }
 
   /** The checkout's spec-first task, while its spec is proposed, its agent idle and opencode has `command`. */
@@ -664,15 +623,12 @@ export class Specs {
       throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
     }
     const target = this.deps.target(projectId, directory);
-    const session = this.deps
-      .sessions(projectId)
-      .find(
-        (s) => s.directory === directory && s.task?.spec && !s.task.discarded
-      );
-    if (!session) {
+    const [found] = this.specSessions(projectId, directory);
+    if (!found) {
       throw new InvalidRequestError(`no spec-first task works in ${directory}`);
     }
-    const current = session.task?.spec?.phase;
+    const { session } = found;
+    const current = found.variant.spec?.phase;
     if (current !== refuse.wants) {
       throw new InvalidRequestError(refuse.phase(current));
     }
@@ -680,7 +636,7 @@ export class Specs {
       throw new BusyError(session.id, refuse.busy);
     }
     const envId = session.envId ?? projectId;
-    return { client: this.deps.client(envId), envId, session, target };
+    return { ...found, client: this.deps.client(envId), envId, target };
   }
 
   private async run(
@@ -749,41 +705,12 @@ export class Specs {
     };
   }
 
-  /** Records the change on the task's sessions in this checkout, so later views and phases know it. */
-  private async record(
-    projectId: ProjectId,
-    tasks: SessionSummary[],
-    change: string
-  ): Promise<void> {
-    const envs = new Set<string>();
-    for (const s of tasks) {
-      const spec = s.task?.spec;
-      if (!spec || spec.change === change) {
-        continue;
+  /** Records the change on the checkout's spec-first variants, so later views and phases know it. */
+  private record(tasks: SpecSession[], change: string): void {
+    for (const { task, variant } of tasks) {
+      if (variant.spec?.change !== change) {
+        this.deps.tasks.setSpec(task.id, variant.n, { change });
       }
-      const envId = s.envId ?? projectId;
-      try {
-        const client = this.deps.client(envId);
-        const raw = await client.session(s.id);
-        await client.updateSession(
-          s.id,
-          {
-            metadata: patchTaskMetadata(raw.metadata, {
-              spec: { ...spec, change },
-            }),
-          },
-          s.directory
-        );
-        envs.add(envId);
-      } catch (error) {
-        this.deps.log(
-          projectId,
-          `spec: could not record change ${change} on ${s.title}: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }
-    for (const envId of envs) {
-      this.deps.reconcile?.(envId);
     }
   }
 }

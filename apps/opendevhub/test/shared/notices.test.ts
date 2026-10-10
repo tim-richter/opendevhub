@@ -22,6 +22,7 @@ function snap(sessions: Record<string, S>): DashboardSnapshot {
     editors: [],
     projects: [
       {
+        tasks: [],
         project: {
           id: "p",
           name: "demo",

@@ -665,14 +665,12 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
   const linked = new Map<string, { projectId: string; title: string }>();
   if (source) {
     for (const view of snapshot?.projects ?? []) {
-      for (const session of view.sessions) {
-        const { task } = session;
+      for (const task of view.tasks) {
         if (
-          task?.jira?.key === source.key &&
-          task.jira.instanceUrl === source.instanceUrl &&
-          !task.discarded
+          task.jira?.key === source.key &&
+          task.jira.instanceUrl === source.instanceUrl
         ) {
-          linked.set(taskPath(view.project.id, task.task), {
+          linked.set(taskPath(view.project.id, task.id), {
             projectId: view.project.name,
             title: task.title,
           });

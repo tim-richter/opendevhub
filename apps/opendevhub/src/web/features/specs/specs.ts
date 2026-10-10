@@ -2,6 +2,7 @@ import type {
   RequirementChange,
   ReviewData,
   SessionSummary,
+  TaskView,
   SpecArtifact,
   SpecChange,
   SpecPhase,
@@ -17,11 +18,15 @@ export const PHASE_LABEL: Record<SpecPhase, string> = {
   propose: "Proposing",
 };
 
-/** A task's spec-first variants, one per checkout. */
-export const specSessions = (sessions: SessionSummary[]): SessionSummary[] => {
+/** A task's spec-first variants' sessions, one per checkout. */
+export const specSessions = (
+  task: TaskView,
+  sessions: SessionSummary[]
+): SessionSummary[] => {
   const seen = new Set<string>();
   return sessions.filter((s) => {
-    if (!s.task?.spec || seen.has(s.directory)) {
+    const spec = task.variants.find((v) => v.sessionId === s.id)?.spec;
+    if (!spec || seen.has(s.directory)) {
       return false;
     }
     seen.add(s.directory);

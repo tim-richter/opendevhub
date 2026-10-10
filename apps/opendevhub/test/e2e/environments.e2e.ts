@@ -26,6 +26,7 @@ import { OpencodeRuntime } from "../../src/server/opencode/runtime";
 import { projectId } from "../../src/server/projects/ids";
 import { StateStore } from "../../src/server/projects/state";
 import type { Project } from "../../src/shared/types";
+import { memoryStores } from "../helpers/stores";
 
 const PROMPT = "Reply with the word ok. Do not change any files.";
 const LIFECYCLE = ["onCreate", "updateContent", "postCreate", "postStart"];
@@ -75,7 +76,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         path: repo,
         devcontainerPath: path.join(repo, ".devcontainer/devcontainer.json"),
       };
+      const dbs = memoryStores();
       const store = new StateStore({
+        tasks: dbs.tasks,
         port: 0,
         persisted: { projects: {} },
         persist: () => {},
@@ -88,6 +91,8 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const runtime = new OpencodeRuntime({ containers, clientFor });
       const hub = createHub({
         store,
+        projects: dbs.projects,
+        tasks: dbs.tasks,
         containers,
         runtime,
         forwarder: new PortForwarder(),

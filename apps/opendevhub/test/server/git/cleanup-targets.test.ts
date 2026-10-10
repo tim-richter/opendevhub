@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SYSTEM } from "../../../src/server/db/events";
+import type { TaskStore } from "../../../src/server/db/tasks";
 import { BusyError } from "../../../src/server/errors";
 import { rawSession } from "../../helpers/fake-opencode";
 import { project, running, feat, setup, withEnv } from "../../helpers/hub";
@@ -146,19 +148,33 @@ describe("cleanup", () => {
     rawSession(id, {
       location: { directory },
       time: { created: 1, updated: Date.now() },
-      metadata: {
-        opendevhub: {
-          task: "tsk_1",
-          variant: 1,
-          of: 2,
-          title: "Fix",
-          discarded: true,
-        },
-      },
     });
 
+  /** Records a task whose variants ran these sessions, every one of them discarded. */
+  const discard = (tasks: TaskStore, ...sessionIds: string[]) => {
+    tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: project.id,
+      prompt: "Fix",
+      title: "Fix",
+      variants: sessionIds.map(() => ({})),
+    });
+    for (const [i, sessionId] of sessionIds.entries()) {
+      tasks.attachSession(
+        "tsk_1",
+        i + 1,
+        { directory: "/workspaces/demo", envId: project.id, sessionId },
+        SYSTEM
+      );
+    }
+    // Keeping no variant discards them all.
+    tasks.pick("tsk_1", 0);
+  };
+
   it("scans sessions of the main opencode and of each running task environment, against a fresh worktree list", async () => {
-    const { hub, client, envId } = await withEnv();
+    const { hub, client, envId, tasks } = await withEnv();
+    discard(tasks, "ses_d", "ses_t");
     client.sessions
       .mockResolvedValueOnce([
         discarded("ses_d"),
@@ -177,7 +193,8 @@ describe("cleanup", () => {
   });
 
   it("leaves out busy sessions, and skips the worktree rule when the worktree list can't be read", async () => {
-    const { hub, client, store, worktrees } = await running();
+    const { hub, client, store, worktrees, tasks } = await running();
+    discard(tasks, "ses_run");
     store.setSessions(project.id, [
       {
         id: "ses_w",
@@ -195,7 +212,7 @@ describe("cleanup", () => {
       });
     client.sessions.mockResolvedValue([
       discarded("ses_run"),
-      discarded("ses_w"),
+      gone("ses_w"),
       gone("ses_gone"),
     ]);
     client.active.mockResolvedValue(new Set(["ses_run"]));
@@ -206,7 +223,8 @@ describe("cleanup", () => {
   });
 
   it("deletes a session that still qualifies, logs it, and skips one that changed", async () => {
-    const { hub, client } = await running();
+    const { hub, client, tasks } = await running();
+    discard(tasks, "ses_d");
     client.sessions.mockResolvedValue([discarded("ses_d")]);
     const [found] = (await hub.cleanupTargets.cleanupSessionScan(project.id))
       .items;

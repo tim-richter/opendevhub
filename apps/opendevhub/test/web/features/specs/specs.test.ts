@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   ReviewData,
   SessionSummary,
+  TaskView,
   SpecChange,
 } from "../../../../src/shared/types";
 import {
@@ -61,24 +62,34 @@ describe("documentTabs once archived", () => {
 
 describe(specSessions, () => {
   it("keeps one spec-first session per checkout", () => {
-    const s = (id: string, directory: string, spec: boolean) =>
-      ({
-        directory,
-        id,
-        task: {
-          of: 1,
-          task: "tsk_1",
-          title: "",
-          variant: 1,
-          ...(spec ? { spec: { phase: "propose" } } : {}),
-        },
-      }) as SessionSummary;
+    const s = (id: string, directory: string) =>
+      ({ directory, id }) as SessionSummary;
+    const task: TaskView = {
+      createdAt: 1,
+      id: "tsk_1",
+      kind: "task",
+      state: "running",
+      title: "",
+      variants: (
+        [
+          ["a", true],
+          ["b", true],
+          ["c", false],
+          ["d", true],
+        ] as const
+      ).map(([sessionId, spec], i) => ({
+        n: i + 1,
+        sessionId,
+        step: "session",
+        ...(spec ? { spec: { phase: "propose" as const } } : {}),
+      })),
+    };
     expect(
-      specSessions([
-        s("a", "/w1", true),
-        s("b", "/w1", true),
-        s("c", "/w2", false),
-        s("d", "/w3", true),
+      specSessions(task, [
+        s("a", "/w1"),
+        s("b", "/w1"),
+        s("c", "/w2"),
+        s("d", "/w3"),
       ]).map((x) => x.id)
     ).toStrictEqual(["a", "d"]);
   });

@@ -1,4 +1,6 @@
 import type { NodeId, Project, ProjectId } from "../../shared/types";
+import type { ProjectStore } from "../db/projects";
+import type { TaskStore } from "../db/tasks";
 import { UnavailableError } from "../errors";
 import type { GitOps } from "../git/ops";
 import type { Publisher } from "../git/publish";
@@ -128,6 +130,10 @@ export const DIRECT: NetworkPort = {
 /** What the Hub's modules act through; tests pass fakes. */
 export interface HubDeps {
   store: StateStore;
+  /** The project registry; discovery upserts it. */
+  projects: ProjectStore;
+  /** Tasks and their variants, the only record of which session belongs to which task. */
+  tasks: TaskStore;
   containers: ContainersPort;
   runtime: RuntimePort;
   forwarder: ForwarderPort;

@@ -11,15 +11,14 @@ import type {
   PickResult,
   Project,
   ProjectId,
-  SessionSummary,
-  StartingVariant,
-  TaskMeta,
   TaskRequest,
   TaskResult,
   TaskStartSpec,
   TaskVariantResult,
   TaskVariantSpec,
 } from "../../shared/types";
+import { USER, variantActor } from "../db/events";
+import type { VariantPatch } from "../db/tasks";
 import { CommandError } from "../environments/containers";
 import type { Environments } from "../environments/environments";
 import { cleanLogLine } from "../environments/log-buffer";
@@ -29,9 +28,9 @@ import { InvalidRequestError, validateBranch } from "../git/worktrees";
 import { LOCAL_NODE } from "../nodes/host";
 import type { NodeRepoLayout } from "../nodes/repo";
 import type { OpencodeClient } from "../opencode/client";
-import { newTaskId } from "../projects/ids";
+import { TASK_ID, newTaskId } from "../projects/ids";
 import { APPLY_COMMAND, PROPOSE_COMMAND } from "./openspec";
-import { discardMetadata, parseTaskMeta, parseTaskRequest } from "./request";
+import { parseTaskRequest } from "./request";
 
 /** What a variant's session starts with: the prompt, `opsx-propose <prompt>`, or `opsx-apply <change>`. */
 const firstTurn = (req: TaskRequest): { command?: string; text: string } => {
@@ -57,7 +56,7 @@ export class Tasks {
 
   /**
    * Starts a task and waits until every variant runs or failed. For each variant: a worktree (unless it runs in
-   * the main checkout), a session tagged with the task in its metadata, and the prompt. Worktrees are created in
+   * the main checkout), a session recorded on the variant's row, and the prompt. Worktrees are created in
    * order under one git lock; a failing variant is recorded on its result and the others still run, and worktrees
    * already created are kept. Isolated variants then start their own containers in parallel and get their sessions there.
    */
@@ -71,7 +70,7 @@ export class Tasks {
 
   /**
    * Like createTask, but answers once the request is checked: the variants are set up in the background, and
-   * the snapshot's `starting` shows each one's step and log until its session appears. `spec` replaces the
+   * the snapshot's task shows each one's step and log until its session exists. `spec` replaces the
    * body's: only the server starts a task implementing a change, once its spec is approved.
    */
   async startTask(
@@ -84,11 +83,28 @@ export class Tasks {
     return { task, variants: [] };
   }
 
-  /** Forgets a starting task's variants that failed (or already have their session). */
+  /** Stops listing a starting task's failed variants; the task's rows are kept. */
   dismissStarting(id: ProjectId, task: string): void {
     this.envs.requireProject(id);
-    if (!this.deps.store.dismissStarting(id, task)) {
+    if (
+      this.deps.tasks.get(task)?.projectId !== id ||
+      !this.deps.tasks.dismissStarting(task, USER)
+    ) {
       throw new NotFoundError(task, "starting task");
+    }
+  }
+
+  /** Hides a task from the dashboard; its sessions and worktrees are left as they are. */
+  archiveTask(id: ProjectId, task: string): void {
+    this.envs.requireProject(id);
+    if (!TASK_ID.test(task)) {
+      throw new InvalidRequestError(`not a task id: ${task}`);
+    }
+    if (
+      this.deps.tasks.get(task)?.projectId !== id ||
+      !this.deps.tasks.archive(task, USER)
+    ) {
+      throw new NotFoundError(task, "task");
     }
   }
 
@@ -128,19 +144,22 @@ export class Tasks {
     const now = (this.deps.now ?? Date.now)();
     const task = newTaskId(now);
     const title = req.title ?? deriveTitle(req.prompt);
-    store.putStarting(id, {
-      task,
-      title,
-      of: req.variants.length,
-      ...(req.jira ? { jira: req.jira } : {}),
-      createdAt: now,
-      variants: req.variants.map((_, i) => ({
-        variant: i + 1,
-        ...(remoteKit ? { node } : {}),
-        step: "queued" as const,
-        log: [],
-      })),
-    });
+    this.deps.tasks.createTask(
+      {
+        createdAt: now,
+        id: task,
+        projectId: id,
+        prompt: req.prompt,
+        title,
+        variants: req.variants.map((v) => ({
+          ...v,
+          ...(remoteKit ? { node } : {}),
+        })),
+        ...(req.jira ? { jira: req.jira } : {}),
+        ...(req.spec ? { spec: req.spec } : {}),
+      },
+      USER
+    );
     const done = this.runTask(project, client, req, {
       base,
       node,
@@ -149,12 +168,14 @@ export class Tasks {
       title,
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      for (const v of store.startingTask(id, task)?.variants ?? []) {
-        if (v.step !== "session" && v.step !== "failed") {
-          store.updateStarting(id, task, v.variant, {
-            error: message,
-            step: "failed",
-          });
+      for (const v of this.deps.tasks.get(task)?.variants ?? []) {
+        if (v.step !== "failed" && !v.sessionId) {
+          this.deps.tasks.updateVariant(
+            task,
+            v.n,
+            { error: message, step: "failed" },
+            variantActor(task, v.n)
+          );
         }
       }
       this.envs.log(id, `task ${title}: could not start: ${message}`);
@@ -188,10 +209,13 @@ export class Tasks {
     const of = req.variants.length;
     const labels = variantLabels(req.variants);
     const own: (EnvWorktree | undefined)[] = [];
-    const step = (
-      i: number,
-      patch: Partial<Omit<StartingVariant, "variant" | "log">>
-    ) => store.updateStarting(id, task, i + 1, patch);
+    const step = (i: number, patch: VariantPatch) =>
+      this.deps.tasks.updateVariant(
+        task,
+        i + 1,
+        patch,
+        variantActor(task, i + 1)
+      );
     const results = await this.envs.withGitWhenFree(id, async (p) => {
       const rt = store.runtime(id);
       const ws = this.envs.workspaceFolder(p);
@@ -246,6 +270,7 @@ export class Tasks {
               remote.base
             );
             result.directory = wt.path;
+            step(i, { directory: wt.path });
             own[i] = wt;
             continue;
           }
@@ -263,31 +288,22 @@ export class Tasks {
               workspaceFolder: ws,
             });
             result.directory = wt.path;
+            step(i, { directory: wt.path });
             if (isolated && wt.hostPath) {
               own[i] = { branch, hostPath: wt.hostPath, path: wt.path };
               continue;
             }
           }
           step(i, { step: "session" });
-          const meta: TaskMeta = {
-            of,
-            task,
-            title,
-            variant: i + 1,
-            ...(req.jira ? { jira: req.jira } : {}),
-            ...(branch ? { branch } : {}),
-            ...(req.spec ? { spec: req.spec } : {}),
-          };
           await this.startVariant(
             client,
+            { envId: id, n: i + 1, task },
             result,
             result.directory ?? ws,
-            meta,
             variantTitle(title, labels[i], of),
             v,
             firstTurn(req)
           );
-          step(i, { sessionId: result.sessionId });
         } catch (error) {
           this.variantFailed(id, title, i, branch, result, error);
           step(i, { error: result.error, step: "failed" });
@@ -328,26 +344,16 @@ export class Tasks {
               );
             });
           result.envId = env.id;
-          step(i, { step: "session" });
-          const meta: TaskMeta = {
-            task,
-            variant: i + 1,
-            of,
-            title,
-            ...(req.jira ? { jira: req.jira } : {}),
-            branch: worktree.branch,
-            ...(req.spec ? { spec: req.spec } : {}),
-          };
+          step(i, { envId: env.id, step: "session" });
           await this.startVariant(
             this.envs.opencodeClient(env.id),
+            { envId: env.id, n: i + 1, task },
             result,
             worktree.path,
-            meta,
             variantTitle(title, labels[i], of),
             req.variants[i],
             firstTurn(req)
           );
-          step(i, { sessionId: result.sessionId });
         } catch (error) {
           this.variantFailed(id, title, i, worktree.branch, result, error);
           step(i, { error: result.error, step: "failed" });
@@ -378,7 +384,7 @@ export class Tasks {
     this.envs.log(id, raw);
     const line = cleanLogLine(raw);
     if (line) {
-      this.deps.store.appendStartingLog(id, task, i + 1, line);
+      this.deps.store.appendStartingLog(task, i + 1, line);
     }
   }
 
@@ -440,14 +446,15 @@ export class Tasks {
   }
 
   /**
-   * Creates a variant's session (recorded on the result at once) and sends its first turn: the prompt, or for a
-   * spec-first variant an OpenSpec command, checked first so that a missing command leaves no session.
+   * Creates a variant's session (recorded on the result and the variant's row at once) and sends its first turn:
+   * the prompt, or for a spec-first variant an OpenSpec command, checked first so that a missing command leaves
+   * no session. The directory is claimed meanwhile, so that reconcile doesn't adopt the session as a manual task.
    */
   private async startVariant(
     client: OpencodeClient,
+    variant: { task: string; n: number; envId: string },
     result: TaskVariantResult,
     directory: string,
-    meta: TaskMeta,
     title: string,
     v: TaskVariantSpec,
     turn: { command?: string; text: string }
@@ -461,16 +468,28 @@ export class Tasks {
         );
       }
     }
-    const session = await client.createSession(directory, {
-      title,
-      ...(v.model ? { model: v.model } : {}),
-      ...(v.agent ? { agent: v.agent } : {}),
-      metadata: { opendevhub: meta },
-    });
-    result.sessionId = session.id;
+    const { task, n, envId } = variant;
+    const release = this.deps.tasks.claim(envId, directory);
+    try {
+      const session = await client.createSession(directory, {
+        title,
+        ...(v.model ? { model: v.model } : {}),
+        ...(v.agent ? { agent: v.agent } : {}),
+      });
+      result.sessionId = session.id;
+      this.deps.tasks.attachSession(
+        task,
+        n,
+        { directory, envId, sessionId: session.id },
+        variantActor(task, n)
+      );
+    } finally {
+      release();
+    }
+    const { sessionId } = result;
     await (command
-      ? client.command(session.id, command, turn.text, directory)
-      : client.prompt(session.id, turn.text, undefined, directory));
+      ? client.command(sessionId, command, turn.text, directory)
+      : client.prompt(sessionId, turn.text, undefined, directory));
   }
 
   private variantFailed(
@@ -494,9 +513,9 @@ export class Tasks {
   }
 
   /**
-   * Keeps one variant of a task. The others are marked discarded, which hides them; opencode replaces metadata as a
-   * whole, so each session's metadata is read and written back with `discarded` added. With `removeWorktrees`,
-   * their worktrees are removed with --force and their branches with -D, unless another session still uses one.
+   * Keeps one variant of a task. The others are recorded as discarded, which hides their sessions, and those still
+   * running are stopped. With `removeWorktrees`, their worktrees are removed with --force and their branches with
+   * -D, unless another session still uses one.
    */
   async pickVariant(
     id: ProjectId,
@@ -505,36 +524,35 @@ export class Tasks {
     removeWorktrees: boolean
   ): Promise<PickResult> {
     this.envs.requireProject(id);
-    const all = this.deps.store.sessionsOf(id);
-    const variants = all.filter((s) => s.task?.task === task);
-    const kept = variants.find((s) => s.id === keep);
-    if (!kept) {
+    const record = this.deps.tasks.get(task);
+    const kept = record?.variants.find((v) => v.sessionId === keep);
+    if (!record || record.projectId !== id || !kept) {
       throw new NotFoundError(keep, "variant");
     }
-    const clientOf = (s: SessionSummary) =>
-      this.envs.opencodeClient(s.envId ?? id);
     // A concurrent pick may have discarded this variant since the dashboard last saw it.
-    const result4 = await clientOf(kept).session(keep);
-    if (parseTaskMeta(result4.metadata)?.discarded) {
+    if (kept.discarded) {
       throw new InvalidRequestError("that variant was already discarded");
     }
-    const others = variants.filter((s) => s.id !== keep);
+    const all = this.deps.store.sessionsOf(id);
+    const others = all.filter((s) => s.task?.id === task && s.id !== keep);
+    const branchOf = new Map(
+      record.variants.flatMap((v) =>
+        v.sessionId && v.branch ? [[v.sessionId, v.branch] as const] : []
+      )
+    );
     const result: PickResult = { discarded: [], errors: [], removed: [] };
     const discard = async () => {
+      this.deps.tasks.pick(task, kept.n, USER);
       for (const s of others) {
+        result.discarded.push(s.id);
+        // A discarded variant must not keep running (or be force-removed mid-run).
+        if (s.status === "idle") {
+          continue;
+        }
         try {
-          const client = clientOf(s);
-          const raw = await client.session(s.id);
-          await client.updateSession(
-            s.id,
-            { metadata: discardMetadata(raw.metadata) },
-            s.directory
-          );
-          result.discarded.push(s.id);
-          // A discarded variant must not keep running (or be force-removed mid-run).
-          if (s.status !== "idle") {
-            await client.interrupt(s.id, s.directory);
-          }
+          await this.envs
+            .opencodeClient(s.envId ?? id)
+            .interrupt(s.id, s.directory);
         } catch (error) {
           result.errors.push(
             `${s.title}: ${error instanceof Error ? error.message : String(error)}`
@@ -593,7 +611,9 @@ export class Tasks {
         // Only delete a branch this task created: the worktree may have switched to another one since.
         const ours =
           wt.branch !== undefined &&
-          gone.some((s) => s.directory === dir && s.task?.branch === wt.branch);
+          gone.some(
+            (s) => s.directory === dir && branchOf.get(s.id) === wt.branch
+          );
         const rec = this.deps.store
           .environments(id)
           .find((e) => e.worktree.path === dir);

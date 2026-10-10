@@ -107,13 +107,7 @@ const webSessions: SessionSummary[] = [
     },
     projectId: "acme-web",
     status: "needs-permission",
-    task: {
-      branch: "feat/rate-limit",
-      task: "tsk_rate",
-      title: "Add burst limit to the login rate limiter",
-      variant: 1,
-      of: 1,
-    },
+    task: { discarded: false, id: "tsk_rate", kind: "task", n: 1 },
     title: "Add burst limit to the login rate limiter",
     tokens: 184_000,
     context: 61_000,
@@ -124,6 +118,7 @@ const webSessions: SessionSummary[] = [
     directory: WEB_ISOLATED_WORKTREE,
     envId: "acme-web-dark",
     id: "ses_run01",
+    task: { discarded: false, id: "tsk_dark", kind: "manual", n: 1 },
     model: { id: "claude-sonnet-5-5", providerID: "anthropic" },
     projectId: "acme-web",
     status: "running",
@@ -135,6 +130,7 @@ const webSessions: SessionSummary[] = [
     cost: 0.08,
     directory: WEB_WORKSPACE,
     id: "ses_form01",
+    task: { discarded: false, id: "tsk_form", kind: "manual", n: 1 },
     pending: {
       forms: [
         {
@@ -171,6 +167,7 @@ const webSessions: SessionSummary[] = [
     cost: 0.31,
     directory: WEB_WORKSPACE,
     id: "ses_idle01",
+    task: { discarded: false, id: "tsk_idle", kind: "manual", n: 1 },
     projectId: "acme-web",
     status: "idle",
     title: "Explain the session middleware",
@@ -270,11 +267,63 @@ export const webProject: ProjectView = {
     ],
   },
   sessions: webSessions,
-  starting: [
+  tasks: [
+    {
+      createdAt: ago(3 * HOUR),
+      id: "tsk_old",
+      kind: "manual",
+      state: "ended",
+      title: "Try the new eslint config",
+      variants: [
+        {
+          directory: WEB_WORKSPACE,
+          envId: "acme-web",
+          n: 1,
+          sessionId: "ses_gone01",
+          sessionRemoved: true,
+          step: "session",
+        },
+      ],
+    },
+    {
+      createdAt: ago(40 * MINUTE),
+      id: "tsk_rate",
+      kind: "task",
+      state: "running",
+      title: "Add burst limit to the login rate limiter",
+      variants: [
+        {
+          branch: "feat/rate-limit",
+          directory: WEB_WORKTREE,
+          envId: "acme-web",
+          model: { id: "claude-opus-5-5", providerID: "anthropic" },
+          n: 1,
+          sessionId: "ses_perm01",
+          step: "session",
+        },
+      ],
+    },
+    ...(
+      [
+        ["tsk_dark", "ses_run01", WEB_ISOLATED_WORKTREE, "acme-web-dark"],
+        ["tsk_form", "ses_form01", WEB_WORKSPACE, "acme-web"],
+        ["tsk_idle", "ses_idle01", WEB_WORKSPACE, "acme-web"],
+      ] as const
+    ).map(([id, sessionId, directory, envId]) => ({
+      createdAt: webSessions.find((x) => x.id === sessionId)?.updatedAt ?? 0,
+      id,
+      kind: "manual" as const,
+      state: "running" as const,
+      title: webSessions.find((x) => x.id === sessionId)?.title ?? "",
+      variants: [
+        { directory, envId, n: 1, sessionId, step: "session" as const },
+      ],
+    })),
     {
       createdAt: ago(MINUTE),
-      of: 2,
-      task: "tsk_search",
+      id: "tsk_search",
+      kind: "task",
+      state: "starting",
       title: "Add full-text search to the docs",
       variants: [
         {
@@ -283,8 +332,8 @@ export const webProject: ProjectView = {
             "Creating worktree feat/search-1",
             "Pulling image opendevhub/acme-web:4f1c2a",
           ],
+          n: 1,
           step: "image",
-          variant: 1,
         },
         {
           branch: "feat/search-2",
@@ -294,8 +343,8 @@ export const webProject: ProjectView = {
             "Starting container",
             "docker: no space left on device",
           ],
+          n: 2,
           step: "failed",
-          variant: 2,
         },
       ],
     },
@@ -357,17 +406,32 @@ export const apiProject: ProjectView = {
         : { id: "gpt-6", providerID: "openai" },
     projectId: "billing-api",
     status: variant === 1 ? "idle" : "running",
-    task: {
-      branch: variant === 1 ? "fix/invoice-rounding" : "fix/invoice-rounding-2",
-      task: "tsk_round",
-      title: "Fix invoice rounding for JPY",
-      variant,
-      of: 2,
-    },
+    task: { discarded: false, id: "tsk_round", kind: "task", n: variant },
     title: "Fix invoice rounding for JPY",
     tokens: 200_000 * variant,
     updatedAt: ago(variant * 20 * MINUTE),
   })),
+  tasks: [
+    {
+      createdAt: ago(HOUR),
+      id: "tsk_round",
+      kind: "task",
+      state: "running",
+      title: "Fix invoice rounding for JPY",
+      variants: [1, 2].map((n) => ({
+        branch: n === 1 ? "fix/invoice-rounding" : "fix/invoice-rounding-2",
+        directory: `/workspaces/.worktrees/billing-api/v${n}`,
+        envId: "billing-api",
+        model:
+          n === 1
+            ? { id: "claude-opus-5-5", providerID: "anthropic" }
+            : { id: "gpt-6", providerID: "openai" },
+        n,
+        sessionId: `ses_var0${n}`,
+        step: "session" as const,
+      })),
+    },
+  ],
 };
 
 export const stoppedProject: ProjectView = {
@@ -386,6 +450,7 @@ export const stoppedProject: ProjectView = {
     projectId: "legacy-cms",
   },
   sessions: [],
+  tasks: [],
 };
 
 export const brokenProject: ProjectView = {
@@ -406,6 +471,7 @@ export const brokenProject: ProjectView = {
     projectId: "ml-pipeline",
   },
   sessions: [],
+  tasks: [],
 };
 
 export const nodes: NodeView[] = [

@@ -4,10 +4,7 @@ import { MAX_VARIANTS } from "../../shared/tasks";
 import type {
   ModelRef,
   ModelsInfo,
-  SpecPhase,
-  TaskMeta,
   TaskRequest,
-  TaskSpec,
   TaskVariantSpec,
 } from "../../shared/types";
 import { InvalidRequestError, validateBranch } from "../git/worktrees";
@@ -179,110 +176,6 @@ export const parseTaskRequest = (
     variants,
   };
 };
-
-const SPEC_PHASES = new Set<string>(["propose", "implement", "archived"]);
-
-/** A spec-first task's phase; tasks from before phases wrote `spec: true`, which meant proposing. */
-const parseTaskSpec = (spec: unknown): TaskSpec | undefined => {
-  if (spec === true) {
-    return { phase: "propose" };
-  }
-  if (!spec || typeof spec !== "object") {
-    return undefined;
-  }
-  const { phase, change, archived, proposedIn, implementedIn } = spec as Record<
-    string,
-    unknown
-  >;
-  if (typeof phase !== "string" || !SPEC_PHASES.has(phase)) {
-    return undefined;
-  }
-  const taskId = (value: unknown) =>
-    typeof value === "string" && value.startsWith("tsk_") ? value : undefined;
-  const from = taskId(proposedIn);
-  const to = taskId(implementedIn);
-  return {
-    phase: phase as SpecPhase,
-    ...(typeof change === "string" && change ? { change } : {}),
-    ...(typeof archived === "string" && archived ? { archived } : {}),
-    ...(from ? { proposedIn: from } : {}),
-    ...(to ? { implementedIn: to } : {}),
-  };
-};
-
-/** The task a session belongs to, from `metadata.opendevhub`; undefined when it has none or it is malformed. */
-export const parseTaskMeta = (metadata: unknown): TaskMeta | undefined => {
-  if (!metadata || typeof metadata !== "object") {
-    return undefined;
-  }
-  const m = (metadata as { opendevhub?: unknown }).opendevhub;
-  if (!m || typeof m !== "object") {
-    return undefined;
-  }
-  const {
-    task,
-    variant,
-    of,
-    title,
-    branch,
-    discarded,
-    jira: rawJira,
-    spec,
-  } = m as Record<string, unknown>;
-  if (typeof task !== "string" || !task.startsWith("tsk_")) {
-    return undefined;
-  }
-  if (
-    typeof variant !== "number" ||
-    typeof of !== "number" ||
-    !Number.isInteger(variant) ||
-    !Number.isInteger(of)
-  ) {
-    return undefined;
-  }
-  if (variant < 1 || of < variant) {
-    return undefined;
-  }
-  let jira: JiraTaskSource | undefined;
-  try {
-    if (rawJira !== undefined) {
-      jira = parseJiraTaskSource(rawJira);
-    }
-  } catch {
-    /* Keep older task metadata usable. */
-  }
-  const taskSpec = parseTaskSpec(spec);
-  return {
-    task,
-    variant,
-    of,
-    ...(jira ? { jira } : {}),
-    title: typeof title === "string" ? title : "",
-    ...(typeof branch === "string" ? { branch } : {}),
-    ...(taskSpec ? { spec: taskSpec } : {}),
-    ...(discarded === true ? { discarded: true } : {}),
-  };
-};
-
-/** The session's metadata with `patch` merged into `opendevhub`. opencode's PATCH replaces metadata, so keep every key. */
-export const patchTaskMetadata = (
-  metadata: Record<string, unknown> | undefined,
-  patch: Partial<TaskMeta>
-): Record<string, unknown> => {
-  const own = metadata?.opendevhub;
-  return {
-    ...metadata,
-    opendevhub: {
-      ...(own && typeof own === "object" ? own : {}),
-      ...patch,
-    },
-  };
-};
-
-/** The session's metadata with `opendevhub.discarded` set. */
-export const discardMetadata = (
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> => patchTaskMetadata(metadata, { discarded: true });
 
 /** What the New task dialog may show. Copies named fields only: opencode's model info holds API keys. */
 export const toModelsInfo = (

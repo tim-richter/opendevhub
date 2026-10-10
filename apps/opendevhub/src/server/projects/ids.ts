@@ -18,6 +18,9 @@ export const projectId = (absPath: string): string => {
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/** What `newTaskId` makes. */
+export const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/u;
+
 /** `tsk_` plus a ULID: 10 characters of milliseconds, then 16 random ones, so ids sort by creation time. */
 export const newTaskId = (
   now = Date.now(),

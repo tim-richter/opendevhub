@@ -199,6 +199,9 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
     .delete("/api/projects/:id/tasks/:task/starting", (c) =>
       ok(c, (id) => hub.tasks.dismissStarting(id, c.req.param("task") ?? ""))
     )
+    .post("/api/projects/:id/tasks/:task/archive", (c) =>
+      ok(c, (id) => hub.tasks.archiveTask(id, c.req.param("task") ?? ""))
+    )
     .post(
       "/api/projects/:id/tasks/:task/pick",
       validateJson(bodies.pick),

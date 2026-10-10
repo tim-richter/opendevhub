@@ -12,6 +12,7 @@ import {
 } from "../../src/server/cli";
 import { loadConfig, saveConfig, saveState } from "../../src/server/config";
 import { StateStore } from "../../src/server/projects/state";
+import { memoryStores } from "../helpers/stores";
 
 describe(parseCli, () => {
   it("parses port and --no-open", () => {
@@ -88,6 +89,7 @@ describe(loadAndSaveStartupConfig, () => {
 describe(proxyTargets, () => {
   it("proxies to a running environment's opencode, main or task", () => {
     const store = new StateStore({
+      tasks: memoryStores().tasks,
       port: 7777,
       persisted: { projects: {} },
       persist: () => {},

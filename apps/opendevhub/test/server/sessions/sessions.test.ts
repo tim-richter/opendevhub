@@ -197,3 +197,90 @@ describe("responding", () => {
     ).rejects.toThrow(UnavailableError);
   });
 });
+
+describe("manual tasks", () => {
+  async function started() {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    return s;
+  }
+  const onlyTask = (s: Awaited<ReturnType<typeof started>>) => {
+    const tasks = s.tasks.listForProject(project.id);
+    expect(tasks).toHaveLength(1);
+    return tasks[0];
+  };
+
+  it("gives a session started in the main checkout a manual task, claiming the directory meanwhile", async () => {
+    const s = await started();
+    const claimed: boolean[] = [];
+    s.client.createSession.mockImplementationOnce(async (directory) => {
+      claimed.push(s.tasks.isClaimed(project.id, directory));
+      return { id: "ses_m", location: { directory } };
+    });
+    const id = await s.hub.sessions.startSession(
+      project.id,
+      "/workspaces/demo",
+      "Look around"
+    );
+    expect(id).toBe("ses_m");
+    expect(claimed).toStrictEqual([true]);
+    expect(s.tasks.isClaimed(project.id, "/workspaces/demo")).toBeFalsy();
+    expect(onlyTask(s)).toMatchObject({
+      createdAt: s.clock.now,
+      kind: "manual",
+      state: "running",
+      title: "Look around",
+      variants: [
+        {
+          directory: "/workspaces/demo",
+          envId: project.id,
+          n: 1,
+          sessionId: "ses_m",
+          step: "session",
+        },
+      ],
+    });
+    expect(onlyTask(s).variants[0].branch).toBeUndefined();
+  });
+
+  it("records the branch of a new worktree started with a session", async () => {
+    const s = await started();
+    const path = "/workspaces/demo.worktrees/feature-login";
+    s.worktrees.list.mockResolvedValue([{ branch: "feature/login", path }]);
+    await s.hub.checkouts.createWorktree(project.id, {
+      branch: "feature/login",
+      startSession: true,
+    });
+    expect(onlyTask(s)).toMatchObject({
+      kind: "manual",
+      title: "feature/login",
+      variants: [{ branch: "feature/login", directory: path }],
+    });
+  });
+
+  it("gives a new session made to generate text a manual task, but not a reused one", async () => {
+    const s = await started();
+    const { sessionId } = await s.hub.sessions.generateIn(
+      project.id,
+      "/workspaces/demo",
+      "Write a commit message",
+      { title: "Commit message" }
+    );
+    expect(onlyTask(s)).toMatchObject({
+      kind: "manual",
+      title: "Commit message",
+      variants: [{ sessionId }],
+    });
+  });
+
+  it("leaves no task or claim behind when opencode refuses the session", async () => {
+    const s = await started();
+    s.client.createSession.mockRejectedValueOnce(new Error("down"));
+    await expect(
+      s.hub.sessions.startSession(project.id, "/workspaces/demo")
+    ).rejects.toThrow("down");
+    expect(s.tasks.listForProject(project.id)).toStrictEqual([]);
+    expect(s.tasks.isClaimed(project.id, "/workspaces/demo")).toBeFalsy();
+  });
+});

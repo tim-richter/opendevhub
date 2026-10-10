@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PersistedState } from "../../../src/server/config";
 import { StateStore } from "../../../src/server/projects/state";
 import type { Project, SessionSummary } from "../../../src/shared/types";
+import { memoryStores } from "../../helpers/stores";
 
 const p = (id: string): Project => ({
   id,
@@ -22,6 +23,7 @@ const session: SessionSummary = {
 function make(persisted: PersistedState = { projects: {} }) {
   const saved: PersistedState[] = [];
   const store = new StateStore({
+    tasks: memoryStores().tasks,
     port: 7777,
     persisted,
     persist: (s) => saved.push(structuredClone(s)),
@@ -298,6 +300,7 @@ describe("usage", () => {
 
   it("publishes nodes in the snapshot and skips no-op updates", () => {
     const store = new StateStore({
+      tasks: memoryStores().tasks,
       port: 7777,
       persisted: { projects: {} },
       persist: () => {},
@@ -323,6 +326,7 @@ describe("usage", () => {
     };
     const saved: PersistedState[] = [];
     const store = new StateStore({
+      tasks: memoryStores().tasks,
       port: 7777,
       persisted: { projects: {} },
       persist: (s) => saved.push(structuredClone(s)),
@@ -366,6 +370,7 @@ describe("usage", () => {
     ]);
 
     const again = new StateStore({
+      tasks: memoryStores().tasks,
       port: 7777,
       persisted: saved.at(-1)!,
       persist: () => {},
@@ -373,31 +378,33 @@ describe("usage", () => {
     expect(again.environment("demo-abc123-fix-1a2b")?.node).toBe("box");
   });
 
-  describe("starting tasks", () => {
+  describe("tasks", () => {
     const project = {
       id: "demo-abc123",
       name: "demo",
       path: "/src/demo",
       devcontainerPath: "/src/demo/.devcontainer/devcontainer.json",
     };
+    const T1 = "tsk_01JA0000000000000000000001";
     const setupStore = () => {
+      const dbs = memoryStores(() => 5);
+      dbs.projects.upsertAll([project]);
       const store = new StateStore({
+        tasks: dbs.tasks,
         port: 7777,
         persisted: { projects: {} },
         persist: () => {},
       });
       store.setProjects([project]);
-      store.putStarting(project.id, {
-        task: "tsk_1",
-        title: "Fix login",
-        of: 2,
+      dbs.tasks.createTask({
         createdAt: 5,
-        variants: [
-          { variant: 1, step: "queued", log: [] },
-          { variant: 2, node: "box", step: "queued", log: [] },
-        ],
+        id: T1,
+        projectId: project.id,
+        prompt: "Fix login",
+        title: "Fix login",
+        variants: [{}, { node: "box" }],
       });
-      return store;
+      return { store, tasks: dbs.tasks };
     };
     const session = (id: string): SessionSummary => ({
       id,
@@ -406,69 +413,82 @@ describe("usage", () => {
       directory: "/workspaces/demo.worktrees/fix-login",
       status: "running",
       updatedAt: 1,
-      pending: { permissions: [], forms: [] },
     });
 
-    it("shows a starting task's variants until their sessions appear", () => {
-      const store = setupStore();
-      store.updateStarting(project.id, "tsk_1", 1, {
-        step: "worktree",
-        branch: "fix-login",
-      });
-      expect(
-        store.snapshot().projects[0].starting?.[0].variants[0]
-      ).toMatchObject({ step: "worktree", branch: "fix-login" });
-      store.updateStarting(project.id, "tsk_1", 1, {
-        step: "session",
-        sessionId: "ses_1",
-      });
-      expect(store.snapshot().projects[0].starting?.[0].variants).toHaveLength(
-        2
+    it("lists the project's tasks from the database, and emits when they change", () => {
+      const { store, tasks } = setupStore();
+      const heard = vi.fn();
+      store.subscribe(heard);
+      tasks.updateVariant(
+        T1,
+        1,
+        { branch: "fix-login", step: "worktree" },
+        { id: `${T1}/1`, type: "variant" }
       );
-      store.setSessions(project.id, [session("ses_1")]);
-      expect(
-        store
-          .snapshot()
-          .projects[0].starting?.[0].variants.map((v) => v.variant)
-      ).toStrictEqual([2]);
-      store.updateStarting(project.id, "tsk_1", 2, {
-        step: "session",
-        sessionId: "ses_2",
+      expect(heard).toHaveBeenCalledTimes(1);
+      const [task] = store.snapshot().projects[0].tasks;
+      expect(task).toStrictEqual({
+        createdAt: 5,
+        id: T1,
+        kind: "task",
+        state: "starting",
+        title: "Fix login",
+        variants: [
+          { branch: "fix-login", n: 1, step: "worktree" },
+          { n: 2, node: "box", step: "queued" },
+        ],
       });
-      store.setSessions(project.id, [session("ses_1"), session("ses_2")]);
-      expect(store.snapshot().projects[0].starting).toBeUndefined();
     });
 
-    it("keeps the last 30 log lines of each variant", () => {
-      const store = setupStore();
-      for (let i = 0; i < 35; i++) {
-        store.appendStartingLog(project.id, "tsk_1", 2, `line ${i}`);
+    it("gives each session its task and hides discarded variants' sessions", () => {
+      const { store, tasks } = setupStore();
+      for (const n of [1, 2]) {
+        tasks.attachSession(
+          T1,
+          n,
+          { directory: "/w", envId: project.id, sessionId: `ses_${n}` },
+          { id: `${T1}/${n}`, type: "variant" }
+        );
       }
-      const { log } = store.snapshot().projects[0].starting![0].variants[1];
+      store.setSessions(project.id, [session("ses_1"), session("ses_2")]);
+      expect(store.sessionsOf(project.id).map((s) => s.task)).toStrictEqual([
+        { discarded: false, id: T1, kind: "task", n: 1 },
+        { discarded: false, id: T1, kind: "task", n: 2 },
+      ]);
+      expect(store.taskOf("ses_2")).toBe(T1);
+      tasks.pick(T1, 2);
+      expect(store.sessionsOf(project.id).map((s) => s.id)).toStrictEqual([
+        "ses_2",
+      ]);
+      expect(
+        store.snapshot().projects[0].tasks[0].variants[0].discarded
+      ).toBeTruthy();
+    });
+
+    it("shows the last 30 setup lines of a variant while it starts", () => {
+      const { store, tasks } = setupStore();
+      for (let i = 0; i < 35; i++) {
+        store.appendStartingLog(T1, 2, `line ${i}`);
+      }
+      const log = store.snapshot().projects[0].tasks[0].variants[1].log ?? [];
       expect(log).toHaveLength(30);
       expect(log[0]).toBe("line 5");
       expect(log.at(-1)).toBe("line 34");
+      tasks.attachSession(
+        T1,
+        2,
+        { directory: "/w", envId: project.id, sessionId: "ses_2" },
+        { id: `${T1}/2`, type: "variant" }
+      );
+      expect(
+        store.snapshot().projects[0].tasks[0].variants[1].log
+      ).toBeUndefined();
     });
 
-    it("dismisses the variants that are done, and the task once none is left", () => {
-      const store = setupStore();
-      store.updateStarting(project.id, "tsk_1", 1, {
-        step: "failed",
-        error: "boom",
-      });
-      expect(store.dismissStarting(project.id, "tsk_1")).toBeTruthy();
-      expect(
-        store
-          .snapshot()
-          .projects[0].starting?.[0].variants.map((v) => v.variant)
-      ).toStrictEqual([2]);
-      store.updateStarting(project.id, "tsk_1", 2, {
-        step: "failed",
-        error: "unreachable",
-      });
-      store.dismissStarting(project.id, "tsk_1");
-      expect(store.snapshot().projects[0].starting).toBeUndefined();
-      expect(store.dismissStarting(project.id, "tsk_1")).toBeFalsy();
+    it("leaves archived tasks out of the snapshot", () => {
+      const { store, tasks } = setupStore();
+      tasks.archive(T1);
+      expect(store.snapshot().projects[0].tasks).toStrictEqual([]);
     });
   });
 });

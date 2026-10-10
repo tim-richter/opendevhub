@@ -11,8 +11,11 @@ import type {
   Project,
   ProjectId,
   SessionCleanupItem,
+  TaskCleanupItem,
   Worktree,
 } from "../../shared/types";
+import { USER } from "../db/events";
+import type { TaskStore } from "../db/tasks";
 import type {
   ContainerInfo,
   Containers,
@@ -23,7 +26,6 @@ import { BusyError } from "../errors";
 import type { RawSession } from "../opencode/client";
 import type { StateStore } from "../projects/state";
 import { rollUp, rootOf } from "../sessions/status";
-import { parseTaskMeta } from "../tasks/request";
 import type { CleanupTargets } from "./cleanup-targets";
 import type { BranchRef, GitOps } from "./ops";
 import { InvalidRequestError } from "./worktrees";
@@ -320,6 +322,8 @@ export interface StaleSessionsInput {
   workspace: string;
   /** Current linked worktree paths; unknown means no session counts as of a removed worktree. */
   worktrees?: string[];
+  /** Whether a session's task variant was discarded, from the variant's row. */
+  discarded?: (sessionId: string) => boolean;
   now: number;
 }
 
@@ -342,7 +346,7 @@ export const staleSessions = (
     const updatedAt = trees.get(s.id)?.updatedAt ?? s.time.updated;
     const idleDays = Math.floor((input.now - updatedAt) / (24 * 60 * 60_000));
     let why;
-    if (parseTaskMeta(s.metadata)?.discarded) {
+    if (input.discarded?.(s.id)) {
       why = "discarded" as const;
     } else if (
       input.worktrees &&
@@ -380,6 +384,32 @@ export const staleSessions = (
   return items;
 };
 
+/** Ended tasks nothing has happened to for as long as an idle session, offered for archiving. */
+export const staleTasks = (
+  projectId: ProjectId,
+  tasks: Pick<TaskStore, "listForProject" | "lastActivity">,
+  now: number
+): TaskCleanupItem[] =>
+  tasks.listForProject(projectId).flatMap((t) => {
+    const last = tasks.lastActivity(t.id) ?? t.createdAt;
+    if (t.state !== "ended" || now - last < IDLE_SESSION_MS) {
+      return [];
+    }
+    const days = Math.floor((now - last) / (24 * 60 * 60_000));
+    return [
+      {
+        checked: true,
+        id: `task:${projectId}:${t.id}`,
+        kind: "task" as const,
+        lastActivity: last,
+        projectId,
+        reason: `ended, nothing happened for ${days} days`,
+        taskId: t.id,
+        title: t.title,
+      },
+    ];
+  });
+
 /** opendevhub's base images by name, and the UID images built on them by label. */
 export const CLEANUP_IMAGE_FILTERS = [
   `reference=${BASE_REPO}*`,
@@ -398,6 +428,11 @@ export interface CleanupDeps {
   branches: Pick<
     CleanupTargets,
     "cleanupScan" | "cleanupBranch" | "cleanupSessionScan" | "cleanupSession"
+  >;
+  /** Ended tasks to offer for archiving; none are offered without it. */
+  tasks?: Pick<
+    TaskStore,
+    "listForProject" | "lastActivity" | "get" | "archive"
   >;
   /** Writes a line to a project's log. */
   log: (projectId: ProjectId, line: string) => void;
@@ -434,7 +469,10 @@ export class Cleanup {
     };
   }
 
-  /** Removes the selected items: branches, then sessions, then containers, then images, each re-checked first. */
+  /**
+   * Removes the selected items: branches, then sessions, then containers, then images, each re-checked first. Tasks
+   * are archived last.
+   */
   async apply(items: CleanupItem[]): Promise<CleanupResult> {
     if (this.applying) {
       throw new BusyError("cleanup");
@@ -488,6 +526,11 @@ export class Cleanup {
           results.push({ id: item.id, ...outcome });
         }
       }
+      for (const item of items) {
+        if (item.kind === "task") {
+          results.push({ id: item.id, ...this.archiveTask(item) });
+        }
+      }
       return { freedBytes, results };
     } finally {
       this.applying = false;
@@ -498,11 +541,14 @@ export class Cleanup {
     p: Project
   ): Promise<{ summary: CleanupProject; items: CleanupItem[] }> {
     const summary: CleanupProject = { id: p.id, name: p.name };
+    // Tasks live in the database, so they are offered whether or not the container runs.
+    const items: CleanupItem[] = this.deps.tasks
+      ? staleTasks(p.id, this.deps.tasks, this.now())
+      : [];
     if (this.deps.store.runtime(p.id).containerState !== "running") {
-      return { items: [], summary: { ...summary, skipped: "not running" } };
+      return { items, summary: { ...summary, skipped: "not running" } };
     }
     const warnings: string[] = [];
-    const items: CleanupItem[] = [];
     try {
       const r = await this.deps.branches.cleanupScan(p.id);
       if (r.warning) {
@@ -586,6 +632,26 @@ export class Cleanup {
           `cleanup: could not remove session ${item.sessionId}: ${message(error)}`
         );
       }
+      return { message: message(error), outcome: "failed" };
+    }
+  }
+
+  /** Archives a scanned task, if it is still ended and not archived. */
+  private archiveTask(item: TaskCleanupItem): CleanupOutcome {
+    const task = this.deps.tasks?.get(item.taskId);
+    if (
+      !task ||
+      task.projectId !== item.projectId ||
+      task.archivedAt !== undefined ||
+      task.state !== "ended"
+    ) {
+      return { message: "no longer an ended task", outcome: "skipped" };
+    }
+    try {
+      this.deps.tasks?.archive(item.taskId, USER);
+      this.deps.log(item.projectId, `cleanup: archived task ${task.title}`);
+      return { message: "archived", outcome: "removed" };
+    } catch (error) {
       return { message: message(error), outcome: "failed" };
     }
   }
@@ -701,6 +767,20 @@ export const parseCleanupItems = (value: unknown): CleanupItem[] => {
         directory: "",
         updatedAt: 0,
         why: "idle",
+      };
+    }
+    if (o.kind === "task") {
+      const projectId = field(o, "projectId");
+      const taskId = field(o, "taskId");
+      return {
+        checked: true,
+        id: `task:${projectId}:${taskId}`,
+        kind: "task",
+        lastActivity: 0,
+        projectId,
+        reason: "",
+        taskId,
+        title: "",
       };
     }
     throw new InvalidRequestError(

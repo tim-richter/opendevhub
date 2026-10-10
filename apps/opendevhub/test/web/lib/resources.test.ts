@@ -31,6 +31,7 @@ const env = (id: string, path: string): EnvironmentView =>
   }) as EnvironmentView;
 
 const view: ProjectView = {
+  tasks: [],
   project: {
     id: "p",
     name: "demo",

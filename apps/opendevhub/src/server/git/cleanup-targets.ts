@@ -193,6 +193,8 @@ export class CleanupTargets {
       busy: new Set([...active, ...waiting]),
       workspace,
       ...(worktrees ? { worktrees } : {}),
+      discarded: (id) =>
+        this.deps.tasks.bySession(id)?.variant.discarded === true,
       now: (this.deps.now ?? Date.now)(),
     });
   }

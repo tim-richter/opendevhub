@@ -22,7 +22,7 @@ import type {
   SpecArtifact,
   SpecChange,
   SpecPhase,
-  TaskSpec,
+  TaskView,
 } from "../../../shared/types";
 import { MarkdownBody } from "../../components/markdown-body";
 import type { MarkdownBlock } from "../../components/markdown-body";
@@ -292,7 +292,7 @@ export const SpecPanel = (props: {
   /** The checkout is a worktree of its own, so the change can be implemented in new ones to compare models. */
   worktree?: boolean;
   /** The task that implements this checkout's change in new worktrees, or that proposed the change this one implements. */
-  links?: Pick<TaskSpec, "implementedIn" | "proposedIn">;
+  links?: { implementedIn?: string; proposedIn?: string };
 }) => {
   const { implementedIn, proposedIn } = props.links ?? {};
   const [picked, setPicked] = useState<string>();
@@ -424,6 +424,8 @@ const TaskLink = (props: {
 /** A spec-first task's Spec section: one tab per variant's checkout. */
 export const SpecSection = (props: {
   projectId: string;
+  /** The task the sessions are variants of: their phases and its links. */
+  task: TaskView;
   sessions: SessionSummary[];
   /** Each checkout's changes, by directory. */
   reviews?: Record<string, ReviewData | null>;
@@ -431,7 +433,8 @@ export const SpecSection = (props: {
   const { sessions } = props;
   const [directory, setDirectory] = useState<string>();
   const shown = sessions.find((s) => s.directory === directory) ?? sessions[0];
-  const phase = shown?.task?.spec?.phase;
+  const variant = props.task.variants.find((v) => v.sessionId === shown?.id);
+  const phase = variant?.spec?.phase;
   if (!shown || !phase) {
     return null;
   }
@@ -460,8 +463,8 @@ export const SpecSection = (props: {
         phase={phase}
         busy={shown.status !== "idle"}
         checkout={props.reviews?.[shown.directory]}
-        worktree={shown.task?.branch !== undefined}
-        links={shown.task?.spec}
+        worktree={variant?.branch !== undefined}
+        links={props.task.spec}
       />
     </Section>
   );

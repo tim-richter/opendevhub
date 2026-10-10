@@ -74,7 +74,10 @@ export interface DashboardHub {
     | "publishSuggestion"
     | "publish"
   >;
-  tasks: Pick<Tasks, "startTask" | "dismissStarting" | "pickVariant">;
+  tasks: Pick<
+    Tasks,
+    "startTask" | "dismissStarting" | "archiveTask" | "pickVariant"
+  >;
 }
 
 export type PushPort = Pick<

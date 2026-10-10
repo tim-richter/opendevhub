@@ -2,6 +2,8 @@ import type {
   ProjectView,
   PublicRuntime,
   SessionSummary,
+  TaskKind,
+  TaskState,
   Worktree,
 } from "../../../shared/types";
 import {
@@ -131,56 +133,43 @@ export const checkoutTone = (view: ProjectView, directory: string): Tone => {
 export interface ProjectTask {
   task: string;
   title: string;
-  /** Variants still listed; some may have been discarded. */
+  kind: TaskKind;
+  state: TaskState;
   variants: number;
   attention: boolean;
   running: boolean;
   updatedAt: number;
-  /** Some variants are still being set up. */
-  starting?: true;
 }
 
 /**
- * Tasks with several variants (they span worktrees, so they live at project level), and tasks still being set
- * up, most recent first.
+ * The tasks the overview lists: tasks with several variants (they span worktrees, so they live at project level),
+ * tasks still being set up, and ended tasks of any kind, waiting to be archived. Most recent first. A running task
+ * with one variant shows as its session, in its checkout.
  */
-export const projectTasks = (view: ProjectView): ProjectTask[] => {
-  const out = new Map<string, ProjectTask>();
-  for (const s of view.sessions) {
-    if (!s.task || s.task.of < 2) {
-      continue;
-    }
-    const t = out.get(s.task.task) ?? {
-      attention: false,
-      running: false,
-      task: s.task.task,
-      title: s.task.title,
-      updatedAt: 0,
-      variants: 0,
-    };
-    t.variants += 1;
-    t.attention ||= needsAttention(s.status);
-    t.running ||= s.status === "running";
-    t.updatedAt = Math.max(t.updatedAt, s.updatedAt);
-    out.set(t.task, t);
-  }
-  for (const s of view.starting ?? []) {
-    const t = out.get(s.task) ?? {
-      attention: false,
-      running: false,
-      task: s.task,
-      title: s.title,
-      updatedAt: s.createdAt,
-      variants: 0,
-    };
-    t.variants = Math.max(t.variants, s.of);
-    t.attention ||= s.variants.some((v) => v.step === "failed");
-    t.running ||= s.variants.some((v) => v.step !== "failed");
-    t.starting = true;
-    out.set(t.task, t);
-  }
-  return [...out.values()].toSorted((a, b) => b.updatedAt - a.updatedAt);
-};
+export const projectTasks = (view: ProjectView): ProjectTask[] =>
+  view.tasks
+    .filter(
+      (t) =>
+        t.state !== "running" || (t.kind === "task" && t.variants.length > 1)
+    )
+    .map((t) => {
+      const sessions = view.sessions.filter((s) => s.task?.id === t.id);
+      return {
+        attention:
+          sessions.some((s) => needsAttention(s.status)) ||
+          t.variants.some((v) => v.step === "failed" && !v.discarded),
+        kind: t.kind,
+        running:
+          t.state === "starting" ||
+          sessions.some((s) => s.status === "running"),
+        state: t.state,
+        task: t.id,
+        title: t.title,
+        updatedAt: Math.max(t.createdAt, ...sessions.map((s) => s.updatedAt)),
+        variants: t.variants.length,
+      };
+    })
+    .toSorted((a, b) => b.updatedAt - a.updatedAt);
 
 /** Where the project tabs of earlier versions went. */
 export const legacyPath = (

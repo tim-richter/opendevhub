@@ -15,7 +15,7 @@ import type { HubDeps } from "../environments/ports";
 import { AlreadyAnsweredError, NotFoundError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import { isGone, isInvalidAnswer } from "../opencode/client";
-import type { OpencodeClient } from "../opencode/client";
+import type { OpencodeClient, RawSession } from "../opencode/client";
 import { OPENSPEC_CLI_CHECK, specWorkflow } from "../tasks/openspec";
 import { toModelsInfo } from "../tasks/request";
 import {
@@ -58,7 +58,13 @@ export class Sessions {
     this.envs.checkDirectory(id, directory);
     const env = this.envs.envForDirectory(project, directory);
     const client = this.envs.opencodeClient(env.id);
-    const session = await client.createSession(directory, { title });
+    const session = await this.createManual(
+      project,
+      env.id,
+      client,
+      directory,
+      title
+    );
     if (prompt?.trim()) {
       await client.prompt(session.id, prompt, undefined, directory);
     }
@@ -95,9 +101,13 @@ export class Sessions {
     }
     const env = this.envs.envForDirectory(project, directory);
     const client = this.envs.opencodeClient(env.id);
-    const session = await client.createSession(directory, {
-      title: options.title,
-    });
+    const session = await this.createManual(
+      project,
+      env.id,
+      client,
+      directory,
+      options.title
+    );
     this.envs.reconcile(env.id);
     const text = await client.generate(
       session.id,
@@ -106,6 +116,46 @@ export class Sessions {
       options.timeoutMs
     );
     return { sessionId: session.id, text };
+  }
+
+  /**
+   * Creates a session outside a task and its manual task, before anything reconciles the environment: the directory
+   * is claimed meanwhile, so that reconcile doesn't adopt the session first.
+   */
+  private async createManual(
+    project: Project,
+    envId: EnvId,
+    client: OpencodeClient,
+    directory: string,
+    title: string | undefined
+  ): Promise<RawSession> {
+    const { tasks, store } = this.deps;
+    const release = tasks.claim(envId, directory);
+    try {
+      const session = await client.createSession(directory, { title });
+      const ws = this.envs.workspaceFolder(project);
+      const branch =
+        directory === ws
+          ? undefined
+          : (store.environment(envId)?.worktree.branch ??
+            store
+              .runtime(project.id)
+              .worktrees?.find((w) => w.path === directory)?.branch);
+      tasks.startManual({
+        branch,
+        createdAt:
+          (session.time as RawSession["time"] | undefined)?.created ??
+          (this.deps.now ?? Date.now)(),
+        directory,
+        envId,
+        projectId: project.id,
+        sessionId: session.id,
+        title: session.title?.trim() || title?.trim() || "Untitled session",
+      });
+      return session;
+    } finally {
+      release();
+    }
   }
 
   /** Deletes one of the project's sessions with its subagents, stopping it first when it isn't idle. */

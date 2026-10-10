@@ -20,6 +20,9 @@ import {
 } from "./config";
 import type { Config } from "./config";
 import { createDashboardApp } from "./dashboard-api";
+import { openStateDatabase } from "./db/database";
+import { ProjectStore } from "./db/projects";
+import { TaskStore } from "./db/tasks";
 import { Checks } from "./environments/checks";
 import { Containers } from "./environments/containers";
 import { Credentials } from "./environments/credentials";
@@ -242,10 +245,16 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const config = loadAndSaveStartupConfig(dir, opts);
   // Edited in Settings; the scans below read the current list.
   let roots = config.roots ?? [];
+  const db = openStateDatabase(stateDir());
+  const projects = new ProjectStore(db);
+  const tasks = new TaskStore(db);
+  // The jobs that were setting these variants up died with the previous process.
+  tasks.failInterrupted();
   const store = new StateStore({
     persist: (s) => saveState(dir, s),
     persisted: loadState(dir),
     port: config.port,
+    tasks,
   });
   store.setRoots(roots);
   const nodes = new Nodes({
@@ -277,6 +286,8 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const git = new GitOps({ containers });
   const hub = createHub({
     store,
+    projects,
+    tasks,
     containers,
     runtime,
     forwarder: new PortForwarder(),
@@ -319,6 +330,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     containers,
     log: (id, line) => hub.environments.note(id, line),
     store,
+    tasks,
   });
   const checks = new Checks({
     containers,
@@ -338,6 +350,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     log: (id, line) => hub.environments.note(id, line),
     reconcile: (envId) => hub.environments.reconcile(envId),
     sessions: (id) => store.sessionsOf(id),
+    tasks,
     startTask: (id, body, spec) => hub.tasks.startTask(id, body, spec),
     target: (id, directory) => hub.checkouts.checkTarget(id, directory),
   });
@@ -414,6 +427,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     await nodes.close();
     usage?.close();
     await server.close();
+    db.close();
     process.exit(0);
   };
   process.once("SIGINT", () => void shutdown());

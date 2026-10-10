@@ -7,23 +7,47 @@ import type {
   SpecWorkflow,
   StartStep,
   TaskResult,
+  TaskView,
+  VariantView,
 } from "../../../shared/types";
 import { workspaceFolderOf } from "../../derive";
 
-/** The task's sessions in variant order. Discarded variants never reach the dashboard. */
+export const taskOf = (view: ProjectView, task: string): TaskView | undefined =>
+  view.tasks.find((t) => t.id === task);
+
+/** The task a session belongs to, with the session's variant. */
+export const variantOf = (
+  view: ProjectView,
+  session: SessionSummary
+): { task: TaskView; variant: VariantView } | undefined => {
+  const ref = session.task;
+  const task = ref && taskOf(view, ref.id);
+  const variant = task?.variants.find((v) => v.n === ref?.n);
+  return task && variant ? { task, variant } : undefined;
+};
+
+/** The task's sessions in variant order. Discarded variants' sessions never reach the dashboard. */
 export const taskSessions = (
   view: ProjectView,
   task: string
 ): SessionSummary[] =>
   view.sessions
-    .filter((s) => s.task?.task === task)
-    .toSorted((a, b) => (a.task?.variant ?? 0) - (b.task?.variant ?? 0));
+    .filter((s) => s.task?.id === task)
+    .toSorted((a, b) => (a.task?.n ?? 0) - (b.task?.n ?? 0));
+
+/** Variants still being set up, or that failed to and weren't dismissed. */
+export const startingVariants = (task: TaskView): VariantView[] =>
+  task.variants.filter(
+    (v) => !v.discarded && (v.step === "failed" || !v.sessionId)
+  );
+
+/** Variants whose session is gone from opencode, picks and discards aside. */
+export const endedVariants = (task: TaskView): VariantView[] =>
+  task.variants.filter((v) => v.sessionRemoved && !v.discarded);
 
 /** A variant's short name: its model, or its number. */
 export const variantName = (session: SessionSummary): string =>
-  session.model
-    ? modelShortName(session.model)
-    : `#${session.task?.variant ?? 1}`;
+  session.model ? modelShortName(session.model) : `#${session.task?.n ?? 1}`;
 
 export const formatCost = (usd: number | undefined): string => {
   if (usd === undefined) {
@@ -107,6 +131,7 @@ export const removals = (
 ): Removal[] => {
   const ws = workspaceFolderOf(view);
   const others = taskSessions(view, task).filter((s) => s.id !== keep);
+  const branchOf = (s: SessionSummary) => variantOf(view, s)?.variant.branch;
   const inUse = new Set(
     view.sessions.filter((s) => !others.includes(s)).map((s) => s.directory)
   );
@@ -120,7 +145,7 @@ export const removals = (
       const ours =
         worktree.branch === undefined ||
         others.some(
-          (s) => s.directory === d && s.task?.branch === worktree.branch
+          (s) => s.directory === d && branchOf(s) === worktree.branch
         );
       return [
         {
@@ -169,24 +194,30 @@ export const pickPrompts = (
   };
 };
 
-/** The task chip on a session row; it links to the task page when the task has several variants. */
+/**
+ * The task chip on a session row; it links to the task page when the task has several variants. A manual task is
+ * the session itself, so it gets none.
+ */
 export const taskChip = (
   view: ProjectView,
   s: SessionSummary
 ):
   | { label: string; title: string; to?: string; model?: string }
   | undefined => {
-  if (!s.task) {
+  const found = variantOf(view, s);
+  if (!found || found.task.kind === "manual") {
     return undefined;
   }
-  const title = `Task: ${s.task.title}`;
-  if (s.task.of === 1) {
+  const { task, variant } = found;
+  const title = `Task: ${task.title}`;
+  const of = task.variants.length;
+  if (of === 1) {
     return { label: "task", title };
   }
   return {
-    label: `task ${s.task.variant}/${s.task.of}`,
+    label: `task ${variant.n}/${of}`,
     title,
-    to: `/p/${encodeURIComponent(view.project.id)}/t/${encodeURIComponent(s.task.task)}`,
+    to: taskPath(view.project.id, task.id),
     ...(s.model ? { model: modelShortName(s.model) } : {}),
   };
 };

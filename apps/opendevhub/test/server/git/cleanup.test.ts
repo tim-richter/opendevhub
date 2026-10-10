@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SYSTEM } from "../../../src/server/db/events";
 import type {
   ContainerInfo,
   ImageInfo,
@@ -13,6 +14,7 @@ import {
   scanBranches,
   staleDocker,
   staleSessions,
+  staleTasks,
 } from "../../../src/server/git/cleanup";
 import type { BranchGit } from "../../../src/server/git/cleanup";
 import type { BranchRef } from "../../../src/server/git/ops";
@@ -27,6 +29,7 @@ import type {
   Worktree,
 } from "../../../src/shared/types";
 import { rawSession } from "../../helpers/fake-opencode";
+import { memoryStores } from "../../helpers/stores";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const OLD = NOW - 2 * FRESH_IMAGE_MS;
@@ -446,7 +449,11 @@ function service(
     running?: boolean;
   } = {}
 ) {
+  const clock = { now: NOW };
+  const dbs = memoryStores(() => clock.now);
+  dbs.projects.upsertAll([project]);
   const store = new StateStore({
+    tasks: dbs.tasks,
     port: 0,
     persisted: { projects: {} },
     persist: () => {},
@@ -499,10 +506,20 @@ function service(
     store,
     containers,
     branches,
+    tasks: dbs.tasks,
     log,
     now: () => NOW,
   });
-  return { cleanup, containers, branches, log, store, order };
+  return {
+    cleanup,
+    containers,
+    branches,
+    log,
+    store,
+    order,
+    clock,
+    tasks: dbs.tasks,
+  };
 }
 const branchItem: BranchCleanupItem = {
   id: "branch:demo:feat",
@@ -760,6 +777,93 @@ describe("Cleanup.apply", () => {
   });
 });
 
+describe("ended tasks", () => {
+  const DAY_MS = 24 * 60 * 60_000;
+  /** A one-variant task whose session went away at `endedAt`; `null` leaves it running. */
+  const taskEndedAt = (
+    s: ReturnType<typeof service>,
+    id: string,
+    endedAt: number | null
+  ) => {
+    s.clock.now = NOW - 60 * DAY_MS;
+    s.tasks.createTask({
+      createdAt: s.clock.now,
+      id,
+      projectId: project.id,
+      prompt: id,
+      title: `Task ${id}`,
+      variants: [{}],
+    });
+    s.tasks.attachSession(
+      id,
+      1,
+      { directory: "/w", envId: id, sessionId: `ses_${id}` },
+      SYSTEM
+    );
+    if (endedAt !== null) {
+      s.clock.now = endedAt;
+      s.tasks.markSessionsGone(id, new Set());
+    }
+    s.clock.now = NOW;
+  };
+
+  it("offers ended tasks idle past the session cutoff, even for a stopped project", async () => {
+    const s = service({ running: false });
+    taskEndedAt(s, "tsk_old", NOW - 40 * DAY_MS);
+    taskEndedAt(s, "tsk_recent", NOW - DAY_MS);
+    taskEndedAt(s, "tsk_live", null);
+    const plan = await s.cleanup.scan();
+    expect(
+      plan.items
+        .filter((i) => i.kind === "task")
+        .map((i) => [i.id, i.checked, i.reason])
+    ).toStrictEqual([
+      [
+        `task:${project.id}:tsk_old`,
+        true,
+        "ended, nothing happened for 40 days",
+      ],
+    ]);
+  });
+
+  it("archives a selected task that is still ended, and skips one that isn't", async () => {
+    const s = service();
+    taskEndedAt(s, "tsk_old", NOW - 40 * DAY_MS);
+    const [item] = staleTasks(project.id, s.tasks, NOW);
+    const forged = { ...item, id: "task:x", taskId: "tsk_nope" };
+    const result = await s.cleanup.apply([item, forged]);
+    expect(result.results).toStrictEqual([
+      { id: item.id, message: "archived", outcome: "removed" },
+      { id: "task:x", message: "no longer an ended task", outcome: "skipped" },
+    ]);
+    expect(s.tasks.get("tsk_old")?.archivedAt).toBe(NOW);
+    expect(s.log).toHaveBeenCalledWith(
+      project.id,
+      "cleanup: archived task Task tsk_old"
+    );
+    expect((await s.cleanup.apply([item])).results[0].outcome).toBe("skipped");
+  });
+
+  it("parses a task item by its identity", () => {
+    expect(
+      parseCleanupItems([
+        { kind: "task", projectId: "demo", taskId: "tsk_1", reason: "forged" },
+      ])
+    ).toStrictEqual([
+      {
+        checked: true,
+        id: "task:demo:tsk_1",
+        kind: "task",
+        lastActivity: 0,
+        projectId: "demo",
+        reason: "",
+        taskId: "tsk_1",
+        title: "",
+      },
+    ]);
+  });
+});
+
 describe(parseCleanupItems, () => {
   it("keeps the identity fields and drops the rest", () => {
     expect(
@@ -846,6 +950,8 @@ describe(staleSessions, () => {
       busy: new Set(busy),
       workspace: "/workspaces/demo",
       worktrees: ["/workspaces/demo.worktrees/feat"],
+      // As the task store says: ses_d's variant was discarded by a pick.
+      discarded: (id) => id === "ses_d",
       now: NOW,
     });
 
@@ -854,15 +960,6 @@ describe(staleSessions, () => {
       rawSession("ses_d", {
         time: recent,
         location: at("/workspaces/demo.worktrees/feat"),
-        metadata: {
-          opendevhub: {
-            task: "tsk_1",
-            variant: 2,
-            of: 2,
-            title: "t",
-            discarded: true,
-          },
-        },
       }),
       rawSession("ses_g", {
         time: recent,

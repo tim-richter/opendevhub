@@ -48,6 +48,7 @@ import type {
   SessionSummary,
   UpdateResult,
 } from "../../src/shared/types";
+import { memoryStores } from "./stores";
 
 /** A Hub on fakes for the Hub modules' tests: `setup()` builds one, the `with…` helpers bring it to a known state. */
 export const project: Project = {
@@ -292,7 +293,16 @@ export function setup(
   projects = [project],
   nodes?: NodeKitsPort
 ) {
-  const store = new StateStore({ port: 7777, persisted, persist: () => {} });
+  const clock = { now: 1_000_000 };
+  const dbs = memoryStores(() => clock.now);
+  // Discovery registers projects before anything refers to them; most tests start from there.
+  dbs.projects.upsertAll(projects);
+  const store = new StateStore({
+    port: 7777,
+    persisted,
+    persist: () => {},
+    tasks: dbs.tasks,
+  });
   const monitors: {
     opts: MonitorOptions;
     started: boolean;
@@ -501,11 +511,16 @@ export function setup(
       ): Promise<Buffer | undefined> => Buffer.from(file)
     ),
   };
+  // Each session gets its own id, as in opencode: a session belongs to one task variant only.
+  let created = 0;
   const client = {
-    createSession: vi.fn(async (directory: string, _o?: NewSession) => ({
-      id: "ses_new",
-      location: { directory },
-    })),
+    createSession: vi.fn(async (directory: string, _o?: NewSession) => {
+      created += 1;
+      return {
+        id: created === 1 ? "ses_new" : `ses_new_${created}`,
+        location: { directory },
+      };
+    }),
     models: vi.fn(async (_dir: string): Promise<RawModel[]> => [
       { id: "m1", providerID: "p", name: "M1", enabled: true, variants: [] },
     ]),
@@ -666,7 +681,6 @@ export function setup(
   const clientFor = vi.fn(
     (_ep: OpencodeEndpoint) => client as unknown as OpencodeClient
   );
-  const clock = { now: 1_000_000 };
   const delay = vi.fn(async (_ms: number) => {});
   const credentials = {
     prepare: vi.fn(
@@ -691,6 +705,8 @@ export function setup(
   const recordUsage = vi.fn();
   const hub = createHub({
     store,
+    projects: dbs.projects,
+    tasks: dbs.tasks,
     containers,
     runtime,
     forwarder,
@@ -735,6 +751,9 @@ export function setup(
   });
   return {
     store,
+    tasks: dbs.tasks,
+    projects: dbs.projects,
+    db: dbs.db,
     containers,
     runtime,
     hub,

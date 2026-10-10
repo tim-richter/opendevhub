@@ -1,5 +1,6 @@
 import { GitBranchIcon, InfoIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { ProjectView } from "../../../shared/types";
-import { refreshWorktrees } from "../../api";
+import { archiveTask, refreshWorktrees } from "../../api";
 import { CopyButton } from "../../components/copy-button";
 import { EnvBadge } from "../../components/env-badge";
 import { Chip, muted, Note, PageHeader, Section } from "../../components/page";
@@ -33,7 +34,7 @@ import {
   orphanSessions,
   projectTasks,
 } from "../checkouts/checkouts";
-import type { Checkout } from "../checkouts/checkouts";
+import type { Checkout, ProjectTask } from "../checkouts/checkouts";
 import { OpenInMenu } from "../checkouts/open-in-menu";
 import { WorktreeOrigin } from "../checkouts/worktree-origin";
 import {
@@ -43,7 +44,7 @@ import {
   useCheckoutActions,
 } from "../checkouts/worktrees";
 import { SessionList } from "../sessions/session-list";
-import { formatCost, formatTokens } from "../tasks/tasks";
+import { formatCost, formatTokens, taskPath } from "../tasks/tasks";
 import { projectUsage } from "../usage/usage";
 import { AllContainersMenu, projectFlags } from "./project-actions";
 import { useProjectView } from "./project-layout";
@@ -84,6 +85,8 @@ export const ProjectOverview = () => {
     .filter((s) => needsAttention(s.status))
     .toSorted(compareSessions);
   const tasks = projectTasks(view);
+  const active = tasks.filter((t) => t.state !== "ended");
+  const ended = tasks.filter((t) => t.state === "ended");
   const orphans = orphanSessions(view).toSorted(compareSessions);
 
   return (
@@ -216,30 +219,17 @@ export const ProjectOverview = () => {
         </ul>
       </Section>
 
-      {tasks.length > 0 && (
+      {active.length > 0 && (
         <Section title="Tasks" hint="each variant works in its own worktree">
           <ul>
-            {tasks.map((t) => (
-              <li
-                key={t.task}
-                className="hover:bg-muted/50 border-t first:border-t-0"
-              >
-                <Link
-                  className="flex items-center gap-3 px-4 py-2"
-                  to={`/p/${encodeURIComponent(project.id)}/t/${encodeURIComponent(t.task)}`}
-                >
-                  <StatusDot tone={taskTone(t)} />
-                  <span className="flex-1 truncate">{t.title || "Task"}</span>
-                  <span className={muted}>
-                    {t.starting && "starting · "}
-                    {t.variants} variant{t.variants === 1 ? "" : "s"}
-                  </span>
-                </Link>
-              </li>
+            {active.map((t) => (
+              <TaskRow key={t.task} projectId={project.id} task={t} />
             ))}
           </ul>
         </Section>
       )}
+
+      {ended.length > 0 && <EndedTasks projectId={project.id} tasks={ended} />}
 
       {orphans.length > 0 && (
         <Section
@@ -374,6 +364,72 @@ const OPENCODE_PILL: Record<ProjectView["runtime"]["opencode"], string> = {
   healthy: "border-ok/45 text-ok",
   starting: "border-warn/45 text-warn",
   unhealthy: "border-destructive/45 text-destructive",
+};
+
+const TaskRow = (props: {
+  projectId: string;
+  task: ProjectTask;
+  action?: ReactNode;
+}) => {
+  const { task: t } = props;
+  return (
+    <li className="hover:bg-muted/50 flex items-center border-t first:border-t-0">
+      <Link
+        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2"
+        to={taskPath(props.projectId, t.task)}
+      >
+        <StatusDot tone={t.state === "ended" ? "off" : taskTone(t)} />
+        <span className="flex-1 truncate">{t.title || "Task"}</span>
+        <span className={muted}>
+          {t.state === "starting" && "starting · "}
+          {t.kind === "manual"
+            ? "session"
+            : `${t.variants} variant${t.variants === 1 ? "" : "s"}`}
+        </span>
+      </Link>
+      {props.action && <span className="pr-3">{props.action}</span>}
+    </li>
+  );
+};
+
+/** Tasks whose sessions are all gone, collapsed until opened; each can be archived. */
+const EndedTasks = (props: { projectId: string; tasks: ProjectTask[] }) => {
+  const { report } = useDash();
+  const [open, setOpen] = useState(false);
+  return (
+    <Section
+      title={`Ended tasks (${props.tasks.length})`}
+      hint="their sessions are gone; archive them to hide them"
+      action={
+        <Button variant="ghost" size="sm" onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide" : "Show"}
+        </Button>
+      }
+    >
+      {open && (
+        <ul>
+          {props.tasks.map((t) => (
+            <TaskRow
+              key={t.task}
+              projectId={props.projectId}
+              task={t}
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    void archiveTask(props.projectId, t.task).catch(report)
+                  }
+                >
+                  Archive
+                </Button>
+              }
+            />
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
 };
 
 const taskTone = (t: {

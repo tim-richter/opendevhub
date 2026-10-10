@@ -192,6 +192,7 @@ export const CleanupPage = () => {
   const containers = plan.items.filter((i) => i.kind === "container");
   const images = plan.items.filter((i) => i.kind === "image");
   const sessions = plan.items.filter((i) => i.kind === "session");
+  const tasks = plan.items.filter((i) => i.kind === "task");
   const projectName = (id: string) =>
     plan.projects.find((p) => p.id === id)?.name ?? id;
   // oxlint-disable-next-line react/purity
@@ -330,6 +331,32 @@ export const CleanupPage = () => {
                 </Chip>
                 <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
                   {relativeTime(item.updatedAt, now)}
+                </span>
+              </Row>
+            ))}
+          </Section>
+
+          <Section
+            title="Tasks"
+            hint="ended for 30 days; archiving hides them and keeps their record"
+            action={selectAll("task")}
+          >
+            {tasks.length === 0 && (
+              <p className={cn(muted, "px-4 py-2")}>Nothing to archive.</p>
+            )}
+            {tasks.map((item) => (
+              <Row
+                key={item.id}
+                item={item}
+                selected={selected.has(item.id)}
+                onToggle={(on) => toggle(item.id, on)}
+                result={results.get(item.id)}
+              >
+                <span className="truncate text-sm">{item.title}</span>
+                <span className={muted}>{projectName(item.projectId)}</span>
+                <Chip variant="secondary">{item.reason}</Chip>
+                <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
+                  {relativeTime(item.lastActivity, now)}
                 </span>
               </Row>
             ))}
