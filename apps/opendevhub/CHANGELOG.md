@@ -1,5 +1,29 @@
 # opendevhub
 
+## 0.4.0
+
+### Minor Changes
+
+- [#19](https://github.com/tim-richter/opendevhub/pull/19) [`2a96fc9`](https://github.com/tim-richter/opendevhub/commit/2a96fc95f9f766d2b3cbd1ff70f3475f919cf7b5) Thanks [@tim-richter](https://github.com/tim-richter)! - Reviews show changed images as their before and after versions instead of "binary", in checkouts and Forgejo pull requests.
+
+- [`c0799e1`](https://github.com/tim-richter/opendevhub/commit/c0799e1b5bdd2566ffd6f8c877732a52254f4c56) Thanks [@tim-richter](https://github.com/tim-richter)! - Each session has its own page: click a session's title in a checkout. It shows the session's cost, tokens by kind, how full its context window is, its subagents, and its turns, newest first, each with its prompt, duration, cost, tokens, tool calls and the agent's last reply. Expand a turn to see what it changed and comment on the lines; the comments go to that session. A box on the page sends the session another prompt.
+
+- [`c0799e1`](https://github.com/tim-richter/opendevhub/commit/c0799e1b5bdd2566ffd6f8c877732a52254f4c56) Thanks [@tim-richter](https://github.com/tim-richter)! - Scan folders are now set in Settings → Projects and saved, replacing the `--root` CLI option. The overview links there when no projects are found.
+
+### Patch Changes
+
+- [`bbdd00d`](https://github.com/tim-richter/opendevhub/commit/bbdd00d807231bfdd558b050721bc90068f8ff4d) Thanks [@tim-richter](https://github.com/tim-richter)! - Preserve strings when parsing devcontainer checks and reject invalid JSONC. Recover from saved config or state files whose top-level value is not an object, keeping a backup. Reject invalid `.lock` components in worktree branch names before invoking Git. Keep text diffs visible when their content mentions Git's binary patch marker.
+
+- [`97d442a`](https://github.com/tim-richter/opendevhub/commit/97d442add507b80e4a4b9b6d30dbcca770861f85) Thanks [@tim-richter](https://github.com/tim-richter)! - Confirmations (removing sessions, worktrees and containers, rebuilds, discarding task variants, clearing AI reviews) now open an in-app dialog instead of the browser's `confirm()` prompt.
+
+- [`c0799e1`](https://github.com/tim-richter/opendevhub/commit/c0799e1b5bdd2566ffd6f8c877732a52254f4c56) Thanks [@tim-richter](https://github.com/tim-richter)! - All dashboard pages now use the full window width, so moving to and from review pages no longer shifts the layout.
+
+- [`07297d1`](https://github.com/tim-richter/opendevhub/commit/07297d19d2a42be84c6112d7d13fbd99ef3ff7ac) Thanks [@tim-richter](https://github.com/tim-richter)! - Compare modified images in the review as 2-up, swipe, onion skin or a pixel difference; the chosen view is remembered. Modified images start collapsed and only load once opened.
+
+- [`c0799e1`](https://github.com/tim-richter/opendevhub/commit/c0799e1b5bdd2566ffd6f8c877732a52254f4c56) Thanks [@tim-richter](https://github.com/tim-richter)! - Token counts now include cache reads and writes, so usage reflects every token a model processed. Task variants also show their context size, the "total tokens" number opencode shows for a session.
+
+- [`760f8f5`](https://github.com/tim-richter/opendevhub/commit/760f8f51c0277767b9b5d5249b1aba5e14d94c97) Thanks [@tim-richter](https://github.com/tim-richter)! - Use Hono RPC for typed dashboard requests and validate API inputs while preserving existing URLs, live updates, and terminal connections.
+
 ## 0.3.0
 
 ### Minor Changes
