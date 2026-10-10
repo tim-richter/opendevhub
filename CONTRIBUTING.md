@@ -19,6 +19,12 @@ pnpm build              # apps/opendevhub/dist (bin.js + web) and apps/docs/dist
 
 On macOS, the port forwarder tests use `127.0.0.2` and `127.0.0.3`, which macOS does not configure by default: `sudo ifconfig lo0 alias 127.0.0.2 up && sudo ifconfig lo0 alias 127.0.0.3 up`.
 
+## Dashboard API
+
+The dashboard uses Hono RPC. Route groups in `apps/opendevhub/src/server/api` return chained Hono routes, and `DashboardApi` exports their inferred type. The frontend imports that type only in `src/web/rpc.ts`; server code stays out of the browser bundle. API wrappers in `src/web/api.ts` and `src/web/push.ts` use the typed client and infer responses from the handlers.
+
+Add request schemas with `validateJson` or `validateQuery` and read their values with `c.req.valid`. Domain modules retain semantic validation and defaults. Return JSON with an explicit status (`200` for successful reads, for example), so `read` can separate success and error types. Preserve inferred route return types instead of annotating factories as plain `Hono` or response helpers as `unknown`. Encode path parameter values with `encodeURIComponent`: Hono's client substitutes them without encoding. SSE dashboard updates and terminal WebSockets retain their existing transports.
+
 ## Storybook
 
 Stories live next to the code (`*.stories.tsx`, CSF Next). Page stories render the whole app at a route (`parameters: { route: "/p/acme-web" }`) against [MSW](https://mswjs.io) mocks of every `/api` route, the `/api/events` snapshot stream included. The fixtures are in `src/web/mocks/fixtures.ts`; a story swaps them or fails a route with `beforeEach: mockApi({ snapshot: emptySnapshot }, failing("get", "/api/usage", "..."))`.

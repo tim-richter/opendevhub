@@ -79,12 +79,24 @@ describe("api", () => {
       );
       expect(fetchMock.mock.calls[2]).toStrictEqual([
         "/api/jira/tickets?scope=board&board=3&search=login+%26+logout&startAt=50",
-        { signal, cache: "no-store" },
+        {
+          signal,
+          cache: "no-store",
+          method: "GET",
+          body: undefined,
+          headers: new Headers(),
+        },
       ]);
       await fetchJiraTicket("APP-1?", signal);
       expect(fetchMock.mock.calls[3]).toStrictEqual([
         "/api/jira/tickets/APP-1%3F",
-        { signal, cache: "no-store" },
+        {
+          signal,
+          cache: "no-store",
+          method: "GET",
+          body: undefined,
+          headers: new Headers(),
+        },
       ]);
       stubFetch(502, { error: "Jira rejected the token" });
       // oxlint-disable-next-line vitest/max-expects
@@ -130,7 +142,13 @@ describe("api", () => {
       await fetchForgejoPulls("all", signal);
       expect(fetchMock.mock.calls[0]).toStrictEqual([
         "/api/forgejo/pulls?state=all",
-        { signal, cache: "no-store" },
+        {
+          signal,
+          cache: "no-store",
+          method: "GET",
+          body: undefined,
+          headers: new Headers(),
+        },
       ]);
       await fetchForgejoDiff("team?", "private#", "7", signal);
       expect(fetchMock.mock.calls[1][0]).toBe(
@@ -171,7 +189,13 @@ describe("api", () => {
         `/api/forgejo/checks/team/app/${"a".repeat(40)}?page=2`,
       ]);
       for (const [, init] of mock.mock.calls) {
-        expect(init).toStrictEqual({ signal, cache: "no-store" });
+        expect(init).toStrictEqual({
+          signal,
+          cache: "no-store",
+          method: "GET",
+          body: undefined,
+          headers: new Headers(),
+        });
       }
       await testForgejoConnection({
         url: "https://forge.example",
@@ -181,7 +205,7 @@ describe("api", () => {
         "/api/forgejo/test",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: new Headers({ "content-type": "application/json" }),
           body: JSON.stringify({
             url: "https://forge.example",
             token: "unsaved",

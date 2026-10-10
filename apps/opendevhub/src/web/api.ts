@@ -1,63 +1,25 @@
 import type {
-  AiReviewResult,
-  ForgejoApprovals,
   ForgejoReviewInput,
-  ForgejoChecks,
-  ForgejoComment,
-  ForgejoConnection,
-  ForgejoPage,
-  ForgejoPullDetails,
   ForgejoPullFilter,
   ForgejoPullQuery,
-  ForgejoOrganizations,
-  ForgejoPulls,
-  ForgejoReview,
-  ForgejoSettings,
   ForgejoSettingsInput,
-  ForgejoTeams,
 } from "../shared/forgejo";
 import type { ImageSide } from "../shared/images";
-import { jiraQueryParams } from "../shared/jira";
-import type {
-  JiraBoardColumn,
-  JiraCatalog,
-  JiraSettings,
-  JiraSettingsInput,
-  JiraTicket,
-  JiraTicketQuery,
-  JiraTickets,
-} from "../shared/jira";
+import { jiraQueryValues } from "../shared/jira";
+import type { JiraSettingsInput, JiraTicketQuery } from "../shared/jira";
 import type { StackId } from "../shared/stacks";
 import type {
-  AddProjectResult,
-  CandidateList,
   CheckDef,
-  CheckRun,
-  ChecksConfig,
-  ChecksView,
-  SpecView,
   CleanupItem,
-  CleanupPlan,
-  CleanupResult,
   DashboardSnapshot,
   FormAnswer,
   LogEvent,
-  ModelsInfo,
-  NodeView,
   PermissionDecision,
-  PickResult,
-  PublishInfo,
   PublishRequest,
-  PublishResult,
-  ReviewData,
   ReviewMode,
-  SessionDetail,
   TaskRequest,
-  TaskResult,
-  UpdateResult,
-  UsageReport,
-  Worktree,
 } from "../shared/types";
+import { api, complete, read, reply } from "./rpc";
 
 export type Action =
   | "start"
@@ -65,257 +27,222 @@ export type Action =
   | "rebuild"
   | "rebuild-no-cache"
   | "restart-opencode";
+export type ReplyOutcome = "done" | "gone";
+const project = api.projects[":id"];
+const pull = api.forgejo.pulls[":owner"][":repo"][":number"];
+const projectParam = (id: string) => ({ id: encodeURIComponent(id) });
+const pullParam = (owner: string, repo: string, number: string) => ({
+  owner: encodeURIComponent(owner),
+  repo: encodeURIComponent(repo),
+  number: encodeURIComponent(number),
+});
 
-const failure = async (res: Response, what: string): Promise<Error> => {
-  const body = (await res.json().catch(() => ({}))) as { error?: string };
-  return new Error(body.error ?? `${what} failed (${res.status})`);
-};
+export const fetchForgejoSettings = () =>
+  read(
+    api.forgejo.settings.$get(undefined, { init: { cache: "no-store" } }),
+    "Forgejo settings"
+  );
 
-export const fetchForgejoSettings = async (): Promise<ForgejoSettings> => {
-  const res = await fetch("/api/forgejo/settings", { cache: "no-store" });
-  if (!res.ok) {
-    throw await failure(res, "Forgejo settings");
-  }
-  return res.json();
-};
-
-export const saveForgejoSettings = async (
-  input: ForgejoSettingsInput
-): Promise<ForgejoSettings> => {
-  const res = await fetch("/api/forgejo/settings", {
-    body: JSON.stringify(input),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "save Forgejo settings");
-  }
-  return res.json();
-};
+export const saveForgejoSettings = (input: ForgejoSettingsInput) =>
+  read(api.forgejo.settings.$post({ json: input }), "save Forgejo settings");
 
 export const fetchForgejoPulls = (
   input: ForgejoPullQuery | ForgejoPullFilter = "all",
   signal?: AbortSignal
-): Promise<ForgejoPulls> => {
+) => {
   const options = typeof input === "string" ? { state: input } : input;
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(options)) {
-    if (value !== undefined && value !== "") {
-      query.set(key, String(value));
-    }
-  }
-  return forgejoGet(`pulls?${query}`, signal);
+  const query = {
+    state: options.state,
+    inbox: options.inbox,
+    repository: options.repository || undefined,
+    q: options.q || undefined,
+    org: options.org || undefined,
+    team: options.team || undefined,
+    page: options.page === undefined ? undefined : String(options.page),
+  };
+  return read(
+    api.forgejo.pulls.$get({ query }, { init: { cache: "no-store", signal } }),
+    "Forgejo request"
+  );
 };
-export const fetchForgejoOrganizations = (
-  signal?: AbortSignal
-): Promise<ForgejoOrganizations> => forgejoGet("orgs", signal);
-export const fetchForgejoTeams = (
-  org: string,
-  signal?: AbortSignal
-): Promise<ForgejoTeams> =>
-  forgejoGet(`orgs/${encodeURIComponent(org)}/teams`, signal);
 
-const forgejoPullRoute = (owner: string, repo: string, number: string) =>
-  `pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}`;
-const forgejoGet = async <T>(
-  route: string,
-  signal?: AbortSignal
-): Promise<T> => {
-  const res = await fetch(`/api/forgejo/${route}`, {
-    cache: "no-store",
-    signal,
-  });
-  if (!res.ok) {
-    throw await failure(res, "Forgejo request");
-  }
-  return res.json();
-};
+export const fetchForgejoOrganizations = (signal?: AbortSignal) =>
+  read(
+    api.forgejo.orgs.$get(undefined, { init: { cache: "no-store", signal } }),
+    "Forgejo request"
+  );
+
+export const fetchForgejoTeams = (org: string, signal?: AbortSignal) =>
+  read(
+    api.forgejo.orgs[":org"].teams.$get(
+      { param: { org: encodeURIComponent(org) } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
+  );
+
 export const fetchForgejoDetails = (
   owner: string,
   repo: string,
   number: string,
   signal?: AbortSignal
-): Promise<ForgejoPullDetails> =>
-  forgejoGet(forgejoPullRoute(owner, repo, number), signal);
+) =>
+  read(
+    pull.$get(
+      { param: pullParam(owner, repo, number) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
+  );
+
 export const fetchForgejoDiff = (
   owner: string,
   repo: string,
   number: string,
   signal?: AbortSignal
-): Promise<{ patch: string }> =>
-  forgejoGet(`${forgejoPullRoute(owner, repo, number)}/patch`, signal);
+) =>
+  read(
+    pull.patch.$get(
+      { param: pullParam(owner, repo, number) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
+  );
+
 export const fetchForgejoApprovals = (
   owner: string,
   repo: string,
   number: string,
   signal?: AbortSignal
-): Promise<ForgejoApprovals> =>
-  forgejoGet(`${forgejoPullRoute(owner, repo, number)}/approvals`, signal);
+) =>
+  read(
+    pull.approvals.$get(
+      { param: pullParam(owner, repo, number) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
+  );
+
 export const fetchForgejoComments = (
   owner: string,
   repo: string,
   number: string,
   page: number,
   signal?: AbortSignal
-): Promise<ForgejoPage<ForgejoComment>> =>
-  forgejoGet(
-    `${forgejoPullRoute(owner, repo, number)}/comments?page=${page}`,
-    signal
+) =>
+  read(
+    pull.comments.$get(
+      { param: pullParam(owner, repo, number), query: { page: String(page) } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
   );
+
 export const fetchForgejoReviews = (
   owner: string,
   repo: string,
   number: string,
   page: number,
   signal?: AbortSignal
-): Promise<ForgejoPage<ForgejoReview>> =>
-  forgejoGet(
-    `${forgejoPullRoute(owner, repo, number)}/reviews?page=${page}`,
-    signal
+) =>
+  read(
+    pull.reviews.$get(
+      { param: pullParam(owner, repo, number), query: { page: String(page) } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
   );
+
 export const fetchForgejoReviewComments = (
   owner: string,
   repo: string,
   number: string,
   id: number,
   signal?: AbortSignal
-): Promise<ForgejoComment[]> =>
-  forgejoGet(
-    `${forgejoPullRoute(owner, repo, number)}/reviews/${id}/comments`,
-    signal
+) =>
+  read(
+    pull.reviews[":review"].comments.$get(
+      { param: { ...pullParam(owner, repo, number), review: String(id) } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
   );
+
 export const fetchForgejoChecks = (
   owner: string,
   repo: string,
   sha: string,
   page: number,
   signal?: AbortSignal
-): Promise<ForgejoChecks> =>
-  forgejoGet(
-    `checks/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(sha)}?page=${page}`,
-    signal
+) =>
+  read(
+    api.forgejo.checks[":owner"][":repo"][":sha"].$get(
+      {
+        param: {
+          owner: encodeURIComponent(owner),
+          repo: encodeURIComponent(repo),
+          sha: encodeURIComponent(sha),
+        },
+        query: { page: String(page) },
+      },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Forgejo request"
   );
-export const testForgejoConnection = async (input: {
-  url: string;
-  token?: string;
-}): Promise<ForgejoConnection> => {
-  const res = await fetch("/api/forgejo/test", {
-    body: JSON.stringify(input),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "test Forgejo connection");
-  }
-  return res.json();
-};
 
-export const fetchJiraSettings = async (): Promise<JiraSettings> => {
-  const res = await fetch("/api/jira/settings", { cache: "no-store" });
-  if (!res.ok) {
-    throw await failure(res, "Jira settings");
-  }
-  return res.json();
-};
+export const testForgejoConnection = (input: { url: string; token?: string }) =>
+  read(api.forgejo.test.$post({ json: input }), "test Forgejo connection");
 
-export const saveJiraSettings = async (
-  input: JiraSettingsInput
-): Promise<JiraSettings> => {
-  const res = await fetch("/api/jira/settings", {
-    body: JSON.stringify(input),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "save Jira settings");
-  }
-  return res.json();
-};
+export const fetchJiraSettings = () =>
+  read(
+    api.jira.settings.$get(undefined, { init: { cache: "no-store" } }),
+    "Jira settings"
+  );
 
-export const fetchJiraTickets = async (
+export const saveJiraSettings = (input: JiraSettingsInput) =>
+  read(api.jira.settings.$post({ json: input }), "save Jira settings");
+
+export const fetchJiraTickets = (
   query: Partial<JiraTicketQuery> = {},
   signal?: AbortSignal
-): Promise<JiraTickets> => {
-  const params = jiraQueryParams(query);
-  const res = await fetch(
-    `/api/jira/tickets${params.size ? `?${params}` : ""}`,
-    { cache: "no-store", signal }
+) =>
+  read(
+    api.jira.tickets.$get(
+      { query: jiraQueryValues(query) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Jira tickets"
   );
-  if (!res.ok) {
-    throw await failure(res, "Jira tickets");
-  }
-  return res.json();
-};
 
-export const fetchJiraCatalog = async (
-  signal?: AbortSignal
-): Promise<JiraCatalog> => {
-  const res = await fetch("/api/jira/catalog", { cache: "no-store", signal });
-  if (!res.ok) {
-    throw await failure(res, "Jira boards and filters");
-  }
-  return res.json();
-};
-
-export const fetchJiraBoardColumns = async (
-  board: number,
-  signal?: AbortSignal
-): Promise<JiraBoardColumn[]> => {
-  const res = await fetch(`/api/jira/boards/${board}/columns`, {
-    cache: "no-store",
-    signal,
-  });
-  if (!res.ok) {
-    throw await failure(res, "Jira board columns");
-  }
-  return res.json();
-};
-
-export const fetchJiraTicket = async (
-  key: string,
-  signal?: AbortSignal
-): Promise<JiraTicket> => {
-  const res = await fetch(`/api/jira/tickets/${encodeURIComponent(key)}`, {
-    cache: "no-store",
-    signal,
-  });
-  if (!res.ok) {
-    throw await failure(res, "Jira ticket");
-  }
-  return res.json();
-};
-
-export const postAction = async (
-  projectId: string,
-  action: Action
-): Promise<void> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/${action}`,
-    { method: "POST" }
+export const fetchJiraCatalog = (signal?: AbortSignal) =>
+  read(
+    api.jira.catalog.$get(undefined, { init: { cache: "no-store", signal } }),
+    "Jira boards and filters"
   );
-  if (!res.ok) {
-    throw await failure(res, action);
-  }
-};
 
-const postJson = async <T>(
-  projectId: string,
-  route: string,
-  body: unknown,
-  what: string
-): Promise<T> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/${route}`,
-    {
-      body: JSON.stringify(body),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    }
+export const fetchJiraBoardColumns = (board: number, signal?: AbortSignal) =>
+  read(
+    api.jira.boards[":id"].columns.$get(
+      { param: { id: String(board) } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Jira board columns"
   );
-  if (!res.ok) {
-    throw await failure(res, what);
-  }
-  return (await res.json()) as T;
+
+export const fetchJiraTicket = (key: string, signal?: AbortSignal) =>
+  read(
+    api.jira.tickets[":key"].$get(
+      { param: { key: encodeURIComponent(key) } },
+      { init: { cache: "no-store", signal } }
+    ),
+    "Jira ticket"
+  );
+
+export const postAction = async (projectId: string, action: Action) => {
+  await complete(
+    project[action].$post({ param: projectParam(projectId) }),
+    action
+  );
 };
 
 export const createWorktree = (
@@ -326,34 +253,32 @@ export const createWorktree = (
     startSession?: boolean;
     prompt?: string;
   }
-): Promise<{ worktree: Worktree; sessionId?: string }> =>
-  postJson(projectId, "worktrees", req, "create worktree");
-
-export const fetchModels = async (projectId: string): Promise<ModelsInfo> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/models`
+) =>
+  read(
+    project.worktrees.$post({ param: projectParam(projectId), json: req }),
+    "create worktree"
   );
-  if (!res.ok) {
-    throw await failure(res, "models");
-  }
-  return (await res.json()) as ModelsInfo;
-};
 
-export const createTask = (
-  projectId: string,
-  req: TaskRequest
-): Promise<TaskResult> => postJson(projectId, "tasks", req, "start task");
+export const fetchModels = (projectId: string) =>
+  read(project.models.$get({ param: projectParam(projectId) }), "models");
+
+export const createTask = (projectId: string, req: TaskRequest) =>
+  read(
+    project.tasks.$post({ param: projectParam(projectId), json: req }),
+    "start task"
+  );
 
 export const pickVariant = (
   projectId: string,
   task: string,
   sessionId: string,
   removeWorktrees: boolean
-): Promise<PickResult> =>
-  postJson(
-    projectId,
-    `tasks/${encodeURIComponent(task)}/pick`,
-    { removeWorktrees, sessionId },
+) =>
+  read(
+    project.tasks[":task"].pick.$post({
+      param: { ...projectParam(projectId), task: encodeURIComponent(task) },
+      json: { removeWorktrees, sessionId },
+    }),
     "pick variant"
   );
 
@@ -362,29 +287,32 @@ export const removeWorktree = (
   path: string,
   force: boolean,
   deleteBranch = false
-): Promise<unknown> =>
-  postJson(
-    projectId,
-    "worktrees/remove",
-    { deleteBranch, force, path },
+) =>
+  read(
+    project.worktrees.remove.$post({
+      param: projectParam(projectId),
+      json: { deleteBranch, force, path },
+    }),
     "remove worktree"
   );
 
-export const refreshWorktrees = (
-  projectId: string
-): Promise<{ worktrees: Worktree[] }> =>
-  postJson(projectId, "worktrees/refresh", {}, "refresh worktrees");
+export const refreshWorktrees = (projectId: string) =>
+  read(
+    project.worktrees.refresh.$post({ param: projectParam(projectId) }),
+    "refresh worktrees"
+  );
 
 export const startSession = async (
   projectId: string,
   directory: string,
   title?: string,
   prompt?: string
-): Promise<string> => {
-  const created = await postJson<{ sessionId: string }>(
-    projectId,
-    "sessions",
-    { directory, prompt, title },
+) => {
+  const created = await read(
+    project.sessions.$post({
+      param: projectParam(projectId),
+      json: { directory, prompt, title },
+    }),
     "start session"
   );
   return created.sessionId;
@@ -394,51 +322,26 @@ export const openInEditor = (
   projectId: string,
   editor: string,
   directory: string
-): Promise<unknown> =>
-  postJson(projectId, "open", { directory, editor }, "open editor");
-
-/** "gone": the item was already answered elsewhere (e.g. in the opencode tab); drop it without an error. */
-export type ReplyOutcome = "done" | "gone";
-
-const reply = async (
-  projectId: string,
-  route: string,
-  method: "POST" | "DELETE",
-  body: unknown,
-  what: string
-): Promise<ReplyOutcome> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/${route}`,
-    {
-      method,
-      ...(body === undefined
-        ? {}
-        : {
-            body: JSON.stringify(body),
-            headers: { "content-type": "application/json" },
-          }),
-    }
+) =>
+  read(
+    project.open.$post({
+      param: projectParam(projectId),
+      json: { directory, editor },
+    }),
+    "open editor"
   );
-  if (res.status === 409) {
-    return "gone";
-  }
-  if (!res.ok) {
-    throw await failure(res, what);
-  }
-  return "done";
-};
 
 export const replyPermission = (
   projectId: string,
   requestId: string,
   decision: PermissionDecision,
   message?: string
-): Promise<ReplyOutcome> =>
+) =>
   reply(
-    projectId,
-    `permissions/${encodeURIComponent(requestId)}`,
-    "POST",
-    { decision, message },
+    project.permissions[":rid"].$post({
+      param: { ...projectParam(projectId), rid: encodeURIComponent(requestId) },
+      json: { decision, message },
+    }),
     "reply"
   );
 
@@ -446,29 +349,25 @@ export const replyForm = (
   projectId: string,
   formId: string,
   answer: FormAnswer
-): Promise<ReplyOutcome> =>
+) =>
   reply(
-    projectId,
-    `forms/${encodeURIComponent(formId)}`,
-    "POST",
-    { answer },
+    project.forms[":fid"].$post({
+      param: { ...projectParam(projectId), fid: encodeURIComponent(formId) },
+      json: { answer },
+    }),
     "answer"
   );
 
 /** Cancels a form. opencode takes no reason, so there is none to send. */
-export const dismissForm = (
-  projectId: string,
-  formId: string
-): Promise<ReplyOutcome> =>
+export const dismissForm = (projectId: string, formId: string) =>
   reply(
-    projectId,
-    `forms/${encodeURIComponent(formId)}`,
-    "DELETE",
-    undefined,
+    project.forms[":fid"].$delete({
+      param: { ...projectParam(projectId), fid: encodeURIComponent(formId) },
+    }),
     "dismiss"
   );
 
-export const fetchReview = async (
+export const fetchReview = (
   projectId: string,
   directory: string,
   opts: {
@@ -480,49 +379,51 @@ export const fetchReview = async (
     from?: string;
   } = {},
   signal?: AbortSignal
-): Promise<ReviewData> => {
-  const query = new URLSearchParams({
-    directory,
-    ...(opts.base ? { base: opts.base } : {}),
-    ...(opts.mode ? { mode: opts.mode } : {}),
-    ...(opts.file ? { file: opts.file } : {}),
-    ...(opts.session ? { session: opts.session } : {}),
-    ...(opts.from ? { from: opts.from } : {}),
-  });
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/review?${query}`,
-    signal ? { signal } : undefined
+) =>
+  read(
+    project.review.$get(
+      {
+        param: projectParam(projectId),
+        query: {
+          directory,
+          ...(opts.base ? { base: opts.base } : {}),
+          ...(opts.mode ? { mode: opts.mode } : {}),
+          ...(opts.file ? { file: opts.file } : {}),
+          ...(opts.session ? { session: opts.session } : {}),
+          ...(opts.from ? { from: opts.from } : {}),
+        },
+      },
+      { init: { signal } }
+    ),
+    "review"
   );
-  if (!res.ok) {
-    throw await failure(res, "review");
-  }
-  return (await res.json()) as ReviewData;
-};
 
 /** Where the review loads one version of a changed image in a checkout. */
 export const reviewImageUrl = (
   projectId: string,
   directory: string,
   opts: { file: string; side: ImageSide; mode?: ReviewMode; base?: string }
-): string => {
-  const query = new URLSearchParams({
-    directory,
-    file: opts.file,
-    side: opts.side,
-    ...(opts.base ? { base: opts.base } : {}),
-    ...(opts.mode ? { mode: opts.mode } : {}),
+) =>
+  project.review.image.$path({
+    param: projectParam(projectId),
+    query: {
+      directory,
+      file: opts.file,
+      side: opts.side,
+      ...(opts.base ? { base: opts.base } : {}),
+      ...(opts.mode ? { mode: opts.mode } : {}),
+    },
   });
-  return `/api/projects/${encodeURIComponent(projectId)}/review/image?${query}`;
-};
 
 export const suggestCommitMessage = async (
   projectId: string,
   directory: string
-): Promise<string> => {
-  const suggested = await postJson<{ message: string }>(
-    projectId,
-    "review/commit-message",
-    { directory },
+) => {
+  const suggested = await read(
+    project.review["commit-message"].$post({
+      param: projectParam(projectId),
+      json: { directory },
+    }),
     "commit message"
   );
   return suggested.message;
@@ -532,204 +433,188 @@ export const commitChanges = async (
   projectId: string,
   directory: string,
   message: string
-): Promise<void> => {
-  await postJson(projectId, "review/commit", { directory, message }, "commit");
+) => {
+  await complete(
+    project.review.commit.$post({
+      param: projectParam(projectId),
+      json: { directory, message },
+    }),
+    "commit"
+  );
 };
 
 export const updateFromBase = (
   projectId: string,
   directory: string,
   base: string
-): Promise<UpdateResult> =>
-  postJson(projectId, "review/update", { base, directory }, "update from base");
+) =>
+  read(
+    project.review.update.$post({
+      param: projectParam(projectId),
+      json: { base, directory },
+    }),
+    "update from base"
+  );
 
 export const mergeIntoBase = (
   projectId: string,
   directory: string,
   base: string,
   ffOnly: boolean
-): Promise<{ branch: string }> =>
-  postJson(
-    projectId,
-    "review/merge",
-    { base, directory, ffOnly },
+) =>
+  read(
+    project.review.merge.$post({
+      param: projectParam(projectId),
+      json: { base, directory, ffOnly },
+    }),
     "merge into base"
   );
 
-export const bringHome = (
-  projectId: string,
-  directory: string
-): Promise<{ branch: string }> =>
-  postJson(projectId, "review/bring-home", { directory }, "bring home");
+export const bringHome = (projectId: string, directory: string) =>
+  read(
+    project.review["bring-home"].$post({
+      param: projectParam(projectId),
+      json: { directory },
+    }),
+    "bring home"
+  );
 
 export const sendPrompt = async (
   projectId: string,
   sessionId: string,
   text: string
-): Promise<void> => {
-  await postJson(
-    projectId,
-    `sessions/${encodeURIComponent(sessionId)}/prompt`,
-    { text },
+) => {
+  await complete(
+    project.sessions[":sid"].prompt.$post({
+      param: { ...projectParam(projectId), sid: encodeURIComponent(sessionId) },
+      json: { text },
+    }),
     "send to agent"
   );
 };
 
 /** Deletes a session with its subagent sessions, stopping it first if it's busy. */
-export const removeSession = async (
-  projectId: string,
-  sessionId: string
-): Promise<void> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
-    { method: "DELETE" }
+export const removeSession = async (projectId: string, sessionId: string) => {
+  await complete(
+    project.sessions[":sid"].$delete({
+      param: { ...projectParam(projectId), sid: encodeURIComponent(sessionId) },
+    }),
+    "remove session"
   );
-  if (!res.ok) {
-    throw await failure(res, "remove session");
-  }
 };
 
 /** A session's turns, token usage and subagents. */
-export const fetchSessionDetail = async (
-  projectId: string,
-  sessionId: string
-): Promise<SessionDetail> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`
+export const fetchSessionDetail = (projectId: string, sessionId: string) =>
+  read(
+    project.sessions[":sid"].$get({
+      param: { ...projectParam(projectId), sid: encodeURIComponent(sessionId) },
+    }),
+    "load the session"
   );
-  if (!res.ok) {
-    throw await failure(res, "load the session");
-  }
-  return (await res.json()) as SessionDetail;
-};
 
-export const rescan = async (): Promise<DashboardSnapshot> => {
-  const res = await fetch("/api/projects/rescan", { method: "POST" });
-  if (!res.ok) {
-    throw await failure(res, "rescan");
-  }
-  return (await res.json()) as DashboardSnapshot;
-};
+export const rescan = () => read(api.projects.rescan.$post(), "rescan");
 
 /** Replaces the folders scanned for projects; the server rescans before answering. */
-export const saveRoots = async (
-  roots: string[]
-): Promise<DashboardSnapshot> => {
-  const res = await fetch("/api/settings/roots", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ roots }),
-  });
-  if (!res.ok) {
-    throw await failure(res, "save folders");
-  }
-  return (await res.json()) as DashboardSnapshot;
-};
+export const saveRoots = (roots: string[]) =>
+  read(api.settings.roots.$post({ json: { roots } }), "save folders");
 
-export const fetchUsage = async (day?: string): Promise<UsageReport> => {
-  const res = await fetch(
-    `/api/usage${day ? `?day=${encodeURIComponent(day)}` : ""}`
+export const fetchUsage = (day?: string) =>
+  read(api.usage.$get({ query: day ? { day } : {} }), "usage");
+
+export const fetchLogs = async (projectId: string) => {
+  const data = await read(
+    project.logs.$get({ param: projectParam(projectId) }),
+    "logs"
   );
-  if (!res.ok) {
-    throw await failure(res, "usage");
-  }
-  return (await res.json()) as UsageReport;
+  return data.lines;
 };
 
-export const fetchLogs = async (projectId: string): Promise<string[]> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/logs`
-  );
-  if (!res.ok) {
-    throw await failure(res, "logs");
-  }
-  return ((await res.json()) as { lines: string[] }).lines;
-};
-
-export const fetchPublishInfo = async (
+export const fetchPublishInfo = (
   projectId: string,
   directory: string,
   remote?: string,
   signal?: AbortSignal
-): Promise<PublishInfo> => {
-  const query = new URLSearchParams({
-    directory,
-    ...(remote ? { remote } : {}),
-  });
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/publish?${query}`,
-    signal ? { signal } : undefined
+) =>
+  read(
+    project.publish.$get(
+      {
+        param: projectParam(projectId),
+        query: { directory, ...(remote ? { remote } : {}) },
+      },
+      { init: { signal } }
+    ),
+    "publish info"
   );
-  if (!res.ok) {
-    throw await failure(res, "publish info");
-  }
-  return (await res.json()) as PublishInfo;
-};
 
-export const suggestPublish = (
-  projectId: string,
-  directory: string
-): Promise<{ title: string; description: string }> =>
-  postJson(projectId, "publish/suggest", { directory }, "suggest");
+export const suggestPublish = (projectId: string, directory: string) =>
+  read(
+    project.publish.suggest.$post({
+      param: projectParam(projectId),
+      json: { directory },
+    }),
+    "suggest"
+  );
 
 export const publishChanges = (
   projectId: string,
   directory: string,
   req: PublishRequest
-): Promise<PublishResult> =>
-  postJson(projectId, "publish", { directory, ...req }, "publish");
+) =>
+  read(
+    project.publish.$post({
+      param: projectParam(projectId),
+      json: { directory, ...req },
+    }),
+    "publish"
+  );
 
-export const fetchChecks = async (
+export const fetchChecks = (
   projectId: string,
   directory?: string,
   signal?: AbortSignal
-): Promise<ChecksView> => {
-  const query =
-    directory === undefined ? "" : `?${new URLSearchParams({ directory })}`;
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/checks${query}`,
-    signal ? { signal } : undefined
+) =>
+  read(
+    project.checks.$get(
+      {
+        param: projectParam(projectId),
+        query: directory === undefined ? {} : { directory },
+      },
+      { init: { signal } }
+    ),
+    "checks"
   );
-  if (!res.ok) {
-    throw await failure(res, "checks");
-  }
-  return (await res.json()) as ChecksView;
-};
 
 /** A checkout's OpenSpec changes, showing `change` or the one the server picks. */
-export const fetchSpec = async (
+export const fetchSpec = (
   projectId: string,
   directory: string,
   change?: string,
   signal?: AbortSignal
-): Promise<SpecView> => {
-  const query = new URLSearchParams({
-    directory,
-    ...(change ? { change } : {}),
-  });
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/spec?${query}`,
-    signal ? { signal } : undefined
+) =>
+  read(
+    project.spec.$get(
+      {
+        param: projectParam(projectId),
+        query: { directory, ...(change ? { change } : {}) },
+      },
+      { init: { signal } }
+    ),
+    "spec"
   );
-  if (!res.ok) {
-    throw await failure(res, "spec");
-  }
-  return (await res.json()) as SpecView;
-};
 
 export const fetchCheckRun = async (
   projectId: string,
   directory: string,
   signal?: AbortSignal
-): Promise<CheckRun | undefined> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/checks/run?${new URLSearchParams({ directory })}`,
-    signal ? { signal } : undefined
+) => {
+  const data = await read(
+    project.checks.run.$get(
+      { param: projectParam(projectId), query: { directory } },
+      { init: { signal } }
+    ),
+    "checks"
   );
-  if (!res.ok) {
-    throw await failure(res, "checks");
-  }
-  return ((await res.json()) as { run?: CheckRun }).run;
+  return data.run;
 };
 
 /** Runs all checks, or the named ones; `approve` lists host commands the user just approved. */
@@ -737,22 +622,31 @@ export const runChecks = (
   projectId: string,
   directory: string,
   opts: { names?: string[]; approve?: string[] } = {}
-): Promise<CheckRun> =>
-  postJson(projectId, "checks/run", { directory, ...opts }, "run checks");
+) =>
+  read(
+    project.checks.run.$post({
+      param: projectParam(projectId),
+      json: { directory, ...opts },
+    }),
+    "run checks"
+  );
 
 /** Saves the project's own list of checks, or goes back to devcontainer.json's with null. */
-export const saveChecks = (
-  projectId: string,
-  checks: CheckDef[] | null
-): Promise<ChecksConfig> =>
-  postJson(projectId, "checks/settings", { checks }, "save checks");
+export const saveChecks = (projectId: string, checks: CheckDef[] | null) =>
+  read(
+    project.checks.settings.$post({
+      param: projectParam(projectId),
+      json: { checks },
+    }),
+    "save checks"
+  );
 
 export const subscribe = (handlers: {
   onSnapshot: (s: DashboardSnapshot) => void;
   onLog: (e: LogEvent) => void;
   onConnection: (connected: boolean) => void;
 }): (() => void) => {
-  const source = new EventSource("/api/events");
+  const source = new EventSource(api.events.$path());
   source.addEventListener("snapshot", (e) =>
     handlers.onSnapshot(JSON.parse((e as MessageEvent<string>).data))
   );
@@ -764,115 +658,65 @@ export const subscribe = (handlers: {
   return () => source.close();
 };
 
-export const createEnv = (
-  projectId: string,
-  path: string
-): Promise<{ envId: string }> =>
-  postJson(projectId, "envs", { path }, "create container");
+export const createEnv = (projectId: string, path: string) =>
+  read(
+    project.envs.$post({ param: projectParam(projectId), json: { path } }),
+    "create container"
+  );
 
 export const envAction = async (
   projectId: string,
   envId: string,
   action: Action
-): Promise<void> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/envs/${encodeURIComponent(envId)}/${action}`,
-    { method: "POST" }
+) => {
+  await complete(
+    project.envs[":env"][action].$post({
+      param: { ...projectParam(projectId), env: encodeURIComponent(envId) },
+    }),
+    `${action} container`
   );
-  if (!res.ok) {
-    throw await failure(res, `${action} container`);
-  }
 };
 
-export const removeEnv = (projectId: string, envId: string): Promise<unknown> =>
-  postJson(
-    projectId,
-    `envs/${encodeURIComponent(envId)}/remove`,
-    {},
+export const removeEnv = (projectId: string, envId: string) =>
+  read(
+    project.envs[":env"].remove.$post({
+      param: { ...projectParam(projectId), env: encodeURIComponent(envId) },
+    }),
     "remove container"
   );
 
-export const fetchCandidates = async (): Promise<CandidateList> => {
-  const res = await fetch("/api/onboarding/candidates");
-  if (!res.ok) {
-    throw await failure(res, "list repos");
-  }
-  return (await res.json()) as CandidateList;
-};
+export const fetchCandidates = () =>
+  read(api.onboarding.candidates.$get(), "list repos");
 
-export const addProject = async (
-  path: string,
-  stack: StackId
-): Promise<AddProjectResult> => {
-  const res = await fetch("/api/onboarding", {
-    body: JSON.stringify({ path, stack }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "add project");
-  }
-  return (await res.json()) as AddProjectResult;
-};
+export const addProject = (path: string, stack: StackId) =>
+  read(api.onboarding.$post({ json: { path, stack } }), "add project");
 
-export const fetchCleanup = async (): Promise<CleanupPlan> => {
-  const res = await fetch("/api/cleanup");
-  if (!res.ok) {
-    throw await failure(res, "cleanup scan");
-  }
-  return (await res.json()) as CleanupPlan;
-};
+export const fetchCleanup = () => read(api.cleanup.$get(), "cleanup scan");
 
-export const applyCleanup = async (
-  items: CleanupItem[]
-): Promise<CleanupResult> => {
-  const res = await fetch("/api/cleanup", {
-    body: JSON.stringify({ items }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "cleanup");
-  }
-  return (await res.json()) as CleanupResult;
-};
+export const applyCleanup = (items: CleanupItem[]) =>
+  read(api.cleanup.$post({ json: { items } }), "cleanup");
 
-export const addNode = async (
-  ssh: string,
-  label?: string
-): Promise<NodeView> => {
-  const res = await fetch("/api/nodes", {
-    body: JSON.stringify({ ssh, ...(label ? { label } : {}) }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "add node");
-  }
-  return (await res.json()) as NodeView;
-};
+export const addNode = (ssh: string, label?: string) =>
+  read(
+    api.nodes.$post({ json: { ssh, ...(label ? { label } : {}) } }),
+    "add node"
+  );
 
-export const removeNode = async (id: string): Promise<void> => {
-  const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    throw await failure(res, "remove node");
-  }
+export const removeNode = async (id: string) => {
+  await complete(
+    api.nodes[":id"].$delete({ param: { id: encodeURIComponent(id) } }),
+    "remove node"
+  );
 };
 
 /** Forgets a starting task's variants that failed. */
-export const dismissStarting = async (
-  projectId: string,
-  task: string
-): Promise<void> => {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(task)}/starting`,
-    { method: "DELETE" }
+export const dismissStarting = async (projectId: string, task: string) => {
+  await complete(
+    project.tasks[":task"].starting.$delete({
+      param: { ...projectParam(projectId), task: encodeURIComponent(task) },
+    }),
+    "dismiss"
   );
-  if (!res.ok) {
-    throw await failure(res, "dismiss");
-  }
 };
 
 export const sendForgejoReview = async (
@@ -880,40 +724,28 @@ export const sendForgejoReview = async (
   repo: string,
   number: string,
   input: ForgejoReviewInput
-): Promise<void> => {
-  const res = await fetch(
-    `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/reviews`,
-    {
-      body: JSON.stringify(input),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    }
+) => {
+  await complete(
+    pull.reviews.$post({ param: pullParam(owner, repo, number), json: input }),
+    "send review"
   );
-  if (!res.ok) {
-    throw await failure(res, "send review");
-  }
 };
-export const createForgejoWorktree = async (
+
+export const createForgejoWorktree = (
   owner: string,
   repo: string,
   number: string,
   projectId: string,
   branch: string,
   commitId: string
-): Promise<{ worktree: Worktree }> => {
-  const res = await fetch(
-    `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/worktree`,
-    {
-      body: JSON.stringify({ branch, commitId, projectId }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    }
+) =>
+  read(
+    pull.worktree.$post({
+      param: pullParam(owner, repo, number),
+      json: { branch, commitId, projectId },
+    }),
+    "create PR worktree"
   );
-  if (!res.ok) {
-    throw await failure(res, "create PR worktree");
-  }
-  return res.json();
-};
 
 /** Where a pull request's review loads one version of a changed image. */
 export const forgejoImageUrl = (
@@ -922,11 +754,11 @@ export const forgejoImageUrl = (
   number: string,
   file: string,
   side: ImageSide
-): string =>
-  `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}/image?${new URLSearchParams({ file, side })}`;
-
-const aiReviewRoute = (owner: string, repo: string, number: string) =>
-  `/api/forgejo/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(number)}/ai-review`;
+) =>
+  pull.image.$path({
+    param: pullParam(owner, repo, number),
+    query: { file, side },
+  });
 
 /** Starts a session that reviews the pull request in a checkout of it; collect its findings once it is idle. */
 export const startAiReviewSession = async (
@@ -934,20 +766,19 @@ export const startAiReviewSession = async (
   repo: string,
   number: string,
   input: { projectId: string; directory: string; commitId: string }
-): Promise<string> => {
-  const res = await fetch(`${aiReviewRoute(owner, repo, number)}/session`, {
-    body: JSON.stringify(input),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "start AI review");
-  }
-  return ((await res.json()) as { sessionId: string }).sessionId;
+) => {
+  const data = await read(
+    pull["ai-review"].session.$post({
+      param: pullParam(owner, repo, number),
+      json: input,
+    }),
+    "start AI review"
+  );
+  return data.sessionId;
 };
 
 /** Findings from a finished review session, or without one, from the diff alone. */
-export const collectAiReview = async (
+export const collectAiReview = (
   owner: string,
   repo: string,
   number: string,
@@ -957,14 +788,11 @@ export const collectAiReview = async (
     commitId: string;
     sessionId?: string;
   }
-): Promise<AiReviewResult> => {
-  const res = await fetch(aiReviewRoute(owner, repo, number), {
-    body: JSON.stringify(input),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    throw await failure(res, "collect AI review");
-  }
-  return res.json();
-};
+) =>
+  read(
+    pull["ai-review"].$post({
+      param: pullParam(owner, repo, number),
+      json: input,
+    }),
+    "collect AI review"
+  );

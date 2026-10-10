@@ -133,42 +133,30 @@ export const parseJiraQuery = (
   };
 };
 
-/** URL parameters for a query, leaving out defaults so URLs stay short. */
-export const jiraQueryParams = (
-  query: Partial<JiraTicketQuery>
-): URLSearchParams => {
-  const params = new URLSearchParams();
+/** Typed HTTP query values, leaving out defaults so URLs stay short. */
+export const jiraQueryValues = (query: Partial<JiraTicketQuery>) => {
   const d = JIRA_DEFAULT_QUERY;
   const { scope, board, sprint, filter, project, status, sort, search } = query;
-  if (scope && scope !== d.scope) {
-    params.set("scope", scope);
-  }
-  if (scope === "board" && board !== undefined) {
-    params.set("board", String(board));
-    if (sprint) {
-      params.set("sprint", "1");
-    }
-  }
-  if (scope === "filter" && filter !== undefined) {
-    params.set("filter", String(filter));
-  }
-  if (project) {
-    params.set("project", project);
-  }
-  if (status && status !== d.status) {
-    params.set("status", status);
-  }
-  if (sort && sort !== d.sort) {
-    params.set("sort", sort);
-  }
-  if (search) {
-    params.set("search", search);
-  }
-  if (query.startAt) {
-    params.set("startAt", String(query.startAt));
-  }
-  return params;
+  return {
+    ...(scope && scope !== d.scope ? { scope } : {}),
+    ...(scope === "board" && board !== undefined
+      ? { board: String(board), ...(sprint ? { sprint: "1" } : {}) }
+      : {}),
+    ...(scope === "filter" && filter !== undefined
+      ? { filter: String(filter) }
+      : {}),
+    ...(project ? { project } : {}),
+    ...(status && status !== d.status ? { status } : {}),
+    ...(sort && sort !== d.sort ? { sort } : {}),
+    ...(search ? { search } : {}),
+    ...(query.startAt ? { startAt: String(query.startAt) } : {}),
+  };
 };
+
+/** URL parameters for the Tickets page and dashboard API. */
+export const jiraQueryParams = (
+  query: Partial<JiraTicketQuery>
+): URLSearchParams => new URLSearchParams(jiraQueryValues(query));
 
 export interface JiraBoard {
   id: number;

@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import type { InferRequestType } from "hono/client";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { InvalidNodeError, InvalidRootError } from "../../src/server/config";
 import { createDashboardApp } from "../../src/server/dashboard-api";
@@ -40,6 +41,13 @@ import type {
   SessionDetail,
   TaskResult,
 } from "../../src/shared/types";
+import {
+  createTask as createTaskViaRpc,
+  fetchModels as fetchModelsViaRpc,
+  postAction as postActionViaRpc,
+  replyPermission as replyPermissionViaRpc,
+} from "../../src/web/api";
+import { api as rpcApi } from "../../src/web/rpc";
 import { MemorySecretStore } from "../helpers/secrets";
 
 const project: Project = {
@@ -1912,5 +1920,82 @@ describe("bring home", () => {
       project.id,
       "/workspaces/demo.worktrees/fix"
     );
+  });
+});
+
+describe("Hono RPC contract", () => {
+  it("infers request fields and successful responses from server routes", () => {
+    const taskRoute = rpcApi.projects[":id"].tasks;
+    type Input = InferRequestType<typeof taskRoute.$post>["json"];
+    expectTypeOf<Input["prompt"]>().toEqualTypeOf<string>();
+    expectTypeOf<Input["where"]>().toEqualTypeOf<
+      "workspace" | "worktree" | undefined
+    >();
+    expectTypeOf<
+      Awaited<ReturnType<typeof createTaskViaRpc>>
+    >().toEqualTypeOf<TaskResult>();
+    expectTypeOf<
+      Awaited<ReturnType<typeof fetchModelsViaRpc>>
+    >().toEqualTypeOf<ModelsInfo>();
+  });
+
+  it("round-trips frontend RPC calls through real routes, including encoded IDs and errors", async () => {
+    const { app, hub } = setup();
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+      app.request(new Request(new URL(input, "http://localhost:7777"), init))
+    );
+    try {
+      await expect(fetchModelsViaRpc("demo/id?")).resolves.toStrictEqual({
+        models: [],
+        agents: [],
+      });
+      expect(hub.sessions.models).toHaveBeenCalledWith("demo/id?");
+      const task = {
+        prompt: "Fix",
+        where: "worktree",
+        variants: [{}],
+      } as const;
+      await expect(
+        createTaskViaRpc(project.id, { ...task, variants: [{}] })
+      ).resolves.toStrictEqual({ task: "tsk_1", variants: [] });
+      expect(hub.tasks.startTask).toHaveBeenCalledWith(project.id, task);
+      await postActionViaRpc(project.id, "rebuild-no-cache");
+      expect(hub.environments.rebuild).toHaveBeenCalledWith(project.id, true);
+      hub.sessions.replyPermission.mockRejectedValueOnce(
+        new AlreadyAnsweredError()
+      );
+      await expect(
+        replyPermissionViaRpc(project.id, "per/1", "once")
+      ).resolves.toBe("gone");
+      hub.sessions.models.mockRejectedValueOnce(
+        new UnavailableError("Start the project first")
+      );
+      await expect(fetchModelsViaRpc(project.id)).rejects.toThrow(
+        "Start the project first"
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects malformed JSON and wrong body/query shapes before invoking domain operations", async () => {
+    const { app, hub } = setup();
+    const post = (body: string) =>
+      app.request(`/api/projects/${project.id}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+    const malformed = await post("{");
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get("content-type")).toContain("application/json");
+    const wrongShape = await post(JSON.stringify({ prompt: 42 }));
+    expect(wrongShape.status).toBe(400);
+    expect(hub.tasks.startTask).not.toHaveBeenCalled();
+    expect(
+      (await app.request(`/api/projects/${project.id}/review?mode=invalid`))
+        .status
+    ).toBe(400);
+    expect(hub.reviews.review).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,5 @@
+import { api, complete, read } from "./rpc";
+
 // The page's half of Web Push: register the service worker, subscribe with the server's VAPID key
 // and hand the subscription to the server, which pushes notices even while no tab is open.
 
@@ -27,30 +29,12 @@ const sameKey = (a: ArrayBuffer | null, b: Uint8Array): boolean => {
   return view.every((byte, i) => byte === b[i]);
 };
 
-const post = async (route: string, body: unknown): Promise<Response> => {
-  const res = await fetch(route, {
-    body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `${route} failed (${res.status})`);
-  }
-  return res;
-};
-
 /** Registers the worker and makes sure this browser is subscribed with the server's current key. */
 const subscribe = async (): Promise<void> => {
   const registration = await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
-  const res = await fetch("/api/push/key");
-  if (!res.ok) {
-    throw new Error(`push key failed (${res.status})`);
-  }
-  const key = base64UrlToBytes(
-    ((await res.json()) as { publicKey: string }).publicKey
-  );
+  const { publicKey } = await read(api.push.key.$get(), "push key");
+  const key = base64UrlToBytes(publicKey);
 
   let subscription = await registration.pushManager.getSubscription();
   // A subscription made with other keys (push.json was lost or regenerated) can't receive our pushes.
@@ -65,7 +49,10 @@ const subscribe = async (): Promise<void> => {
     applicationServerKey: key,
     userVisibleOnly: true,
   });
-  await post("/api/push/subscribe", subscription.toJSON());
+  await complete(
+    api.push.subscribe.$post({ json: subscription.toJSON() }),
+    "subscribe to notifications"
+  );
 };
 
 /** Asks for notification permission, then subscribes. Resolves to the permission the user chose. */
@@ -106,6 +93,6 @@ export const closeNotifications = async (
 };
 
 export const sendTestNotification = async (): Promise<number> => {
-  const res = await post("/api/push/test", {});
-  return ((await res.json()) as { sent: number }).sent;
+  const { sent } = await read(api.push.test.$post(), "test notification");
+  return sent;
 };
