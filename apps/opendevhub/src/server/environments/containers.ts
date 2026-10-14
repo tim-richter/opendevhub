@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import type { Dotfiles, FeatureOptions } from "../../shared/personalization";
 import type { RunResult, Runner } from "../nodes/exec";
 
 export const LABEL = "opendevhub.project";
@@ -199,6 +200,14 @@ export const parseImageInspect = (json: string): ImageInfo[] => {
   }));
 };
 
+/** `--additional-features <json>`, or nothing when there are none. */
+const featureArgs = (
+  features: Record<string, FeatureOptions> | undefined
+): string[] =>
+  features && Object.keys(features).length > 0
+    ? ["--additional-features", JSON.stringify(features)]
+    : [];
+
 /** The last `{"outcome": …}` line the devcontainer CLI printed. */
 const lastOutcome = (stdout: string): Record<string, unknown> | undefined => {
   const lines = stdout
@@ -243,6 +252,10 @@ export class Containers {
       noCache?: boolean;
       onLine: (line: string) => void;
       mounts?: string[];
+      /** Features on top of the config's own; they change the image, so only a rebuild applies new ones. */
+      additionalFeatures?: Record<string, FeatureOptions>;
+      /** Cloned and installed by the CLI once, when the container is created. */
+      dotfiles?: Dotfiles;
     }
   ): Promise<UpResult> {
     const args = ["up", ...this.idArgs(target)];
@@ -255,6 +268,16 @@ export class Containers {
     // Only applied when the container is created; an existing container keeps its mounts.
     for (const m of opts.mounts ?? []) {
       args.push("--mount", m);
+    }
+    args.push(...featureArgs(opts.additionalFeatures));
+    if (opts.dotfiles) {
+      args.push("--dotfiles-repository", opts.dotfiles.repository);
+      if (opts.dotfiles.installCommand) {
+        args.push("--dotfiles-install-command", opts.dotfiles.installCommand);
+      }
+      if (opts.dotfiles.targetPath) {
+        args.push("--dotfiles-target-path", opts.dotfiles.targetPath);
+      }
     }
     const result = await this.run("devcontainer", args, {
       onLine: opts.onLine,
@@ -416,7 +439,8 @@ export class Containers {
     imageName: string,
     onLine: (line: string) => void,
     labels: string[] = [],
-    noCache = false
+    noCache = false,
+    additionalFeatures?: Record<string, FeatureOptions>
   ): Promise<void> {
     const args = [
       "build",
@@ -428,6 +452,7 @@ export class Containers {
     if (noCache) {
       args.push("--no-cache");
     }
+    args.push(...featureArgs(additionalFeatures));
     for (const label of labels) {
       args.push("--label", label);
     }

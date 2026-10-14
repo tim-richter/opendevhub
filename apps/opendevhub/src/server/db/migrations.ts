@@ -270,6 +270,9 @@ INSERT INTO task_sessions SELECT session_id, task_id, n FROM variants WHERE sess
   `
 ALTER TABLE task_sessions ADD COLUMN archived_at INTEGER;
 `,
+  `
+ALTER TABLE environments ADD COLUMN personalization TEXT;
+`,
 ];
 
 export class NewerDatabaseError extends Error {

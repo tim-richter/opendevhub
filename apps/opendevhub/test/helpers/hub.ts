@@ -319,7 +319,8 @@ export function setup(
     exec: vi.fn(
       async (
         _t: ExecTarget,
-        _command: string[]
+        _command: string[],
+        _opts?: { input?: string }
       ): Promise<{
         exitCode: number;
         stdout: string;
@@ -693,7 +694,9 @@ export function setup(
         p: Project,
         _w: EnvWorktree,
         _keyFiles: string[],
-        _onLine: (l: string) => void
+        _onLine: (l: string) => void,
+        _noCache?: boolean,
+        _features?: Record<string, unknown>
       ) => ({
         key: "k".repeat(64),
         ref: `opendevhub/${p.id}:kkkkkkkkkkkk-base`,
@@ -709,6 +712,7 @@ export function setup(
     remove: vi.fn(async (_id: string) => {}),
   };
   const projectSettings = vi.fn((_p: Project): unknown => undefined);
+  const personalization = vi.fn((): unknown => undefined);
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn(
     (_ep: OpencodeEndpoint) => client as unknown as OpencodeClient
@@ -773,6 +777,7 @@ export function setup(
     images,
     envFiles,
     projectSettings,
+    personalization,
     credentials,
     agentTunnel,
     hostPortTunnel,
@@ -827,6 +832,7 @@ export function setup(
     images,
     envFiles,
     projectSettings,
+    personalization,
     credentials,
     agentTunnel,
     tunnels,

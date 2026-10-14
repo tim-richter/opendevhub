@@ -41,7 +41,8 @@ function setup(list: (string | undefined)[] = ["tree1", undefined]) {
         ref: string,
         _onLine: (l: string) => void,
         _labels?: string[],
-        _noCache?: boolean
+        _noCache?: boolean,
+        _features?: Record<string, unknown>
       ) => {
         const done = deferred();
         builds.push({ folder, ref, done });
@@ -107,6 +108,26 @@ describe(imageKey, () => {
     ).not.toBe(k);
   });
 
+  it("keys the user's features in any key order, and keeps the key without them", () => {
+    const base = { cliVersion: "0.89.0", generation: 0, objects: ["a"] };
+    const k = imageKey(base);
+    expect(imageKey({ ...base, features: {} })).toBe(k);
+    const withFeatures = imageKey({
+      ...base,
+      features: { "ghcr.io/a/b:1": { x: 1, y: 2 }, "ghcr.io/c/d:1": {} },
+    });
+    expect(withFeatures).not.toBe(k);
+    expect(
+      imageKey({
+        ...base,
+        features: { "ghcr.io/c/d:1": {}, "ghcr.io/a/b:1": { y: 2, x: 1 } },
+      })
+    ).toBe(withFeatures);
+    expect(
+      imageKey({ ...base, features: { "ghcr.io/a/b:1": { x: 2, y: 2 } } })
+    ).not.toBe(withFeatures);
+  });
+
   it("names the base image after the project and the key", () => {
     expect(baseImageRef("demo-abc123", "0123456789abcdef")).toBe(
       "opendevhub/demo-abc123:0123456789ab-base"
@@ -154,6 +175,27 @@ describe("Images.ensureBase", () => {
     expect(containers.build).toHaveBeenCalledOnce();
     builds[0].done.resolve();
     expect((await a).ref).toBe((await b).ref);
+  });
+
+  it("builds the user's features into the image, under a key of its own", async () => {
+    const { images, containers, builds } = setup();
+    const features = { "ghcr.io/x/features/git-town:1": {} };
+    const plain = images.ensureBase(project, wt("a"), [], () => {});
+    await tick();
+    builds[0].done.resolve();
+    const withFeatures = images.ensureBase(
+      project,
+      wt("a"),
+      [],
+      () => {},
+      false,
+      features
+    );
+    await tick();
+    builds[1].done.resolve();
+    const [a, b] = await Promise.all([plain, withFeatures]);
+    expect(b.ref).not.toBe(a.ref);
+    expect(containers.build.mock.calls[1][5]).toStrictEqual(features);
   });
 
   it("skips the build when the image exists", async () => {

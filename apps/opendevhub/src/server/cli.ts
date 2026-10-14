@@ -74,6 +74,7 @@ import { preflight } from "./preflight";
 import { scanRoots } from "./projects/discovery";
 import { projectLinkSettings } from "./projects/links";
 import { Onboarding } from "./projects/onboarding";
+import { personalizationSettings } from "./projects/personalization";
 import { projectPortSettings } from "./projects/ports";
 import { StateStore } from "./projects/state";
 import { startServer } from "./server";
@@ -352,6 +353,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     }),
     envFiles: new EnvFiles(path.join(stateDir(), "envs")),
     projectSettings: (p) => loadConfig(dir).projects?.[p.path],
+    personalization: () => loadConfig(dir).personalization,
     worktrees: new Worktrees({
       containers,
       relativeLinks: process.env.OPENDEVHUB_RELATIVE_WORKTREES !== "0",
@@ -470,6 +472,21 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     },
     ...projectLinkSettings({
       project: (id) => store.project(id),
+      settings: projectSettings,
+    }),
+    ...personalizationSettings({
+      global: {
+        get: () => loadConfig(dir).personalization,
+        set: (personalization) => {
+          const { personalization: _old, ...rest } = loadConfig(dir);
+          saveConfig(dir, {
+            ...rest,
+            ...(personalization ? { personalization } : {}),
+          });
+        },
+      },
+      project: (id) => store.project(id),
+      runtime: (id) => store.runtime(id),
       settings: projectSettings,
     }),
     ...projectPortSettings({

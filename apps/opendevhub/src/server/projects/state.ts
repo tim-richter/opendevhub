@@ -54,6 +54,7 @@ const DURABLE_KEYS = [
   "workspaceFolder",
   "relayToken",
   "remoteUser",
+  "personalization",
 ] as const;
 
 /** A task environment opendevhub created: its worktree, and the image it was last started from. */

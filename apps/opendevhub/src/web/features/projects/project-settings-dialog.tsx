@@ -23,6 +23,7 @@ import {
   ScanSearchIcon,
   SearchIcon,
   SettingsIcon,
+  SparklesIcon,
   UnplugIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -39,6 +40,7 @@ import { SettingsHeader } from "../settings/settings-layout";
 import { AppearanceSettings } from "./appearance-settings";
 import { LinksSettings } from "./links-settings";
 import { OcrProjectSettingsBlock } from "./ocr-project-settings";
+import { PersonalizationProjectSettings } from "./personalization-project-settings";
 import { HostPortsSettings, PortsSettings } from "./ports-settings";
 
 const GROUPS = [
@@ -88,6 +90,15 @@ const SECTIONS: ProjectSection[] = [
     id: "host-ports",
     keywords: "host localhost browser chrome debugging network container",
     label: "Host ports",
+  },
+  {
+    component: PersonalizationProjectSettings,
+    group: "environments",
+    icon: SparklesIcon,
+    id: "personalization",
+    keywords:
+      "devcontainer features dotfiles setup install script tools git-town personal",
+    label: "Personalization",
   },
   {
     component: OcrProjectSettingsBlock,

@@ -16,6 +16,8 @@ export interface Config {
   projects?: Record<string, unknown>;
   /** Machines tasks can run on, besides this one. */
   nodes?: NodeConfig[];
+  /** What the user adds to every project's containers (features, setup command, dotfiles), validated where used. */
+  personalization?: Record<string, unknown>;
 }
 
 export const DEFAULT_PORT = 7777;
@@ -228,6 +230,11 @@ export const loadConfig = (dir: string): Config => {
     typeof raw.projects === "object" &&
     !Array.isArray(raw.projects)
       ? { projects: raw.projects }
+      : {}),
+    ...(raw.personalization &&
+    typeof raw.personalization === "object" &&
+    !Array.isArray(raw.personalization)
+      ? { personalization: raw.personalization }
       : {}),
   };
 };

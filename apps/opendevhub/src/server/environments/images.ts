@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { stableJson } from "../../shared/personalization";
+import type { FeatureOptions } from "../../shared/personalization";
 import type { EnvWorktree, Project } from "../../shared/types";
 import type { Runner } from "../nodes/exec";
 import type { Containers } from "./containers";
@@ -14,12 +16,17 @@ export const imageKey = (input: {
   cliVersion: string;
   objects: (string | undefined)[];
   generation: number;
+  /** The user's extra features; left out of the key when there are none, so existing keys stay as they were. */
+  features?: Record<string, FeatureOptions>;
 }): string => {
-  const parts = [
+  const parts: unknown[] = [
     input.cliVersion,
     input.objects.map((o) => o ?? null),
     input.generation,
   ];
+  if (input.features && Object.keys(input.features).length > 0) {
+    parts.push(stableJson(input.features));
+  }
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 };
 
@@ -48,24 +55,31 @@ export class Images {
     this.deps = deps;
   }
 
-  /** The image a worktree's config describes, built first when it doesn't exist yet — or always, without cache, with `noCache`. */
+  /**
+   * The image a worktree's config describes, plus the user's extra features, built first when it doesn't exist
+   * yet — or always, without cache, with `noCache`.
+   */
   async ensureBase(
     project: Project,
     worktree: EnvWorktree,
     keyFiles: string[],
     onLine: (line: string) => void,
-    noCache = false
+    noCache = false,
+    features: Record<string, FeatureOptions> = {}
   ): Promise<{ key: string; ref: string }> {
     const [cliVersion, objects] = await Promise.all([
       this.cliVersion(),
       this.deps.objects(project, worktree, [...KEY_PATHS, ...keyFiles]),
     ]);
-    const key = imageKey({ cliVersion, generation: 0, objects });
+    const key = imageKey({ cliVersion, features, generation: 0, objects });
     const ref = baseImageRef(project.id, key);
     let pending = this.building.get(ref);
     if (!pending) {
       pending = this.enqueue(project.id, () =>
-        this.buildIfMissing(ref, worktree.hostPath, project.id, onLine, noCache)
+        this.buildIfMissing(ref, worktree.hostPath, project.id, onLine, {
+          features,
+          noCache,
+        })
       ).finally(() => this.building.delete(ref));
       this.building.set(ref, pending);
     }
@@ -93,8 +107,9 @@ export class Images {
     folder: string,
     projectId: string,
     onLine: (line: string) => void,
-    noCache: boolean
+    opts: { noCache: boolean; features: Record<string, FeatureOptions> }
   ): Promise<void> {
+    const { noCache } = opts;
     if (!noCache && (await this.deps.containers.imageExists(ref))) {
       return;
     }
@@ -104,7 +119,8 @@ export class Images {
       ref,
       onLine,
       [`${BASE_PROJECT_LABEL}=${projectId}`],
-      noCache
+      noCache,
+      opts.features
     );
     onLine(`image: built ${ref}`);
   }

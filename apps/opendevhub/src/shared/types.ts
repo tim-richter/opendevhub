@@ -145,6 +145,8 @@ export interface ProjectRuntime {
   hostPorts?: HostPortStatus[];
   worktreeRoot?: WorktreeRoot;
   worktrees?: Worktree[];
+  /** The personalization (features and dotfiles) the container was created with, as `creationSettings` gives it. */
+  personalization?: string;
 }
 
 export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;

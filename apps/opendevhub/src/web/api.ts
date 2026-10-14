@@ -19,6 +19,10 @@ import type {
   OcrSettingsInput,
   OcrTestInput,
 } from "../shared/ocr";
+import type {
+  Personalization,
+  ProjectPersonalization,
+} from "../shared/personalization";
 import type { ProjectColor } from "../shared/project-appearance";
 import type { StackId } from "../shared/stacks";
 import type {
@@ -1448,4 +1452,43 @@ export const fetchOcrLog = (id: string) =>
   read(
     api.ocr.runs[":id"].logs.$get({ param: { id } }),
     "Open Code Review progress"
+  );
+
+/** What the user adds to every project's containers: features, a setup command and dotfiles. */
+export const fetchPersonalization = (signal?: AbortSignal) =>
+  read(
+    api.settings.personalization.$get(undefined, {
+      init: { cache: "no-store", signal },
+    }),
+    "personalization settings"
+  );
+
+export const savePersonalization = (input: Personalization) =>
+  read(
+    api.settings.personalization.$put({ json: input }),
+    "save personalization settings"
+  );
+
+export const fetchProjectPersonalization = (
+  projectId: string,
+  signal?: AbortSignal
+) =>
+  read(
+    project.personalization.$get(
+      { param: projectParam(projectId) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "project personalization"
+  );
+
+export const saveProjectPersonalization = (
+  projectId: string,
+  input: ProjectPersonalization
+) =>
+  read(
+    project.personalization.$put({
+      json: input,
+      param: projectParam(projectId),
+    }),
+    "save project personalization"
   );

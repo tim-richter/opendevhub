@@ -21,6 +21,7 @@ import type {
   Route,
   RouteContainer,
 } from "../../../src/server/network/routes";
+import { creationSettings } from "../../../src/shared/personalization";
 import type { Project } from "../../../src/shared/types";
 import { rawSession } from "../../helpers/fake-opencode";
 import {
@@ -2070,7 +2071,8 @@ describe("environments on another node", () => {
       remoteFix,
       [],
       expect.any(Function),
-      false
+      false,
+      {}
     );
     expect(images.ensureBase).not.toHaveBeenCalled();
     expect(box.kit.containers.readConfig).toHaveBeenCalledWith(
@@ -2132,5 +2134,106 @@ describe("environments on another node", () => {
     await hub.environments.stop(project.id);
     expect(store.runtime(project.id).containerState).toBe("stopped");
     expect(box.kit.containers.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("personalization", () => {
+  const globalSettings = {
+    dotfiles: { repository: "tim/dotfiles" },
+    features: { "ghcr.io/x/features/git-town:1": {} },
+    setupCommand: "echo global",
+  };
+  const isSetup = (command: string[]) =>
+    command[0] === "sh" && command[2]?.includes("opendevhub/setup-");
+
+  it("creates the main container with the user's features and dotfiles, and runs the setup commands", async () => {
+    const { hub, store, containers, personalization, projectSettings } =
+      setup();
+    personalization.mockReturnValue(globalSettings);
+    projectSettings.mockReturnValue({
+      personalization: {
+        features: { "ghcr.io/x/features/jq:1": { version: "1.7" } },
+        setupCommand: "echo project",
+      },
+    });
+    await hub.environments.rescan();
+    await hub.environments.start(project.id);
+    const effective = {
+      dotfiles: { repository: "tim/dotfiles" },
+      features: {
+        "ghcr.io/x/features/git-town:1": {},
+        "ghcr.io/x/features/jq:1": { version: "1.7" },
+      },
+      setupCommands: ["echo global", "echo project"],
+    };
+    expect(containers.up.mock.calls[0][1]).toMatchObject({
+      additionalFeatures: effective.features,
+      dotfiles: effective.dotfiles,
+    });
+    const setups = containers.exec.mock.calls.filter((c) => isSetup(c[1]));
+    expect(setups.map((c) => c[2]?.input)).toStrictEqual([
+      "echo global",
+      "echo project",
+    ]);
+    expect(setups[0][1][4]).toMatch(/^[0-9a-f]{12}$/u);
+    expect(store.runtime(project.id).personalization).toBe(
+      creationSettings(effective)
+    );
+  });
+
+  it("keeps what an existing container was created with when it starts again", async () => {
+    const { hub, store, personalization } = setup();
+    await hub.environments.rescan();
+    await hub.environments.start(project.id);
+    const created = store.runtime(project.id).personalization;
+    personalization.mockReturnValue(globalSettings);
+    await hub.environments.stop(project.id);
+    await hub.environments.start(project.id);
+    expect(store.runtime(project.id).personalization).toBe(created);
+    await hub.environments.rebuild(project.id);
+    await vi.waitFor(() =>
+      expect(store.runtime(project.id).personalization).not.toBe(created)
+    );
+  });
+
+  it("logs a failing setup command and starts opencode anyway", async () => {
+    const { hub, store, containers, personalization } = setup();
+    personalization.mockReturnValue({ setupCommand: "exit 3" });
+    containers.exec.mockImplementation(async (_t, command) => ({
+      exitCode: isSetup(command) ? 3 : 0,
+      stderr: "",
+      stdout: "",
+      timedOut: false,
+    }));
+    await hub.environments.rescan();
+    await hub.environments.start(project.id);
+    expect(store.runtime(project.id).opencode).toBe("healthy");
+    expect(
+      hub.environments
+        .logLines(project.id)
+        .some((l) =>
+          /personalize: setup command \w+ failed \(exit 3\)/u.test(l)
+        )
+    ).toBe(true);
+  });
+
+  it("builds a task's features into its base image and clones the dotfiles when it starts", async () => {
+    const s = await withWorktree();
+    s.personalization.mockReturnValue(globalSettings);
+    const { envId } = await s.hub.environments.createEnv(project.id, feat.path);
+    await vi.waitFor(() =>
+      expect(s.store.runtime(envId).opencode).toBe("healthy")
+    );
+    expect(s.images.ensureBase.mock.calls.at(-1)?.[5]).toStrictEqual(
+      globalSettings.features
+    );
+    const up = s.containers.up.mock.calls.find((c) => c[0].id === envId);
+    expect(up?.[1]).toMatchObject({ dotfiles: globalSettings.dotfiles });
+    expect(up?.[1]).not.toHaveProperty("additionalFeatures");
+    expect(
+      s.containers.exec.mock.calls.some(
+        (c) => c[0].id === envId && isSetup(c[1])
+      )
+    ).toBe(true);
   });
 });

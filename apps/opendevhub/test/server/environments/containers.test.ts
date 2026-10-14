@@ -217,6 +217,40 @@ describe("Containers mounts and workspace folder", () => {
     ]);
   });
 
+  it("up adds the user's features and dotfiles", async () => {
+    const { run, calls } = fakeRunner(() => ({ stdout: okUp }));
+    await new Containers(run).up(project, {
+      additionalFeatures: { "ghcr.io/x/features/git-town:1": { v: "21" } },
+      dotfiles: {
+        installCommand: "./go.sh",
+        repository: "tim/dotfiles",
+        targetPath: "~/.dots",
+      },
+      onLine: () => {},
+      rebuild: false,
+    });
+    expect(calls[0].args.slice(-8)).toStrictEqual([
+      "--additional-features",
+      '{"ghcr.io/x/features/git-town:1":{"v":"21"}}',
+      "--dotfiles-repository",
+      "tim/dotfiles",
+      "--dotfiles-install-command",
+      "./go.sh",
+      "--dotfiles-target-path",
+      "~/.dots",
+    ]);
+  });
+
+  it("up leaves out empty features and absent dotfiles", async () => {
+    const { run, calls } = fakeRunner(() => ({ stdout: okUp }));
+    await new Containers(run).up(project, {
+      additionalFeatures: {},
+      onLine: () => {},
+      rebuild: false,
+    });
+    expect(calls[0].args.join(" ")).not.toMatch(/additional|dotfiles/u);
+  });
+
   it("reads the planned workspace folder from read-configuration", async () => {
     const stdout = JSON.stringify({
       configuration: {},
@@ -426,6 +460,19 @@ describe("task environment containers", () => {
       "a=1",
       "--label",
       "b=2",
+    ]);
+  });
+
+  it("passes the user's features to the build", async () => {
+    const ok = fakeRunner(() => ({
+      stdout: '{"outcome":"success","imageName":["img"]}',
+    }));
+    await new Containers(ok.run).build("/f", "img", () => {}, [], false, {
+      "ghcr.io/x/features/git-town:1": {},
+    });
+    expect(ok.calls[0].args.slice(-2)).toStrictEqual([
+      "--additional-features",
+      '{"ghcr.io/x/features/git-town:1":{}}',
     ]);
   });
 

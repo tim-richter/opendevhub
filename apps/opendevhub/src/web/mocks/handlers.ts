@@ -16,6 +16,15 @@ import type {
   OcrSettingsInput,
   OcrTestResult,
 } from "../../shared/ocr";
+import {
+  readPersonalization,
+  readProjectPersonalization,
+  resolvePersonalization,
+} from "../../shared/personalization";
+import type {
+  Personalization,
+  ProjectPersonalization,
+} from "../../shared/personalization";
 import type {
   DashboardSnapshot,
   ProjectLinks,
@@ -114,6 +123,21 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     ocrTest = { ok: true },
   } = options;
   let ocr = options.ocr ?? ocrSettings;
+  let personalization: Personalization = readPersonalization({
+    features: { "ghcr.io/devcontainers/features/github-cli:1": {} },
+    setupCommand: "git config --global alias.co checkout",
+  });
+  const projectPersonalization = new Map<string, ProjectPersonalization>();
+  const projectPersonalizationView = (id: string) => {
+    const own =
+      projectPersonalization.get(id) ?? readProjectPersonalization(undefined);
+    return {
+      effective: resolvePersonalization(personalization, own),
+      global: personalization,
+      personalization: own,
+      rebuildNeeded: projectPersonalization.has(id),
+    };
+  };
   let presets: ForgejoFilterPreset[] = [
     {
       filters: { inbox: "review-requested", state: "open" },
@@ -318,6 +342,29 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
       await delay(800);
       return HttpResponse.json({ installed: true });
     }),
+    http.get("/api/settings/personalization", async () => {
+      await wait();
+      return HttpResponse.json({ personalization });
+    }),
+    http.put("/api/settings/personalization", async ({ request }) => {
+      personalization = readPersonalization(await request.json());
+      return HttpResponse.json({ personalization });
+    }),
+    http.get("/api/projects/:id/personalization", async ({ params }) => {
+      await wait();
+      return HttpResponse.json(projectPersonalizationView(String(params.id)));
+    }),
+    http.put(
+      "/api/projects/:id/personalization",
+      async ({ params, request }) => {
+        const id = String(params.id);
+        projectPersonalization.set(
+          id,
+          readProjectPersonalization(await request.json())
+        );
+        return HttpResponse.json(projectPersonalizationView(id));
+      }
+    ),
     http.get("/api/projects/:id/ocr", async () => {
       await wait();
       return HttpResponse.json(projectOcr);

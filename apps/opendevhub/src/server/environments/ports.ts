@@ -179,6 +179,8 @@ export interface HubDeps {
   envFiles?: EnvFilesPort;
   /** The project's entry in config.json `projects`. */
   projectSettings?: (project: Project) => unknown;
+  /** config.json's `personalization`: what the user adds to every project's containers. */
+  personalization?: () => unknown;
   /** Git identity, known_hosts and git's ssh command in containers; skipped when absent. */
   credentials?: CredentialsPort;
   /** Books what each poll's sessions spent; skipped when absent (no usage ledger). */

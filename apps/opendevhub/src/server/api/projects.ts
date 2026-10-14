@@ -132,6 +132,44 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           return { ports: deps.projectHostPorts.get(id) };
         })
     )
+    .get("/api/settings/personalization", (c) =>
+      json(c, () => {
+        if (!deps.personalization) {
+          throw new UnavailableError("Personalization is not available");
+        }
+        return deps.personalization.get();
+      })
+    )
+    .put(
+      "/api/settings/personalization",
+      validateJson(bodies.personalization),
+      (c) =>
+        json(c, () => {
+          if (!deps.personalization) {
+            throw new UnavailableError("Personalization is not available");
+          }
+          return deps.personalization.save(c.req.valid("json"));
+        })
+    )
+    .get("/api/projects/:id/personalization", (c) =>
+      json(c, (id) => {
+        if (!deps.projectPersonalization) {
+          throw new UnavailableError("Personalization is not available");
+        }
+        return deps.projectPersonalization.get(id);
+      })
+    )
+    .put(
+      "/api/projects/:id/personalization",
+      validateJson(bodies.projectPersonalization),
+      (c) =>
+        json(c, (id) => {
+          if (!deps.projectPersonalization) {
+            throw new UnavailableError("Personalization is not available");
+          }
+          return deps.projectPersonalization.save(id, c.req.valid("json"));
+        })
+    )
     .get("/api/projects/:id/links", (c) =>
       json(c, (id) => {
         if (!deps.projectLinks) {

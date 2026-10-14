@@ -25,6 +25,7 @@ import {
   GitPullRequestIcon,
   PlugIcon,
   SearchIcon,
+  SparklesIcon,
   ScanSearchIcon,
   ServerIcon,
   SettingsIcon,
@@ -54,6 +55,10 @@ import {
 } from "./integrations-settings";
 import { NotificationSettings } from "./notification-settings";
 import { OCR_SECTION, OcrSettingsSection } from "./ocr-settings";
+import {
+  PERSONALIZATION_SECTION,
+  PersonalizationSettingsSection,
+} from "./personalization-settings";
 import { ProjectSettings } from "./project-settings";
 import { SETTINGS_PARAM, SettingsLink, useSettingsHref } from "./settings-link";
 import { ShortcutSettings } from "./shortcut-settings";
@@ -138,6 +143,15 @@ const SECTIONS: SectionDef[] = [
     keywords: "nodes machines ssh servers remote",
     label: "Remote instances",
     render: () => <RemoteInstancesSettings />,
+  },
+  {
+    group: "workspace",
+    icon: SparklesIcon,
+    id: PERSONALIZATION_SECTION,
+    keywords:
+      "devcontainer features dotfiles setup install script tools git-town personal",
+    label: "Personalization",
+    render: () => <PersonalizationSettingsSection />,
   },
   {
     group: "workspace",

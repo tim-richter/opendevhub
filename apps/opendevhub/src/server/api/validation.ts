@@ -12,6 +12,13 @@ import {
   normalizeJql,
 } from "../../shared/jira";
 import {
+  DOTFILES_REPOSITORY,
+  FEATURE_ID,
+  FEATURE_ID_MAX,
+  FEATURES_MAX,
+  SETUP_COMMAND_MAX,
+} from "../../shared/personalization";
+import {
   PROJECT_COLORS,
   PROJECT_SHORT_NAME,
 } from "../../shared/project-appearance";
@@ -55,6 +62,22 @@ const actionFlag = z
   .transform((value) => value === true)
   .optional();
 const directory = z.object({ directory: text });
+const personalization = z.object({
+  features: z
+    .record(
+      z.string().max(FEATURE_ID_MAX).regex(FEATURE_ID),
+      z.record(z.string(), z.unknown())
+    )
+    .refine((f) => Object.keys(f).length <= FEATURES_MAX),
+  setupCommand: z.string().max(SETUP_COMMAND_MAX).optional(),
+  dotfiles: z
+    .object({
+      repository: z.string().max(500).regex(DOTFILES_REPOSITORY),
+      installCommand: z.string().max(2000).optional(),
+      targetPath: z.string().max(500).optional(),
+    })
+    .optional(),
+});
 // Provider ids, model ids and variants, as `tasks/request.ts` takes them.
 const modelName = z.string().regex(/^[A-Za-z0-9._:/@-]{1,200}$/u);
 const modelRef = z.object({
@@ -212,6 +235,10 @@ export const bodies = {
   }),
   localAiFindings: z.object({ directory: z.string(), sessionId: z.string() }),
   ocrSettings: z.object({ provider: ocrProvider, limits: ocrLimits }),
+  personalization,
+  projectPersonalization: personalization.extend({
+    inheritGlobal: z.boolean(),
+  }),
   ocrProject: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("global") }),
     ocrProvider.extend({ mode: z.literal("custom") }),

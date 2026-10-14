@@ -36,6 +36,11 @@ export const RemoteInstances = meta.story({
   parameters: { route: "/?settings=remote-instances" },
 });
 
+/** Features, a setup command and dotfiles every project's containers get. */
+export const Personalization = meta.story({
+  parameters: { route: "/?settings=personalization" },
+});
+
 /** Identity, agent keys, and a host whose key isn't loaded. */
 export const Git = meta.story({ parameters: { route: "/?settings=git" } });
 

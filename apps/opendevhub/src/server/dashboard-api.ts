@@ -3,6 +3,12 @@ import path from "node:path";
 
 import { Hono } from "hono";
 
+import type {
+  Personalization,
+  PersonalizationView,
+  ProjectPersonalization,
+  ProjectPersonalizationView,
+} from "../shared/personalization";
 import type { ProjectAppearance } from "../shared/project-appearance";
 import type { ProjectLinks } from "../shared/types";
 import { createActivityRoutes } from "./api/activity";
@@ -140,6 +146,16 @@ export interface DashboardDeps {
   projectHostPorts?: {
     get: (id: string) => number[];
     save: (id: string, ports: number[]) => Promise<void>;
+  };
+  /** What the user adds to every project's containers; applied as containers start. */
+  personalization?: {
+    get: () => PersonalizationView;
+    save: (p: Personalization) => PersonalizationView;
+  };
+  /** A project's own additions to the personalization, and whether its container needs a rebuild for them. */
+  projectPersonalization?: {
+    get: (id: string) => ProjectPersonalizationView;
+    save: (id: string, p: ProjectPersonalization) => ProjectPersonalizationView;
   };
   /** The Jira board and Forgejo repository each project is linked to. */
   projectLinks?: {

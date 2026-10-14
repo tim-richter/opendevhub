@@ -202,6 +202,21 @@ describe("config projects", () => {
   });
 });
 
+describe("config personalization", () => {
+  it("keeps the user's personalization through the CLI's load and save", () => {
+    const personalization = {
+      features: { "ghcr.io/x/features/git-town:1": {} },
+      setupCommand: "echo hi",
+    };
+    fs.writeFileSync(
+      path.join(dir, "config.json"),
+      JSON.stringify({ personalization, port: 1 })
+    );
+    saveConfig(dir, loadConfig(dir));
+    expect(loadConfig(dir).personalization).toStrictEqual(personalization);
+  });
+});
+
 describe(stateDir, () => {
   it("uses XDG_STATE_HOME when absolute, else ~/.local/state", () => {
     expect(stateDir({ XDG_STATE_HOME: "/xdg" })).toBe("/xdg/opendevhub");

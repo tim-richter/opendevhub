@@ -1515,6 +1515,67 @@ describe("dashboard API", () => {
     expect((await post(deps.app, { ports: [] })).status).toBe(412);
   });
 
+  it("reads and saves the global and a project's personalization, rejecting what the CLI can't use", async () => {
+    const deps = setup();
+    const view = { personalization: { features: {} } };
+    const personalization = {
+      get: vi.fn(() => view),
+      save: vi.fn((_p: unknown) => view),
+    };
+    const projectView = {
+      effective: { features: {}, setupCommands: [] },
+      global: { features: {} },
+      personalization: { features: {}, inheritGlobal: true },
+      rebuildNeeded: false,
+    };
+    const projectPersonalization = {
+      get: vi.fn((_id: string) => projectView),
+      save: vi.fn((_id: string, _p: unknown) => projectView),
+    };
+    const app = createDashboardApp({
+      ...deps,
+      personalization,
+      projectPersonalization,
+    });
+    const put = (target: typeof app, url: string, body: unknown) =>
+      target.request(url, {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+    const global = "/api/settings/personalization";
+    const own = `/api/projects/${project.id}/personalization`;
+    expect(await (await app.request(global)).json()).toStrictEqual(view);
+    expect(await (await app.request(own)).json()).toStrictEqual(projectView);
+    const body = {
+      dotfiles: { repository: "tim/dotfiles" },
+      features: { "ghcr.io/x/features/git-town:1": {} },
+      setupCommand: "echo hi",
+    };
+    expect((await put(app, global, body)).status).toBe(200);
+    expect(personalization.save).toHaveBeenCalledWith(body);
+    expect(
+      (await put(app, own, { ...body, inheritGlobal: false })).status
+    ).toBe(200);
+    expect(projectPersonalization.save).toHaveBeenCalledWith(project.id, {
+      ...body,
+      inheritGlobal: false,
+    });
+    expect(
+      (await put(app, global, { features: { "./local": {} } })).status
+    ).toBe(400);
+    expect(
+      (
+        await put(app, global, {
+          dotfiles: { repository: "--upload-pack=x" },
+          features: {},
+        })
+      ).status
+    ).toBe(400);
+    expect((await put(app, own, body)).status).toBe(400);
+    expect((await put(deps.app, global, body)).status).toBe(412);
+  });
+
   it("serves the git setup and tests a host", async () => {
     const deps = setup();
     const view = {

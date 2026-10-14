@@ -11,6 +11,8 @@ export interface DurableRuntime {
   workspaceFolder?: string;
   relayToken?: string;
   remoteUser?: string;
+  /** The personalization (features and dotfiles) the container was created with. */
+  personalization?: string;
 }
 
 export type DurablePatch = Partial<{
@@ -54,6 +56,7 @@ interface RawEnvironment {
   image_ref: string | null;
   password: string | null;
   relay_token: string | null;
+  personalization: string | null;
   created_at: number;
   removed_at: number | null;
   worktree_path: string | null;
@@ -69,6 +72,7 @@ const SELECT = `SELECT e.*, w.path AS worktree_path, w.host_path AS worktree_hos
 const DURABLE_COLUMNS = {
   containerId: "container_id",
   password: "password",
+  personalization: "personalization",
   relayToken: "relay_token",
   remoteUser: "remote_user",
   workspaceFolder: "workspace_folder",
@@ -200,7 +204,7 @@ export class EnvironmentStore {
           .prepare(
             `UPDATE environments SET project_id = ?, kind = 'task', worktree_id = ?, node_id = ?, container_id = NULL,
              workspace_folder = NULL, remote_user = NULL, image_key = NULL, image_ref = NULL, password = NULL,
-             relay_token = NULL, created_at = ?, removed_at = NULL WHERE id = ?`
+             relay_token = NULL, personalization = NULL, created_at = ?, removed_at = NULL WHERE id = ?`
           )
           .run(env.projectId, env.worktreeId, env.node ?? null, at, env.id);
       } else {
