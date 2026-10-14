@@ -650,6 +650,9 @@ export function setup(
       async (_sid: string, _agent: string, _dir?: string) => {}
     ),
     sessions: vi.fn(async (): Promise<RawSession[]> => []),
+    childSessions: vi.fn(
+      async (_parentId: string): Promise<RawSession[]> => []
+    ),
     messages: vi.fn(
       async (_sid: string, _limit: number): Promise<RawMessage[]> => []
     ),

@@ -667,6 +667,8 @@ describe("dashboard API", () => {
               number: 7,
             },
             commitId: sha,
+            head: "feature/login",
+            headRepository: "fork/repo",
           }) as never
       ),
       test: vi.fn(),
@@ -722,12 +724,14 @@ describe("dashboard API", () => {
         })
       ).status
     ).toBe(200);
+    // The worktree checks out the PR's own head branch, whatever the request names.
     expect(hub.checkouts.createWorktree).toHaveBeenCalledWith("p", {
-      branch: "review/pr-7",
+      branch: "feature/login",
       pull: {
         url: "https://forge.example/team/repo/pulls/7",
         number: 7,
         commitId: sha,
+        headRepository: "fork/repo",
         repo: { owner: "team", repo: "repo" },
       },
     });
