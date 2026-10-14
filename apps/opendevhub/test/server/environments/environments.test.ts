@@ -2217,6 +2217,37 @@ describe("personalization", () => {
     ).toBe(true);
   });
 
+  it("mounts the user's folders and volumes, skipping missing folders and opendevhub's own targets", async () => {
+    const { hub, containers, personalization } = setup();
+    const here = process.cwd();
+    personalization.mockReturnValue({
+      mounts: [
+        { source: here, target: "/home/node/here", type: "bind" },
+        { source: "go-cache", target: "/go/pkg", type: "volume" },
+        {
+          source: "/nowhere/at/all",
+          target: "/home/node/missing",
+          type: "bind",
+        },
+        { source: "/tmp", target: "/workspaces/demo.worktrees", type: "bind" },
+      ],
+    });
+    await hub.environments.rescan();
+    await hub.environments.start(project.id);
+    const mounts = containers.up.mock.calls[0][1].mounts ?? [];
+    expect(mounts).toContain(`type=bind,source=${here},target=/home/node/here`);
+    expect(mounts).toContain("type=volume,source=go-cache,target=/go/pkg");
+    expect(mounts.join(" ")).not.toMatch(/nowhere/u);
+    expect(mounts.filter((m) => m.includes("/tmp,"))).toStrictEqual([]);
+    const log = hub.environments.logLines(project.id).join("\n");
+    expect(log).toMatch(
+      /skipped mount \/home\/node\/missing: \/nowhere\/at\/all doesn't exist/u
+    );
+    expect(log).toMatch(
+      /skipped mount \/workspaces\/demo.worktrees: opendevhub mounts something there itself/u
+    );
+  });
+
   it("builds a task's features into its base image and clones the dotfiles when it starts", async () => {
     const s = await withWorktree();
     s.personalization.mockReturnValue(globalSettings);

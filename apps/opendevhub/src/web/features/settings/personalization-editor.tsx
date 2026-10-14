@@ -4,17 +4,100 @@ import { Label } from "@opendevhub/ui/label";
 import { Textarea } from "@opendevhub/ui/textarea";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 
-import { FEATURES_MAX } from "../../../shared/personalization";
+import { FEATURES_MAX, MOUNTS_MAX } from "../../../shared/personalization";
+import { Choice } from "../../components/choice";
 import { muted } from "../../components/page";
 import {
   featureDraft,
   featureIdError,
+  mountDraft,
+  mountDraftError,
   optionsError,
 } from "./personalization-draft";
 import type {
   FeatureDraft,
+  MountDraft,
   PersonalizationDraft,
 } from "./personalization-draft";
+
+const MOUNT_TYPES = [
+  { label: "Folder", value: "bind" },
+  { label: "Volume", value: "volume" },
+];
+
+const MountRow = (props: {
+  id: string;
+  mount: MountDraft;
+  onChange: (mount: MountDraft) => void;
+  onRemove: () => void;
+}) => {
+  const { mount } = props;
+  const problem = mountDraftError(mount);
+  const bind = mount.type === "bind";
+  return (
+    <li className="flex flex-col gap-2 p-3">
+      <div className="flex flex-wrap items-start gap-2 sm:flex-nowrap">
+        <Choice
+          label="Mount type"
+          value={mount.type}
+          options={MOUNT_TYPES}
+          onChange={(type) =>
+            props.onChange({
+              ...mount,
+              type: type === "volume" ? "volume" : "bind",
+            })
+          }
+          className="w-28 shrink-0"
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <Label htmlFor={`${props.id}-source`} className="sr-only">
+            {bind ? "Folder on the host" : "Volume name"}
+          </Label>
+          <Input
+            id={`${props.id}-source`}
+            className="font-mono"
+            placeholder={bind ? "~/notes" : "go-mod-cache"}
+            spellCheck={false}
+            value={mount.source}
+            aria-invalid={problem ? true : undefined}
+            onChange={(e) =>
+              props.onChange({ ...mount, source: e.currentTarget.value })
+            }
+          />
+        </div>
+        <span aria-hidden className="text-muted-foreground self-center">
+          →
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <Label htmlFor={`${props.id}-target`} className="sr-only">
+            Path in the container
+          </Label>
+          <Input
+            id={`${props.id}-target`}
+            className="font-mono"
+            placeholder="/home/node/notes"
+            spellCheck={false}
+            value={mount.target}
+            aria-invalid={problem ? true : undefined}
+            onChange={(e) =>
+              props.onChange({ ...mount, target: e.currentTarget.value })
+            }
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Remove mount ${mount.target.trim() || mount.source.trim()}`}
+          onClick={props.onRemove}
+        >
+          <Trash2Icon />
+        </Button>
+      </div>
+      {problem && <p className="text-destructive text-xs">{problem}</p>}
+    </li>
+  );
+};
 
 const FeatureRow = (props: {
   id: string;
@@ -139,6 +222,48 @@ export const PersonalizationFields = (props: {
             }
           >
             <PlusIcon /> Add feature
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-0.5">
+          <h3 className="text-sm font-medium">Mounts</h3>
+          <p className={muted}>
+            Folders of the machine the container runs on, or Docker volumes,
+            mounted read and write. Agents and everything else in the container
+            can change what&apos;s in them.
+          </p>
+        </div>
+        {draft.mounts.length > 0 && (
+          <ul className="bg-card flex flex-col divide-y rounded-lg border">
+            {draft.mounts.map((m) => (
+              <MountRow
+                key={m.key}
+                id={`${id}-mount-${m.key}`}
+                mount={m}
+                onChange={(next) =>
+                  set({
+                    mounts: draft.mounts.map((o) =>
+                      o.key === m.key ? next : o
+                    ),
+                  })
+                }
+                onRemove={() =>
+                  set({ mounts: draft.mounts.filter((o) => o.key !== m.key) })
+                }
+              />
+            ))}
+          </ul>
+        )}
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={draft.mounts.length >= MOUNTS_MAX}
+            onClick={() => set({ mounts: [...draft.mounts, mountDraft()] })}
+          >
+            <PlusIcon /> Add mount
           </Button>
         </div>
       </div>

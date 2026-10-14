@@ -72,9 +72,9 @@ const PersonalizationForm = (props: { personalization: Personalization }) => {
         </fieldset>
       </SettingsBlock>
       <Note>
-        Features and dotfiles go into new containers: rebuild a project (or
-        create a new task container) to apply them. A changed setup command runs
-        on the next start.
+        Features, dotfiles and mounts go into new containers: rebuild a project
+        (or create a new task container) to apply them. A changed setup command
+        runs on the next start.
       </Note>
       <div className="flex flex-wrap items-center gap-3 border-t pt-6">
         <Button type="submit" disabled={save.isPending}>

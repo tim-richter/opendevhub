@@ -12,6 +12,12 @@ Open **Settings → Personalization** to set it for every project. To add to it 
 
 - **Features**: [dev container Features](https://containers.dev/features) built into the image on top of the repository's own, passed to the dev container CLI as `--additional-features`. Only published features work (`ghcr.io/owner/repo/feature:1`, or an `https://` tarball). Local `./feature` folders don't, because they would have to be in the repository. Options are JSON, the same as in devcontainer.json.
 - **Setup command**: a shell script run as the container's user once the container starts. It runs with `bash -l` when bash is installed and `sh -l` otherwise. It runs once per container and again after you change it. A marker in `~/.cache/opendevhub` records that it ran, and the marker is only written when the script succeeds, so a failed script runs again on the next start. A failure never stops the container. The output goes to the environment's log, prefixed with `personalize:`.
+- **Mounts**: folders or Docker volumes mounted into the container, the same as `mounts` in devcontainer.json, passed to the dev container CLI as `--mount`.
+  - A folder is an absolute path or one under `~`. It comes from the machine the container runs on. That is your machine for local containers, and the node itself for containers on a [remote node](/docs/remote-nodes), where `~` means the node's home folder.
+  - A folder that doesn't exist on your machine is skipped and logged rather than failing the container. Folders on a remote node aren't checked, so a missing one fails the container's start.
+  - Mounts are read and write: `--mount` takes no `readonly` option. Agents and everything else in the container can change and delete what is in them.
+  - Targets under `/opendevhub`, and the targets opendevhub uses itself for worktrees and opencode's sessions, are skipped.
+  - A volume suits a cache you want to keep across rebuilds, for example `go-mod-cache` mounted at `/go/pkg/mod`.
 - **Dotfiles**: a repository the dev container CLI clones into each new container before it runs the repository's install script (`install.sh`, `setup.sh` and so on). This is the same mechanism that VS Code and Codespaces use. You can enter `owner/repo` for GitHub, or any git URL.
 
 ## How project settings combine
@@ -21,12 +27,13 @@ A project uses your global personalization and adds its own:
 - For a feature that both list, the project's options win.
 - Both setup commands run, the global one first.
 - The project's dotfiles replace the global ones.
+- For a mount target that both use, the project's mount wins.
 
 Turn off **Use your global personalization** for a project to give it only its own settings. The project page shows what its containers end up with.
 
 ## When changes apply
 
-Features and dotfiles are part of how a container is created:
+Features, dotfiles and mounts are part of how a container is created:
 
 - **Project container:** rebuild it. Its Personalization settings say when it was created with other settings and offer a **Rebuild** button.
 - **Task containers:** they are built from a base image. Your features are part of that image's key, so a new task container gets a fresh image. Rebuild an existing one to update it.
@@ -51,7 +58,11 @@ The settings are stored like this:
   "personalization": {
     "features": { "ghcr.io/devcontainers/features/github-cli:1": {} },
     "setupCommand": "go install github.com/git-town/git-town/v21@latest",
-    "dotfiles": { "repository": "you/dotfiles" }
+    "dotfiles": { "repository": "you/dotfiles" },
+    "mounts": [
+      { "type": "bind", "source": "~/notes", "target": "/home/node/notes" },
+      { "type": "volume", "source": "go-mod-cache", "target": "/go/pkg/mod" }
+    ]
   },
   "projects": {
     "/src/app": {
@@ -64,5 +75,7 @@ The settings are stored like this:
 <Callout type="warn" title="It runs in the container">
   Setup commands and dotfiles install scripts run inside the project's
   container, with the container user's access to the workspace and to the
-  ssh-agent opendevhub forwards. Only add scripts and repositories you trust.
+  ssh-agent opendevhub forwards. Mounted folders are writable from the container
+  too. Only add scripts and repositories you trust, and don't mount folders that
+  hold secrets you don't want agents to read, such as `~/.ssh` or `~/.aws`.
 </Callout>

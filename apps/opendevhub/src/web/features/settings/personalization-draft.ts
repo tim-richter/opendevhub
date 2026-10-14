@@ -1,9 +1,11 @@
 import {
   DOTFILES_REPOSITORY,
   FEATURE_ID,
+  mountError,
 } from "../../../shared/personalization";
 import type {
   FeatureOptions,
+  PersonalMount,
   Personalization,
   ResolvedPersonalization,
 } from "../../../shared/personalization";
@@ -16,8 +18,15 @@ export interface FeatureDraft {
   options: string;
 }
 
+/** One mount row being edited. */
+export interface MountDraft extends PersonalMount {
+  /** Stable across edits, for React. */
+  key: number;
+}
+
 export interface PersonalizationDraft {
   features: FeatureDraft[];
+  mounts: MountDraft[];
   setupCommand: string;
   repository: string;
   installCommand: string;
@@ -37,6 +46,19 @@ export const featureDraft = (
   };
 };
 
+export const mountDraft = (
+  m: PersonalMount = { source: "", target: "", type: "bind" }
+): MountDraft => {
+  nextKey += 1;
+  return { ...m, key: nextKey };
+};
+
+/** Why the mount can't be used, or undefined when it can; nothing while a field is still empty. */
+export const mountDraftError = (m: MountDraft): string | undefined =>
+  m.source.trim() && m.target.trim()
+    ? mountError({ ...m, source: m.source.trim(), target: m.target.trim() })
+    : undefined;
+
 export const personalizationDraft = (
   p: Personalization
 ): PersonalizationDraft => ({
@@ -44,6 +66,7 @@ export const personalizationDraft = (
     featureDraft(id, options)
   ),
   installCommand: p.dotfiles?.installCommand ?? "",
+  mounts: (p.mounts ?? []).map((m) => mountDraft(m)),
   repository: p.dotfiles?.repository ?? "",
   setupCommand: p.setupCommand ?? "",
   targetPath: p.dotfiles?.targetPath ?? "",
@@ -96,6 +119,28 @@ export const personalizationOf = (
       ? (JSON.parse(f.options) as FeatureOptions)
       : {};
   }
+  const mounts: PersonalMount[] = [];
+  for (const m of d.mounts) {
+    const source = m.source.trim();
+    const target = m.target.trim();
+    if (!(source || target)) {
+      continue;
+    }
+    if (!(source && target)) {
+      return {
+        error: `Mount ${source || target}: enter both where it comes from and where it goes`,
+      };
+    }
+    const mount = { source, target, type: m.type };
+    const problem = mountError(mount);
+    if (problem) {
+      return { error: `Mount ${target}: ${problem}` };
+    }
+    if (mounts.some((o) => o.target === target)) {
+      return { error: `Two mounts go to ${target}` };
+    }
+    mounts.push(mount);
+  }
   const repository = d.repository.trim();
   if (repository && !DOTFILES_REPOSITORY.test(repository)) {
     return {
@@ -106,6 +151,7 @@ export const personalizationOf = (
   return {
     value: {
       features,
+      ...(mounts.length > 0 ? { mounts } : {}),
       ...(d.setupCommand.trim() ? { setupCommand: d.setupCommand } : {}),
       ...(repository
         ? {
@@ -143,6 +189,10 @@ export const summary = (
     parts.push("a setup command");
   } else if (commands > 1) {
     parts.push(plural(commands, "setup command"));
+  }
+  const mounts = p.mounts?.length ?? 0;
+  if (mounts > 0) {
+    parts.push(plural(mounts, "mount"));
   }
   if (p.dotfiles) {
     parts.push(`dotfiles from ${p.dotfiles.repository}`);

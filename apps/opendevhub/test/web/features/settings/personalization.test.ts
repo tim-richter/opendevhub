@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   featureDraft,
+  mountDraft,
   personalizationDraft,
   personalizationOf,
   summary,
@@ -11,6 +12,7 @@ import type { PersonalizationDraft } from "../../../../src/web/features/settings
 const empty: PersonalizationDraft = {
   features: [],
   installCommand: "",
+  mounts: [],
   repository: "",
   setupCommand: "",
   targetPath: "",
@@ -24,6 +26,13 @@ describe(personalizationOf, () => {
         "ghcr.io/x/features/git-town:1": {},
         "ghcr.io/x/features/jq:1": { version: "1.7" },
       },
+      mounts: [
+        {
+          source: "~/notes",
+          target: "/home/node/notes",
+          type: "bind" as const,
+        },
+      ],
       setupCommand: "echo hi",
     };
     expect(personalizationOf(personalizationDraft(saved))).toStrictEqual({
@@ -73,6 +82,35 @@ describe(personalizationOf, () => {
   });
 });
 
+describe("mount drafts", () => {
+  it("skips empty rows and reports half-filled, invalid and clashing mounts", () => {
+    expect(
+      personalizationOf({ ...empty, mounts: [mountDraft()] })
+    ).toStrictEqual({ value: { features: {} } });
+    expect(
+      personalizationOf({
+        ...empty,
+        mounts: [mountDraft({ source: "~/a", target: "", type: "bind" })],
+      })
+    ).toMatchObject({ error: expect.stringMatching(/enter both/u) });
+    expect(
+      personalizationOf({
+        ...empty,
+        mounts: [mountDraft({ source: "a", target: "/a", type: "bind" })],
+      })
+    ).toMatchObject({ error: expect.stringMatching(/absolute path/u) });
+    expect(
+      personalizationOf({
+        ...empty,
+        mounts: [
+          mountDraft({ source: "~/a", target: "/a", type: "bind" }),
+          mountDraft({ source: "v", target: "/a", type: "volume" }),
+        ],
+      })
+    ).toStrictEqual({ error: "Two mounts go to /a" });
+  });
+});
+
 describe(summary, () => {
   it("describes what is set up", () => {
     expect(summary({ features: {} })).toBe("nothing");
@@ -80,9 +118,12 @@ describe(summary, () => {
       summary({
         dotfiles: { repository: "tim/dotfiles" },
         features: { a: {}, b: {} },
+        mounts: [{ source: "/a", target: "/a", type: "bind" }],
         setupCommand: "x",
       })
-    ).toBe("2 features, a setup command and dotfiles from tim/dotfiles");
+    ).toBe(
+      "2 features, a setup command, 1 mount and dotfiles from tim/dotfiles"
+    );
     expect(summary({ features: {}, setupCommands: ["a", "b"] })).toBe(
       "2 setup commands"
     );

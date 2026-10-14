@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import {
   creationSettings,
+  mountArg as personalMountArg,
+  mountSource,
   readPersonalization,
   readProjectPersonalization,
   resolvePersonalization,
@@ -1204,7 +1207,11 @@ export class Environments {
         containers.up(env.target, {
           // The features are in the base image already.
           ...(personal.dotfiles ? { dotfiles: personal.dotfiles } : {}),
-          mounts: await this.opencodeMounts(env),
+          mounts: await this.withPersonalMounts(
+            env,
+            personal,
+            await this.opencodeMounts(env)
+          ),
           noCache,
           onLine: (l) => this.envLog(env, l),
           rebuild,
@@ -1284,7 +1291,7 @@ export class Environments {
       const up = await containers.up(project, {
         additionalFeatures: personal.features,
         ...(personal.dotfiles ? { dotfiles: personal.dotfiles } : {}),
-        mounts,
+        mounts: await this.withPersonalMounts(env, personal, mounts),
         noCache,
         onLine: (l) => this.log(project.id, l),
         rebuild,
@@ -1470,6 +1477,49 @@ export class Environments {
           : undefined
       )
     );
+  }
+
+  /**
+   * opendevhub's own mounts, then the user's. Skips a user mount whose target opendevhub already uses, one under
+   * `~` when the node's home isn't known, and a folder of this machine that doesn't exist (`--mount` won't create
+   * it, and the container would fail to start).
+   */
+  private async withPersonalMounts(
+    env: Env,
+    personal: ResolvedPersonalization,
+    own: string[]
+  ): Promise<string[]> {
+    const taken = new Set(
+      own.map((m) => /(?:^|,)target=(?<target>[^,]+)/u.exec(m)?.groups?.target)
+    );
+    const local = env.node === LOCAL_NODE;
+    const home = local ? os.homedir() : this.kit(env).host?.home;
+    const out = [...own];
+    for (const mount of personal.mounts ?? []) {
+      const skip = (why: string) =>
+        this.envLog(env, `personalize: skipped mount ${mount.target}: ${why}`);
+      if (taken.has(mount.target)) {
+        skip("opendevhub mounts something there itself");
+        continue;
+      }
+      if (!home && mount.source.startsWith("~")) {
+        skip("the node's home folder isn't known yet");
+        continue;
+      }
+      if (mount.type === "bind" && local) {
+        const source = mountSource(mount, home ?? "");
+        const exists = await fs
+          .stat(source)
+          .then(() => true)
+          .catch(() => false);
+        if (!exists) {
+          skip(`${source} doesn't exist`);
+          continue;
+        }
+      }
+      out.push(personalMountArg(mount, home ?? ""));
+    }
+    return out;
   }
 
   /**

@@ -1550,6 +1550,7 @@ describe("dashboard API", () => {
     const body = {
       dotfiles: { repository: "tim/dotfiles" },
       features: { "ghcr.io/x/features/git-town:1": {} },
+      mounts: [{ source: "~/notes", target: "/home/node/notes", type: "bind" }],
       setupCommand: "echo hi",
     };
     expect((await put(app, global, body)).status).toBe(200);
@@ -1569,6 +1570,14 @@ describe("dashboard API", () => {
         await put(app, global, {
           dotfiles: { repository: "--upload-pack=x" },
           features: {},
+        })
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await put(app, global, {
+          features: {},
+          mounts: [{ source: "~/x", target: "/opendevhub/x", type: "bind" }],
         })
       ).status
     ).toBe(400);

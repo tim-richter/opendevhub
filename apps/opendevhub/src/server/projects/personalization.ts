@@ -38,6 +38,7 @@ const stored = (
     ...(Object.keys(p.features).length > 0 ? { features: p.features } : {}),
     ...(p.setupCommand?.trim() ? { setupCommand: p.setupCommand } : {}),
     ...(p.dotfiles ? { dotfiles: p.dotfiles } : {}),
+    ...(p.mounts?.length ? { mounts: p.mounts } : {}),
     ...extra,
   };
   return Object.keys(value).length > 0 ? value : undefined;

@@ -39,24 +39,33 @@ export const useProjectPersonalization = (projectId: string) =>
 
 const Effective = ({ effective }: { effective: ResolvedPersonalization }) => {
   const features = Object.keys(effective.features);
+  const mounts = effective.mounts ?? [];
+  const rest = summary({ ...effective, features: {}, mounts: [] });
   return (
     <div className="bg-muted/40 flex flex-col gap-2 rounded-lg border p-3 text-sm">
       <p className="font-medium">This project&apos;s containers get</p>
-      {features.length === 0 &&
-        effective.setupCommands.length === 0 &&
-        !effective.dotfiles && <p className={muted}>Nothing extra.</p>}
-      {features.length > 0 && (
+      {summary(effective) === "nothing" && (
+        <p className={muted}>Nothing extra.</p>
+      )}
+      {(features.length > 0 || mounts.length > 0) && (
         <ul className="flex flex-col gap-0.5 font-mono text-xs">
           {features.map((id) => (
             <li key={id} className="truncate" title={id}>
               {id}
             </li>
           ))}
+          {mounts.map((m) => (
+            <li
+              key={m.target}
+              className="truncate"
+              title={`${m.source} → ${m.target}`}
+            >
+              {m.source} → {m.target}
+            </li>
+          ))}
         </ul>
       )}
-      {(effective.setupCommands.length > 0 || effective.dotfiles) && (
-        <p className={muted}>{summary({ ...effective, features: {} })}</p>
-      )}
+      {rest !== "nothing" && <p className={muted}>{rest}</p>}
     </div>
   );
 };
@@ -74,8 +83,8 @@ const RebuildNote = ({ projectId }: { projectId: string }) => {
     <Note warn>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span>
-          The project&apos;s container was created with other features or
-          dotfiles. Rebuild it to apply the current ones.
+          The project&apos;s container was created with other features, dotfiles
+          or mounts. Rebuild it to apply the current ones.
         </span>
         <Button
           type="button"
@@ -181,8 +190,8 @@ const ProjectPersonalizationForm = (props: {
       </fieldset>
       <p className={muted}>
         This project&apos;s features win over global ones with the same id, its
-        setup command runs after the global one, and its dotfiles replace the
-        global ones.
+        setup command runs after the global one, its dotfiles replace the global
+        ones, and its mounts win over global ones with the same target.
       </p>
       <Effective effective={view.effective} />
       <div className="flex flex-wrap items-center gap-3">

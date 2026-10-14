@@ -12,6 +12,18 @@ export interface Dotfiles {
 }
 
 /**
+ * A folder of this machine (or of the node the container runs on), or a Docker volume, mounted into the container.
+ * Read and write: the dev container CLI's `--mount` takes no other options.
+ */
+export interface PersonalMount {
+  type: "bind" | "volume";
+  /** An absolute path or one under `~` for a bind mount; a volume's name. */
+  source: string;
+  /** An absolute path in the container. */
+  target: string;
+}
+
+/**
  * What the user adds to every container on top of the repository's devcontainer.json, kept in opendevhub's
  * config.json and never in the repository.
  */
@@ -21,6 +33,7 @@ export interface Personalization {
   /** A shell script run in the container once it is created, and again whenever it changes. */
   setupCommand?: string;
   dotfiles?: Dotfiles;
+  mounts?: PersonalMount[];
 }
 
 /** A project's personalization: added to the global one unless `inheritGlobal` is off. */
@@ -34,6 +47,8 @@ export interface ResolvedPersonalization {
   /** Run in order, each on its own. */
   setupCommands: string[];
   dotfiles?: Dotfiles;
+  /** Absent when there are none. */
+  mounts?: PersonalMount[];
 }
 
 export interface PersonalizationView {
@@ -45,7 +60,7 @@ export interface ProjectPersonalizationView {
   /** The global settings, for showing what the project inherits. */
   global: Personalization;
   effective: ResolvedPersonalization;
-  /** The project's container was created with other features or dotfiles: a rebuild applies the current ones. */
+  /** The project's container was created with other features, dotfiles or mounts: a rebuild applies the current ones. */
   rebuildNeeded: boolean;
 }
 
@@ -61,6 +76,36 @@ export const FEATURE_ID =
 /** A git URL or `owner/repo`; never starting with `-`, which git would read as an option. */
 export const DOTFILES_REPOSITORY =
   /^(?:[\w.-]+\/[\w.-]+|(?:https?|ssh|git):\/\/\S+|[\w.-]+@[\w.-]+:\S+)$/u;
+
+export const MOUNTS_MAX = 20;
+/** Where opendevhub mounts its own state in every container. */
+export const RESERVED_MOUNT_ROOT = "/opendevhub";
+const MOUNT_PATH = /^\/[^,\s]*$/u;
+const BIND_SOURCE = /^(?:~|~\/[^,]*|\/[^,]*)$/u;
+const VOLUME_NAME = /^[A-Za-z0-9][\w.-]*$/u;
+
+/** Why a mount can't be passed to `--mount`, or undefined when it can. */
+export const mountError = (m: PersonalMount): string | undefined => {
+  if (
+    m.type === "bind"
+      ? !BIND_SOURCE.test(m.source)
+      : !VOLUME_NAME.test(m.source)
+  ) {
+    return m.type === "bind"
+      ? "Use an absolute path or one under ~, without commas"
+      : "Use a volume name: letters, digits, '.', '_' and '-'";
+  }
+  if (!MOUNT_PATH.test(m.target) || m.target.split("/").includes("..")) {
+    return "The target must be an absolute path in the container, without commas or ..";
+  }
+  if (
+    m.target === RESERVED_MOUNT_ROOT ||
+    m.target.startsWith(`${RESERVED_MOUNT_ROOT}/`)
+  ) {
+    return `${RESERVED_MOUNT_ROOT} is where opendevhub keeps its own state`;
+  }
+  return undefined;
+};
 
 export const EMPTY_PERSONALIZATION: Personalization = { features: {} };
 
@@ -99,6 +144,29 @@ const readDotfiles = (value: unknown): Dotfiles | undefined => {
   };
 };
 
+/** Valid mounts, the last one winning when two share a target. */
+const readMounts = (value: unknown): PersonalMount[] => {
+  const byTarget = new Map<string, PersonalMount>();
+  for (const raw of Array.isArray(value) ? value : []) {
+    const m = record(raw);
+    const source = text(m?.source);
+    const target = text(m?.target)?.replace(/(?<=.)\/+$/u, "");
+    if (!(source && target)) {
+      continue;
+    }
+    const mount: PersonalMount = {
+      source,
+      target,
+      type: m?.type === "volume" ? "volume" : "bind",
+    };
+    if (!mountError(mount)) {
+      byTarget.delete(target);
+      byTarget.set(target, mount);
+    }
+  }
+  return [...byTarget.values()].slice(0, MOUNTS_MAX);
+};
+
 /** The global personalization from config.json, dropping what isn't valid. */
 export const readPersonalization = (value: unknown): Personalization => {
   const p = record(value) ?? {};
@@ -107,10 +175,12 @@ export const readPersonalization = (value: unknown): Personalization => {
       ? p.setupCommand
       : undefined;
   const dotfiles = readDotfiles(p.dotfiles);
+  const mounts = readMounts(p.mounts);
   return {
     features: readFeatures(p.features),
     ...(setupCommand ? { setupCommand } : {}),
     ...(dotfiles ? { dotfiles } : {}),
+    ...(mounts.length > 0 ? { mounts } : {}),
   };
 };
 
@@ -124,7 +194,8 @@ export const readProjectPersonalization = (
 
 /**
  * The project's settings on top of the global ones: the project's options win for a feature both list,
- * both setup commands run (the global one first), and the project's dotfiles replace the global ones.
+ * both setup commands run (the global one first), the project's dotfiles replace the global ones, and the
+ * project's mount wins for a target both use.
  */
 export const resolvePersonalization = (
   global: Personalization,
@@ -132,20 +203,22 @@ export const resolvePersonalization = (
 ): ResolvedPersonalization => {
   const base = project.inheritGlobal ? global : EMPTY_PERSONALIZATION;
   const dotfiles = project.dotfiles ?? base.dotfiles;
+  const own = project.mounts ?? [];
+  const mounts = [
+    ...(base.mounts ?? []).filter(
+      (m) => !own.some((o) => o.target === m.target)
+    ),
+    ...own,
+  ];
   return {
     features: { ...base.features, ...project.features },
     setupCommands: [base.setupCommand, project.setupCommand].filter(
       (c): c is string => c !== undefined
     ),
     ...(dotfiles ? { dotfiles } : {}),
+    ...(mounts.length > 0 ? { mounts } : {}),
   };
 };
-
-/** Whether the merged personalization adds anything at all. */
-export const isEmptyPersonalization = (p: ResolvedPersonalization): boolean =>
-  Object.keys(p.features).length === 0 &&
-  p.setupCommands.length === 0 &&
-  !p.dotfiles;
 
 /** JSON with object keys sorted, so the same settings in another order serialize the same. */
 export const stableJson = (value: unknown): string =>
@@ -159,6 +232,23 @@ export const stableJson = (value: unknown): string =>
       : v
   );
 
-/** What a container has to be created with: its features and dotfiles. Setup commands run on every start. */
+/**
+ * What a container has to be created with: its features, dotfiles and mounts. Setup commands run on every start.
+ * Without mounts it reads as before mounts existed, so containers created then don't look out of date.
+ */
 export const creationSettings = (p: ResolvedPersonalization): string =>
-  stableJson({ dotfiles: p.dotfiles ?? null, features: p.features });
+  stableJson({
+    dotfiles: p.dotfiles ?? null,
+    features: p.features,
+    ...(p.mounts?.length ? { mounts: p.mounts } : {}),
+  });
+
+/** Where a mount comes from, with `~` read as `home`. */
+export const mountSource = (m: PersonalMount, home: string): string =>
+  m.type === "bind" && (m.source === "~" || m.source.startsWith("~/"))
+    ? `${home.replace(/\/+$/u, "")}${m.source.slice(1)}`
+    : m.source;
+
+/** The `--mount` value for a mount, with `~` read as `home`. */
+export const mountArg = (m: PersonalMount, home: string): string =>
+  `type=${m.type},source=${mountSource(m, home)},target=${m.target}`;

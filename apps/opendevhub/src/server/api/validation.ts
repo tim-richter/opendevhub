@@ -16,6 +16,8 @@ import {
   FEATURE_ID,
   FEATURE_ID_MAX,
   FEATURES_MAX,
+  MOUNTS_MAX,
+  mountError,
   SETUP_COMMAND_MAX,
 } from "../../shared/personalization";
 import {
@@ -76,6 +78,18 @@ const personalization = z.object({
       installCommand: z.string().max(2000).optional(),
       targetPath: z.string().max(500).optional(),
     })
+    .optional(),
+  mounts: z
+    .array(
+      z
+        .object({
+          source: z.string().max(1000),
+          target: z.string().max(1000),
+          type: z.enum(["bind", "volume"]),
+        })
+        .refine((m) => mountError(m) === undefined)
+    )
+    .max(MOUNTS_MAX)
     .optional(),
 });
 // Provider ids, model ids and variants, as `tasks/request.ts` takes them.
