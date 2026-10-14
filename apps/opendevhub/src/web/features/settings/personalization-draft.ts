@@ -46,11 +46,11 @@ export const featureDraft = (
   };
 };
 
-export const mountDraft = (
-  m: PersonalMount = { source: "", target: "", type: "bind" }
-): MountDraft => {
+const EMPTY_MOUNT: PersonalMount = { source: "", target: "", type: "bind" };
+
+export const mountDraft = (m?: PersonalMount): MountDraft => {
   nextKey += 1;
-  return { ...m, key: nextKey };
+  return { ...(m ?? EMPTY_MOUNT), key: nextKey };
 };
 
 /** Why the mount can't be used, or undefined when it can; nothing while a field is still empty. */
