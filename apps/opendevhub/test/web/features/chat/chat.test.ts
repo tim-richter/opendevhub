@@ -37,10 +37,10 @@ describe("chat", () => {
       "feat/rate-limit",
       "feat/dark-mode",
     ]);
-    expect(defaultCheckoutChoice(webProject)).toBe(NEW_WORKTREE);
+    expect(defaultCheckoutChoice(webProject)).toBe(ws);
   });
 
-  it("falls back to the main checkout when the project can't create worktrees", () => {
+  it("defaults to the main checkout when the project can't create worktrees", () => {
     expect(checkoutChoices(unmounted)[0]).toMatchObject({ disabled: true });
     expect(defaultCheckoutChoice(unmounted)).toBe(ws);
   });

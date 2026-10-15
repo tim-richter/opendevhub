@@ -179,9 +179,9 @@ export const checkoutChoices = (view: ProjectView): CheckoutChoice[] => [
   ...checkouts(view).map((c) => ({ label: c.label, value: c.directory })),
 ];
 
-/** New worktree when the project can make one, else the main checkout. */
+/** The main checkout. */
 export const defaultCheckoutChoice = (view: ProjectView): string =>
-  canCreateWorktree(view) ? NEW_WORKTREE : workspaceFolderOf(view);
+  workspaceFolderOf(view);
 
 /** What the composer is scoped to and where the start request sends the chat. */
 export const chatTarget = (
