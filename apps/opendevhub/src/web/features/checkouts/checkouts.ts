@@ -184,9 +184,31 @@ export const checkoutTasks = (
 ): ProjectTask[] =>
   projectTasks(view).filter((t) => t.directories.includes(directory));
 
-/** The checkouts with a page of their own: the main checkout and the worktrees no (listed) task variant created. */
+/** Whether a still-listed task's variant that created the worktree is starting or running. */
+const ownedByAliveVariant = (
+  view: ProjectView,
+  creator: Worktree["createdBy"] | undefined
+): boolean => {
+  if (creator?.by !== "variant") {
+    return false;
+  }
+  return view.tasks.some(
+    (t) =>
+      t.id === creator.task &&
+      t.variants.some(
+        (v) => v.n === creator.n && !v.discarded && v.step !== "failed"
+      )
+  );
+};
+
+/**
+ * The checkouts with a page of their own: the main checkout and the worktrees a task variant isn't currently
+ * starting or running (failed or discarded variants surface their worktrees as standalone checkouts too).
+ */
 export const standaloneCheckouts = (view: ProjectView): Checkout[] =>
-  checkouts(view).filter((c) => !worktreeRedirect(view, c));
+  checkouts(view).filter(
+    (c) => !c.worktree || !ownedByAliveVariant(view, c.worktree.createdBy)
+  );
 
 /** Where the project tabs of earlier versions went. */
 export const legacyPath = (
@@ -213,8 +235,9 @@ const TASK_TAB_OF: Record<string, TaskTab> = {
 };
 
 /**
- * Where a worktree page goes when a task variant created the worktree: that task, with the variant selected, on the
- * matching tab. Undefined for the main checkout and worktrees no (listed) task created, which keep their own page.
+ * Where a worktree page goes when a still-active task variant created the worktree: that task, with the variant
+ * selected, on the matching tab. Undefined for the main checkout, worktrees no (listed) task created, and worktrees
+ * of failed or discarded variants, which keep their own page.
  */
 export const worktreeRedirect = (
   view: ProjectView,
@@ -222,10 +245,11 @@ export const worktreeRedirect = (
   tab = ""
 ): string | undefined => {
   const creator = checkout.worktree?.createdBy;
-  if (creator?.by !== "variant" || !(tab in TASK_TAB_OF)) {
-    return undefined;
-  }
-  if (!view.tasks.some((t) => t.id === creator.task)) {
+  if (
+    creator?.by !== "variant" ||
+    !(tab in TASK_TAB_OF) ||
+    !ownedByAliveVariant(view, creator)
+  ) {
     return undefined;
   }
   return taskHref(view.project.id, creator.task, {

@@ -310,6 +310,45 @@ describe(checkouts, () => {
     ]);
   });
 
+  it("keeps the worktrees of failed or discarded variants on their own page and lists them standalone", () => {
+    const v = view(
+      [],
+      [task("t1", [{}, { step: "failed" }, { discarded: true }])]
+    );
+    const created = {
+      ...v,
+      runtime: {
+        ...v.runtime,
+        worktrees: [
+          {
+            createdBy: { by: "variant" as const, n: 1, task: "t1", title: "T" },
+            path: wt("home"),
+          },
+          {
+            createdBy: { by: "variant" as const, n: 2, task: "t1", title: "T" },
+            path: wt("login"),
+          },
+          {
+            createdBy: { by: "variant" as const, n: 3, task: "t1", title: "T" },
+            path: wt("pr"),
+          },
+        ],
+      },
+    };
+    const [, alive, failed, discarded] = checkouts(created);
+    // n=1 is still starting: its worktree lives under the task.
+    expect(worktreeRedirect(created, alive)).toBe("/p/p%201/t/t1?v=1");
+    // n=2 failed and n=3 discarded: the worktree keeps its own page.
+    expect(worktreeRedirect(created, failed)).toBeUndefined();
+    expect(worktreeRedirect(created, failed, "runtime")).toBeUndefined();
+    expect(worktreeRedirect(created, discarded)).toBeUndefined();
+    expect(standaloneCheckouts(created).map((c) => c.target)).toStrictEqual([
+      "",
+      "login",
+      "pr",
+    ]);
+  });
+
   it("sends an old session link to its task, else to its checkout", () => {
     const v = view(
       [
