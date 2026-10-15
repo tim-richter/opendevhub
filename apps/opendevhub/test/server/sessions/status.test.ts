@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  blockingShellIds,
   contextOf,
   deriveSessions,
   rollUp,
@@ -131,6 +132,19 @@ describe(deriveSessions, () => {
       },
     ]);
     expect(out.find((s) => s.id === "other")).not.toHaveProperty("shells");
+  });
+
+  it("leaves out shells a tool call is still waiting on", () => {
+    const out = deriveSessions("p", {
+      ...base,
+      blockingShells: new Set(["sh_blocking"]),
+      sessions: [rawSession("root")],
+      shells: [
+        { ...rawShell("sh_blocking", "root"), directory: "/workspaces/demo" },
+        { ...rawShell("sh_bg", "root"), directory: "/workspaces/demo" },
+      ],
+    });
+    expect(out[0].shells?.map((s) => s.id)).toStrictEqual(["sh_bg"]);
   });
 
   it("shows a working child when its parent is idle in opencode", () => {
@@ -448,5 +462,30 @@ describe("deriveSessions context", () => {
     });
     expect(out.find((s) => s.id === "root")?.context).toBe(1234);
     expect(out.find((s) => s.id === "other")).not.toHaveProperty("context");
+  });
+});
+
+describe(blockingShellIds, () => {
+  it("finds the shells running tool calls wait on", () => {
+    const shellCall = (status: string, shellID?: string) => ({
+      name: "shell",
+      state: { metadata: shellID ? { shellID } : {}, status },
+      type: "tool",
+    });
+    expect(
+      blockingShellIds([
+        {
+          content: [
+            shellCall("running", "sh_blocking"),
+            shellCall("completed", "sh_bg"),
+            shellCall("running"),
+            { name: "read", state: { status: "running" }, type: "tool" },
+          ],
+          id: "m1",
+          type: "assistant",
+        },
+        { id: "m0", text: "hi", type: "user" },
+      ])
+    ).toStrictEqual(["sh_blocking"]);
   });
 });

@@ -45,9 +45,13 @@ export interface RawAssistantContent {
   name?: string;
   /**
    * Set on a tool call: its status, "pending", "running", "completed" or "error", and what it did, such as the
-   * command it ran, when opencode gives one.
+   * command it ran, when opencode gives one; a shell call's `metadata.shellID` names the shell it runs.
    */
-  state?: { status: string; title?: string };
+  state?: {
+    status: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+  };
 }
 
 /** The fields of a session message that opendevhub reads. */

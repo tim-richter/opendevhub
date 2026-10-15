@@ -32,7 +32,25 @@ export interface StatusInput {
   contexts?: Map<string, number>;
   /** Running shell commands, by the directory they were listed for. */
   shells?: LocatedShell[];
+  /** Ids of shells a tool call is still waiting on (see `blockingShellIds`); they aren't background work. */
+  blockingShells?: Set<string>;
 }
+
+/**
+ * The shells a session's tool calls are still waiting on, from its newest messages. Such a shell blocks the
+ * chat; only one that was moved to the background (its tool call already finished) runs alongside it.
+ */
+export const blockingShellIds = (messages: RawMessage[]): string[] =>
+  messages.flatMap((m) =>
+    (m.content ?? []).flatMap((part) => {
+      const shellId = part.state?.metadata?.shellID;
+      return part.name === "shell" &&
+        part.state?.status === "running" &&
+        typeof shellId === "string"
+        ? [shellId]
+        : [];
+    })
+  );
 
 const RANK: Record<SessionStatus, number> = {
   idle: 3,
@@ -237,7 +255,11 @@ export const deriveSessions = (
   const shells = new Map<string, BackgroundShell[]>();
   for (const sh of input.shells ?? []) {
     const sessionId = sh.metadata?.sessionID;
-    if (sh.status !== "running" || typeof sessionId !== "string") {
+    if (
+      sh.status !== "running" ||
+      typeof sessionId !== "string" ||
+      input.blockingShells?.has(sh.id)
+    ) {
       continue;
     }
     const root = rootOf(sessionId, parents);

@@ -124,6 +124,43 @@ describe(Monitor, () => {
     expect(latest?.[0].status).toBe("idle");
   });
 
+  it("leaves out shells that still block their session's chat", async () => {
+    fake.state.sessions = [rawSession("ses_1")];
+    fake.state.shells = {
+      "/workspaces/demo": [
+        rawShell("sh_blocking", "ses_1"),
+        rawShell("sh_bg", "ses_1"),
+      ],
+    };
+    fake.state.messages = {
+      ses_1: [
+        {
+          content: [
+            {
+              name: "shell",
+              state: { metadata: { shellID: "sh_bg" }, status: "completed" },
+              type: "tool",
+            },
+            {
+              name: "shell",
+              state: {
+                metadata: { shellID: "sh_blocking" },
+                status: "running",
+              },
+              type: "tool",
+            },
+          ],
+          id: "msg_1",
+          type: "assistant",
+        },
+      ],
+    };
+    start();
+    await vi.waitFor(() =>
+      expect(latest?.[0].shells?.map((s) => s.id)).toStrictEqual(["sh_bg"])
+    );
+  });
+
   it("stays healthy when a worktree directory is missing in the container", async () => {
     const stale = "/home/me/demo.worktrees/gone";
     fake.state.sessions = [rawSession("ses_1")];

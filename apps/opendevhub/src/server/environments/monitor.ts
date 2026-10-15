@@ -1,6 +1,11 @@
 import type { SessionSummary } from "../../shared/types";
 import type { OpencodeClient, RawSession } from "../opencode/client";
-import { contextOf, deriveSessions } from "../sessions/status";
+import {
+  blockingShellIds,
+  contextOf,
+  deriveSessions,
+} from "../sessions/status";
+import type { LocatedShell } from "../sessions/status";
 
 export interface MonitorOptions {
   client: OpencodeClient;
@@ -29,6 +34,9 @@ const MAX_DIRECTORIES = 16;
 const MAX_CONTEXT_LOOKUPS = 20;
 /** The newest assistant message with usage is nearly always among a session's last few (a streaming one has none yet). */
 const CONTEXT_MESSAGES = 5;
+/** A shell tool call that is still running sits in the session's newest assistant message. */
+const SHELL_MESSAGES = 3;
+const MAX_SHELL_LOOKUPS = 20;
 
 const uniqueById = <T extends { id: string }>(items: T[]): T[] => [
   ...new Map(items.map((i) => [i.id, i])).values(),
@@ -140,7 +148,10 @@ export class Monitor {
             : []
         ),
       ];
-      const all = await this.withMissing(sessions, flagged);
+      const [all, blockingShells] = await Promise.all([
+        this.withMissing(sessions, flagged),
+        this.blockingShells(shells),
+      ]);
       const contexts = await this.contextsOf(all);
       if (this.stopped) {
         return;
@@ -151,6 +162,7 @@ export class Monitor {
       this.opts.onSessions(
         deriveSessions(projectId, {
           active,
+          blockingShells,
           contexts,
           envId: this.opts.envId,
           firstSeen: this.firstSeen,
@@ -185,6 +197,28 @@ export class Monitor {
         this.firstSeen.set(id, now);
       }
     }
+  }
+
+  /**
+   * The running shells whose tool call is still waiting on them: they block their session's chat, so only the
+   * rest count as background commands. A failed read is best effort and leaves that session's shells listed.
+   */
+  private async blockingShells(shells: LocatedShell[]): Promise<Set<string>> {
+    const owners = new Set(
+      shells.flatMap((s) =>
+        s.status === "running" && typeof s.metadata?.sessionID === "string"
+          ? [s.metadata.sessionID]
+          : []
+      )
+    );
+    const lists = await Promise.all(
+      [...owners]
+        .slice(0, MAX_SHELL_LOOKUPS)
+        .map((id) =>
+          this.opts.client.messages(id, SHELL_MESSAGES).catch(() => [])
+        )
+    );
+    return new Set(lists.flatMap(blockingShellIds));
   }
 
   /**
