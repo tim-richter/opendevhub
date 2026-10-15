@@ -8,6 +8,7 @@ import type {
   RawMessage,
   RawPermissionRequest,
   RawSession,
+  RawShell,
 } from "../../src/server/opencode/client";
 
 export interface FakeVcs {
@@ -27,6 +28,10 @@ export interface FakeState {
   active: string[];
   permissions: Record<string, RawPermissionRequest[]>;
   forms: Record<string, RawForm[]>;
+  /** Shell commands per directory; `GET /api/shell` lists the running ones. */
+  shells?: Record<string, RawShell[]>;
+  /** Shell ids `DELETE /api/shell/:id` killed. */
+  killedShells: string[];
   fail: boolean;
   /** Directories opencode can't open (missing in the container): their scoped routes answer 500. */
   missingDirectories?: string[];
@@ -98,6 +103,7 @@ export async function startFakeOpencode(
     modelSwitches: [],
     agentSwitches: [],
     deleted: [],
+    killedShells: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -244,6 +250,14 @@ export async function startFakeOpencode(
           data: state.forms[dir] ?? [],
         });
       }
+      case "/api/shell": {
+        return json({
+          location: { directory: dir },
+          data: (state.shells?.[dir] ?? []).filter(
+            (sh) => sh.status === "running"
+          ),
+        });
+      }
       case "/api/vcs": {
         return json({
           location: { directory: dir },
@@ -365,6 +379,21 @@ export async function startFakeOpencode(
             }
           }
           state.sessions = state.sessions.filter((s) => !gone.has(s.id));
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+        const shell = url.pathname.match(/^\/api\/shell\/([^/]+)$/u);
+        if (shell && req.method === "DELETE") {
+          const shellId = decodeURIComponent(shell[1]);
+          state.killedShells.push(shellId);
+          const list = state.shells?.[dir];
+          if (list) {
+            state.shells = {
+              ...state.shells,
+              [dir]: list.filter((sh) => sh.id !== shellId),
+            };
+          }
           res.writeHead(204);
           res.end();
           return;
@@ -535,6 +564,22 @@ export function rawSession(
     title: `Session ${id}`,
     time: { created: 1, updated: 1 },
     location: { directory: "/workspaces/demo" },
+    ...over,
+  };
+}
+
+export function rawShell(
+  id: string,
+  sessionID: string | undefined,
+  over: Partial<RawShell> = {}
+): RawShell {
+  return {
+    id,
+    status: "running",
+    command: `run ${id}`,
+    cwd: "/workspaces/demo",
+    metadata: sessionID ? { sessionID } : {},
+    time: { started: 1 },
     ...over,
   };
 }

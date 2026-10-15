@@ -5,7 +5,7 @@ import {
   deriveSessions,
   rollUp,
 } from "../../../src/server/sessions/status";
-import { rawSession } from "../../helpers/fake-opencode";
+import { rawSession, rawShell } from "../../helpers/fake-opencode";
 
 const base = { active: new Set<string>(), permissions: [], forms: [] };
 
@@ -89,6 +89,48 @@ describe(deriveSessions, () => {
         status: "needs-permission",
       },
     ]);
+  });
+
+  it("lists background shells under the root session that started them", () => {
+    const out = deriveSessions("p", {
+      ...base,
+      sessions: [
+        rawSession("root"),
+        rawSession("child", { parentID: "root" }),
+        rawSession("other"),
+      ],
+      shells: [
+        {
+          ...rawShell("sh_late", "child", { time: { started: 5 } }),
+          directory: "/w/feat",
+        },
+        { ...rawShell("sh_early", "root"), directory: "/workspaces/demo" },
+        {
+          ...rawShell("sh_done", "root", { status: "exited" }),
+          directory: "/workspaces/demo",
+        },
+        { ...rawShell("sh_user", undefined), directory: "/workspaces/demo" },
+      ],
+    });
+    const root = out.find((s) => s.id === "root");
+    expect(root?.status).toBe("idle");
+    expect(root?.shells).toStrictEqual([
+      {
+        command: "run sh_early",
+        directory: "/workspaces/demo",
+        id: "sh_early",
+        sessionId: "root",
+        startedAt: 1,
+      },
+      {
+        command: "run sh_late",
+        directory: "/w/feat",
+        id: "sh_late",
+        sessionId: "child",
+        startedAt: 5,
+      },
+    ]);
+    expect(out.find((s) => s.id === "other")).not.toHaveProperty("shells");
   });
 
   it("shows a working child when its parent is idle in opencode", () => {

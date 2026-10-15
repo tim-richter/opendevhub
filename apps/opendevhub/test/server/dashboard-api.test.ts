@@ -227,6 +227,7 @@ function setup(webDir?: string) {
         "src/a.ts",
       ]),
       removeSession: vi.fn(async (_id: string, _sid: string) => {}),
+      killShell: vi.fn(async (_id: string, _sid: string, _shid: string) => {}),
       startTaskConversation: vi.fn(
         async (_id: string, _sid: string) => "ses_new"
       ),
@@ -1719,6 +1720,19 @@ describe("dashboard API", () => {
       expect(
         (await send(app, "DELETE", "sessions/ses_9", undefined)).status
       ).toBe(404);
+    });
+
+    it("kills a session's background shell", async () => {
+      const { app, hub } = setup();
+      expect(
+        (await send(app, "DELETE", "sessions/ses_1/shells/sh_1", undefined))
+          .status
+      ).toBe(200);
+      expect(hub.sessions.killShell).toHaveBeenCalledWith(
+        project.id,
+        "ses_1",
+        "sh_1"
+      );
     });
 
     it("maps unknown ids to 404, already answered to 409 and invalid answers to 400 with the message", async () => {

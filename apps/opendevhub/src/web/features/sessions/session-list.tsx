@@ -28,6 +28,7 @@ import type { SessionEntry } from "../../derive";
 import { Link } from "../../routing";
 import { checkoutOf, checkoutPath, sessionPath } from "../checkouts/checkouts";
 import { taskChip } from "../tasks/tasks";
+import { ShellsChip } from "./background-shells";
 import { PendingStack } from "./pending-cards";
 
 export const SessionRow = (props: {
@@ -88,8 +89,9 @@ export const SessionRow = (props: {
       )}
       id={`session-${session.id}`}
     >
-      <span className="justify-self-start max-md:hidden">
+      <span className="flex flex-col items-start gap-1 justify-self-start max-md:hidden">
         <SessionBadge status={session.status} />
+        <ShellsChip session={session} />
       </span>
       <div className="flex min-w-0 flex-col gap-0.5 max-md:col-span-full">
         {props.to ? (
@@ -144,6 +146,7 @@ export const SessionRow = (props: {
       {/* On phones the badge, project and time share one line under the title. */}
       <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 md:hidden">
         <SessionBadge status={session.status} />
+        <ShellsChip session={session} />
         {projectLink}
         <When
           at={session.updatedAt}

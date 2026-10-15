@@ -158,6 +158,17 @@ export interface RawForm {
   fields?: FormField[];
 }
 
+/** A shell command opencode runs (opencode v2 `Shell.Info`); background ones outlive the tool call that started it. */
+export interface RawShell {
+  id: string;
+  status: "running" | "exited" | "timeout" | "killed";
+  command: string;
+  cwd: string;
+  /** Opaque tags from whoever started it; opencode's shell tool sets `sessionID`. */
+  metadata?: Record<string, unknown>;
+  time: { started: number; completed?: number };
+}
+
 export interface RawFileStatus {
   file: string;
   additions: number;
@@ -772,6 +783,25 @@ export class OpencodeClient {
       directory
     );
     return result11.data;
+  }
+
+  /** The shell commands running in `directory`; opencode leaves out exited ones. */
+  async shells(directory: string): Promise<RawShell[]> {
+    const result = await this.get<{ data: RawShell[] }>(
+      "/api/shell",
+      directory
+    );
+    return result.data;
+  }
+
+  /** Kills a running shell command and forgets it. */
+  killShell(shellId: string, directory?: string): Promise<void> {
+    return this.send(
+      "DELETE",
+      `/api/shell/${encodeURIComponent(shellId)}`,
+      undefined,
+      directory
+    );
   }
 
   /** Resolves when the stream ends; rejects on HTTP or network errors (including abort). */

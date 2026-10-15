@@ -22,7 +22,7 @@ export interface MonitorOptions {
   now?: () => number;
 }
 
-const RELEVANT_EVENT = /^(?<g1>session|permission|form)\./u;
+const RELEVANT_EVENT = /^(?<g1>session|permission|form|shell)\./u;
 const FAILURES_BEFORE_UNHEALTHY = 3;
 const MAX_SESSION_LOOKUPS = 20;
 const MAX_DIRECTORIES = 16;
@@ -119,16 +119,26 @@ export class Monitor {
           Promise.all([
             client.permissionRequests(d).catch(() => []),
             client.forms(d).catch(() => []),
+            client
+              .shells(d)
+              .then((list) => list.map((sh) => ({ ...sh, directory: d })))
+              .catch(() => []),
           ])
         )
       );
       const permissions = uniqueById(perDirectory.flatMap(([p]) => p));
       const forms = uniqueById(perDirectory.flatMap(([, f]) => f));
+      const shells = uniqueById(perDirectory.flatMap((lists) => lists[2]));
       this.stamp([...permissions, ...forms].map((i) => i.id));
       const flagged = [
         ...active,
         ...permissions.map((p) => p.sessionID),
         ...forms.map((f) => f.sessionID),
+        ...shells.flatMap((s) =>
+          typeof s.metadata?.sessionID === "string"
+            ? [s.metadata.sessionID]
+            : []
+        ),
       ];
       const all = await this.withMissing(sessions, flagged);
       const contexts = await this.contextsOf(all);
@@ -147,6 +157,7 @@ export class Monitor {
           forms,
           permissions,
           sessions: all,
+          shells,
         })
       );
     } catch {
@@ -217,7 +228,7 @@ export class Monitor {
   }
 
   /**
-   * Permission requests and questions are listed per directory, so a session working in a worktree is
+   * Permission requests, questions and shell commands are listed per directory, so a session working in a worktree is
    * only seen when its directory is asked about. Ask for the workspace, the known worktrees and the
    * directories of the most recently updated sessions.
    */

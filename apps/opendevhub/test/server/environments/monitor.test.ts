@@ -4,7 +4,11 @@ import { Monitor } from "../../../src/server/environments/monitor";
 import type { MonitorOptions } from "../../../src/server/environments/monitor";
 import { OpencodeClient } from "../../../src/server/opencode/client";
 import type { SessionSummary } from "../../../src/shared/types";
-import { rawSession, startFakeOpencode } from "../../helpers/fake-opencode";
+import {
+  rawSession,
+  rawShell,
+  startFakeOpencode,
+} from "../../helpers/fake-opencode";
 import type { FakeOpencode } from "../../helpers/fake-opencode";
 
 let fake: FakeOpencode;
@@ -97,6 +101,27 @@ describe(Monitor, () => {
         ses_main: "needs-answer",
       })
     );
+  });
+
+  it("reports background shells with the directory they run in", async () => {
+    const wt = "/workspaces/demo.worktrees/feature-x";
+    fake.state.sessions = [
+      rawSession("ses_wt", { location: { directory: wt } }),
+    ];
+    fake.state.shells = { [wt]: [rawShell("sh_1", "ses_wt")] };
+    start();
+    await vi.waitFor(() =>
+      expect(latest?.[0].shells).toStrictEqual([
+        {
+          command: "run sh_1",
+          directory: wt,
+          id: "sh_1",
+          sessionId: "ses_wt",
+          startedAt: 1,
+        },
+      ])
+    );
+    expect(latest?.[0].status).toBe("idle");
   });
 
   it("stays healthy when a worktree directory is missing in the container", async () => {

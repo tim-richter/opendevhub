@@ -67,6 +67,46 @@ describe("removeSession", () => {
   });
 });
 
+describe("killShell", () => {
+  it("kills a session's background shell in the directory opencode listed it for", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.store.setSessions(project.id, [
+      {
+        id: "ses_1",
+        projectId: project.id,
+        title: "Idle one",
+        directory: "/workspaces/demo",
+        updatedAt: 1,
+        status: "idle",
+        shells: [
+          {
+            command: "pnpm test",
+            directory: "/workspaces/demo.worktrees/x",
+            id: "sh_1",
+            sessionId: "ses_child",
+            startedAt: 1,
+          },
+        ],
+      },
+    ]);
+    const { reconciled } = s.monitors[0];
+    await s.hub.sessions.killShell(project.id, "ses_1", "sh_1");
+    expect(s.client.killShell).toHaveBeenCalledWith(
+      "sh_1",
+      "/workspaces/demo.worktrees/x"
+    );
+    expect(s.hub.environments.logLines(project.id)).toContain(
+      "killed background command pnpm test"
+    );
+    expect(s.monitors[0].reconciled).toBeGreaterThan(reconciled);
+    await expect(
+      s.hub.sessions.killShell(project.id, "ses_1", "sh_9")
+    ).rejects.toThrow(NotFoundError);
+  });
+});
+
 describe("task conversations", () => {
   it("closes a running conversation without deleting it, then starts a fresh one", async () => {
     const s = setup();

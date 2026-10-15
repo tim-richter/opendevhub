@@ -335,6 +335,26 @@ export class Sessions {
     this.envs.reconcile(envId);
   }
 
+  /** Kills a shell command one of the project's sessions left running in the background. */
+  async killShell(
+    id: ProjectId,
+    sessionId: string,
+    shellId: string
+  ): Promise<void> {
+    this.envs.requireProject(id);
+    const session = this.deps.store
+      .sessionsOf(id)
+      .find((s) => s.id === sessionId);
+    const shell = session?.shells?.find((s) => s.id === shellId);
+    if (!session || !shell) {
+      throw new NotFoundError(shellId, "shell");
+    }
+    const envId = session.envId ?? id;
+    await this.envs.opencodeClient(envId).killShell(shellId, shell.directory);
+    this.envs.log(id, `killed background command ${shell.command}`);
+    this.envs.reconcile(envId);
+  }
+
   /** What one of the project's sessions did: its turns, token usage and subagents. */
   async sessionDetail(
     id: ProjectId,

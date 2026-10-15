@@ -89,6 +89,7 @@ export interface DashboardHub {
     | "findFiles"
     | "sessionDetail"
     | "removeSession"
+    | "killShell"
     | "startTaskConversation"
     | "archiveTaskConversation"
     | "models"

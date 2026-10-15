@@ -314,6 +314,15 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
     .delete("/api/projects/:id/sessions/:sid", (c) =>
       ok(c, (id) => hub.sessions.removeSession(id, c.req.param("sid") ?? ""))
     )
+    .delete("/api/projects/:id/sessions/:sid/shells/:shid", (c) =>
+      ok(c, (id) =>
+        hub.sessions.killShell(
+          id,
+          c.req.param("sid") ?? "",
+          c.req.param("shid") ?? ""
+        )
+      )
+    )
     .post("/api/projects/:id/sessions/:sid/task-conversation", (c) =>
       json(c, (id) =>
         hub.sessions.startTaskConversation(id, c.req.param("sid") ?? "")

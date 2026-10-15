@@ -8,7 +8,11 @@ import {
   toAttachments,
 } from "../../../src/server/opencode/client";
 import type { OpencodeEvent } from "../../../src/server/opencode/client";
-import { rawSession, startFakeOpencode } from "../../helpers/fake-opencode";
+import {
+  rawSession,
+  rawShell,
+  startFakeOpencode,
+} from "../../helpers/fake-opencode";
 import type { FakeOpencode } from "../../helpers/fake-opencode";
 
 let fake: FakeOpencode;
@@ -50,6 +54,22 @@ describe(OpencodeClient, () => {
     expect(
       (await client.childSessions("ses_chat")).map((session) => session.id)
     ).toStrictEqual(["ses_agent"]);
+  });
+
+  it("lists a directory's running shells and kills one there", async () => {
+    fake.state.shells = {
+      "/w/other": [
+        rawShell("sh_1", "ses_1"),
+        rawShell("sh_2", "ses_1", { status: "exited" }),
+      ],
+    };
+    await expect(client.shells("/workspaces/demo")).resolves.toStrictEqual([]);
+    expect((await client.shells("/w/other")).map((s) => s.id)).toStrictEqual([
+      "sh_1",
+    ]);
+    await client.killShell("sh_1", "/w/other");
+    expect(fake.state.killedShells).toStrictEqual(["sh_1"]);
+    await expect(client.shells("/w/other")).resolves.toStrictEqual([]);
   });
 
   it("scopes permission requests and forms by directory header", async () => {

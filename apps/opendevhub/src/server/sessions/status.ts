@@ -1,4 +1,5 @@
 import type {
+  BackgroundShell,
   ModelRef,
   PendingForm,
   PendingItems,
@@ -11,8 +12,12 @@ import type {
   RawMessage,
   RawPermissionRequest,
   RawSession,
+  RawShell,
   RawTokens,
 } from "../opencode/client";
+
+/** A running shell with the directory opencode listed it for. */
+export type LocatedShell = RawShell & { directory: string };
 
 export interface StatusInput {
   /** The environment these sessions come from; copied onto each session. */
@@ -25,6 +30,8 @@ export interface StatusInput {
   firstSeen?: Map<string, number>;
   /** Tokens in each root session's context, by session id (see `contextOf`). */
   contexts?: Map<string, number>;
+  /** Running shell commands, by the directory they were listed for. */
+  shells?: LocatedShell[];
 }
 
 const RANK: Record<SessionStatus, number> = {
@@ -227,6 +234,24 @@ export const deriveSessions = (
     children.set(root, entries);
   }
 
+  const shells = new Map<string, BackgroundShell[]>();
+  for (const sh of input.shells ?? []) {
+    const sessionId = sh.metadata?.sessionID;
+    if (sh.status !== "running" || typeof sessionId !== "string") {
+      continue;
+    }
+    const root = rootOf(sessionId, parents);
+    const entries = shells.get(root) ?? [];
+    entries.push({
+      command: sh.command,
+      directory: sh.directory,
+      id: sh.id,
+      sessionId,
+      startedAt: sh.time.started,
+    });
+    shells.set(root, entries);
+  }
+
   return input.sessions
     .filter((s) => !s.parentID && s.time.archived === undefined)
     .map((s) => {
@@ -259,6 +284,13 @@ export const deriveSessions = (
               subagents: children
                 .get(s.id)
                 ?.toSorted((a, b) => b.updatedAt - a.updatedAt),
+            }
+          : {}),
+        ...(shells.has(s.id)
+          ? {
+              shells: shells
+                .get(s.id)
+                ?.toSorted((a, b) => a.startedAt - b.startedAt),
             }
           : {}),
       };

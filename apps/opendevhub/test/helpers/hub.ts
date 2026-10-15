@@ -658,6 +658,7 @@ export function setup(
     ),
     active: vi.fn(async () => new Set<string>()),
     deleteSession: vi.fn(async (_id: string, _dir?: string) => {}),
+    killShell: vi.fn(async (_id: string, _dir?: string) => {}),
   };
   const publisher = {
     info: vi.fn(

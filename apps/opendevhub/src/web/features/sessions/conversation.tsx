@@ -26,6 +26,7 @@ import { CheckoutRuntime } from "../checkouts/checkout-page";
 import type { Checkout } from "../checkouts/checkouts";
 import { ProjectReview } from "../review/project-review";
 import { taskChip } from "../tasks/tasks";
+import { BackgroundShells, ShellsChip } from "./background-shells";
 import { Composer } from "./composer";
 import { PendingStack } from "./pending-cards";
 import {
@@ -191,6 +192,7 @@ export const Conversation = (props: {
           </h2>
           <div className="flex shrink-0 items-center gap-1.5 text-xs">
             <SessionBadge status={session.status} />
+            <ShellsChip session={session} />
           </div>
           <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 overflow-hidden text-xs max-md:hidden">
             {session.model && <Chip>{modelShortName(session.model)}</Chip>}
@@ -267,6 +269,8 @@ export const Conversation = (props: {
             )}
           </section>
         )}
+
+        <BackgroundShells session={session} />
 
         <div className="relative min-h-48 flex-1">
           <div

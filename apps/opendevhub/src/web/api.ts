@@ -880,6 +880,24 @@ export const removeSession = async (projectId: string, sessionId: string) => {
   );
 };
 
+/** Kills a shell command the session left running in the background. */
+export const killShell = async (
+  projectId: string,
+  sessionId: string,
+  shellId: string
+) => {
+  await complete(
+    project.sessions[":sid"].shells[":shid"].$delete({
+      param: {
+        ...projectParam(projectId),
+        sid: encodeURIComponent(sessionId),
+        shid: encodeURIComponent(shellId),
+      },
+    }),
+    "stop the command"
+  );
+};
+
 /** A session's turns, token usage and subagents. */
 export const fetchSessionDetail = (projectId: string, sessionId: string) =>
   read(

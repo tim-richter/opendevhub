@@ -736,6 +736,19 @@ export interface SessionSummary {
   context?: number;
   /** Child agent sessions, including agents running after this session goes idle. */
   subagents?: LiveSubagentSummary[];
+  /** Shell commands it or its subagents left running in the background, oldest first. */
+  shells?: BackgroundShell[];
+}
+
+/** A shell command an agent moved to the background; it keeps running after the turn ends. */
+export interface BackgroundShell {
+  id: string;
+  /** The session (this one or a subagent) whose tool call started it. */
+  sessionId: string;
+  command: string;
+  /** The checkout opencode runs it for; killing it goes through this directory. */
+  directory: string;
+  startedAt: number;
 }
 
 export interface LiveSubagentSummary {
