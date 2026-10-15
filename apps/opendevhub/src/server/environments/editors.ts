@@ -187,15 +187,38 @@ const findTerminal = async (
   return undefined;
 };
 
-/** Finds executables on PATH plus the places editor installers drop launchers that PATH often misses. */
-export const pathWhich = (env: NodeJS.ProcessEnv = process.env): Which => {
-  const home = os.homedir();
+/** macOS-only: where each editor's CLI lives inside its `.app` bundle. */
+const MAC_APP_BINS: Record<string, string> = {
+  "Visual Studio Code": "Contents/Resources/app/bin",
+  Cursor: "Contents/Resources/app/bin",
+  Zed: "Contents/MacOS",
+};
+
+const macAppDirs = (home: string): string[] =>
+  Object.entries(MAC_APP_BINS).flatMap(([app, rel]) => [
+    path.join("/Applications", `${app}.app`, rel),
+    path.join(home, "Applications", `${app}.app`, rel),
+  ]);
+
+/**
+ * Finds executables on PATH plus the places editor installers drop launchers that PATH often misses.
+ * On macOS also looks inside installed `.app` bundles, where the CLI only works
+ * once the user runs the app's "Install command in PATH" — clicking the launcher never creates it.
+ */
+export const pathWhich = (
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home = os.homedir()
+): Which => {
   const dirs = [
     ...(env.PATH ?? "").split(path.delimiter).filter(Boolean),
     path.join(home, ".local", "bin"),
     path.join(home, ".local", "share", "JetBrains", "Toolbox", "scripts"),
     "/snap/bin",
   ];
+  if (platform === "darwin") {
+    dirs.push(...macAppDirs(home));
+  }
   return async (names) => {
     for (const name of names) {
       if (path.isAbsolute(name)) {

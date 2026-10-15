@@ -136,6 +136,52 @@ describe(pathWhich, () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("on macOS finds editor CLIs inside app bundles and lets PATH win", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "odh-apps-"));
+    try {
+      const mk = (rel: string) => {
+        const abs = path.join(tmp, rel);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, "#!/bin/sh\n", { mode: 0o755 });
+        return abs;
+      };
+      const codeInApp = mk(
+        "home/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+      );
+      mk("home/Applications/Cursor.app/Contents/Resources/app/bin/cursor");
+      mk("home/Applications/Zed.app/Contents/MacOS/zed");
+      const codeOnPath = mk("bin/code");
+
+      const darwin = pathWhich(
+        { PATH: path.join(tmp, "bin") },
+        "darwin",
+        path.join(tmp, "home")
+      );
+      await expect(darwin(["code"])).resolves.toBe(codeOnPath);
+      await expect(darwin(["cursor"])).resolves.toBe(
+        path.join(
+          tmp,
+          "home/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+        )
+      );
+      await expect(darwin(["zed"])).resolves.toBe(
+        path.join(tmp, "home/Applications/Zed.app/Contents/MacOS/zed")
+      );
+
+      const onlyApps = pathWhich(
+        { PATH: "" },
+        "darwin",
+        path.join(tmp, "home")
+      );
+      await expect(onlyApps(["code"])).resolves.toBe(codeInApp);
+
+      const linux = pathWhich({ PATH: "" }, "linux", path.join(tmp, "home"));
+      await expect(linux(["code"])).resolves.toBeUndefined();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 function fakeChild() {
