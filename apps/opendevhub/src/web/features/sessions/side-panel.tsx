@@ -49,6 +49,8 @@ import { When } from "../../components/when";
 import { needsAttention, openUrlOf } from "../../derive";
 import { useMediaQuery } from "../../hooks/use-media-query";
 import { RightSidebar } from "../../shell/right-sidebar";
+import type { ShortcutId } from "../../shell/shortcuts";
+import { useShortcutLabel, useShortcut } from "../../shell/use-shortcut";
 import type { Checkout } from "../checkouts/checkouts";
 import { TurnChanges } from "../review/turn-changes";
 import { formatCost, formatTokens } from "../tasks/tasks";
@@ -196,6 +198,12 @@ export const ConversationSidebar = (props: {
 }) => {
   const wide = useMediaQuery(WIDE_QUERY);
   const { open } = props;
+  useShortcut("panelChanges", () => props.onToggle("changes"), {
+    enabled: props.panels.includes("changes"),
+  });
+  useShortcut("panelTerminal", () => props.onToggle("terminal"), {
+    enabled: props.panels.includes("terminal"),
+  });
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const resizePanel = (width: number, persist = false) => {
     const nextWidth = clampPanelWidth(width);
@@ -226,30 +234,52 @@ export const ConversationSidebar = (props: {
         <SidebarContent className="w-12 flex-none border-l first:border-l-0">
           <SidebarGroup className="px-2">
             <SidebarMenu aria-label="Side panels">
-              {props.panels.map((id) => {
-                const { icon: Icon, label } = PANELS[id];
-                return (
-                  <SidebarMenuItem key={id}>
-                    <Tip label={label} side="left">
-                      <SidebarMenuButton
-                        className="size-8 justify-center p-0"
-                        aria-label={label}
-                        aria-pressed={open?.id === id}
-                        isActive={open?.id === id}
-                        onClick={() => props.onToggle(id)}
-                      >
-                        <Icon />
-                      </SidebarMenuButton>
-                    </Tip>
-                  </SidebarMenuItem>
-                );
-              })}
+              {props.panels.map((id) => (
+                <RailButton
+                  key={id}
+                  id={id}
+                  active={open?.id === id}
+                  onToggle={() => props.onToggle(id)}
+                />
+              ))}
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
       </Sidebar>
       {open && !wide && <PanelSheet panel={open} onClose={props.onClose} />}
     </RightSidebar>
+  );
+};
+
+/** The shortcuts that show or hide a panel. */
+const PANEL_SHORTCUTS: Partial<Record<PanelId, ShortcutId>> = {
+  changes: "panelChanges",
+  terminal: "panelTerminal",
+};
+
+/** One panel's button in the rail, its tooltip naming the panel's shortcut when it has one. */
+const RailButton = (props: {
+  id: PanelId;
+  active: boolean;
+  onToggle: () => void;
+}) => {
+  const { icon: Icon, label } = PANELS[props.id];
+  const shortcut = PANEL_SHORTCUTS[props.id];
+  const keys = useShortcutLabel(shortcut ?? "panelChanges");
+  return (
+    <SidebarMenuItem>
+      <Tip label={shortcut && keys ? `${label} (${keys})` : label} side="left">
+        <SidebarMenuButton
+          className="size-8 justify-center p-0"
+          aria-label={label}
+          aria-pressed={props.active}
+          isActive={props.active}
+          onClick={props.onToggle}
+        >
+          <Icon />
+        </SidebarMenuButton>
+      </Tip>
+    </SidebarMenuItem>
   );
 };
 

@@ -1,4 +1,8 @@
-import { formatForDisplay, useHotkey } from "@tanstack/react-hotkeys";
+import {
+  formatForDisplay,
+  matchesKeyboardEvent,
+  useHotkey,
+} from "@tanstack/react-hotkeys";
 import type { HotkeyCallback, UseHotkeyOptions } from "@tanstack/react-hotkeys";
 import { useSyncExternalStore } from "react";
 
@@ -75,6 +79,12 @@ export const useBinding = (id: ShortcutId): Binding =>
 export const useShortcutLabel = (id: ShortcutId): string | undefined => {
   const binding = useBinding(id);
   return binding === null ? undefined : formatForDisplay(binding);
+};
+
+/** Whether `event` presses `id`'s current binding, for handlers outside React such as the terminal's. */
+export const isShortcutEvent = (id: ShortcutId, event: KeyboardEvent) => {
+  const binding = bindingOf(id, current);
+  return binding !== null && matchesKeyboardEvent(event, binding);
 };
 
 /** Rebinds `id`; `null` turns it off. */

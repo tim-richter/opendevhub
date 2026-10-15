@@ -9,6 +9,7 @@ import type { Hotkey } from "@tanstack/react-hotkeys";
 export type ShortcutScope =
   | "global"
   | "chat"
+  | "conversation"
   | "newTask"
   | "pending"
   | "review";
@@ -41,6 +42,23 @@ export const SHORTCUT_GROUPS = [
       { default: "Escape", id: "chatInterrupt", label: "Stop the agent" },
     ],
     title: "Chat",
+  },
+  {
+    hint: "In a conversation whose right sidebar offers the panel; works in the terminal too",
+    scope: "conversation",
+    shortcuts: [
+      {
+        default: "Mod+Shift+G",
+        id: "panelChanges",
+        label: "Show or hide Changes",
+      },
+      {
+        default: "Control+`",
+        id: "panelTerminal",
+        label: "Show or hide the terminal",
+      },
+    ],
+    title: "Conversation",
   },
   {
     hint: "In the New task form's prompt",

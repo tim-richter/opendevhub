@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import { cn } from "@/lib/utils";
+import { isShortcutEvent } from "@/shell/use-shortcut";
 
 import { useCheckoutContext } from "./checkout-context";
 import { checkoutRuntime } from "./checkouts";
@@ -354,6 +355,12 @@ const TerminalPanel = ({
     terminalInstances.set(terminalId, terminal);
     const fit = new FitAddon();
     terminal.loadAddon(fit);
+    // The side panel shortcuts reach the page instead of the shell, so the terminal can hide itself.
+    terminal.attachCustomKeyEventHandler(
+      (event) =>
+        !isShortcutEvent("panelTerminal", event) &&
+        !isShortcutEvent("panelChanges", event)
+    );
     terminal.open(container.current);
     const params = new URLSearchParams({
       directory,
