@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { CheckResult, ChecksView } from "../../../../src/shared/types";
 import {
+  checkSections,
   checksState,
   fixPrompt,
   formatDuration,
+  groupState,
   needingApproval,
   publishWarning,
   withRun,
@@ -16,6 +18,7 @@ const lint = {
   where: "container" as const,
   timeout: 900,
   approved: true,
+  source: "team" as const,
 };
 const img = {
   name: "img",
@@ -23,6 +26,7 @@ const img = {
   where: "host" as const,
   timeout: 900,
   approved: false,
+  source: "team" as const,
 };
 const result = (
   name: string,
@@ -38,8 +42,9 @@ const result = (
 });
 const view = (extra: Partial<ChecksView> = {}): ChecksView => ({
   checks: [lint, img],
-  source: "devcontainer",
-  devcontainer: [lint, img],
+  team: [lint, img],
+  personal: [],
+  teamWritable: true,
   errors: [],
   ...extra,
 });
@@ -142,6 +147,48 @@ describe("needingApproval / withRun / formatDuration", () => {
     expect(formatDuration(1234)).toBe("1.2 s");
     expect(formatDuration(42_000)).toBe("42 s");
     expect(formatDuration(185_000)).toBe("3 min 5 s");
+  });
+});
+
+describe("checkSections / groupState", () => {
+  const test = { ...lint, name: "test", group: "fast" };
+  const e2e = { ...lint, name: "e2e", group: "slow" };
+  const types = { ...lint, name: "types", group: "fast" };
+
+  it("puts ungrouped checks first, then each group in order", () => {
+    expect(checkSections([test, lint, e2e, types])).toStrictEqual([
+      { checks: [lint] },
+      { checks: [test, types], group: "fast" },
+      { checks: [e2e], group: "slow" },
+    ]);
+    expect(checkSections([test])).toStrictEqual([
+      { checks: [test], group: "fast" },
+    ]);
+  });
+
+  it("sums up a group from its checks' results", () => {
+    const a = { ...lint, name: "a" };
+    const b = { ...lint, name: "b" };
+    expect(groupState(undefined, [a, b])).toStrictEqual({
+      passed: 0,
+      state: "idle",
+    });
+    expect(
+      groupState(run([result("a", "passed"), result("b", "running")], false), [
+        a,
+        b,
+      ])
+    ).toStrictEqual({ passed: 1, state: "running" });
+    expect(
+      groupState(run([result("a", "passed"), result("b", "failed")]), [a, b])
+    ).toStrictEqual({ passed: 1, state: "failed" });
+    expect(
+      groupState(run([result("a", "passed"), result("b", "passed")]), [a, b])
+    ).toStrictEqual({ passed: 2, state: "passed" });
+    expect(groupState(run([result("a", "passed")]), [a, b])).toStrictEqual({
+      passed: 1,
+      state: "idle",
+    });
   });
 });
 

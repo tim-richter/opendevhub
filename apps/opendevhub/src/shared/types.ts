@@ -34,6 +34,29 @@ export interface ProjectLinks {
   forgejoRepository?: string;
 }
 
+/** Where a project setting is saved: the team's devcontainer.json, or the user's own config.json. */
+export type SettingsScope = "team" | "personal";
+
+/** The shareable settings of one layer. */
+export interface ProjectSharedSettings {
+  name?: string;
+  appearance: ProjectAppearance;
+  links: ProjectLinks;
+  /** Team: devcontainer.json's own numeric `forwardPorts`. Personal: the ones forwarded on top. */
+  forwardPorts: number[];
+}
+
+/** A project's shareable settings per layer, so the UI can say where each value comes from. */
+export interface ProjectTeamView {
+  /** devcontainer.json relative to the project, where team settings are saved. */
+  file: string;
+  /** The file could be read, so team settings can be saved to it. */
+  writable: boolean;
+  errors: string[];
+  team: ProjectSharedSettings;
+  personal: ProjectSharedSettings;
+}
+
 /** One item on a project's to-do list. */
 export interface ProjectTodo {
   id: number;
@@ -317,17 +340,25 @@ export interface CheckDef {
   where: CheckWhere;
   /** Seconds. */
   timeout: number;
+  /** Checks sharing a group are shown together and can be run together. */
+  group?: string;
 }
 
-export type CheckSource = "devcontainer" | "settings" | "none";
+/** Where a check comes from: the team's devcontainer.json, the user's own settings, or the user's version of a team check. */
+export type CheckSource = "team" | "personal" | "override";
+
+/** An entry of the user's own checks: a check of its own, or one turning a team check off. */
+export type CheckOverlay = CheckDef | { name: string; disabled: true };
 
 export interface ChecksConfig {
   /** The checks that apply; each host check says whether its exact command was approved. */
-  checks: (CheckDef & { approved: boolean })[];
-  source: CheckSource;
-  /** As read from devcontainer.json, and the project's own list when it has one. */
-  devcontainer: CheckDef[];
-  settings?: CheckDef[];
+  checks: (CheckDef & { approved: boolean; source: CheckSource })[];
+  /** As read from devcontainer.json `customizations.opendevhub.checks`. */
+  team: CheckDef[];
+  /** The user's own entries, laid over the team's by name. */
+  personal: CheckOverlay[];
+  /** devcontainer.json could be read, so team checks can be saved to it. */
+  teamWritable: boolean;
   /** Entries that were dropped, and why. */
   errors: string[];
 }

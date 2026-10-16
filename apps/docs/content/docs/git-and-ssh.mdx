@@ -50,13 +50,7 @@ For each ssh remote of the project, the matching entries from your `~/.ssh/known
 
 ## Turn forwarding off
 
-In the project's `devcontainer.json`:
-
-```jsonc
-"customizations": { "opendevhub": { "sshAgent": false } }
-```
-
-or in `~/.config/opendevhub/config.json`:
+Whether your keys go into a project's containers is your call, so it's set in `~/.config/opendevhub/config.json`, not in the repo (`sshAgent` in `devcontainer.json` is ignored):
 
 ```json
 { "projects": { "/path/to/repo": { "sshAgent": false } } }

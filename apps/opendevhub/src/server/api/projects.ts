@@ -77,7 +77,8 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
         if (!deps.renameProject) {
           throw new UnavailableError("Renaming projects is not available");
         }
-        await deps.renameProject(id, c.req.valid("json").name);
+        const { name, scope } = c.req.valid("json");
+        await deps.renameProject(id, name, scope);
       })
     )
     .post(
@@ -89,10 +90,14 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
             throw new UnavailableError("Project appearance is not available");
           }
           const appearance = c.req.valid("json");
-          return deps.projectAppearance.save(id, {
-            shortName: appearance.shortName || undefined,
-            color: appearance.color || undefined,
-          });
+          return deps.projectAppearance.save(
+            id,
+            {
+              shortName: appearance.shortName || undefined,
+              color: appearance.color || undefined,
+            },
+            appearance.scope
+          );
         })
     )
     .get("/api/projects/:id/ports", (c) =>
@@ -108,7 +113,8 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
         if (!deps.projectPorts) {
           throw new UnavailableError("Project ports are not available");
         }
-        await deps.projectPorts.save(id, c.req.valid("json").ports);
+        const { ports, scope } = c.req.valid("json");
+        await deps.projectPorts.save(id, ports, scope);
         return { ports: deps.projectPorts.get(id) };
       })
     )
@@ -183,8 +189,17 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
         if (!deps.projectLinks) {
           throw new UnavailableError("Project links are not available");
         }
-        deps.projectLinks.save(id, c.req.valid("json"));
+        const { scope, ...links } = c.req.valid("json");
+        deps.projectLinks.save(id, links, scope);
         return deps.projectLinks.get(id);
+      })
+    )
+    .get("/api/projects/:id/team-settings", (c) =>
+      json(c, (id) => {
+        if (!deps.projectTeam) {
+          throw new UnavailableError("Team settings are not available");
+        }
+        return deps.projectTeam.get(id);
       })
     )
     .get("/api/projects/:id/todos", (c) =>
@@ -783,7 +798,7 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
       (c) =>
         json(c, (id) => {
           const b = c.req.valid("json");
-          return checks.saveSettings(id, b.checks);
+          return checks.saveSettings(id, b.checks, b.scope);
         })
     )
     .post("/api/projects/:id/checks/run", validateJson(bodies.runChecks), (c) =>

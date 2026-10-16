@@ -14,7 +14,8 @@ In the project's `devcontainer.json`, so they're committed and shared with the t
 "customizations": {
   "opendevhub": {
     "checks": [
-      { "name": "lint", "command": "pnpm lint" },
+      { "name": "lint", "command": "pnpm lint", "group": "static" },
+      { "name": "types", "command": "pnpm typecheck", "group": "static" },
       { "name": "test", "command": "pnpm test", "timeout": 1200 },
       { "name": "image", "command": "docker compose build", "where": "host" }
     ]
@@ -24,15 +25,30 @@ In the project's `devcontainer.json`, so they're committed and shared with the t
 
 - `command` runs with `sh -c` in the checkout's folder.
 - `where` is `container` (default), the checkout's own container or the project's, or `host`, this machine (for `docker build` and `docker compose`).
-- `timeout` is in seconds (default 900, 10 to 7200). A check that runs out of time fails, and everything it started is stopped.
+- `timeout` is in whole seconds (default 900), any positive number. A check that runs out of time fails, and everything it started is stopped.
+- `group` is optional. Checks with the same group are shown together and can be run together from one button.
 
 Changes to `devcontainer.json` apply right away; nothing needs restarting.
 
-To use a different list without touching the repo, open the project's settings (the gear on the project page) and click **Edit** under **Checks**. Your list is saved in `~/.config/opendevhub/config.json` and replaces the one in `devcontainer.json`; **Use devcontainer.json** switches back.
+You can also edit them in the project's settings (the gear on the project page): click **Edit** under **Checks** and pick **Team** to change the list in `devcontainer.json` (commit the file to share it), or **Just me** to change only your own.
+
+In the editor each group is a box of its own. **Add group** starts a new one, and its name is editable in place. Drag a check by its handle to reorder it or move it to another group, or focus the handle and use the up and down arrow keys; past the first or last check of a group it moves into the next one. The order you set is the order the checks run in.
+
+**Copy mine to team** opens the team's list with your own checks laid in: checks named like a team check replace it, and new ones are added. Review the list and save to write it to `devcontainer.json`; your own entries that now match the team's are dropped, so you run the team's version.
+
+### Your own checks
+
+Your own checks are saved in `~/.config/opendevhub/config.json` and laid over the team's by name:
+
+- A check with a new name is added, for you only.
+- A check with the same name as a team check replaces it for you (**your version**). **Use the team's** drops it again.
+- **Turn off** next to a team check stops you running it, and **Turn on** brings it back. In `config.json` that's `{ "name": "e2e", "disabled": true }`.
+
+Team checks added later still apply to you. **Clear my changes** drops all of your own entries.
 
 ## Run them
 
-The **Checks** button in the task, chat or worktree header, and in the Changes toolbar, shows where things stand: not run, out of date, running, passed or failed. Click it to open the panel, then **Run all**, or the play button next to one check to run just that one. Checks run one after another, and all of them run even when an earlier one fails. Click a check to read its output; failed ones open by themselves.
+The **Checks** button in the task, chat or worktree header, and in the Changes toolbar, shows where things stand: not run, out of date, running, passed or failed. Click it to open the panel, then **Run all**, **Run group** on a group's heading to run just its checks, or the play button next to one check to run just that one. Checks run one after another, and all of them run even when an earlier one fails. Click a check to read its output; failed ones open by themselves.
 
 A result belongs to the commit it ran on. Once you commit, or the uncommitted changes differ from the ones that were tested, the button shows the results as out of date.
 
@@ -47,6 +63,6 @@ Running Docker inside the devcontainer (Docker-in-Docker) needs a privileged con
 - In a worktree, `COMPOSE_PROJECT_NAME` is set to `<project>-<branch>` (unless you set it yourself), so two worktrees' `docker compose` runs don't share containers, networks or volumes.
 - Every check gets `OPENDEVHUB_CHECK` (its name) and `OPENDEVHUB_BRANCH`.
 
-**Approval.** An agent can edit `devcontainer.json`, so a host command runs only after you have approved its exact text. The first run of a new or changed host command shows it and asks you to **Approve and run**. The approval is stored as a hash in `config.json` and covers only that text. Commands you save yourself in the project's settings count as approved.
+**Approval.** An agent can edit `devcontainer.json`, and so can anyone who commits to the repo, so a host command runs only after you have approved its exact text. The first run of a new or changed host command shows it and asks you to **Approve and run**. The approval is stored as a hash in your `config.json` and covers only that text; it is never shared. Commands you save yourself in the project's settings, for you or for the team, count as approved for you.
 
 Approval covers the command, not what it builds. A `Dockerfile` or compose file still runs through your Docker daemon, so review the diff before you run host checks.

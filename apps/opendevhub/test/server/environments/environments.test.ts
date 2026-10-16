@@ -1649,7 +1649,7 @@ describe("git and ssh credentials", () => {
     });
   });
 
-  it("honours sshAgent: false in a task container's own configuration, whatever the main one said", async () => {
+  it("ignores sshAgent in devcontainer.json: forwarding keys is the user's choice", async () => {
     const s = setup();
     s.worktrees.list.mockResolvedValue([feat]);
     s.containers.readConfiguration.mockImplementation(
@@ -1667,10 +1667,8 @@ describe("git and ssh credentials", () => {
     await vi.waitFor(() =>
       expect(s.store.runtime(envId).opencode).toBe("healthy")
     );
-    expect(s.agentTunnel).toHaveBeenCalledOnce();
-    expect(s.store.runtime(envId).sshAgent).toBe("off");
-    expect(s.credentials.prepare.mock.calls[1][2].sshAgent).toBeFalsy();
-    expect(s.runtime.ensureRunning.mock.calls[1][1].env).toBeUndefined();
+    expect(s.store.runtime(envId).sshAgent).not.toBe("off");
+    expect(s.credentials.prepare.mock.calls[1][2].sshAgent).toBeTruthy();
   });
 
   it("asks for relay recovery when the tunnel loses the relay", async () => {

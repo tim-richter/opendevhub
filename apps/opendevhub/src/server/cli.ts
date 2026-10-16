@@ -77,6 +77,11 @@ import { Onboarding } from "./projects/onboarding";
 import { personalizationSettings } from "./projects/personalization";
 import { projectPortSettings } from "./projects/ports";
 import { StateStore } from "./projects/state";
+import {
+  FileTeamSettings,
+  resolveProjectSettings,
+} from "./projects/team-settings";
+import { projectName, projectTeamView } from "./projects/team-view";
 import { startServer } from "./server";
 import { UsageStore, trackUsage } from "./sessions/usage";
 import { Specs } from "./specs/specs";
@@ -281,6 +286,14 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   tasks.failInterrupted();
   chats.failInterrupted();
   const projectSettings = new FileProjectSettings(dir);
+  /** Settings the team shares in each project's devcontainer.json. */
+  const teamSettings = new FileTeamSettings();
+  /** The user's own settings over the team's. */
+  const sharedSettings = (project: Project): Record<string, unknown> =>
+    resolveProjectSettings(
+      teamSettings.get(project).settings,
+      projectSettings.get(project.path)
+    );
   const store = new StateStore({
     chats,
     checkouts,
@@ -289,7 +302,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     links,
     port: config.port,
     projectAppearance: (project) =>
-      readProjectAppearance(projectSettings.get(project.path)),
+      readProjectAppearance(sharedSettings(project)),
     tasks,
   });
   store.setRoots(roots);
@@ -316,16 +329,12 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const editors = new EditorLauncher(await detectEditors(pathWhich()));
   store.setEditors(editors.list());
   const git = new GitOps({ containers });
-  /** A name set in Settings replaces the folder name discovery gives a project. */
-  const withNames = (list: Project[]): Project[] => {
-    const entries = loadConfig(dir).projects ?? {};
-    return list.map((p) => {
-      const name = (entries[p.path] as { name?: unknown } | undefined)?.name;
-      return typeof name === "string" && name.trim()
-        ? { ...p, name: name.trim() }
-        : p;
-    });
-  };
+  /** A name set in Settings, or by the team in devcontainer.json, replaces the folder name discovery gives a project. */
+  const withNames = (list: Project[]): Project[] =>
+    list.map((p) => ({
+      ...p,
+      name: projectName(p, teamSettings.get(p), projectSettings.get(p.path)),
+    }));
   const hub = createHub({
     store,
     projects,
@@ -388,6 +397,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     run: spawnRunner,
     settings: projectSettings,
     target: (id, directory) => hub.checkouts.checkTarget(id, directory),
+    team: teamSettings,
   });
 
   const specs = new Specs({
@@ -447,32 +457,62 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
       roots = next;
       store.setRoots(next);
     },
-    renameProject: async (id, name) => {
+    renameProject: async (id, name, scope = "personal") => {
       const project = store.project(id);
       if (!project) {
         throw new NotFoundError(id);
       }
-      projectSettings.update(project.path, { name: name.trim() || undefined });
+      const patch = { name: name.trim() || undefined };
+      if (scope === "team") {
+        teamSettings.update(project, patch);
+        // The user's own name would hide the team's they just saved.
+        projectSettings.update(project.path, { name: undefined });
+      } else {
+        projectSettings.update(project.path, patch);
+      }
       await hub.environments.rescan();
     },
     projectAppearance: {
-      save: (id, appearance) => {
+      save: (id, appearance, scope = "personal") => {
         const project = store.project(id);
         if (!project) {
           throw new NotFoundError(id);
         }
-        projectSettings.update(project.path, {
+        const patch = {
           shortName: appearance.shortName || undefined,
           color: appearance.color || undefined,
-        });
-        const saved = readProjectAppearance(projectSettings.get(project.path));
+        };
+        if (scope === "team") {
+          teamSettings.update(project, patch);
+          projectSettings.update(project.path, {
+            shortName: undefined,
+            color: undefined,
+          });
+        } else {
+          projectSettings.update(project.path, patch);
+        }
+        const saved = readProjectAppearance(sharedSettings(project));
         store.setProjectAppearance(id, saved);
         return saved;
+      },
+    },
+    projectTeam: {
+      get: (id) => {
+        const project = store.project(id);
+        if (!project) {
+          throw new NotFoundError(id);
+        }
+        return projectTeamView(
+          project,
+          teamSettings.get(project),
+          projectSettings.get(project.path)
+        );
       },
     },
     ...projectLinkSettings({
       project: (id) => store.project(id),
       settings: projectSettings,
+      team: teamSettings,
     }),
     ...personalizationSettings({
       global: {
@@ -493,6 +533,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
       project: (id) => store.project(id),
       refreshPorts: (id) => hub.environments.refreshPorts(id),
       settings: projectSettings,
+      team: teamSettings,
     }),
     gitSetup: new GitSetupProbe({
       projects: () => store.projects(),

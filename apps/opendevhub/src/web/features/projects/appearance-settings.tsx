@@ -7,11 +7,25 @@ import {
   PROJECT_COLORS,
   PROJECT_SHORT_NAME,
 } from "../../../shared/project-appearance";
-import type { ProjectColor } from "../../../shared/project-appearance";
-import type { ProjectView } from "../../../shared/types";
+import type {
+  ProjectColor,
+  ProjectAppearance,
+} from "../../../shared/project-appearance";
+import type { ProjectView, SettingsScope } from "../../../shared/types";
 import { saveProjectAppearance } from "../../api";
 import { muted } from "../../components/page";
 import { cn } from "../../lib/utils";
+import {
+  ScopeToggle,
+  TeamChip,
+  TeamSavedNote,
+  defaultScope,
+  useProjectTeam,
+  useRefreshProjectTeam,
+} from "./team-scope";
+
+const isSet = (a: ProjectAppearance | undefined): boolean =>
+  !!(a?.shortName || a?.color);
 
 const swatches: Record<ProjectColor, string> = {
   slate: "bg-slate-500",
@@ -32,7 +46,13 @@ export const AppearanceSettings = ({ view }: { view: ProjectView }) => {
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<SettingsScope>();
+  const { data: team } = useProjectTeam(view.project.id);
+  const refreshTeam = useRefreshProjectTeam(view.project.id);
+  const inTeam = isSet(team?.team.appearance);
+  const inPersonal = isSet(team?.personal.appearance);
+  const [chosenScope, setScope] = useState<SettingsScope>();
+  const scope = chosenScope ?? defaultScope(inTeam, inPersonal);
   const valid = shortName === "" || PROJECT_SHORT_NAME.test(shortName);
   const changed =
     shortName.toUpperCase() !== (view.appearance?.shortName ?? "") ||
@@ -43,24 +63,29 @@ export const AppearanceSettings = ({ view }: { view: ProjectView }) => {
     setColor(view.appearance?.color ?? "");
   }, [view.appearance?.shortName, view.appearance?.color]);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!valid || !changed) {
-      return;
-    }
+  const save = async (
+    appearance: { shortName: string; color: ProjectColor | "" },
+    to: SettingsScope
+  ) => {
     setSaving(true);
     setError(undefined);
     try {
-      await saveProjectAppearance(view.project.id, {
-        shortName: shortName.toUpperCase(),
-        color,
-      });
-      setSaved(true);
+      await saveProjectAppearance(view.project.id, appearance, to);
+      setSaved(to);
+      await refreshTeam();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    // Saving the same look to the team still moves it there.
+    if (!valid || (!changed && !(scope === "team" && inPersonal))) {
+      return;
+    }
+    await save({ shortName: shortName.toUpperCase(), color }, scope);
   };
 
   return (
@@ -89,7 +114,7 @@ export const AppearanceSettings = ({ view }: { view: ProjectView }) => {
             value={shortName}
             onChange={(event) => {
               setShortName(event.target.value);
-              setSaved(false);
+              setSaved(undefined);
             }}
           />
           <span className={muted}>Two or three letters</span>
@@ -112,7 +137,7 @@ export const AppearanceSettings = ({ view }: { view: ProjectView }) => {
               checked={color === ""}
               onChange={() => {
                 setColor("");
-                setSaved(false);
+                setSaved(undefined);
               }}
             />
             <span className="border-input peer-focus-visible:ring-ring peer-checked:ring-ring bg-sidebar flex size-9 items-center justify-center rounded-lg border text-xs font-semibold peer-checked:ring-2 peer-focus-visible:ring-2">
@@ -130,7 +155,7 @@ export const AppearanceSettings = ({ view }: { view: ProjectView }) => {
                 checked={color === choice}
                 onChange={() => {
                   setColor(choice);
-                  setSaved(false);
+                  setSaved(undefined);
                 }}
               />
               <span
@@ -149,14 +174,39 @@ export const AppearanceSettings = ({ view }: { view: ProjectView }) => {
           {error}
         </p>
       )}
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={saving || !valid || !changed}>
+      <div className="flex flex-wrap items-center gap-3">
+        <ScopeToggle
+          value={scope}
+          onChange={setScope}
+          team={team}
+          disabled={saving}
+        />
+        <Button
+          type="submit"
+          disabled={
+            saving || !valid || (!changed && !(scope === "team" && inPersonal))
+          }
+        >
           {saving ? "Saving…" : "Save appearance"}
         </Button>
-        {saved && !changed && (
+        {inTeam && !inPersonal && <TeamChip />}
+        {inTeam && inPersonal && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-muted-foreground"
+            disabled={saving}
+            title="Drop your own letters and color and use the team's"
+            onClick={() => void save({ shortName: "", color: "" }, "personal")}
+          >
+            Use the team&apos;s
+          </Button>
+        )}
+        {saved === "personal" && !changed && (
           <span className="text-muted-foreground text-sm">Saved</span>
         )}
       </div>
+      {saved === "team" && !changed && <TeamSavedNote team={team} />}
     </form>
   );
 };

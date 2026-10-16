@@ -8,6 +8,11 @@ import { del, get, set } from "idb-keyval";
 import { version } from "../../../package.json";
 
 const IDB_KEY = "opendevhub-query-cache";
+/**
+ * Bump when a persisted response changes shape: the version only changes on release, so without this a dev build
+ * (or anyone between releases) restores responses the new code can't read.
+ */
+const CACHE_SHAPE = 2;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** How long a cached response may be restored after a reload; queries must stay in memory as long. */
@@ -32,7 +37,7 @@ const shouldPersist = (query: Query): boolean =>
 
 export const persistOptions: Omit<PersistQueryClientOptions, "queryClient"> = {
   // A new release may change response shapes; start over rather than render stale ones.
-  buster: version,
+  buster: `${version}+${CACHE_SHAPE}`,
   dehydrateOptions: { shouldDehydrateQuery: shouldPersist },
   maxAge: PERSIST_MAX_AGE_MS,
   persister: {

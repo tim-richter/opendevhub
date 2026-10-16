@@ -7,7 +7,6 @@ import {
   composeProjectName,
   hostCheckHash,
   parseChecks,
-  parseJsonc,
   resolveChecks,
 } from "../../../src/server/environments/checks";
 import type {
@@ -46,7 +45,7 @@ describe(parseChecks, () => {
       { command: "true" },
       { name: "a", command: "" },
       { name: "b", command: "true", where: "cloud" },
-      { name: "c", command: "true", timeout: 5 },
+      { name: "c", command: "true", timeout: 0 },
       { name: "d", command: "true" },
       { name: "d", command: "false" },
     ]);
@@ -56,8 +55,41 @@ describe(parseChecks, () => {
       "check #2: needs a name of 1 to 40 characters",
       'check "a": needs a command of 1 to 4000 characters',
       'check "b": where must be "container" or "host"',
-      'check "c": timeout must be whole seconds from 10 to 7200',
+      'check "c": timeout must be a positive number of whole seconds',
       'check "d": the name is used twice',
+    ]);
+  });
+
+  it("takes any positive whole number of seconds as the timeout", () => {
+    const { checks, errors } = parseChecks([
+      { name: "soak", command: "true", timeout: 86_400 },
+      { name: "quick", command: "true", timeout: 1 },
+      { name: "half", command: "true", timeout: 1.5 },
+    ]);
+    expect(checks.map((c) => c.timeout)).toStrictEqual([86_400, 1]);
+    expect(errors).toStrictEqual([
+      'check "half": timeout must be a positive number of whole seconds',
+    ]);
+  });
+
+  it("keeps a check's group and rejects an empty one", () => {
+    const { checks, errors } = parseChecks([
+      { name: "lint", command: "pnpm lint", group: " fast " },
+      { name: "test", command: "pnpm test", group: "" },
+      { name: "e2e", command: "pnpm e2e", group: 3 },
+    ]);
+    expect(checks).toStrictEqual([
+      {
+        name: "lint",
+        command: "pnpm lint",
+        where: "container",
+        timeout: 900,
+        group: "fast",
+      },
+    ]);
+    expect(errors).toStrictEqual([
+      'check "test": group must be 1 to 40 characters',
+      'check "e2e": group must be 1 to 40 characters',
     ]);
   });
 
@@ -70,83 +102,64 @@ describe(parseChecks, () => {
   });
 });
 
-describe(parseJsonc, () => {
-  it("allows comments and trailing commas, but not inside strings", () => {
-    const text = `{
-      // a comment
-      "url": "http://x/*not a comment*/", /* block */
-      "list": [1, 2,],
-      "s": "a \\" // b",
-    }`;
-    expect(parseJsonc(text)).toStrictEqual({
-      url: "http://x/*not a comment*/",
-      list: [1, 2],
-      s: 'a " // b',
-    });
-  });
-
-  it("preserves comma and closing-bracket sequences inside strings", () => {
-    const value = {
-      command: `printf ',}' && printf ', ]'`,
-      escaped: 'a "quoted,}" value',
-      nested: [",\n}", ",]"],
-    };
-    expect(parseJsonc(JSON.stringify(value))).toStrictEqual(value);
-  });
-
-  it("removes trailing commas separated from the closing bracket by comments", () => {
-    expect(
-      parseJsonc('{"list": [1, /* comment */], // comment\n}')
-    ).toStrictEqual({
-      list: [1],
-    });
-  });
-
-  it.each(['{"n": 1/* comment */2}', "{} /* unfinished"])(
-    "rejects invalid JSONC %j",
-    (text) => {
-      expect(() => parseJsonc(text)).toThrow(SyntaxError);
-    }
-  );
-});
-
 describe(resolveChecks, () => {
-  const custom = {
+  const team = {
     checks: [
       { name: "test", command: "pnpm test" },
       { name: "img", command: "docker build .", where: "host" },
     ],
   };
 
-  it("uses devcontainer.json and marks unapproved host commands", () => {
-    const r = resolveChecks(custom, {});
-    expect(r.source).toBe("devcontainer");
-    expect(r.checks.map((c) => [c.name, c.approved])).toStrictEqual([
-      ["test", true],
-      ["img", false],
+  it("uses the team's checks and marks unapproved host commands", () => {
+    const r = resolveChecks(team, {});
+    expect(r.checks.map((c) => [c.name, c.source, c.approved])).toStrictEqual([
+      ["test", "team", true],
+      ["img", "team", false],
     ]);
+    expect(r.teamWritable).toBeTruthy();
     expect(
-      resolveChecks(custom, {
+      resolveChecks(team, {
         approvedHostChecks: [hostCheckHash("docker build .")],
       }).checks[1].approved
     ).toBeTruthy();
   });
 
-  it("lets the project's settings replace the list, even with an empty one", () => {
-    const r = resolveChecks(custom, { checks: [] });
-    expect(r).toMatchObject({ source: "settings", checks: [], settings: [] });
-    expect(r.devcontainer).toHaveLength(2);
-    expect(resolveChecks(undefined, {}).source).toBe("none");
+  it("lays the user's own entries over the team's by name", () => {
+    const r = resolveChecks(team, {
+      checks: [
+        { name: "img", disabled: true },
+        { name: "test", command: "pnpm test --run" },
+        { name: "lint", command: "pnpm lint" },
+      ],
+    });
+    expect(r.checks.map((c) => [c.name, c.source, c.command])).toStrictEqual([
+      ["test", "override", "pnpm test --run"],
+      ["lint", "personal", "pnpm lint"],
+    ]);
+    expect(r.team).toHaveLength(2);
+    expect(r.personal[0]).toStrictEqual({ name: "img", disabled: true });
+    expect(resolveChecks(undefined, {}).checks).toStrictEqual([]);
+  });
+
+  it("keeps team checks a former full list of the user's leaves out", () => {
+    expect(
+      resolveChecks(team, { checks: [] }).checks.map((c) => c.name)
+    ).toStrictEqual(["test", "img"]);
   });
 
   it("prefixes errors with where they came from", () => {
-    expect(
-      resolveChecks({ checks: [{}] }, { checks: "x" }, ["read failed"]).errors
-    ).toStrictEqual([
+    const r = resolveChecks(
+      { checks: [{}, { name: "x", disabled: true }] },
+      { checks: "x" },
+      ["read failed"]
+    );
+    expect(r.errors).toStrictEqual([
       "read failed",
       "devcontainer.json: check #1: needs a name of 1 to 40 characters",
+      'devcontainer.json: check "x": only your own checks can turn a check off',
       "settings: checks must be a list",
     ]);
+    expect(r.teamWritable).toBeFalsy();
   });
 });
 
@@ -201,6 +214,7 @@ function setup(
   } = {}
 ) {
   const settings = new MemorySettings();
+  const team = { update: vi.fn() };
   const log: string[] = [];
   const execCalls: { command: string[]; env?: Record<string, string> }[] = [];
   const hostCalls: { args: string[]; opts: RunOptions }[] = [];
@@ -255,6 +269,7 @@ function setup(
       currentBranch: async () => "feature",
     },
     settings,
+    team,
     log: (_id, line) => log.push(line),
     readFile: async () => file,
     now: () => clock,
@@ -269,7 +284,16 @@ function setup(
     });
     return checks.latest("demo", dir).run!;
   };
-  return { checks, settings, log, execCalls, hostCalls, state, finished };
+  return {
+    checks,
+    settings,
+    team,
+    log,
+    execCalls,
+    hostCalls,
+    state,
+    finished,
+  };
 }
 
 describe(Checks, () => {
@@ -494,25 +518,54 @@ describe(Checks, () => {
     ]);
   });
 
-  it("saves the project's own list, approving its host commands, and removes it again", async () => {
+  it("saves the user's own entries, approving their host commands, and removes them again", async () => {
     const { checks, settings } = setup();
     const saved = await checks.saveSettings("demo", [
+      { name: "lint", disabled: true },
       { name: "img", command: "docker build .", where: "host" },
     ]);
-    expect(saved).toMatchObject({
-      source: "settings",
-      checks: [{ name: "img", approved: true }],
-    });
+    expect(
+      saved.checks.map((c) => [c.name, c.source, c.approved])
+    ).toStrictEqual([
+      ["test", "team", true],
+      ["img", "personal", true],
+    ]);
     expect(settings.get("/src/demo").checks).toStrictEqual([
+      { name: "lint", disabled: true },
       { name: "img", command: "docker build .", where: "host", timeout: 900 },
     ]);
     await expect(
       checks.saveSettings("demo", [{ name: "" }])
     ).rejects.toBeInstanceOf(InvalidRequestError);
-    expect((await checks.saveSettings("demo", null)).source).toBe(
-      "devcontainer"
-    );
+    expect(
+      (await checks.saveSettings("demo", null)).checks.map((c) => c.source)
+    ).toStrictEqual(["team", "team"]);
     expect(settings.get("/src/demo").checks).toBeUndefined();
+  });
+
+  it("saves the team's list to devcontainer.json", async () => {
+    const { checks, settings, team } = setup();
+    await checks.saveSettings(
+      "demo",
+      [{ name: "img", command: "docker build .", where: "host" }],
+      "team"
+    );
+    expect(team.update).toHaveBeenCalledWith(project, {
+      checks: [
+        { name: "img", command: "docker build .", where: "host", timeout: 900 },
+      ],
+    });
+    expect(settings.get("/src/demo").checks).toBeUndefined();
+    expect(settings.get("/src/demo").approvedHostChecks).toStrictEqual([
+      hostCheckHash("docker build ."),
+    ]);
+    await expect(
+      checks.saveSettings("demo", [{ name: "x", disabled: true }], "team")
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    await checks.saveSettings("demo", [], "team");
+    expect(team.update).toHaveBeenLastCalledWith(project, {
+      checks: undefined,
+    });
   });
 
   it("reports a devcontainer.json it can't read", async () => {
@@ -520,7 +573,8 @@ describe(Checks, () => {
     (checks as unknown as { deps: ChecksDeps }).deps.readFile = async () =>
       "{ nope";
     const config = await checks.config("demo");
-    expect(config.source).toBe("none");
+    expect(config.checks).toStrictEqual([]);
+    expect(config.teamWritable).toBeFalsy();
     expect(config.errors[0]).toMatch(
       /^could not read \/src\/demo\/.devcontainer\/devcontainer.json/u
     );

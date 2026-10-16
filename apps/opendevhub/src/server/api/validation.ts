@@ -64,6 +64,8 @@ const actionFlag = z
   .transform((value) => value === true)
   .optional();
 const directory = z.object({ directory: text });
+/** Where a shareable project setting is saved; the user's own config.json unless `team`. */
+const scope = z.enum(["team", "personal"]).optional();
 const personalization = z.object({
   features: z
     .record(
@@ -267,15 +269,17 @@ export const bodies = {
     commitId: z.string(),
   }),
   roots: z.object({ roots: z.array(z.string()) }),
-  projectName: z.object({ name: z.string().max(200) }),
+  projectName: z.object({ name: z.string().max(200), scope }),
   projectAppearance: z.object({
     shortName: z.union([z.literal(""), z.string().regex(PROJECT_SHORT_NAME)]),
     color: z.union([z.literal(""), z.enum(PROJECT_COLORS)]),
+    scope,
   }),
   todo: z.object({ text: todoText }),
   todoUpdate: z.object({ text: todoText.optional(), done: flag }),
   projectPorts: z.object({
     ports: z.array(z.number().int().min(1).max(65_535)).max(100),
+    scope,
   }),
   projectHostPorts: z.object({
     ports: z.array(z.number().int().min(1).max(65_535)).max(100),
@@ -295,6 +299,7 @@ export const bodies = {
       })
       .optional(),
     jiraJql: jql.optional(),
+    scope,
   }),
   sshTest: z.object({ host: z.string().min(1) }),
   onboarding: z.object({ path: text, stack: z.enum(STACK_IDS) }),
@@ -403,12 +408,15 @@ export const bodies = {
       .array(
         z.object({
           name: z.string(),
-          command: z.string(),
+          command: z.string().optional(),
           where: z.enum(["host", "container"]).optional(),
           timeout: z.number().optional(),
+          group: z.string().optional(),
+          disabled: z.literal(true).optional(),
         })
       )
       .nullable(),
+    scope,
   }),
   runChecks: directory.extend({ names: strings, approve: strings }),
   reviseSpec: directory.extend({ change: z.string(), feedback: z.string() }),

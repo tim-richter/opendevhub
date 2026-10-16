@@ -100,15 +100,9 @@ describe(resolveEnvSettings, () => {
     ).toStrictEqual(["b"]);
   });
 
-  it("turns the ssh-agent off from either place, config.json first", () => {
+  it("turns the ssh-agent off only from config.json", () => {
     expect(
       resolveEnvSettings({ sshAgent: false }, undefined).sshAgent
-    ).toBeFalsy();
-    expect(resolveEnvSettings(undefined, { sshAgent: false }).sshAgent).toBe(
-      false
-    );
-    expect(
-      resolveEnvSettings({ sshAgent: false }, { sshAgent: true }).sshAgent
     ).toBeTruthy();
     expect(
       resolveEnvSettings({ sshAgent: true }, { sshAgent: false }).sshAgent

@@ -35,7 +35,7 @@ const record = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 
-/** `customizations.opendevhub` from devcontainer.json, with the project's `config.json` entry taking precedence. */
+/** `customizations.opendevhub` from devcontainer.json, with the project's `config.json` entry taking precedence; `sshAgent` comes from `config.json` alone. */
 export const resolveEnvSettings = (
   custom: unknown,
   override: unknown
@@ -54,10 +54,8 @@ export const resolveEnvSettings = (
   } else {
     files = [];
   }
-  const sshAgent =
-    [o.sshAgent, c.sshAgent].find(
-      (v): v is boolean => typeof v === "boolean"
-    ) ?? true;
+  // Whether to forward your keys is yours to decide, so devcontainer.json can't set it.
+  const sshAgent = typeof o.sshAgent === "boolean" ? o.sshAgent : true;
   return {
     isolation,
     keyFiles: files.filter(

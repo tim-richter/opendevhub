@@ -27,7 +27,7 @@ import type { ProjectColor } from "../shared/project-appearance";
 import type { StackId } from "../shared/stacks";
 import type {
   ChatStartRequest,
-  CheckDef,
+  CheckOverlay,
   CleanupItem,
   ComposerSendRequest,
   DashboardSnapshot,
@@ -36,6 +36,7 @@ import type {
   MakeTaskRequest,
   PermissionDecision,
   ProjectLinks,
+  SettingsScope,
   PublishRequest,
   ReviewMode,
   NewTaskBody,
@@ -914,23 +915,42 @@ export const saveRoots = (roots: string[]) =>
   read(api.settings.roots.$post({ json: { roots } }), "save folders");
 
 /** A blank name goes back to the project's folder name. */
-export const renameProject = async (projectId: string, name: string) => {
+/** `team` saves the name to devcontainer.json for everyone; a blank name goes back to the team's or the folder's. */
+export const renameProject = async (
+  projectId: string,
+  name: string,
+  scope: SettingsScope = "personal"
+) => {
   await complete(
-    project.name.$post({ json: { name }, param: projectParam(projectId) }),
+    project.name.$post({
+      json: { name, scope },
+      param: projectParam(projectId),
+    }),
     "rename project"
   );
 };
 
 export const saveProjectAppearance = (
   projectId: string,
-  appearance: { shortName: string; color: ProjectColor | "" }
+  appearance: { shortName: string; color: ProjectColor | "" },
+  scope: SettingsScope = "personal"
 ) =>
   read(
     project.appearance.$post({
-      json: appearance,
+      json: { ...appearance, scope },
       param: projectParam(projectId),
     }),
     "save project appearance"
+  );
+
+/** The project's shareable settings as devcontainer.json and the user's own settings each have them. */
+export const fetchProjectTeam = (projectId: string, signal?: AbortSignal) =>
+  read(
+    project["team-settings"].$get(
+      { param: projectParam(projectId) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "team settings"
   );
 
 export const fetchProjectPorts = (projectId: string, signal?: AbortSignal) =>
@@ -942,10 +962,20 @@ export const fetchProjectPorts = (projectId: string, signal?: AbortSignal) =>
     "project ports"
   );
 
-/** Saves the ports the project forwards on top of devcontainer.json's, and forwards them right away. */
-export const saveProjectPorts = (projectId: string, ports: number[]) =>
+/**
+ * Saves the ports the project forwards on top of devcontainer.json's, and forwards them right away. With
+ * `team`, replaces devcontainer.json's own instead.
+ */
+export const saveProjectPorts = (
+  projectId: string,
+  ports: number[],
+  scope: SettingsScope = "personal"
+) =>
   read(
-    project.ports.$post({ param: projectParam(projectId), json: { ports } }),
+    project.ports.$post({
+      param: projectParam(projectId),
+      json: { ports, scope },
+    }),
     "save project ports"
   );
 
@@ -981,9 +1011,16 @@ export const fetchProjectLinks = (projectId: string, signal?: AbortSignal) =>
   );
 
 /** Links the project to a Jira board and a Forgejo repository; a link left out is removed. */
-export const saveProjectLinks = (projectId: string, links: ProjectLinks) =>
+export const saveProjectLinks = (
+  projectId: string,
+  links: ProjectLinks,
+  scope: SettingsScope = "personal"
+) =>
   read(
-    project.links.$post({ json: links, param: projectParam(projectId) }),
+    project.links.$post({
+      json: { ...links, scope },
+      param: projectParam(projectId),
+    }),
     "save project links"
   );
 
@@ -1203,11 +1240,16 @@ export const runChecks = (
   );
 
 /** Saves the project's own list of checks, or goes back to devcontainer.json's with null. */
-export const saveChecks = (projectId: string, checks: CheckDef[] | null) =>
+/** Saves the user's own checks (null removes them), or with `team` the team's list in devcontainer.json. */
+export const saveChecks = (
+  projectId: string,
+  checks: CheckOverlay[] | null,
+  scope: SettingsScope = "personal"
+) =>
   read(
     project.checks.settings.$post({
       param: projectParam(projectId),
-      json: { checks },
+      json: { checks, scope },
     }),
     "save checks"
   );

@@ -38,6 +38,7 @@
     "@napi-rs/keyring": "2.1.0",
     "@tanstack/charts": "1.0.0",
     "hono": "^4.13.13",
+    "jsonc-parser": "3.3.1",
     "node-pty": "^1.1.0",
     "open": "^11.0.4",
     "react-markdown": "^10.1.0",

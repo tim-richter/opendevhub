@@ -10,7 +10,11 @@ import type {
   ProjectPersonalizationView,
 } from "../shared/personalization";
 import type { ProjectAppearance } from "../shared/project-appearance";
-import type { ProjectLinks } from "../shared/types";
+import type {
+  ProjectLinks,
+  ProjectTeamView,
+  SettingsScope,
+} from "../shared/types";
 import { createActivityRoutes } from "./api/activity";
 import { createCoreRoutes } from "./api/core";
 import { createForgejoRoutes } from "./api/forgejo";
@@ -133,16 +137,29 @@ export interface DashboardDeps {
   onboarding: OnboardingPort;
   /** Validates and persists the scan roots; throws InvalidRootError for a bad list. */
   saveRoots?: (input: unknown) => void;
-  /** Shows the project under `name`, or its folder name again when `name` is blank. */
-  renameProject?: (id: string, name: string) => Promise<void>;
+  /** Shows the project under `name`, or its folder name again when `name` is blank; `team` saves it to devcontainer.json. */
+  renameProject?: (
+    id: string,
+    name: string,
+    scope?: SettingsScope
+  ) => Promise<void>;
   projectAppearance?: {
-    save: (id: string, appearance: ProjectAppearance) => ProjectAppearance;
+    save: (
+      id: string,
+      appearance: ProjectAppearance,
+      scope?: SettingsScope
+    ) => ProjectAppearance;
   };
-  /** Ports a project forwards on top of devcontainer.json's `forwardPorts`; saving forwards them right away. */
+  /**
+   * Ports a project forwards on top of devcontainer.json's `forwardPorts`; saving forwards them right away.
+   * With `team`, saving replaces devcontainer.json's own instead.
+   */
   projectPorts?: {
     get: (id: string) => number[];
-    save: (id: string, ports: number[]) => Promise<void>;
+    save: (id: string, ports: number[], scope?: SettingsScope) => Promise<void>;
   };
+  /** The shareable settings per layer: the team's devcontainer.json and the user's config.json. */
+  projectTeam?: { get: (id: string) => ProjectTeamView };
   /** Ports on this machine the project's containers reach at the same localhost port; saving applies them right away. */
   projectHostPorts?: {
     get: (id: string) => number[];
@@ -161,7 +178,7 @@ export interface DashboardDeps {
   /** The Jira board and Forgejo repository each project is linked to. */
   projectLinks?: {
     get: (id: string) => ProjectLinks;
-    save: (id: string, links: ProjectLinks) => void;
+    save: (id: string, links: ProjectLinks, scope?: SettingsScope) => void;
   };
   /** This machine's git identity and ssh keys; absent in tests that don't need it. */
   gitSetup?: Pick<GitSetupProbe, "view" | "test">;

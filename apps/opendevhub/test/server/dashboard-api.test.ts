@@ -378,8 +378,9 @@ function setup(webDir?: string) {
   };
   const config: ChecksConfig = {
     checks: [],
-    source: "none",
-    devcontainer: [],
+    team: [],
+    personal: [],
+    teamWritable: true,
     errors: [],
   };
   const run: CheckRun = {
@@ -1363,7 +1364,10 @@ describe("dashboard API", () => {
         body: JSON.stringify(body),
       });
     expect((await post(app, { name: "Acme" })).status).toBe(200);
-    expect(renameProject).toHaveBeenCalledWith(project.id, "Acme");
+    expect(renameProject).toHaveBeenCalledWith(project.id, "Acme", undefined);
+    expect((await post(app, { name: "Acme", scope: "team" })).status).toBe(200);
+    expect(renameProject).toHaveBeenLastCalledWith(project.id, "Acme", "team");
+    expect((await post(app, { name: "Acme", scope: "all" })).status).toBe(400);
     expect((await post(app, { name: 3 })).status).toBe(400);
     expect((await post(deps.app, { name: "Acme" })).status).toBe(412);
   });
@@ -1391,20 +1395,25 @@ describe("dashboard API", () => {
       shortName: "OD",
       color: "violet",
     });
-    expect(save).toHaveBeenCalledWith(project.id, {
-      shortName: "OD",
-      color: "violet",
-    });
+    expect(save).toHaveBeenCalledWith(
+      project.id,
+      { shortName: "OD", color: "violet" },
+      undefined
+    );
     expect((await post({ shortName: "ODE", color: "blue" })).status).toBe(200);
-    expect(save).toHaveBeenLastCalledWith(project.id, {
-      shortName: "ODE",
-      color: "blue",
-    });
-    expect((await post({ shortName: "", color: "" })).status).toBe(200);
-    expect(save).toHaveBeenLastCalledWith(project.id, {
-      shortName: undefined,
-      color: undefined,
-    });
+    expect(save).toHaveBeenLastCalledWith(
+      project.id,
+      { shortName: "ODE", color: "blue" },
+      undefined
+    );
+    expect(
+      (await post({ shortName: "", color: "", scope: "team" })).status
+    ).toBe(200);
+    expect(save).toHaveBeenLastCalledWith(
+      project.id,
+      { shortName: undefined, color: undefined },
+      "team"
+    );
     expect((await post({ shortName: "O", color: "red" })).status).toBe(400);
     expect((await post({ shortName: "ODEV", color: "red" })).status).toBe(400);
     expect((await post({ shortName: "12", color: "red" })).status).toBe(400);
@@ -1472,7 +1481,17 @@ describe("dashboard API", () => {
     const res = await post(app, { ports: [3000, 8080] });
     expect(res.status).toBe(200);
     expect(await res.json()).toStrictEqual({ ports: [3000, 8080] });
-    expect(projectPorts.save).toHaveBeenCalledWith(project.id, [3000, 8080]);
+    expect(projectPorts.save).toHaveBeenCalledWith(
+      project.id,
+      [3000, 8080],
+      undefined
+    );
+    expect((await post(app, { ports: [80], scope: "team" })).status).toBe(200);
+    expect(projectPorts.save).toHaveBeenLastCalledWith(
+      project.id,
+      [80],
+      "team"
+    );
     expect((await post(app, { ports: [0] })).status).toBe(400);
     expect((await post(app, { ports: ["80"] })).status).toBe(400);
     expect((await post(deps.app, { ports: [] })).status).toBe(412);
@@ -2584,9 +2603,15 @@ describe("checks endpoints", () => {
       checks: [{ name: "t", command: "true" }],
     });
     await post(app, "checks/settings", { checks: null });
+    await post(app, "checks/settings", {
+      checks: [{ name: "t", disabled: true }],
+    });
+    await post(app, "checks/settings", { checks: [], scope: "team" });
     expect(checks.saveSettings.mock.calls).toStrictEqual([
-      ["demo-abc123", [{ name: "t", command: "true" }]],
-      ["demo-abc123", null],
+      ["demo-abc123", [{ name: "t", command: "true" }], undefined],
+      ["demo-abc123", null, undefined],
+      ["demo-abc123", [{ name: "t", disabled: true }], undefined],
+      ["demo-abc123", [], "team"],
     ]);
   });
 });

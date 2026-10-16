@@ -493,6 +493,7 @@ describe("api", () => {
         JSON.parse(String(fetchMock.mock.calls[2][1]?.body))
       ).toStrictEqual({
         checks: null,
+        scope: "personal",
       });
     });
 

@@ -147,8 +147,6 @@ export class Environments {
   private readonly tunnels = new Map<EnvId, AgentTunnelHandle>();
   /** Isolation settings per project, read when its main container forwards ports. */
   private readonly settings = new Map<ProjectId, EnvSettings>();
-  /** Each environment's sshAgent setting, from the configuration it was started with. */
-  private readonly sshAgents = new Map<EnvId, boolean>();
   /** Each running environment's host port tunnels and their states, for the relay at `relayKey`. */
   private readonly hostTunnels = new Map<
     EnvId,
@@ -1470,9 +1468,12 @@ export class Environments {
     return this.taskEnv(project, rec);
   }
 
-  /** Whether to forward the ssh-agent into this environment: its own configuration first, then the project's settings. */
+  /** Whether to forward the ssh-agent into this environment: the user's own setting for the project. */
   private sshAgentOf(env: Env): boolean {
-    return this.sshAgents.get(env.id) ?? this.settingsOf(env.project).sshAgent;
+    return resolveEnvSettings(
+      undefined,
+      this.deps.projectSettings?.(env.project)
+    ).sshAgent;
   }
 
   /** The global personalization with the project's on top. */
@@ -1644,22 +1645,11 @@ export class Environments {
       if (!env.worktree) {
         this.noteSettings(env.project, undefined);
       }
-      this.sshAgents.delete(env.id);
       return;
     }
     if (!env.worktree) {
       this.noteSettings(env.project, config.configuration);
     }
-    const custom = (
-      config.configuration?.customizations as
-        | Record<string, unknown>
-        | undefined
-    )?.opendevhub;
-    this.sshAgents.set(
-      env.id,
-      resolveEnvSettings(custom, this.deps.projectSettings?.(env.project))
-        .sshAgent
-    );
     const parsed = parseForwardPorts(
       [...config.forwardPorts, ...extraForwardPorts(settings)],
       config.portsAttributes
@@ -1940,7 +1930,6 @@ export class Environments {
   private async closePorts(id: EnvId): Promise<void> {
     this.stopTunnel(id);
     this.stopHostTunnels(id);
-    this.sshAgents.delete(id);
     this.forwardTargets.delete(id);
     await this.deps.forwarder.close(id);
     this.deps.store.updateRuntime(id, {

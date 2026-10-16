@@ -1,0 +1,43 @@
+---
+title: Project settings
+description: Which project settings the team shares in devcontainer.json, and which stay yours.
+icon: Settings
+---
+
+A project's settings come from two places:
+
+- **Team**: `customizations.opendevhub` in the project's `devcontainer.json`. It's committed with the repo, so everyone gets the same settings.
+- **Just me**: the project's entry in `~/.config/opendevhub/config.json` on your machine.
+
+When both have a setting, yours wins, setting by setting. The project's settings pages mark values that come from the team with **team**. Where you can save a setting, a **Just me / Team** switch picks where it goes. Saving to **Team** edits `devcontainer.json` in the project's main checkout and keeps its comments and formatting. The change shows up in the checkout's changes; commit it to share it.
+
+```jsonc
+"customizations": {
+  "opendevhub": {
+    "name": "Acme Web",
+    "shortName": "AW",
+    "color": "teal",
+    "forgejoRepository": "acme/web",
+    "jiraJql": "project = WEB",
+    "isolation": "isolated",
+    "keyFiles": ["pnpm-lock.yaml"],
+    "checks": [{ "name": "test", "command": "pnpm test" }]
+  }
+}
+```
+
+| Setting | Team | Just me |
+| --- | --- | --- |
+| `name`, `shortName`, `color` | ✓ | ✓ |
+| `jiraBoard`, `jiraJql`, `forgejoRepository` | ✓ | ✓ |
+| `isolation`, `keyFiles` ([Worktrees](/docs/worktrees)) | ✓ | ✓ |
+| `checks` ([Checks](/docs/checks)) | ✓ | ✓, laid over the team's by name |
+| Forwarded ports | `forwardPorts` at the top of `devcontainer.json` | ✓, added to the team's |
+| `sshAgent` ([Git and ssh](/docs/git-and-ssh)) |  | ✓ |
+| Host ports ([Host browser](/docs/host-browser)) |  | ✓ |
+| [Personalization](/docs/personalization) |  | ✓ |
+| Approved host commands |  | ✓ |
+
+Settings that touch your machine, your keys or your taste in tools never come from the repo; opendevhub ignores them in `devcontainer.json`. The same goes for anything else under `customizations.opendevhub`.
+
+Saving a setting to the team also drops your own value for it, so the team's takes effect for you right away.

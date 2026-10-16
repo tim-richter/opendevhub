@@ -35,6 +35,7 @@ import {
   provenanceOf,
   candidates,
   checksView,
+  projectTeamView,
   composerAgents,
   composerCommands,
   composerFiles,
@@ -574,10 +575,16 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
       HttpResponse.json(projectLinks.get(String(params.id)) ?? defaultLinks)
     ),
     http.post("/api/projects/:id/links", async ({ params, request }) => {
-      const links = (await request.json()) as ProjectLinks;
+      const { scope: _scope, ...links } =
+        (await request.json()) as ProjectLinks & {
+          scope?: string;
+        };
       projectLinks.set(String(params.id), links);
       return HttpResponse.json(links);
     }),
+    http.get("/api/projects/:id/team-settings", () =>
+      HttpResponse.json(projectTeamView)
+    ),
     http.get("/api/projects/:id/todos", () => HttpResponse.json({ todos })),
     http.post("/api/projects/:id/todos", async ({ request }) => {
       const { text } = (await request.json()) as { text: string };

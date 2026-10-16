@@ -4,12 +4,20 @@ import { RotateCcwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import type { ProjectView } from "../../../shared/types";
+import type { ProjectView, SettingsScope } from "../../../shared/types";
 import { renameProject } from "../../api";
 import { Empty, Note } from "../../components/page";
 import { useDash } from "../../dashboard-context";
 import { Link } from "../../routing";
 import { ProjectSettingsButton } from "../projects/project-settings-dialog";
+import {
+  ScopeToggle,
+  TeamChip,
+  TeamSavedNote,
+  defaultScope,
+  useProjectTeam,
+  useRefreshProjectTeam,
+} from "../projects/team-scope";
 import { SettingsBlock, SettingsHeader, SettingsList } from "./settings-layout";
 import { SettingsLink } from "./settings-link";
 
@@ -21,17 +29,29 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
   const [draft, setDraft] = useState(project.name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [savedToTeam, setSavedToTeam] = useState(false);
+  const { data: team } = useProjectTeam(project.id);
+  const refreshTeam = useRefreshProjectTeam(project.id);
+  const teamName = team?.team.name;
+  const ownName = team?.personal.name;
+  const [chosenScope, setScope] = useState<SettingsScope>();
+  const scope = chosenScope ?? defaultScope(!!teamName, !!ownName);
   const folder = folderName(project.path);
-  const renamed = project.name !== folder;
+  /** What Reset goes back to: the team's name, else the folder's. */
+  const fallback = teamName ?? folder;
+  const renamed = !!ownName || (!team && project.name !== folder);
   const changed = draft.trim() !== project.name && draft.trim() !== "";
 
   useEffect(() => setDraft(project.name), [project.name]);
 
-  const save = async (name: string) => {
+  const save = async (name: string, to: SettingsScope = scope) => {
     setBusy(true);
     setError(undefined);
+    setSavedToTeam(false);
     try {
-      await renameProject(project.id, name);
+      await renameProject(project.id, name, to);
+      setSavedToTeam(to === "team");
+      await refreshTeam();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -68,6 +88,12 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
         />
         {changed && (
           <>
+            <ScopeToggle
+              value={scope}
+              onChange={setScope}
+              team={team}
+              disabled={busy}
+            />
             <Button type="submit" size="sm" disabled={busy}>
               {busy ? "Saving…" : "Rename"}
             </Button>
@@ -83,6 +109,9 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
           </>
         )}
         <span className="ml-auto flex items-center gap-1">
+          {teamName && !ownName && !changed && (
+            <TeamChip title="Named by the team in devcontainer.json" />
+          )}
           {renamed && !changed && (
             <Button
               type="button"
@@ -90,8 +119,12 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
               variant="ghost"
               className="text-muted-foreground"
               disabled={busy}
-              title={`Go back to the folder name, ${folder}`}
-              onClick={() => void save("")}
+              title={
+                teamName
+                  ? `Go back to the team's name, ${fallback}`
+                  : `Go back to the folder name, ${folder}`
+              }
+              onClick={() => void save("", "personal")}
             >
               <RotateCcwIcon /> Reset
             </Button>
@@ -111,6 +144,7 @@ const ProjectRow = ({ view }: { view: ProjectView }) => {
           <Note error>{error}</Note>
         </div>
       )}
+      {savedToTeam && !changed && <TeamSavedNote team={team} />}
     </li>
   );
 };

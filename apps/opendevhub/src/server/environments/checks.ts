@@ -4,23 +4,28 @@ import path from "node:path";
 
 import type {
   CheckDef,
+  CheckOverlay,
   CheckResult,
   CheckRun,
+  CheckSource,
   ChecksConfig,
   ChecksView,
   Project,
   ProjectId,
+  SettingsScope,
 } from "../../shared/types";
 import type { ProjectSettingsStore } from "../config";
 import { BusyError, NotFoundError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import type { RunResult, Runner } from "../nodes/exec";
+import { parseDevcontainer } from "../projects/team-settings";
+import type { TeamSettingsStore } from "../projects/team-settings";
 import type { Containers, ExecTarget } from "./containers";
 import { cleanLogLine } from "./log-buffer";
 
 export const DEFAULT_TIMEOUT_S = 900;
-const MIN_TIMEOUT_S = 10;
-const MAX_TIMEOUT_S = 7200;
+/** The longest delay a Node timer takes; a longer one would fire at once, so longer timeouts wait this long. */
+const MAX_TIMER_MS = 2_147_483_647;
 const MAX_NAME = 40;
 const MAX_COMMAND = 4000;
 /** Lines of output kept per check. */
@@ -44,19 +49,26 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
     : undefined;
 
 /** Validates a `checks` list; invalid entries are dropped and described. */
-export const parseChecks = (
-  raw: unknown
-): {
+export function parseChecks(raw: unknown): {
   checks: CheckDef[];
   errors: string[];
-} => {
+};
+/** With `overlay`, `{ name, disabled: true }` entries are kept too: the user's own list turning team checks off. */
+export function parseChecks(
+  raw: unknown,
+  opts: { overlay: true }
+): { checks: CheckOverlay[]; errors: string[] };
+export function parseChecks(
+  raw: unknown,
+  opts: { overlay?: boolean } = {}
+): { checks: CheckOverlay[]; errors: string[] } {
   if (raw === undefined) {
     return { checks: [], errors: [] };
   }
   if (!Array.isArray(raw)) {
     return { checks: [], errors: ["checks must be a list"] };
   }
-  const checks: CheckDef[] = [];
+  const checks: CheckOverlay[] = [];
   const errors: string[] = [];
   for (const [i, value] of raw.entries()) {
     const entry = record(value);
@@ -78,6 +90,16 @@ export const parseChecks = (
       fail("the name is used twice");
       continue;
     }
+    if (entry.disabled !== undefined) {
+      if (!opts.overlay) {
+        fail("only your own checks can turn a check off");
+      } else if (entry.disabled === true) {
+        checks.push({ disabled: true, name });
+      } else {
+        fail("disabled must be true");
+      }
+      continue;
+    }
     const command =
       typeof entry.command === "string" ? entry.command.trim() : "";
     if (!command || command.length > MAX_COMMAND) {
@@ -92,101 +114,76 @@ export const parseChecks = (
     const timeout = entry.timeout ?? DEFAULT_TIMEOUT_S;
     if (
       typeof timeout !== "number" ||
-      !Number.isInteger(timeout) ||
-      timeout < MIN_TIMEOUT_S ||
-      timeout > MAX_TIMEOUT_S
+      !Number.isSafeInteger(timeout) ||
+      timeout < 1
     ) {
-      fail(
-        `timeout must be whole seconds from ${MIN_TIMEOUT_S} to ${MAX_TIMEOUT_S}`
-      );
+      fail("timeout must be a positive number of whole seconds");
       continue;
     }
-    checks.push({ command, name, timeout, where });
+    let group: string | undefined;
+    if (entry.group !== undefined) {
+      group = typeof entry.group === "string" ? entry.group.trim() : "";
+      if (!group || group.length > MAX_NAME) {
+        fail(`group must be 1 to ${MAX_NAME} characters`);
+        continue;
+      }
+    }
+    checks.push({ command, name, timeout, where, ...(group ? { group } : {}) });
   }
   return { checks, errors };
-};
+}
 
 /** What approving a host command stores: it covers this exact text only. */
 export const hostCheckHash = (command: string): string =>
   createHash("sha256").update(`host\0${command}`).digest("hex");
 
-// Match strings first so literal comma/bracket sequences are left intact.
-const JSONC_STRING_OR_TRAILING_COMMA = /"(?:\\.|[^"\\])*"|,(?<g1>\s*[}\]])/gu;
-
-/** JSON with `//` and block comments and trailing commas, as devcontainer.json allows. */
-export const parseJsonc = (text: string): unknown => {
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') {
-        j += text[j] === "\\" ? 2 : 1;
-      }
-      out += text.slice(i, j + 1);
-      i = j + 1;
-    } else if (c === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") {
-        i += 1;
-      }
-    } else if (c === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      if (end === -1) {
-        throw new SyntaxError("Unterminated JSONC block comment");
-      }
-      out += " ";
-      i = end + 2;
-    } else {
-      out += c;
-      i += 1;
-    }
-  }
-  return JSON.parse(
-    out.replaceAll(
-      JSONC_STRING_OR_TRAILING_COMMA,
-      (match, closing: string | undefined) => closing ?? match
-    )
-  );
-};
-
 /**
- * The checks that apply: the project's own list in config.json replaces devcontainer.json's.
- * `custom` is `customizations.opendevhub`; `settings` is the project's config.json entry.
+ * The checks that apply: the team's from devcontainer.json, with the user's own laid over them by name. A
+ * user entry replaces the team check of the same name, `disabled` removes it, and a new name is added.
+ * `team` is `customizations.opendevhub`; `settings` is the project's config.json entry.
  */
 export const resolveChecks = (
-  custom: unknown,
+  team: unknown,
   settings: Record<string, unknown>,
   extraErrors: string[] = []
 ): ChecksConfig => {
-  const fromFile = parseChecks(record(custom)?.checks);
-  const own =
-    settings.checks === undefined ? undefined : parseChecks(settings.checks);
+  const fromTeam = parseChecks(record(team)?.checks);
+  const own = parseChecks(settings.checks, { overlay: true });
   const approved = new Set(
     Array.isArray(settings.approvedHostChecks)
       ? settings.approvedHostChecks
       : []
   );
-  const active = own ?? fromFile;
-  let source: ChecksConfig["source"] = "none";
-  if (own) {
-    source = "settings";
-  } else if (fromFile.checks.length > 0) {
-    source = "devcontainer";
+  const active: (CheckDef & { source: CheckSource })[] = [];
+  for (const check of fromTeam.checks) {
+    const mine = own.checks.find((c) => c.name === check.name);
+    if (!mine) {
+      active.push({ ...check, source: "team" });
+    } else if (!("disabled" in mine)) {
+      active.push({ ...mine, source: "override" });
+    }
+  }
+  for (const mine of own.checks) {
+    if (
+      !("disabled" in mine) &&
+      !fromTeam.checks.some((c) => c.name === mine.name)
+    ) {
+      active.push({ ...mine, source: "personal" });
+    }
   }
   return {
-    checks: active.checks.map((c) => ({
+    checks: active.map((c) => ({
       ...c,
       approved:
         c.where === "container" || approved.has(hostCheckHash(c.command)),
     })),
-    source,
-    devcontainer: fromFile.checks,
-    ...(own ? { settings: own.checks } : {}),
+    team: fromTeam.checks,
+    personal: own.checks,
+    teamWritable: extraErrors.length === 0,
     errors: [
       ...extraErrors,
-      ...fromFile.errors.map((e) => `devcontainer.json: ${e}`),
-      ...(own?.errors ?? []).map((e) => `settings: ${e}`),
+      ...fromTeam.errors.map((e) => `devcontainer.json: ${e}`),
+      ...own.errors.map((e) => `settings: ${e}`),
     ],
   };
 };
@@ -224,6 +221,8 @@ export interface ChecksDeps {
     currentBranch: (p: Project, dir: string) => Promise<string | undefined>;
   };
   settings: ProjectSettingsStore;
+  /** Where team checks are saved: devcontainer.json. */
+  team?: Pick<TeamSettingsStore, "update">;
   log: (projectId: ProjectId, line: string) => void;
   readFile?: (file: string) => Promise<string>;
   now?: () => number;
@@ -236,6 +235,9 @@ export class ChecksRunningError extends BusyError {
     this.name = "ChecksRunningError";
   }
 }
+
+const timerMs = (seconds: number): number =>
+  Math.min(seconds * 1000, MAX_TIMER_MS);
 
 const seconds = (ms: number): string =>
   ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`;
@@ -269,8 +271,13 @@ export class Checks {
     let custom: unknown;
     const errors: string[] = [];
     try {
-      const json = record(parseJsonc(await read(project.devcontainerPath)));
-      custom = record(json?.customizations)?.opendevhub;
+      const parsed = parseDevcontainer(await read(project.devcontainerPath));
+      custom = record(parsed.value?.customizations)?.opendevhub;
+      errors.push(
+        ...parsed.errors.map(
+          (e) => `could not read ${project.devcontainerPath}: ${e}`
+        )
+      );
     } catch (error) {
       errors.push(
         `could not read ${project.devcontainerPath}: ${error instanceof Error ? error.message : String(error)}`
@@ -310,31 +317,48 @@ export class Checks {
     return run ? { run: structuredClone(run) } : {};
   }
 
-  /** Saves the project's own list (approving its host commands), or removes it with null. */
+  /**
+   * Saves the user's own entries (null removes them all), or with `team` the team's list in devcontainer.json.
+   * Either way the host commands saved are approved for this user, who just wrote them.
+   */
   // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
   async saveSettings(
     projectId: ProjectId,
-    checks: unknown
+    checks: unknown,
+    scope: SettingsScope = "personal"
   ): Promise<ChecksConfig> {
     const project = this.requireProject(projectId);
-    if (checks === null) {
+    if (checks === null && scope === "personal") {
       this.deps.settings.update(project.path, { checks: undefined });
       return this.config(projectId);
     }
     if (!Array.isArray(checks)) {
       throw new InvalidRequestError(
-        "checks must be a list, or null to use devcontainer.json"
+        scope === "team"
+          ? "checks must be a list"
+          : "checks must be a list, or null to use the team's"
       );
     }
-    const parsed = parseChecks(checks);
+    const parsed =
+      scope === "team"
+        ? parseChecks(checks)
+        : parseChecks(checks, { overlay: true });
     if (parsed.errors.length > 0) {
       throw new InvalidRequestError(parsed.errors.join("; "));
     }
     const hosts = parsed.checks
-      .filter((c) => c.where === "host")
-      .map((c) => hostCheckHash(c.command));
+      .filter((c) => !("disabled" in c) && c.where === "host")
+      .map((c) => hostCheckHash((c as CheckDef).command));
+    if (scope === "team") {
+      if (!this.deps.team) {
+        throw new InvalidRequestError("team checks can't be saved here");
+      }
+      this.deps.team.update(project, {
+        checks: parsed.checks.length > 0 ? parsed.checks : undefined,
+      });
+    }
     this.deps.settings.update(project.path, {
-      checks: parsed.checks,
+      ...(scope === "personal" ? { checks: parsed.checks } : {}),
       ...(hosts.length > 0
         ? { approvedHostChecks: this.approvedWith(project, hosts) }
         : {}),
@@ -527,7 +551,7 @@ export class Checks {
           detached: true,
           env,
           onLine,
-          timeoutMs: timeout * 1000,
+          timeoutMs: timerMs(timeout),
         });
       } else {
         r = await this.deps.containers.exec(
@@ -544,7 +568,7 @@ export class Checks {
           {
             env,
             onLine,
-            timeoutMs: timeout * 1000 + GRACE_MS,
+            timeoutMs: timerMs(timeout + GRACE_MS / 1000),
           }
         );
         // `timeout` exits 124 (137 after -k) when the check ran out of time.

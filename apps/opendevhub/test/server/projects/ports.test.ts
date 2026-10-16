@@ -5,8 +5,19 @@ import type { Project } from "../../../src/shared/types";
 
 const project = { id: "p1", name: "demo", path: "/src/demo" } as Project;
 
-function setup(entry: Record<string, unknown> = {}) {
+function setup(entry: Record<string, unknown> = {}, teamPorts?: unknown[]) {
   let saved = { ...entry };
+  const team = {
+    ports: teamPorts as unknown[] | undefined,
+    get: vi.fn(() => ({
+      settings: {},
+      forwardPorts: team.ports,
+      errors: [],
+    })),
+    setForwardPorts: vi.fn((_p: Project, ports: unknown[]) => {
+      team.ports = ports.length > 0 ? ports : undefined;
+    }),
+  };
   const settings = {
     get: vi.fn((_path: string) => saved),
     update: vi.fn((_path: string, patch: Record<string, unknown>) => {
@@ -22,11 +33,32 @@ function setup(entry: Record<string, unknown> = {}) {
     project: (id) => (id === project.id ? project : undefined),
     refreshPorts,
     settings,
+    team,
   });
-  return { ...deps, settings, refreshPorts, entry: () => saved };
+  return { ...deps, settings, team, refreshPorts, entry: () => saved };
 }
 
 describe(projectPortSettings, () => {
+  it("saves forwarded ports to the team, keeping devcontainer.json's service ports", async () => {
+    const { projectPorts, team, entry, refreshPorts } = setup(
+      { forwardPorts: [3000, 8080] },
+      [5173, "db:5432"]
+    );
+    await projectPorts.save(project.id, [3000, 3000, 5173], "team");
+    expect(team.ports).toStrictEqual([3000, 5173, "db:5432"]);
+    // The user's own 3000 is the team's now.
+    expect(entry()).toStrictEqual({ forwardPorts: [8080] });
+    expect(refreshPorts).toHaveBeenCalledWith(project.id);
+  });
+
+  it("won't save a host port as a team forwarded port", async () => {
+    const { projectPorts, team } = setup({ hostPorts: [9222] });
+    await expect(projectPorts.save(project.id, [9222], "team")).rejects.toThrow(
+      "port 9222 is already a host port of this project"
+    );
+    expect(team.setForwardPorts).not.toHaveBeenCalled();
+  });
+
   it("saves host ports sorted and unique, and applies them", async () => {
     const { projectHostPorts, entry, refreshPorts } = setup();
     await projectHostPorts.save(project.id, [9222, 5432, 9222]);

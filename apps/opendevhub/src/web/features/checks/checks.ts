@@ -89,6 +89,52 @@ export const withRun = (
   run: CheckRun | undefined
 ): ChecksView => (run ? { ...view, run } : view);
 
+/** A check's result in a run: the one for its exact name, command and place. */
+export const resultOf = (
+  run: CheckRun | undefined,
+  c: CheckDef
+): CheckResult | undefined =>
+  run?.results.find(
+    (r) => r.name === c.name && r.command === c.command && r.where === c.where
+  );
+
+/** Checks in their sections: the ungrouped ones first, then each group where it first appears. */
+export const checkSections = <T extends CheckDef>(
+  checks: T[]
+): { group?: string; checks: T[] }[] => {
+  const loose = checks.filter((c) => !c.group);
+  const groups = new Map<string, T[]>();
+  for (const c of checks) {
+    if (c.group) {
+      groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
+    }
+  }
+  return [
+    ...(loose.length > 0 ? [{ checks: loose }] : []),
+    ...[...groups].map(([group, members]) => ({ checks: members, group })),
+  ];
+};
+
+/** Where a group of checks stands in a run, and how many of them passed. */
+export const groupState = (
+  run: CheckRun | undefined,
+  checks: CheckDef[]
+): { state: Exclude<ChecksState, "none" | "stale">; passed: number } => {
+  const results = checks.map((c) => resultOf(run, c));
+  const passed = results.filter((r) => r?.status === "passed").length;
+  let state: Exclude<ChecksState, "none" | "stale"> = "idle";
+  if (results.some((r) => r?.status === "queued" || r?.status === "running")) {
+    state = "running";
+  } else if (
+    results.some((r) => r?.status === "failed" || r?.status === "error")
+  ) {
+    state = "failed";
+  } else if (passed === checks.length) {
+    state = "passed";
+  }
+  return { passed, state };
+};
+
 export const formatDuration = (ms: number): string => {
   if (ms < 10_000) {
     return `${(ms / 1000).toFixed(1)} s`;

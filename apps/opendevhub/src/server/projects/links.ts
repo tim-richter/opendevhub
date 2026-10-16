@@ -1,17 +1,20 @@
 import { normalizeJql, validJql } from "../../shared/jira";
-import type { Project, ProjectLinks } from "../../shared/types";
+import type { Project, ProjectLinks, SettingsScope } from "../../shared/types";
 import type { ProjectSettingsStore } from "../config";
 import type { DashboardDeps } from "../dashboard-api";
 import { NotFoundError } from "../errors";
+import { resolveProjectSettings } from "./team-settings";
+import type { TeamSettingsStore } from "./team-settings";
 
 export interface ProjectLinksDeps {
   project: (id: string) => Project | undefined;
   settings: ProjectSettingsStore;
+  team: Pick<TeamSettingsStore, "get" | "update">;
 }
 
 const REPOSITORY = /^[\w.-]+\/[\w.-]+$/u;
 
-/** Reads the links from a project's `config.json` entry, dropping any that were hand-edited into a bad shape. */
+/** Reads the links from a project's settings entry, dropping any that were hand-edited into a bad shape. */
 export const readProjectLinks = (
   entry: Record<string, unknown>
 ): ProjectLinks => {
@@ -39,29 +42,53 @@ export const readProjectLinks = (
   };
 };
 
-/** The Jira board and Forgejo repository a project is linked to, kept in its `config.json` entry. */
+/**
+ * The Jira board and Forgejo repository a project is linked to: the user's `config.json` entry over the team's
+ * devcontainer.json, link by link.
+ */
 export const projectLinkSettings = (
   deps: ProjectLinksDeps
 ): { projectLinks: NonNullable<DashboardDeps["projectLinks"]> } => {
-  const pathOf = (id: string): string => {
+  const projectOf = (id: string): Project => {
     const project = deps.project(id);
     if (!project) {
       throw new NotFoundError(id);
     }
-    return project.path;
+    return project;
   };
   return {
     projectLinks: {
-      get: (id) => readProjectLinks(deps.settings.get(pathOf(id))),
-      // Saving replaces every link, so a link left out is removed.
-      save: (id, links) =>
-        deps.settings.update(pathOf(id), {
+      get: (id) => {
+        const project = projectOf(id);
+        return readProjectLinks(
+          resolveProjectSettings(
+            deps.team.get(project).settings,
+            deps.settings.get(project.path)
+          )
+        );
+      },
+      // Saving replaces every link of that layer, so a link left out is removed.
+      save: (id, links, scope: SettingsScope = "personal") => {
+        const project = projectOf(id);
+        const patch = {
           forgejoRepository: links.forgejoRepository,
           jiraBoard: links.jiraBoard
             ? { id: links.jiraBoard.id, name: links.jiraBoard.name }
             : undefined,
           jiraJql: links.jiraJql ? normalizeJql(links.jiraJql) : undefined,
-        }),
+        };
+        if (scope === "team") {
+          deps.team.update(project, patch);
+          // The user's own links would hide the team's they just saved.
+          deps.settings.update(project.path, {
+            forgejoRepository: undefined,
+            jiraBoard: undefined,
+            jiraJql: undefined,
+          });
+          return;
+        }
+        deps.settings.update(project.path, patch);
+      },
     },
   };
 };

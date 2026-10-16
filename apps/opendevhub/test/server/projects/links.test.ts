@@ -9,10 +9,23 @@ import type { Project } from "../../../src/shared/types";
 
 const project = { id: "p1", name: "demo", path: "/src/demo" } as Project;
 
-function setup(entry: Record<string, unknown> = {}) {
+const drop = (o: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+function setup(
+  entry: Record<string, unknown> = {},
+  teamEntry: Record<string, unknown> = {}
+) {
   let saved = { ...entry };
+  let team = { ...teamEntry };
   const { projectLinks } = projectLinkSettings({
     project: (id) => (id === project.id ? project : undefined),
+    team: {
+      get: () => ({ settings: team, forwardPorts: undefined, errors: [] }),
+      update: (_p, patch) => {
+        team = drop({ ...team, ...patch });
+      },
+    },
     settings: {
       get: () => saved,
       update: (_path, patch) => {
@@ -24,7 +37,7 @@ function setup(entry: Record<string, unknown> = {}) {
       },
     },
   });
-  return { entry: () => saved, projectLinks };
+  return { entry: () => saved, team: () => team, projectLinks };
 }
 
 describe(projectLinkSettings, () => {
@@ -62,6 +75,30 @@ describe(projectLinkSettings, () => {
     expect(entry()).toStrictEqual({ jiraJql: "labels = app AND type = Bug" });
     expect(projectLinks.get(project.id)).toStrictEqual({
       jiraJql: "labels = app AND type = Bug",
+    });
+  });
+
+  it("shows the team's links under the user's own, link by link", () => {
+    const { projectLinks } = setup(
+      { forgejoRepository: "me/fork" },
+      { forgejoRepository: "team/app", jiraJql: "project = APP", sshAgent: 1 }
+    );
+    expect(projectLinks.get(project.id)).toStrictEqual({
+      forgejoRepository: "me/fork",
+      jiraJql: "project = APP",
+    });
+  });
+
+  it("saves to the team and drops the user's own links that would hide it", () => {
+    const { projectLinks, entry, team } = setup({
+      forgejoRepository: "me/fork",
+      name: "Demo",
+    });
+    projectLinks.save(project.id, { forgejoRepository: "team/app" }, "team");
+    expect(team()).toStrictEqual({ forgejoRepository: "team/app" });
+    expect(entry()).toStrictEqual({ name: "Demo" });
+    expect(projectLinks.get(project.id)).toStrictEqual({
+      forgejoRepository: "team/app",
     });
   });
 

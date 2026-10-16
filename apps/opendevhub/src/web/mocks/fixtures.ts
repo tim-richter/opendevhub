@@ -45,6 +45,7 @@ import type {
   EnvironmentView,
   ModelsInfo,
   NodeView,
+  ProjectTeamView,
   ProjectView,
   PublishInfo,
   ReviewData,
@@ -1196,12 +1197,27 @@ export const specView: SpecView = {
   ],
 };
 
+export const projectTeamView: ProjectTeamView = {
+  file: ".devcontainer/devcontainer.json",
+  writable: true,
+  errors: [],
+  team: {
+    name: "Acme Web",
+    appearance: { color: "teal", shortName: "AW" },
+    links: { forgejoRepository: "acme/web" },
+    forwardPorts: [3000],
+  },
+  personal: { appearance: {}, links: {}, forwardPorts: [5173] },
+};
+
 export const checksView: ChecksView = {
   checks: [
     {
       approved: true,
       command: "pnpm typecheck",
+      group: "static",
       name: "typecheck",
+      source: "team",
       timeout: 300,
       where: "container",
     },
@@ -1209,32 +1225,48 @@ export const checksView: ChecksView = {
       approved: true,
       command: "pnpm test",
       name: "test",
+      source: "override",
       timeout: 600,
       where: "container",
     },
     {
       approved: false,
       command: "pnpm exec ultracite check",
+      group: "static",
       name: "lint",
+      source: "personal",
       timeout: 120,
       where: "host",
     },
   ],
   current: true,
-  devcontainer: [
-    {
-      command: "pnpm typecheck",
-      name: "typecheck",
-      timeout: 300,
-      where: "container",
-    },
+  personal: [
     { command: "pnpm test", name: "test", timeout: 600, where: "container" },
     {
       command: "pnpm exec ultracite check",
+      group: "static",
       name: "lint",
       timeout: 120,
       where: "host",
     },
+    { disabled: true, name: "e2e" },
+  ],
+  teamWritable: true,
+  team: [
+    {
+      command: "pnpm typecheck",
+      group: "static",
+      name: "typecheck",
+      timeout: 300,
+      where: "container",
+    },
+    {
+      command: "pnpm test --coverage",
+      name: "test",
+      timeout: 900,
+      where: "container",
+    },
+    { command: "pnpm e2e", name: "e2e", timeout: 900, where: "container" },
   ],
   errors: [],
   run: {
@@ -1276,7 +1308,6 @@ export const checksView: ChecksView = {
     ],
     startedAt: ago(5 * MINUTE),
   },
-  source: "devcontainer",
 };
 
 export const publishInfo: PublishInfo = {

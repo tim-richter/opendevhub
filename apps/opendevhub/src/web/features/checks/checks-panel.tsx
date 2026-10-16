@@ -15,6 +15,7 @@ import {
   CircleDashedIcon,
   CircleIcon,
   CircleXIcon,
+  LayersIcon,
   ListChecksIcon,
   LoaderCircleIcon,
   MonitorIcon,
@@ -28,13 +29,16 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-import type { CheckResult, ChecksView } from "../../../shared/types";
+import type { CheckDef, CheckResult, ChecksView } from "../../../shared/types";
 import { runChecks } from "../../api";
 import { Chip } from "../../components/page";
 import {
+  checkSections,
   checksState,
   formatDuration,
+  groupState,
   needingApproval,
+  resultOf,
   STATE_LABEL,
   withRun,
 } from "./checks";
@@ -345,75 +349,167 @@ export const ChecksPanel = (props: {
           No checks. Add them on the project page or in devcontainer.json.
         </p>
       )}
-      <ul>
-        {view.checks.map((c) => {
-          const r = results.find(
-            (x) =>
-              x.name === c.name &&
-              x.command === c.command &&
-              x.where === c.where
-          );
-          const expanded = open.has(c.name);
-          const hasOutput = !!r && (r.output.length > 0 || !!r.reason);
-          return (
-            <li key={c.name} className="border-t first:border-t-0">
-              <div className="flex min-w-0 items-center gap-2 px-4 py-2 text-sm">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="text-foreground h-auto min-w-0 flex-1 justify-start p-0 text-left hover:bg-transparent disabled:cursor-default disabled:opacity-100"
-                  disabled={!hasOutput}
-                  aria-expanded={hasOutput ? expanded : undefined}
-                  onClick={() =>
-                    setOpen((o) => {
-                      const next = new Set(o);
-                      if (!next.delete(c.name)) {
-                        next.add(c.name);
-                      }
-                      return next;
-                    })
-                  }
-                >
-                  <ExpandIcon expanded={expanded} hasOutput={hasOutput} />
-                  <ResultIcon result={r} />
-                  <span className="font-medium">{c.name}</span>
-                  {c.where === "host" && (
-                    <Chip className="gap-1" title="Runs on this machine">
-                      <MonitorIcon className="size-3" /> host
-                    </Chip>
-                  )}
-                  <code
-                    className="text-muted-foreground min-w-0 truncate font-mono text-xs"
-                    title={c.command}
-                  >
-                    {c.command}
-                  </code>
-                </Button>
-                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                  {outcome(r)}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Run ${c.name}`}
-                  title={`Run ${c.name}`}
-                  disabled={running}
-                  onClick={() => go([c.name])}
-                >
-                  <PlayIcon />
-                </Button>
-              </div>
-              {expanded && hasOutput && (
-                <pre className="bg-muted/40 max-h-80 overflow-auto border-t px-4 py-2 font-mono text-xs whitespace-pre-wrap">
-                  {r?.reason ? `${r.reason}\n` : ""}
-                  {r?.output.join("\n")}
-                </pre>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {checkSections(view.checks).map((section) => {
+        const rows = section.checks.map((c) => (
+          <CheckRow
+            key={c.name}
+            check={c}
+            result={resultOf(view.run, c)}
+            expanded={open.has(c.name)}
+            disabled={running}
+            onToggle={() =>
+              setOpen((o) => {
+                const next = new Set(o);
+                if (!next.delete(c.name)) {
+                  next.add(c.name);
+                }
+                return next;
+              })
+            }
+            onRun={() => go([c.name])}
+          />
+        ));
+        if (!section.group) {
+          return <ul key="">{rows}</ul>;
+        }
+        const names = section.checks.map((c) => c.name);
+        const group = groupState(view.run, section.checks);
+        return (
+          <section
+            key={section.group}
+            aria-label={section.group}
+            className="border-t first:border-t-0"
+          >
+            <GroupHeader
+              name={section.group}
+              total={section.checks.length}
+              passed={group.passed}
+              state={
+                group.state !== "running" && !view.current && view.run
+                  ? "stale"
+                  : group.state
+              }
+              disabled={running}
+              onRun={() => go(names)}
+            />
+            <ul>{rows}</ul>
+          </section>
+        );
+      })}
     </Card>
+  );
+};
+
+/** A group's heading: how it stands, and a button that runs all of its checks. */
+const GroupHeader = (props: {
+  name: string;
+  state: ChecksState;
+  passed: number;
+  total: number;
+  disabled: boolean;
+  onRun: () => void;
+}) => {
+  const groupRunning = props.state === "running";
+  let summary = `${props.total} ${props.total === 1 ? "check" : "checks"}`;
+  if (groupRunning) {
+    summary = `${props.passed} of ${props.total} passed so far`;
+  } else if (props.state === "passed" || props.state === "failed") {
+    summary = `${props.passed} of ${props.total} passed`;
+  } else if (props.state === "stale") {
+    summary = "ran on a different commit";
+  }
+  return (
+    <div className="bg-muted/70 flex min-w-0 items-center gap-2 border-b px-4 py-1.5 text-sm">
+      {/* Lines the group's icon up with its checks' result icons, past their expand arrows. */}
+      <span className="w-6 shrink-0" />
+      <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
+        {props.state === "idle" ? (
+          <LayersIcon className="text-muted-foreground" />
+        ) : (
+          <ChecksIcon state={props.state} />
+        )}
+      </span>
+      <h3 className="truncate font-semibold">{props.name}</h3>
+      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+        {summary}
+      </span>
+      <Button
+        variant="outline"
+        size="xs"
+        className="bg-background ml-auto transition-transform duration-150 ease-out active:scale-[0.97]"
+        aria-label={`Run group ${props.name}`}
+        disabled={props.disabled}
+        onClick={props.onRun}
+      >
+        {groupRunning ? (
+          <LoaderCircleIcon className="animate-spin" />
+        ) : (
+          <PlayIcon />
+        )}
+        {groupRunning ? "Running…" : "Run group"}
+      </Button>
+    </div>
+  );
+};
+
+/** One check: its result, a toggle for its output, and a button that runs it alone. */
+const CheckRow = (props: {
+  check: CheckDef;
+  result?: CheckResult;
+  expanded: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onRun: () => void;
+}) => {
+  const { check: c, result: r, expanded } = props;
+  const hasOutput = !!r && (r.output.length > 0 || !!r.reason);
+  return (
+    <li className="border-t first:border-t-0">
+      <div className="flex min-w-0 items-center gap-2 px-4 py-2 text-sm">
+        <Button
+          type="button"
+          variant="ghost"
+          className="text-foreground h-auto min-w-0 flex-1 justify-start p-0 text-left hover:bg-transparent disabled:cursor-default disabled:opacity-100"
+          disabled={!hasOutput}
+          aria-expanded={hasOutput ? expanded : undefined}
+          onClick={props.onToggle}
+        >
+          <ExpandIcon expanded={expanded} hasOutput={hasOutput} />
+          <ResultIcon result={r} />
+          <span className="font-medium">{c.name}</span>
+          {c.where === "host" && (
+            <Chip className="gap-1" title="Runs on this machine">
+              <MonitorIcon className="size-3" /> host
+            </Chip>
+          )}
+          <code
+            className="text-muted-foreground min-w-0 truncate font-mono text-xs"
+            title={c.command}
+          >
+            {c.command}
+          </code>
+        </Button>
+        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+          {outcome(r)}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Run ${c.name}`}
+          title={`Run ${c.name}`}
+          disabled={props.disabled}
+          onClick={props.onRun}
+        >
+          <PlayIcon />
+        </Button>
+      </div>
+      {expanded && hasOutput && (
+        <pre className="bg-muted/40 max-h-80 overflow-auto border-t px-4 py-2 font-mono text-xs whitespace-pre-wrap">
+          {r?.reason ? `${r.reason}\n` : ""}
+          {r?.output.join("\n")}
+        </pre>
+      )}
+    </li>
   );
 };
 
