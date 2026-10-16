@@ -1,5 +1,31 @@
 # opendevhub
 
+## 0.5.0
+
+### Minor Changes
+
+- [`6171239`](https://github.com/tim-richter/opendevhub/commit/617123911dc50c9e36bf4219dad5859affda0f36) Thanks [@tim-richter](https://github.com/tim-richter)! - Checks can be grouped: give checks the same `group` and the Checks panel shows them under one heading with a **Run group** button and a count of how many passed. Groups can be set in `devcontainer.json` or in the project's settings.
+
+  A check's timeout is no longer capped at 7200 seconds: any positive number of whole seconds works.
+
+  The checks editor shows groups as boxes you can add, rename and remove, and checks can be dragged (or moved with the arrow keys) to reorder them within and between groups. **Copy mine to team** opens the team's checks with your own merged in, to review and save to `devcontainer.json`.
+
+- [#22](https://github.com/tim-richter/opendevhub/pull/22) [`6b1d67a`](https://github.com/tim-richter/opendevhub/commit/6b1d67a5c3a05c8cc7415654c47df0226ae853df) Thanks [@tim-richter](https://github.com/tim-richter)! - Add personalization: devcontainer Features, a setup command, a dotfiles repository and mounts (folders or volumes) that you add to every project's containers, or to one project's. They are kept in opendevhub's config.json and never in the repository. Set them in Settings → Personalization and in each project's settings.
+
+- [`6171239`](https://github.com/tim-richter/opendevhub/commit/617123911dc50c9e36bf4219dad5859affda0f36) Thanks [@tim-richter](https://github.com/tim-richter)! - Teams can share more project settings in `devcontainer.json` under `customizations.opendevhub`: the project's name, sidebar letters and color, and its Jira and Forgejo links, alongside checks, isolation and key files. The project's settings pages mark values that come from the team, and a **Just me / Team** switch saves a setting to your own config or to `devcontainer.json`, keeping its comments and formatting. Forwarded ports can be saved to the file's `forwardPorts` the same way.
+
+  Your own checks are now laid over the team's by name instead of replacing the whole list: a check with a new name is added, one with a team check's name replaces it for you, and **Turn off** stops you running a team check. If you had saved your own list before, team checks that aren't in it now run as well.
+
+  `sshAgent` in `devcontainer.json` is no longer read; turn ssh-agent forwarding off in `~/.config/opendevhub/config.json` instead.
+
+### Patch Changes
+
+- [#23](https://github.com/tim-richter/opendevhub/pull/23) [`1f810bb`](https://github.com/tim-richter/opendevhub/commit/1f810bb0f703ca3d53ad396963363a816901831f) Thanks [@Hedvegia](https://github.com/Hedvegia)! - Fix worktree host paths on macOS with Docker Desktop: bind mount sources the daemon reports under `/host_mnt/...` are mapped back to the machine path, so new worktrees (for example from a Jira ticket) are recorded at an existing folder instead of the non-existent `/host_mnt` one.
+
+- [`5a7d1b3`](https://github.com/tim-richter/opendevhub/commit/5a7d1b325b5f09d5203e3f3a061111a2b840a923) Thanks [@tim-richter](https://github.com/tim-richter)! - Fix `devcontainer up` and terminals still failing with `posix_spawnp failed` on macOS after a `pnpm install` while opendevhub is running: node-pty's `spawn-helper` execute bit is now restored right before each spawn, not only at startup.
+
+- [#20](https://github.com/tim-richter/opendevhub/pull/20) [`abcc22d`](https://github.com/tim-richter/opendevhub/commit/abcc22da312139d85dcde78fd64160445acc102e) Thanks [@tim-richter](https://github.com/tim-richter)! - Build the dashboard with React Compiler, so components re-render less without hand-written memoization.
+
 ## 0.4.0
 
 ### Minor Changes
