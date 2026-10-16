@@ -459,7 +459,11 @@ export interface CleanupDeps {
   >;
   branches: Pick<
     CleanupTargets,
-    "cleanupScan" | "cleanupBranch" | "cleanupSessionScan" | "cleanupSession"
+    | "cleanupScan"
+    | "cleanupBranch"
+    | "cleanupSessionScan"
+    | "cleanupSession"
+    | "cleanupConversation"
   >;
   /** Ended tasks to offer for archiving; none are offered without it. */
   tasks?: Pick<
@@ -470,7 +474,7 @@ export interface CleanupDeps {
     | "get"
     | "archive"
     | "deleteArchived"
-    | "liveSessionIds"
+    | "liveSessions"
   >;
   chats?: Pick<ChatStore, "listArchivedForProject" | "get" | "deleteArchived">;
   /** Stored AI reviews to offer for deletion; none are offered without it. */
@@ -518,7 +522,7 @@ export class Cleanup {
 
   /**
    * Removes the selected items: branches, then sessions, then containers, then images, each re-checked first. Tasks
-   * are archived and stale reviews deleted last.
+   * are archived, archived chats and tasks deleted with their conversations, and stale reviews deleted last.
    */
   async apply(items: CleanupItem[]): Promise<CleanupResult> {
     if (this.applying) {
@@ -580,10 +584,10 @@ export class Cleanup {
       }
       for (const item of items) {
         if (item.kind === "chat") {
-          results.push({ id: item.id, ...this.deleteChat(item, results) });
+          results.push({ id: item.id, ...(await this.deleteChat(item)) });
         }
         if (item.kind === "archived-task") {
-          results.push({ id: item.id, ...this.deleteTask(item, results) });
+          results.push({ id: item.id, ...(await this.deleteTask(item)) });
         }
       }
       for (const item of items) {
@@ -748,10 +752,8 @@ export class Cleanup {
     }
   }
 
-  private deleteChat(
-    item: ChatCleanupItem,
-    results: CleanupResult["results"]
-  ): CleanupOutcome {
+  /** Deletes an archived chat's conversation, unless it is gone already, then the chat. */
+  private async deleteChat(item: ChatCleanupItem): Promise<CleanupOutcome> {
     const chat = this.deps.chats?.get(item.chatId);
     if (
       !chat ||
@@ -760,22 +762,18 @@ export class Cleanup {
     ) {
       return { message: "no longer an archived chat", outcome: "skipped" };
     }
-    const removed = results.some(
-      (result) =>
-        result.id === `session:${item.projectId}:${chat.sessionId}` &&
-        result.outcome === "removed"
-    );
-    if (chat.sessionId && !chat.sessionRemoved && !removed) {
-      return { message: "delete its conversation first", outcome: "skipped" };
-    }
     try {
-      if (
-        !this.deps.chats?.deleteArchived(
-          item.chatId,
-          USER,
-          removed ? chat.sessionId : undefined
-        )
-      ) {
+      const live = chat.sessionRemoved ? undefined : chat.sessionId;
+      if (live) {
+        const kept = await this.removeConversation(item.projectId, {
+          sessionId: live,
+          ...(chat.envId ? { envId: chat.envId } : {}),
+        });
+        if (kept) {
+          return kept;
+        }
+      }
+      if (!this.deps.chats?.deleteArchived(item.chatId, USER, live)) {
         return { message: "changed since scan", outcome: "skipped" };
       }
       this.deps.log(item.projectId, `cleanup: deleted chat ${chat.title}`);
@@ -785,10 +783,10 @@ export class Cleanup {
     }
   }
 
-  private deleteTask(
-    item: ArchivedTaskCleanupItem,
-    results: CleanupResult["results"]
-  ): CleanupOutcome {
+  /** Deletes an archived task's conversations, unless they are gone already, then the task. */
+  private async deleteTask(
+    item: ArchivedTaskCleanupItem
+  ): Promise<CleanupOutcome> {
     const task = this.deps.tasks?.get(item.taskId);
     if (
       !task ||
@@ -797,20 +795,13 @@ export class Cleanup {
     ) {
       return { message: "no longer an archived task", outcome: "skipped" };
     }
-    const live = this.deps.tasks?.liveSessionIds(item.taskId) ?? [];
-    if (
-      live.some(
-        (id) =>
-          !results.some(
-            (result) =>
-              result.id === `session:${item.projectId}:${id}` &&
-              result.outcome === "removed"
-          )
-      )
-    ) {
-      return { message: "delete its conversations first", outcome: "skipped" };
-    }
     try {
+      for (const session of this.deps.tasks?.liveSessions(item.taskId) ?? []) {
+        const kept = await this.removeConversation(item.projectId, session);
+        if (kept) {
+          return kept;
+        }
+      }
       if (!this.deps.tasks?.deleteArchived(item.taskId, USER)) {
         return { message: "changed since scan", outcome: "skipped" };
       }
@@ -819,6 +810,19 @@ export class Cleanup {
     } catch (error) {
       return { message: message(error), outcome: "failed" };
     }
+  }
+
+  /** Removes one conversation of a record being deleted; the outcome to report when it stays, else undefined. */
+  private async removeConversation(
+    projectId: ProjectId,
+    session: { sessionId: string; envId?: EnvId }
+  ): Promise<CleanupOutcome | undefined> {
+    const outcome = await this.deps.branches.cleanupConversation(
+      projectId,
+      session.envId,
+      session.sessionId
+    );
+    return outcome.outcome === "removed" ? undefined : outcome;
   }
 
   /** Deletes a pull request's stored reviews, if it is still closed or merged and none ran since the scan's cutoff. */

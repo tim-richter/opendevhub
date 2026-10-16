@@ -48,6 +48,12 @@ export const tailLines = (text: string, n = 20): string[] =>
     .filter((l) => l.trim() !== "")
     .slice(-n);
 
+const GIT_HINT = /^hint:/u;
+
+/** The line of a git failure's output tail that says what went wrong: the last that isn't a `hint:`. */
+export const gitReason = (tail: string[]): string | undefined =>
+  tail.findLast((l) => !GIT_HINT.test(l.trim())) ?? tail.at(-1);
+
 export interface UpResult {
   containerId: string;
   remoteWorkspaceFolder: string;

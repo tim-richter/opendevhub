@@ -24,6 +24,7 @@ import { StateStore } from "../../../src/server/projects/state";
 import type {
   BranchCleanupItem,
   CleanupItem,
+  CleanupOutcome,
   Project,
   SessionCleanupItem,
   Worktree,
@@ -499,6 +500,16 @@ function service(
       order.push(item.id);
       return { outcome: "removed" as const };
     }),
+    cleanupConversation: vi.fn(
+      async (
+        _id: string,
+        _envId: string | undefined,
+        sessionId: string
+      ): Promise<CleanupOutcome> => {
+        order.push(`conversation:${sessionId}`);
+        return { outcome: "removed" };
+      }
+    ),
   };
   const log = vi.fn((_id: string, _line: string) => {});
   const cleanup = new Cleanup({
@@ -906,7 +917,7 @@ describe("archived records", () => {
     expect(s.tasks.get("tsk_archived")).toBeUndefined();
   });
 
-  it("keeps an archived chat until its selected conversation is removed", async () => {
+  it("deletes an archived chat together with its conversation", async () => {
     const s = service();
     const chat = s.chats.insert({
       createdAt: NOW,
@@ -926,19 +937,28 @@ describe("archived records", () => {
     if (!record) {
       return;
     }
-    expect((await s.cleanup.apply([record])).results[0].outcome).toBe(
-      "skipped"
-    );
+    s.branches.cleanupConversation.mockResolvedValueOnce({
+      message: "its conversation is still running",
+      outcome: "skipped",
+    });
+    expect((await s.cleanup.apply([record])).results[0]).toStrictEqual({
+      id: record.id,
+      message: "its conversation is still running",
+      outcome: "skipped",
+    });
     expect(s.chats.get(chat.id)).toBeDefined();
-    const result = await s.cleanup.apply([sessionItem, record]);
-    expect(result.results.map((item) => item.outcome)).toStrictEqual([
-      "removed",
-      "removed",
-    ]);
+    expect((await s.cleanup.apply([record])).results[0].outcome).toBe(
+      "removed"
+    );
+    expect(s.branches.cleanupConversation).toHaveBeenLastCalledWith(
+      project.id,
+      project.id,
+      "ses_d"
+    );
     expect(s.chats.get(chat.id)).toBeUndefined();
   });
 
-  it("keeps an archived task until its selected conversation is removed", async () => {
+  it("deletes an archived task together with its conversations", async () => {
     const s = service();
     s.tasks.createTask({
       createdAt: NOW,
@@ -946,12 +966,18 @@ describe("archived records", () => {
       projectId: project.id,
       prompt: "old",
       title: "Old task",
-      variants: [{}],
+      variants: [{}, {}],
     });
     s.tasks.attachSession(
       "tsk_live",
       1,
-      { directory: "/w", envId: project.id, sessionId: "ses_d" },
+      { directory: "/w", envId: project.id, sessionId: "ses_a" },
+      SYSTEM
+    );
+    s.tasks.attachSession(
+      "tsk_live",
+      2,
+      { directory: "/w", envId: project.id, sessionId: "ses_b" },
       SYSTEM
     );
     s.tasks.archive("tsk_live");
@@ -962,15 +988,11 @@ describe("archived records", () => {
     if (!record) {
       return;
     }
-    expect((await s.cleanup.apply([record])).results[0].outcome).toBe(
-      "skipped"
-    );
-    expect(s.tasks.get("tsk_live")).toBeDefined();
-    const result = await s.cleanup.apply([sessionItem, record]);
+    const result = await s.cleanup.apply([record]);
     expect(result.results.map((item) => item.outcome)).toStrictEqual([
       "removed",
-      "removed",
     ]);
+    expect(s.order).toStrictEqual(["conversation:ses_a", "conversation:ses_b"]);
     expect(s.tasks.get("tsk_live")).toBeUndefined();
   });
 

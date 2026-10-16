@@ -1,5 +1,5 @@
 import type { UpdateResult, UpdateStrategy } from "../../shared/types";
-import { CommandError, tailLines } from "../environments/containers";
+import { CommandError, gitReason, tailLines } from "../environments/containers";
 import type { Containers, ExecTarget } from "../environments/containers";
 import type { RunResult, Runner } from "../nodes/exec";
 import { parseRemote } from "./forge";
@@ -54,7 +54,7 @@ export const parseBranchRefs = (out: string): BranchRef[] =>
 const failure = (args: string[], r: RunResult): CommandError => {
   const tail = tailLines(`${r.stderr}\n${r.stdout}`, 5);
   return new CommandError(
-    `git ${args[0]} failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`,
+    `git ${args[0]} failed: ${gitReason(tail) ?? `exit ${r.exitCode}`}`,
     tail
   );
 };

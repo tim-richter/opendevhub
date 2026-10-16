@@ -95,7 +95,7 @@ export const riskyNotes = (
         return `archives the task ${i.title}`;
       }
       if (i.kind === "chat" || i.kind === "archived-task") {
-        return `permanently deletes ${i.kind === "chat" ? "chat" : "task"} ${i.title}`;
+        return `permanently deletes ${i.kind === "chat" ? "chat" : "task"} ${i.title} with its conversations`;
       }
       if (i.kind === "review") {
         return `deletes ${i.count} stored AI review${i.count === 1 ? "" : "s"} of ${i.number === undefined ? i.url : `PR #${i.number}`}`;

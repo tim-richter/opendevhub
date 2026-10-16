@@ -6,6 +6,7 @@ import {
   ENV_LABEL,
   ENV_PROJECT_LABEL,
   envLabels,
+  gitReason,
   LABEL,
   parseImageInspect,
   parseInspect,
@@ -686,5 +687,19 @@ describe("Containers.inspect over ssh", () => {
       })).run
     );
     await expect(gone.inspect("c1")).resolves.toBeUndefined();
+  });
+});
+
+describe("gitReason", () => {
+  it("names git's error rather than its trailing hints", () => {
+    expect(
+      gitReason([
+        "error: the branch 'feat' is not fully merged",
+        "hint: If you are sure you want to delete it, run 'git branch -D feat'",
+        'hint: Disable this message with "git config set advice.forceDeleteBranch false"',
+      ])
+    ).toBe("error: the branch 'feat' is not fully merged");
+    expect(gitReason(["hint: only a hint"])).toBe("hint: only a hint");
+    expect(gitReason([])).toBeUndefined();
   });
 });

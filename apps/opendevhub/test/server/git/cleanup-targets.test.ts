@@ -52,7 +52,7 @@ describe("cleanup", () => {
     expect(store.runtime(project.id).worktrees).toStrictEqual([featWt]);
   });
 
-  it("removes the worktree, then deletes a merged branch with -d, and logs it", async () => {
+  it("removes the worktree, then force-deletes a merged branch, and logs it", async () => {
     const { hub, worktrees, git } = await running();
     await expect(
       hub.cleanupTargets.cleanupBranch(project.id, item)
@@ -69,7 +69,7 @@ describe("cleanup", () => {
       project,
       "/workspaces/demo",
       "feat",
-      false
+      true
     );
     expect(hub.environments.logLines(project.id)).toContain(
       "cleanup: deleted branch feat (merged into main) and its worktree"
@@ -279,6 +279,50 @@ describe("cleanup", () => {
     ).resolves.toStrictEqual({
       outcome: "skipped",
       message: "changed since scan",
+    });
+    expect(client.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("deletes an archived record's conversation, and counts one already gone as removed", async () => {
+    const { hub, client } = await running();
+    client.sessions.mockResolvedValue([discarded("ses_a")]);
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
+    ).resolves.toStrictEqual({ outcome: "removed" });
+    expect(client.deleteSession).toHaveBeenCalledWith(
+      "ses_a",
+      "/workspaces/demo"
+    );
+    client.sessions.mockResolvedValue([]);
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
+    ).resolves.toStrictEqual({ outcome: "removed" });
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, "env-gone", "ses_b")
+    ).resolves.toStrictEqual({ outcome: "removed" });
+    expect(client.deleteSession).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a conversation that is still running, or in a stopped container", async () => {
+    const { hub, client, store } = await running();
+    client.sessions.mockResolvedValue([
+      discarded("ses_a"),
+      rawSession("ses_child", { parentID: "ses_a" }),
+    ]);
+    client.active.mockResolvedValue(new Set(["ses_child"]));
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
+    ).resolves.toStrictEqual({
+      message: "its conversation is still running",
+      outcome: "skipped",
+    });
+    store.updateRuntime(project.id, { containerState: "stopped" });
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
+    ).resolves.toStrictEqual({
+      message:
+        "its conversation is in the project's stopped container; start it to delete",
+      outcome: "skipped",
     });
     expect(client.deleteSession).not.toHaveBeenCalled();
   });

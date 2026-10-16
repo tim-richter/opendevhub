@@ -6,7 +6,7 @@ import type {
   PublishResult,
 } from "../../shared/types";
 import type { ForgeStore } from "../config";
-import { CommandError, tailLines } from "../environments/containers";
+import { CommandError, gitReason, tailLines } from "../environments/containers";
 import type { Containers } from "../environments/containers";
 import type { RunResult, Runner } from "../nodes/exec";
 import {
@@ -268,7 +268,7 @@ export class Publisher {
         );
       }
       throw new CommandError(
-        `git push failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`,
+        `git push failed: ${gitReason(tail) ?? `exit ${r.exitCode}`}`,
         tail
       );
     }

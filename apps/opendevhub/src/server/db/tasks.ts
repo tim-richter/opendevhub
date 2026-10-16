@@ -928,17 +928,20 @@ export class TaskStore {
     });
   }
 
-  /** Conversations still present for an archived task, including earlier tabs. */
-  liveSessionIds(taskId: string): string[] {
+  /** Conversations still present for an archived task, including earlier tabs, with the environment of each. */
+  liveSessions(taskId: string): { sessionId: string; envId?: EnvId }[] {
     const rows = this.db
       .prepare(`
-      SELECT session_id FROM variants WHERE task_id = ? AND session_id IS NOT NULL AND session_removed_at IS NULL
+      SELECT session_id, env_id FROM variants WHERE task_id = ? AND session_id IS NOT NULL AND session_removed_at IS NULL
       UNION
-      SELECT s.session_id FROM task_sessions s JOIN variants v ON v.task_id = s.task_id AND v.n = s.n
+      SELECT s.session_id, v.env_id FROM task_sessions s JOIN variants v ON v.task_id = s.task_id AND v.n = s.n
       WHERE s.task_id = ? AND v.session_removed_at IS NULL
     `)
-      .all(taskId, taskId) as { session_id: string }[];
-    return rows.map((row) => row.session_id);
+      .all(taskId, taskId) as { session_id: string; env_id: EnvId | null }[];
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      ...(row.env_id === null ? {} : { envId: row.env_id }),
+    }));
   }
 
   /**

@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { Project, Worktree, WorktreeRoot } from "../../shared/types";
-import { CommandError, tailLines } from "../environments/containers";
+import { CommandError, gitReason, tailLines } from "../environments/containers";
 import type { Containers } from "../environments/containers";
 import type { Runner } from "../nodes/exec";
 
@@ -381,7 +381,7 @@ export class Worktrees {
     if (r.exitCode !== 0) {
       const tail = tailLines(`${r.stderr}\n${r.stdout}`, 5);
       throw new CommandError(
-        `git ${args.slice(0, 2).join(" ")} failed: ${tail.at(-1) ?? `exit ${r.exitCode}`}`,
+        `git ${args.slice(0, 2).join(" ")} failed: ${gitReason(tail) ?? `exit ${r.exitCode}`}`,
         tail
       );
     }

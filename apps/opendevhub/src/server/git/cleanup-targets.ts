@@ -9,6 +9,7 @@ import type {
 import { USER } from "../db/events";
 import type { Environments } from "../environments/environments";
 import type { HubDeps } from "../environments/ports";
+import { rootOf } from "../sessions/status";
 import type { Checkouts } from "./checkouts";
 import { branchChanged, scanBranches, staleSessions } from "./cleanup";
 
@@ -67,13 +68,9 @@ export class CleanupTargets {
             item.dirty === true
           );
         }
-        // -d is git's own check that it's merged; a branch whose upstream is gone may be squash-merged, which -d refuses.
-        await this.deps.git.deleteBranch(
-          p,
-          ws,
-          item.branch,
-          item.why === "upstream-gone"
-        );
+        // Forced: branchChanged just checked the verdict against the branch's base, while -d would check its upstream
+        // or the main checkout's HEAD instead, and refuses a squash-merged branch whose upstream is gone.
+        await this.deps.git.deleteBranch(p, ws, item.branch, true);
         this.deps.checkouts.deleteBranch(id, item.branch, USER);
       } finally {
         const list = await this.deps.worktrees
@@ -155,6 +152,60 @@ export class CleanupTargets {
       `cleanup: removed session ${current.title} (${current.reason})`
     );
     this.envs.reconcile(envId);
+    return { outcome: "removed" };
+  }
+
+  /**
+   * Deletes the conversation of an archived chat or task that cleanup is deleting. One whose environment is gone,
+   * or that its environment no longer lists, is gone already.
+   */
+  async cleanupConversation(
+    id: ProjectId,
+    envId: EnvId | undefined,
+    sessionId: string
+  ): Promise<CleanupOutcome> {
+    const env = envId ?? id;
+    if (env !== id) {
+      const record = this.deps.store.environment(env);
+      if (!record) {
+        return { outcome: "removed" };
+      }
+      if (record.projectId !== id) {
+        return { message: "changed since scan", outcome: "skipped" };
+      }
+    }
+    if (this.deps.store.runtime(env).containerState !== "running") {
+      return {
+        message: `its conversation is in ${env === id ? "the project's" : "a"} stopped container; start it to delete`,
+        outcome: "skipped",
+      };
+    }
+    const client = this.envs.opencodeClient(env);
+    const [sessions, active] = await Promise.all([
+      client.sessions(),
+      client.active(),
+    ]);
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) {
+      this.envs.reconcile(env);
+      return { outcome: "removed" };
+    }
+    const parents = new Map(sessions.map((s) => [s.id, s.parentID]));
+    const waiting = this.deps.store
+      .sessionsOf(id)
+      .some((s) => s.id === sessionId && s.status !== "idle");
+    if ([...active].some((a) => rootOf(a, parents) === sessionId) || waiting) {
+      return {
+        message: "its conversation is still running",
+        outcome: "skipped",
+      };
+    }
+    await client.deleteSession(sessionId, session.location.directory);
+    this.envs.log(
+      id,
+      `cleanup: removed session ${session.title?.trim() || sessionId}`
+    );
+    this.envs.reconcile(env);
     return { outcome: "removed" };
   }
 
