@@ -1,11 +1,11 @@
+import { Skeleton } from "@opendevhub/ui/skeleton";
+import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
-import { Empty, muted, Note } from "../../components/page";
-import { workspaceFolderOf } from "../../derive";
+import { Empty, muted } from "../../components/page";
 import { CheckoutProvider } from "../checkouts/checkout-context";
 import { CheckoutRuntime } from "../checkouts/checkout-page";
 import { checkoutOf } from "../checkouts/checkouts";
-import { ProjectReview } from "../review/project-review";
 import { useTaskPage } from "./task-context";
 import { startStepLabel } from "./tasks";
 
@@ -47,28 +47,25 @@ export const VariantCheckout = (props: { children: ReactNode }) => {
   );
 };
 
-/** The variant's worktree changes; a workspace task's are the main checkout's, which other conversations share. */
-export const TaskChanges = () => {
-  const { view, variant } = useTaskPage();
-  const shared =
-    !!variant.directory && variant.directory === workspaceFolderOf(view);
-  return (
-    <div className="flex flex-col gap-4">
-      {shared && (
-        <Note>
-          This task works in the main checkout, so these are the main
-          checkout&apos;s changes, shared with the other conversations there.
-        </Note>
-      )}
-      <VariantCheckout>
-        <ProjectReview />
-      </VariantCheckout>
-    </div>
-  );
-};
-
 export const TaskRuntime = () => (
   <VariantCheckout>
     <CheckoutRuntime />
+  </VariantCheckout>
+);
+
+const CheckoutTerminal = lazy(() =>
+  import("../checkouts/checkout-terminal").then((module) => ({
+    default: module.CheckoutTerminal,
+  }))
+);
+
+/** The selected variant's terminal, filling the tab. */
+export const TaskTerminal = () => (
+  <VariantCheckout>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Suspense fallback={<Skeleton className="h-full w-full" />}>
+        <CheckoutTerminal fill />
+      </Suspense>
+    </div>
   </VariantCheckout>
 );

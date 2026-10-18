@@ -65,8 +65,8 @@ import {
   sessionRedirect,
   worktreeRedirect,
 } from "./checkouts";
-import { LogPanel } from "./log-panel";
 import { OpenInMenu } from "./open-in-menu";
+import { RuntimeControls, RuntimeLogs } from "./runtime-controls";
 import { WorktreeCreator } from "./worktree-creator";
 import {
   checkoutReady,
@@ -444,13 +444,19 @@ const Group = (props: {
   );
 };
 
-/** The checkout's container at work: its forwarded ports beside its log. */
+/** The checkout's container at work: its controls, then its forwarded ports beside its log. */
 export const CheckoutRuntime = ({
   sidebar = false,
 }: { sidebar?: boolean } = {}) => (
-  <div className={cn("grid items-start gap-8", !sidebar && "lg:grid-cols-2")}>
-    <CheckoutPorts />
-    <CheckoutLogs />
+  // Split by the width it gets, not the window's: the task page gives it a narrower column than a worktree page.
+  <div className="@container flex flex-col gap-8">
+    <RuntimeControls />
+    <div
+      className={cn("grid items-start gap-8", !sidebar && "@4xl:grid-cols-2")}
+    >
+      <CheckoutPorts />
+      <RuntimeLogs />
+    </div>
   </div>
 );
 
@@ -601,27 +607,5 @@ const PortRow = ({ port: p }: { port: ForwardedPort }) => {
       <span className="text-muted-foreground ml-auto truncate">{p.label}</span>
       <CopyButton text={url} label="Copy URL" />
     </li>
-  );
-};
-
-const CheckoutLogs = () => {
-  const { view, checkout } = useCheckoutContext();
-  const own = envOfDirectory(view, checkout.directory);
-  const { logs, loadLogs } = useDash();
-  const { id } = view.project;
-  useEffect(() => loadLogs(id), [id, loadLogs]);
-  return (
-    <LogPanel
-      lines={logs[id] ?? []}
-      hint={
-        own ? (
-          <>
-            The project&apos;s log; lines from this worktree&apos;s own
-            container start with{" "}
-            <code className="font-mono">[{own.worktree.branch}]</code>.
-          </>
-        ) : undefined
-      }
-    />
   );
 };

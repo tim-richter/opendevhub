@@ -32,7 +32,11 @@ import {
   TaskCompare,
   TaskSpec,
 } from "./features/tasks/project-task";
+import { TaskChanges } from "./features/tasks/task-changes";
+import { TaskRuntime, TaskTerminal } from "./features/tasks/task-checkout-tabs";
 import { TaskConversation } from "./features/tasks/task-conversation";
+import { TaskReviewPage } from "./features/tasks/task-review";
+import { TaskChecks } from "./features/tasks/task-status";
 import { TasksPage } from "./features/tasks/tasks-page";
 import { parseSearch, stringifySearch } from "./routing";
 import { NotFound } from "./shell/not-found";
@@ -124,13 +128,22 @@ const taskRoute = () => {
     createRoute({ component, getParentRoute: () => route, path });
   return route.addChildren([
     tab("/", TaskConversation),
-    tab("changes", () => <TaskConversation initialPanel="changes" />),
-    tab("terminal", () => <TaskConversation initialPanel="terminal" />),
-    tab("runtime", () => <TaskConversation initialPanel="runtime" />),
+    tab("changes", TaskChanges),
+    tab("terminal", TaskTerminal),
+    tab("runtime", TaskRuntime),
     tab("spec", TaskSpec),
+    tab("checks", TaskChecks),
     tab("compare", TaskCompare),
   ]);
 };
+
+/** A task variant's full review (`?v=`), outside the task page's frame. */
+const taskReviewRoute = () =>
+  createRoute({
+    component: TaskReviewPage,
+    getParentRoute: () => projectRoute,
+    path: "t/$task/review",
+  });
 
 /**
  * Project tabs from before worktrees came first; kept so old links still land somewhere sensible. A review of a
@@ -203,6 +216,7 @@ const routeTree = rootRoute.addChildren([
         path: "/",
       }),
       taskRoute(),
+      taskReviewRoute(),
       checkoutRoute("main"),
       checkoutRoute("w/$worktree"),
       legacyRoute("worktrees", "worktrees"),

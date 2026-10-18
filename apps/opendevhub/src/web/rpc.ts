@@ -6,6 +6,16 @@ import type { DashboardApi } from "../server/dashboard-api";
 /** Only the route type crosses into the frontend; server implementations stay in the Node bundle. */
 export const { api } = hc<DashboardApi>("/");
 
+/** A request the server refused; `status` is its HTTP status (409 while another action runs). */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 const failure = async (res: Response, what: string): Promise<Error> => {
   const body: unknown = await res.json().catch(() => undefined);
   const message =
@@ -15,7 +25,7 @@ const failure = async (res: Response, what: string): Promise<Error> => {
     typeof body.error === "string"
       ? body.error
       : `${what} failed (${res.status})`;
-  return new Error(message);
+  return new ApiError(message, res.status);
 };
 
 /** The success type comes from the server handler, including its JSON serialization. */

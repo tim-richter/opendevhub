@@ -31,6 +31,8 @@ import type {
   CleanupItem,
   ComposerSendRequest,
   DashboardSnapshot,
+  EnvLogs,
+  EnvLogSource,
   FormAnswer,
   LogEvent,
   MakeTaskRequest,
@@ -1289,6 +1291,25 @@ export const envAction = async (
     `${action} container`
   );
 };
+
+/** The end of one source of an environment's log; the main environment is addressed by the project's id. */
+export const fetchEnvLogs = (
+  projectId: string,
+  envId: string,
+  source: EnvLogSource,
+  lines = 500,
+  signal?: AbortSignal
+): Promise<EnvLogs> =>
+  read(
+    project.envs[":env"].logs.$get(
+      {
+        param: { ...projectParam(projectId), env: encodeURIComponent(envId) },
+        query: { lines: String(lines), source },
+      },
+      { init: { cache: "no-store", signal } }
+    ),
+    "logs"
+  );
 
 export const removeEnv = (projectId: string, envId: string) =>
   read(

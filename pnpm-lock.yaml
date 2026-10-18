@@ -251,6 +251,12 @@ importers:
 
   apps/opendevhub:
     dependencies:
+      '@fontsource-variable/instrument-sans':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource-variable/jetbrains-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@hono/node-server':
         specifier: ^2.1.3
         version: 2.1.3(hono@4.13.13)
@@ -294,12 +300,6 @@ importers:
       '@blazediff/react':
         specifier: 1.8.0
         version: 1.8.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@fontsource-variable/geist':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource-variable/geist-mono':
-        specifier: ^5.3.0
-        version: 5.3.0
       '@opendevhub/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -451,11 +451,11 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
     devDependencies:
-      '@fontsource-variable/geist':
-        specifier: 5.3.0
+      '@fontsource-variable/instrument-sans':
+        specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource-variable/geist-mono':
-        specifier: 5.3.0
+      '@fontsource-variable/jetbrains-mono':
+        specifier: ^5.3.0
         version: 5.3.0
       '@storybook/addon-a11y':
         specifier: 10.6.1
@@ -1033,11 +1033,11 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@fontsource-variable/geist-mono@5.3.0':
-    resolution: {integrity: sha512-vBbuwDEo9AkrqADMXOrlAR3DFcJi4/JxeuU43FoiQERnNwsfXNnvxvReZG02cQKmyk4DZkZdBZX3oTDvy2zBAw==}
+  '@fontsource-variable/instrument-sans@5.3.0':
+    resolution: {integrity: sha512-u4gKbDBTNFGkg997tfQn3eHOhHuquWUFTRT/rwzuKtrxX5P2ekfs2x+LgBPP4P32+cC+vUwF1Cr+IdRoPQbrGw==}
 
-  '@fontsource-variable/geist@5.3.0':
-    resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
+  '@fontsource-variable/jetbrains-mono@5.3.0':
+    resolution: {integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==}
 
   '@fuma-translate/react@1.0.2':
     resolution: {integrity: sha512-uOiOtBx3nRXR8Nu1GzBf1tApgF1FErDBTHxRIAQeyQdyOoZbrNRN6H4kDCWObY4qyGeGbHydG0DHzgeUgFDMIw==}
@@ -6942,9 +6942,9 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@fontsource-variable/geist-mono@5.3.0': {}
+  '@fontsource-variable/instrument-sans@5.3.0': {}
 
-  '@fontsource-variable/geist@5.3.0': {}
+  '@fontsource-variable/jetbrains-mono@5.3.0': {}
 
   '@fuma-translate/react@1.0.2(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:

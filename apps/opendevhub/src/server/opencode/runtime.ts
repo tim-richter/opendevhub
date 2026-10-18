@@ -6,7 +6,8 @@ import type { HostPort } from "../network/routes";
 import type { OpencodeClient, OpencodeEndpoint } from "./client";
 
 export const OPENCODE_PORT = 4096;
-const LOG_FILE = "/tmp/opendevhub-opencode.log";
+/** Where opencode serve writes its output inside the container. */
+export const OPENCODE_LOG_FILE = "/tmp/opendevhub-opencode.log";
 const KILL_SERVER = "pkill -f 'opencode [s]erve' || true";
 
 // `devcontainer exec` does not read shell rc files, so the installer's PATH entry
@@ -197,7 +198,7 @@ export class OpencodeRuntime {
     }
     const script =
       `cd ${shellQuote(args.workspaceFolder)} && ` +
-      `nohup ${shellQuote(binary)} serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${LOG_FILE} 2>&1 &`;
+      `nohup ${shellQuote(binary)} serve --hostname 0.0.0.0 --port ${port} < /dev/null > ${OPENCODE_LOG_FILE} 2>&1 &`;
     const launch = await containers.exec(target, ["sh", "-c", script], {
       env: { ...args.env, OPENCODE_PASSWORD: password },
     });
@@ -222,7 +223,7 @@ export class OpencodeRuntime {
     const log = await containers.exec(target, [
       "sh",
       "-c",
-      `tail -n 20 ${LOG_FILE} 2>/dev/null`,
+      `tail -n 20 ${OPENCODE_LOG_FILE} 2>/dev/null`,
     ]);
     throw new CommandError(
       "opencode did not become healthy within 30 s",

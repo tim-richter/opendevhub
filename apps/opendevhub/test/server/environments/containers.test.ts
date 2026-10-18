@@ -8,6 +8,7 @@ import {
   envLabels,
   gitReason,
   LABEL,
+  parseDockerLogs,
   parseImageInspect,
   parseInspect,
   parseUpOutput,
@@ -701,5 +702,19 @@ describe("gitReason", () => {
     ).toBe("error: the branch 'feat' is not fully merged");
     expect(gitReason(["hint: only a hint"])).toBe("hint: only a hint");
     expect(gitReason([])).toBeUndefined();
+  });
+});
+
+describe(parseDockerLogs, () => {
+  it("reads docker's timestamps, drops blank lines and keeps untimed ones", () => {
+    expect(
+      parseDockerLogs(
+        "2026-10-18T10:00:01.000000000Z second\n\n2026-10-18T10:00:00.5Z first\nplain"
+      )
+    ).toStrictEqual([
+      { text: "plain" },
+      { at: Date.parse("2026-10-18T10:00:00.5Z"), text: "first" },
+      { at: Date.parse("2026-10-18T10:00:01.000000000Z"), text: "second" },
+    ]);
   });
 });

@@ -332,6 +332,12 @@ export function setup(
       async (_p?: ExecTarget): Promise<string | undefined> => "/workspaces/demo"
     ),
     listManaged: vi.fn(async (): Promise<ContainerInfo[]> => []),
+    logs: vi.fn(
+      async (
+        _id: string,
+        _lines: number
+      ): Promise<{ at?: number; text: string }[]> => []
+    ),
     up: vi.fn(
       async (
         t: ExecTarget,

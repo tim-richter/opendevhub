@@ -476,6 +476,16 @@ export const queries = {
     startAt: text,
   }),
   usage: z.object({ day: text }),
+  /** An environment's log: one source, its last `lines` lines (at most 2000). */
+  envLogs: z.object({
+    source: z.enum(["setup", "container", "opencode"]).default("setup"),
+    lines: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(500)
+      .transform((n) => Math.min(n, 2000)),
+  }),
   directory,
   files: directory.extend({ query: z.string().max(500) }),
   review,

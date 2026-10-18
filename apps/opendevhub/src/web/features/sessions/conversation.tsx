@@ -73,6 +73,8 @@ export const Conversation = (props: {
   /** Offers the checkout runtime in a side panel. */
   runtime?: boolean;
   initialPanel?: PanelId;
+  /** Names whom the composer writes to. */
+  composerLabel?: string;
   chips?: ReactNode;
   actions?: ReactNode;
   onSend: (
@@ -325,6 +327,14 @@ export const Conversation = (props: {
           {notice && (
             <p className="text-ok text-xs" role="status">
               {notice}
+            </p>
+          )}
+          {props.composerLabel && (
+            <p
+              className="text-muted-foreground -mb-2 truncate px-1 font-mono text-xs"
+              title={props.composerLabel}
+            >
+              {props.composerLabel}
             </p>
           )}
           <Composer

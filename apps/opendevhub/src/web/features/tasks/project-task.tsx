@@ -2,22 +2,18 @@ import { Alert, AlertDescription } from "@opendevhub/ui/alert";
 import { Button } from "@opendevhub/ui/button";
 import { Card } from "@opendevhub/ui/card";
 import { Skeleton } from "@opendevhub/ui/skeleton";
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
-import { Outlet, useLocation, useParams } from "@tanstack/react-router";
+import { Outlet, useChildMatches, useParams } from "@tanstack/react-router";
 import {
-  ChevronRightIcon,
-  ColumnsIcon,
   ExternalLinkIcon,
   FileTextIcon,
   GitCompareIcon,
+  ListChecksIcon,
   LoaderCircleIcon,
   MessagesSquareIcon,
-  PlusIcon,
   ServerIcon,
   TerminalIcon,
-  TicketIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -25,7 +21,6 @@ import type { ReactNode } from "react";
 import { confirm } from "@/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 
-import { modelShortName } from "../../../shared/tasks";
 import type {
   ChecksView,
   ProjectView,
@@ -37,13 +32,7 @@ import type {
 } from "../../../shared/types";
 import { taskHref } from "../../../shared/urls";
 import type { TaskTab } from "../../../shared/urls";
-import {
-  archiveTask,
-  archiveTaskConversation,
-  dismissStarting,
-  pickVariant,
-  startTaskConversation,
-} from "../../api";
+import { dismissStarting, pickVariant } from "../../api";
 import { EnvBadge } from "../../components/env-badge";
 import {
   Chip,
@@ -51,21 +40,16 @@ import {
   fillViewport,
   muted,
   Section,
-  Segmented,
   TabBar,
   TabLink,
 } from "../../components/page";
 import { SessionBadge } from "../../components/status";
 import { useDash } from "../../dashboard-context";
 import { envOfDirectory, sessionHref } from "../../derive";
-import { Link, Navigate, useNavigate, useSearchParams } from "../../routing";
-import { ActivityButton } from "../activity/activity-button";
-import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
+import { Link, Navigate, useSearchParams } from "../../routing";
 import { checkoutOf } from "../checkouts/checkouts";
-import { OpenInMenu } from "../checkouts/open-in-menu";
 import { checksState, failedNames } from "../checks/checks";
 import type { ChecksState } from "../checks/checks";
-import { CheckoutChecks } from "../checks/checks-panel";
 import { checksQuery } from "../checks/checks-queries";
 import { PullRequestBadge } from "../forgejo/pull-request-badge";
 import { useProjectView } from "../projects/project-layout";
@@ -74,10 +58,17 @@ import { TaskProgress } from "../specs/spec-approve";
 import { SpecSection } from "../specs/spec-panel";
 import { specQuery } from "../specs/spec-queries";
 import { PHASE_LABEL, specSessions, taskProgress } from "../specs/specs";
-import { formatUsage, taskUsage } from "../usage/usage";
 import { DraftTask } from "./draft-task";
 import { TaskPageCtx, useTaskPage } from "./task-context";
+import { TaskHeader } from "./task-header";
 import { SpecChain, TaskReviews, VariantTable } from "./task-hub";
+import { PhoneThreadSelect, PhoneVariants, TaskSidebar } from "./task-sidebar";
+import {
+  TaskStatusPanel,
+  TaskStatusStrip,
+  useVariantStatus,
+} from "./task-status";
+import { TaskStepper } from "./task-stepper";
 import {
   diffStats,
   fileMatrix,
@@ -88,7 +79,6 @@ import {
   selectedVariant,
   startingVariants,
   startStepLabel,
-  switchableVariants,
   taskOf,
   taskSessions,
   taskTabs,
@@ -111,8 +101,8 @@ const byDirectory = <T,>(
   return all;
 };
 
-/** A variant that is still being set up: where it is, and the last lines its setup wrote. */
-const StartingCard = (props: {
+/** A variant still being set up, or that failed to: where it is, the last lines its setup wrote, and Dismiss. */
+const VariantSetup = (props: {
   variant: VariantView;
   onDismiss: () => void;
 }) => {
@@ -144,7 +134,7 @@ const StartingCard = (props: {
         <p className="text-destructive text-sm break-words">{v.error}</p>
       )}
       {v.log && v.log.length > 0 && (
-        <pre className="bg-muted/50 text-muted-foreground max-h-48 overflow-auto rounded-md px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+        <pre className="bg-muted/50 text-muted-foreground max-h-[60vh] overflow-auto rounded-md px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
           {v.log.join("\n")}
         </pre>
       )}
@@ -176,145 +166,65 @@ const VariantPulls = (props: { task: TaskView; n: number | undefined }) => {
   );
 };
 
-/** Hides an ended task from the dashboard; its record stays. */
-const ArchiveButton = (props: { view: ProjectView; task: TaskView }) => {
-  const { report } = useDash();
-  const [busy, setBusy] = useState(false);
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={busy}
-      title="Hide this task; its conversations and worktrees stay as they are"
-      onClick={() => {
-        setBusy(true);
-        void archiveTask(props.view.project.id, props.task.id)
-          .catch(report)
-          .finally(() => setBusy(false));
-      }}
-    >
-      Archive
-    </Button>
-  );
+/** Tabs that fill the viewport, so the composer or terminal sits at the bottom. */
+const FILL_TABS: ReadonlySet<TaskTab> = new Set(["conversation", "terminal"]);
+
+type BarTab = Exclude<TaskTab, "compare">;
+
+const TAB_LABEL: Record<
+  BarTab,
+  { icon: typeof GitCompareIcon; label: string }
+> = {
+  changes: { icon: GitCompareIcon, label: "Changes" },
+  checks: { icon: ListChecksIcon, label: "Checks" },
+  conversation: { icon: MessagesSquareIcon, label: "Conversation" },
+  runtime: { icon: ServerIcon, label: "Runtime" },
+  spec: { icon: FileTextIcon, label: "Spec" },
+  terminal: { icon: TerminalIcon, label: "Terminal" },
 };
 
-/** The open conversations of one variant, in task header order. */
-const ConversationTabs = (props: {
-  view: ProjectView;
-  task: TaskView;
-  variant: VariantView;
-  current: TaskTab;
-  thread?: string;
-}) => {
-  const navigate = useNavigate();
-  const conversations = taskSessions(props.view, props.task.id)
-    .filter((session) => session.task?.n === props.variant.n)
-    .toSorted((a, b) => a.id.localeCompare(b.id));
-  const selected =
-    conversations.find((session) => session.id === props.thread) ??
-    conversations.find((session) => session.id === props.variant.sessionId) ??
-    conversations.at(-1);
-  const path = (thread?: string) =>
-    taskHref(props.view.project.id, props.task.id, {
-      v: props.variant.n,
-      ...(thread ? { thread } : {}),
-    });
-  const start = useMutation({
-    mutationFn: () => {
-      if (!props.variant.sessionId) {
-        throw new Error("The task has no conversation to continue from");
-      }
-      return startTaskConversation(
-        props.view.project.id,
-        props.variant.sessionId
-      );
-    },
-    onSuccess: (id) => void navigate(path(id)),
-  });
-  const close = useMutation({
-    mutationFn: (id: string) =>
-      archiveTaskConversation(props.view.project.id, id),
-    onSuccess: (_result, id) => {
-      if (props.current === "conversation" && selected?.id === id) {
-        const remaining = conversations.filter((session) => session.id !== id);
-        void navigate(path(remaining.at(-1)?.id), { replace: true });
-      }
-    },
-  });
-
+/** A tab's label, with the number of changed files on Changes and of failing checks on Checks. */
+const TabLabel = (props: { tab: BarTab }) => {
+  const { view, variant } = useTaskPage();
+  const status = useVariantStatus(view, variant);
+  const { icon: Icon, label } = TAB_LABEL[props.tab];
+  let count: number | undefined;
+  if (props.tab === "changes") {
+    count = status.stats?.files;
+  } else if (props.tab === "checks" && status.failing > 0) {
+    count = status.failing;
+  }
   return (
     <>
-      {conversations.map((session, index) => {
-        const label =
-          conversations.length === 1
-            ? "Conversation"
-            : `Conversation ${index + 1}`;
-        const active =
-          props.current === "conversation" && selected?.id === session.id;
-        return (
-          <span
-            key={session.id}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-0.5 border-b-2",
-              active ? "border-foreground" : "border-transparent"
-            )}
-          >
-            <Link
-              to={path(session.id)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 py-2 pl-0.5 text-sm font-medium whitespace-nowrap",
-                active
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <MessagesSquareIcon className="size-4" /> {label}
-            </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground size-6"
-              aria-label={`Close ${label}`}
-              title={`Close ${label}`}
-              disabled={close.isPending}
-              onClick={() => close.mutate(session.id)}
-            >
-              <XIcon className="size-3.5" />
-            </Button>
-          </span>
-        );
-      })}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="text-muted-foreground size-8 shrink-0 self-center"
-        aria-label="New conversation"
-        title="New conversation"
-        disabled={
-          !props.variant.sessionId || props.variant.discarded || start.isPending
-        }
-        onClick={() => start.mutate()}
-      >
-        <PlusIcon className="size-4" />
-      </Button>
-      {(start.error || close.error) && (
-        <span className="text-destructive self-center text-xs">
-          {(start.error ?? close.error)?.message}
+      <Icon className="size-4" /> {label}
+      {count !== undefined && (
+        <span
+          className={cn(
+            "text-xs tabular-nums",
+            props.tab === "checks"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          )}
+        >
+          {count}
         </span>
       )}
     </>
   );
 };
 
-/** The task page: its header, the variant switcher and the tabs, with the selected tab below. */
+/**
+ * The task page: the header and progress stepper, then the variants and conversations on the left, the selected
+ * variant's tabs in the middle, and its status on the right (or at the end of the tab bar row below 1440px).
+ */
 export const ProjectTask = () => {
   const view = useProjectView();
   const { task = "" } = useParams({ strict: false });
-  const { pathname } = useLocation();
-  const { report, snapshot } = useDash();
-  const [params, setParams] = useSearchParams();
-  const total = taskUsage(snapshot, task);
+  // The tab route the router rendered, not the URL: while it navigates to the Review page (a sibling route), the URL
+  // already reads `/review` but this page is still mounted, and must not take that for an unknown tab.
+  const tabRoute: string | undefined = useChildMatches()[0]?.routeId;
+  const { report } = useDash();
+  const [params] = useSearchParams();
   const record = taskOf(view, task);
   const sessions = taskSessions(view, task).filter((session) =>
     record?.variants.some((v) => v.sessionId === session.id)
@@ -336,9 +246,7 @@ export const ProjectTask = () => {
   }
   const variant = selectedVariant(record, params.get("v"));
   const tabs = taskTabs(record);
-  const base = taskHref(view.project.id, record.id);
-  const current = (pathname.slice(base.length).split("/")[1] ||
-    "conversation") as TaskTab;
+  const current = (tabRoute?.split("/").pop() || "conversation") as TaskTab;
   const v = params.get("v");
   const hrefOf = (tab: TaskTab) =>
     taskHref(view.project.id, record.id, {
@@ -349,201 +257,109 @@ export const ProjectTask = () => {
   if (params.get("tab") === "compare" && tabs.includes("compare")) {
     return <Navigate replace to={hrefOf("compare")} />;
   }
-  if (!tabs.includes(current)) {
+  if (tabRoute && !tabs.includes(current)) {
     return <Navigate replace to={hrefOf("conversation")} />;
   }
 
-  const starting = startingVariants(record);
-  const variantCount = record.variants.length;
-  const comparable = record.kind === "task";
-  const switchable = switchableVariants(record, variant);
-  const checkout = variant?.directory
-    ? checkoutOf(view, variant.directory)
-    : undefined;
-  const crumbs = (
-    <nav
-      aria-label="Breadcrumb"
-      className="text-muted-foreground flex items-center gap-1 text-sm"
-    >
-      <Link to={projectPath} className="hover:text-foreground hover:underline">
-        {view.project.name}
-      </Link>
-      <ChevronRightIcon className="size-3.5" /> {KIND_LABEL[record.kind]}
-    </nav>
+  const header = (
+    <TaskHeader
+      view={view}
+      task={record}
+      variant={variant}
+      sessions={sessions}
+    />
   );
-
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-4",
-        // The conversation fills the rest of the viewport, so its composer sits at the bottom.
-        ["conversation", "changes", "terminal", "runtime"].includes(current) &&
-          fillViewport
-      )}
-    >
-      <ProvenanceBreadcrumb
-        key={variant?.n}
-        type={variant ? "variant" : "task"}
-        id={variant ? `${record.id}/${variant.n}` : record.id}
-        fallback={crumbs}
-      />
-      <div className="flex flex-wrap items-baseline gap-2.5">
-        <h2 className="text-lg font-semibold">{record.title || "Task"}</h2>
-        <Chip>{KIND_LABEL[record.kind]}</Chip>
-        <Chip variant={record.state === "running" ? "secondary" : "outline"}>
-          {record.state}
-        </Chip>
-        {record.fromChat && (
-          <Chip variant="outline" title="Made from a chat, its variant 1">
-            from chat
-          </Chip>
-        )}
-        {record.ticket && (
-          <Chip variant="outline" asChild>
-            <Link to={`/jira/${encodeURIComponent(record.ticket.key)}`}>
-              <TicketIcon className="size-3" /> {record.ticket.key}
-              {record.ticket.status && ` · ${record.ticket.status}`}
-            </Link>
-          </Chip>
-        )}
-        {(record.pullRequests ?? []).map((p) => (
-          <PullRequestBadge key={p.url} pull={p} />
-        ))}
-        <span className={muted}>
-          {comparable && (
-            <>
-              {variantCount} variant
-              {variantCount === 1 ? "" : "s"}
-            </>
-          )}
-          {starting.some((s) => s.step !== "failed") && " · starting"}
-          {total && (
-            <span className="tabular-nums">
-              {comparable ? " · " : ""}Total {formatUsage(total)}
-            </span>
-          )}
-        </span>
-        <span className="ml-auto flex items-center gap-1">
-          {variant?.directory && !variant.node && (
-            <CheckoutChecks
-              key={variant.directory}
-              projectId={view.project.id}
-              directory={variant.directory}
-            />
-          )}
-          {checkout && !checkout.worktree?.node && (
-            <OpenInMenu
-              view={view}
-              directory={checkout.directory}
-              hostPath={checkout.hostPath}
-            />
-          )}
-          <ActivityButton
-            filter={{ taskId: record.id }}
-            subject={record.title || "Task"}
-            empty="Nothing recorded for this task yet."
-          />
-          {record.state === "ended" && (
-            <ArchiveButton view={view} task={record} />
-          )}
-        </span>
-      </div>
-      {record.reviewOf && (
-        <p className="flex flex-wrap items-center gap-2 text-sm">
-          <span className={muted}>
-            Review of{" "}
-            {record.reviewOf.number === undefined
-              ? "a pull request"
-              : `PR #${record.reviewOf.number}`}
-            {record.reviewOf.title && `: ${record.reviewOf.title}`}
-          </span>
-          <PullRequestBadge pull={record.reviewOf} />
-        </p>
-      )}
-      <TaskReviews task={record} />
-      {starting.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
-          {starting.map((s) => (
-            <StartingCard
-              key={`starting-${s.n}`}
-              variant={s}
-              onDismiss={() =>
-                void dismissStarting(view.project.id, task).catch(report)
-              }
-            />
-          ))}
-        </div>
-      )}
-      {variant && switchable.length > 1 && current !== "compare" && (
-        <Segmented
-          label="Variant"
-          value={String(variant.n)}
-          options={switchable.map((x) => ({
-            id: String(x.n),
-            label: `V${x.n}${x.model ? ` · ${modelShortName(x.model)}` : ""}`,
-          }))}
-          onChange={(n) =>
-            setParams((prev) => {
-              const out = new URLSearchParams(prev);
-              out.set("v", n);
-              out.delete("thread");
-              return out;
-            })
-          }
-        />
-      )}
-      <TabBar label="Task">
-        {!variant && (
-          <TabLink to={hrefOf("conversation")} end>
-            <MessagesSquareIcon className="size-4" /> Conversation
-          </TabLink>
-        )}
-        {variant && (
-          <ConversationTabs
-            view={view}
-            task={record}
-            variant={variant}
-            current={current}
-            thread={params.get("thread") ?? undefined}
-          />
-        )}
-        {tabs
-          .filter(
-            (tab) =>
-              !["conversation", "changes", "terminal", "runtime"].includes(tab)
-          )
-          .map((tab) => {
-            const { icon: Icon, label } = TAB_LABEL[tab];
-            return (
-              <TabLink key={tab} to={hrefOf(tab)} end={tab === "conversation"}>
-                <Icon className="size-4" /> {label}
-              </TabLink>
-            );
-          })}
-      </TabBar>
-      {variant ? (
-        <TaskPageCtx value={{ sessions, task: record, variant, view }}>
-          <Outlet />
-        </TaskPageCtx>
-      ) : (
+  if (!variant) {
+    return (
+      <div className="flex flex-col gap-4">
+        {header}
         <Empty title="No variants">
           <p className={muted}>This task has nothing to show yet.</p>
         </Empty>
-      )}
-    </div>
-  );
-};
+      </div>
+    );
+  }
 
-const TAB_LABEL: Record<
-  TaskTab,
-  { icon: typeof GitCompareIcon; label: string }
-> = {
-  changes: { icon: GitCompareIcon, label: "Changes" },
-  compare: { icon: ColumnsIcon, label: "Compare" },
-  conversation: { icon: MessagesSquareIcon, label: "Conversation" },
-  runtime: { icon: ServerIcon, label: "Runtime" },
-  spec: { icon: FileTextIcon, label: "Spec" },
-  terminal: { icon: TerminalIcon, label: "Terminal" },
+  // A variant still being set up (or that failed to) shows its setup log instead of its tabs' content.
+  const setup =
+    startingVariants(record).some((s) => s.n === variant.n) &&
+    current !== "compare" &&
+    current !== "spec";
+  const barTabs = tabs.filter((tab): tab is BarTab => tab !== "compare");
+  const frame = { current, task: record, variant, view };
+
+  return (
+    <TaskPageCtx value={{ sessions, task: record, variant, view }}>
+      <div
+        className={cn(
+          "flex flex-col gap-3",
+          FILL_TABS.has(current) && !setup && fillViewport
+        )}
+      >
+        {header}
+        <TaskStepper
+          view={view}
+          task={record}
+          variant={variant}
+          sessions={sessions}
+        />
+        <PhoneVariants {...frame} />
+        <TaskReviews task={record} />
+        <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[3.5rem_minmax(0,1fr)] lg:grid-cols-[14rem_minmax(0,1fr)] min-[90rem]:grid-cols-[14rem_minmax(0,1fr)_17rem]">
+          <div className="hidden min-h-0 flex-col border-r pr-3 md:flex">
+            <TaskSidebar {...frame} />
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-col gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+              <div className="max-w-full min-w-0 flex-[1_0_auto]">
+                <TabBar label="Task">
+                  {barTabs.map((tab) => {
+                    const link = (
+                      <TabLink
+                        key={tab}
+                        to={hrefOf(tab)}
+                        end={tab === "conversation"}
+                      >
+                        <TabLabel tab={tab} />
+                      </TabLink>
+                    );
+                    // Checks is the rail's content; it's listed only on phones, which have no rail or strip.
+                    return tab === "checks" ? (
+                      <span key={tab} className="contents md:hidden">
+                        {link}
+                      </span>
+                    ) : (
+                      link
+                    );
+                  })}
+                </TabBar>
+              </div>
+              <TaskStatusStrip className="ml-auto hidden md:flex min-[90rem]:hidden" />
+            </div>
+            {variant.branch && (
+              <Chip className="self-start font-mono md:hidden">
+                {variant.branch}
+              </Chip>
+            )}
+            {current === "conversation" && !setup && (
+              <PhoneThreadSelect {...frame} />
+            )}
+            {setup ? (
+              <VariantSetup
+                variant={variant}
+                onDismiss={() =>
+                  void dismissStarting(view.project.id, task).catch(report)
+                }
+              />
+            ) : (
+              <Outlet />
+            )}
+          </div>
+          <TaskStatusPanel className="hidden overflow-y-auto border-l pl-4 min-[90rem]:flex" />
+        </div>
+      </div>
+    </TaskPageCtx>
+  );
 };
 
 /** The spec chain, and the selected variant's OpenSpec change. */
@@ -722,11 +538,6 @@ export const TaskCompare = () => {
       )}
     </div>
   );
-};
-
-const KIND_LABEL: Record<TaskView["kind"], string> = {
-  review: "AI review",
-  task: "Task",
 };
 
 const CHECK_TONE: Record<ChecksState, string> = {

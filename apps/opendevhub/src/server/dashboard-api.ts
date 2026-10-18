@@ -62,6 +62,7 @@ export interface DashboardHub {
     | "restartOpencode"
     | "rescan"
     | "logLines"
+    | "envLogs"
     | "onLog"
     | "createEnv"
     | "startEnv"

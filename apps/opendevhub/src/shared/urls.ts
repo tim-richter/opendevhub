@@ -17,13 +17,14 @@ export type TaskTab =
   | "terminal"
   | "runtime"
   | "spec"
+  | "checks"
   | "compare";
 
-/** A task page, optionally on a tab, with a variant (`?v=`) and a conversation thread (`?thread=`) selected. */
+/** A task page, optionally on a tab (or its Review page, outside the tabs), with a variant (`?v=`) and a conversation thread (`?thread=`) selected. */
 export const taskHref = (
   projectId: string,
   taskId: string,
-  opts: { v?: number; thread?: string; tab?: TaskTab } = {}
+  opts: { v?: number; thread?: string; tab?: TaskTab | "review" } = {}
 ): string => {
   const base = `/p/${encodeURIComponent(projectId)}/t/${encodeURIComponent(taskId)}`;
   const path =

@@ -296,6 +296,20 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
     .post("/api/projects/:id/envs/:env/stop", (c) =>
       action(c, () => envActions["stop"](param(c, "id"), param(c, "env")))
     )
+    .get(
+      "/api/projects/:id/envs/:env/logs",
+      validateQuery(queries.envLogs),
+      (c) =>
+        json(c, (id) => {
+          const q = c.req.valid("query");
+          return hub.environments.envLogs(
+            id,
+            param(c, "env"),
+            q.source,
+            q.lines
+          );
+        })
+    )
     .post("/api/projects/:id/envs/:env/remove", (c) =>
       ok(c, (id) => hub.environments.removeEnv(id, c.req.param("env") ?? ""))
     )

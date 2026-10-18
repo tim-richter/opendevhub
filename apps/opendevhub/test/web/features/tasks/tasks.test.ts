@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  ChecksView,
   ProjectView,
   ReviewData,
   SessionSummary,
@@ -31,6 +32,12 @@ import {
   defaultVariant,
   selectedVariant,
   switchableVariants,
+  activeVariants,
+  showsVariants,
+  comparesVariants,
+  variantState,
+  taskAttention,
+  taskSteps,
 } from "../../../../src/web/features/tasks/tasks";
 
 /** A session's reference to variant `n` of a task. */
@@ -475,13 +482,23 @@ describe("task page", () => {
 
   it("shows Compare for two or more live variants and Spec for spec-first tasks", () => {
     const base = ["conversation", "changes", "terminal", "runtime"];
-    expect(taskTabs(task("t", [{}]))).toStrictEqual(base);
-    expect(taskTabs(task("t", [{}, { discarded: true }]))).toStrictEqual(base);
-    expect(taskTabs(task("t", [{}, {}]))).toStrictEqual([...base, "compare"]);
-    expect(taskTabs(task("t", [{}], { kind: "review" }))).toStrictEqual(base);
+    expect(taskTabs(task("t", [{}]))).toStrictEqual([...base, "checks"]);
+    expect(taskTabs(task("t", [{}, { discarded: true }]))).toStrictEqual([
+      ...base,
+      "checks",
+    ]);
+    expect(taskTabs(task("t", [{}, {}]))).toStrictEqual([
+      ...base,
+      "checks",
+      "compare",
+    ]);
+    expect(taskTabs(task("t", [{}], { kind: "review" }))).toStrictEqual([
+      ...base,
+      "checks",
+    ]);
     expect(
       taskTabs(task("t", [{}, {}], { spec: { first: true } }))
-    ).toStrictEqual([...base, "spec", "compare"]);
+    ).toStrictEqual([...base, "spec", "checks", "compare"]);
   });
 
   it("lists the conversations in the variant's checkout, its own first, then newest first", () => {
@@ -512,5 +529,209 @@ describe("task page", () => {
         step: "session",
       }).map((s) => s.id)
     ).toStrictEqual(["new"]);
+  });
+});
+
+describe("active variants", () => {
+  it("shows no variant UI for a single-variant task", () => {
+    const t = task("t", [{ sessionId: "s1" }]);
+    expect(activeVariants(t).map((v) => v.n)).toStrictEqual([1]);
+    expect(showsVariants(t)).toBe(false);
+    expect(comparesVariants(t)).toBe(false);
+  });
+
+  it("hides variant UI after a pick discards the others", () => {
+    const t = task("t", [
+      { discarded: true },
+      { picked: true },
+      { discarded: true },
+    ]);
+    expect(activeVariants(t).map((v) => v.n)).toStrictEqual([2]);
+    expect(showsVariants(t)).toBe(false);
+    expect(switchableVariants(t, t.variants[1]).map((v) => v.n)).toStrictEqual([
+      2,
+    ]);
+  });
+
+  it("counts a failed start that wasn't dismissed", () => {
+    const t = task("t", [
+      { sessionId: "s1" },
+      { error: "boom", step: "failed" },
+    ]);
+    expect(showsVariants(t)).toBe(true);
+    expect(variantState(t.variants[1], undefined)).toBe("failed");
+  });
+
+  it("shows variants and Compare for two running variants", () => {
+    const t = task("t", [{ sessionId: "s1" }, { sessionId: "s2" }]);
+    expect(showsVariants(t)).toBe(true);
+    expect(comparesVariants(t)).toBe(true);
+  });
+});
+
+describe("variant and task state", () => {
+  const v = (over = {}) => ({
+    n: 1,
+    sessionId: "s1",
+    step: "session" as const,
+    ...over,
+  });
+  it("reads a variant's state from its setup and its session", () => {
+    expect(
+      variantState(v({ sessionId: undefined, step: "image" }), undefined)
+    ).toBe("starting");
+    expect(
+      variantState(v(), session("s1", wt("a"), { status: "running" }))
+    ).toBe("working");
+    expect(
+      variantState(v(), session("s1", wt("a"), { status: "needs-permission" }))
+    ).toBe("needs-you");
+    expect(variantState(v(), session("s1", wt("a")))).toBe("idle");
+    expect(variantState(v({ sessionRemoved: true }), undefined)).toBe("idle");
+  });
+
+  it("puts Needs you before Working before Starting, then Ended or Idle", () => {
+    const t = task("t", [
+      { sessionId: "s1" },
+      { sessionId: "s2" },
+      { sessionId: undefined, step: "container" },
+    ]);
+    const running = session("s1", wt("a"), { status: "running" });
+    const asking = session("s2", wt("b"), { status: "needs-answer" });
+    expect(taskAttention(t, [running, asking])).toBe("needs-you");
+    expect(taskAttention(t, [running, session("s2", wt("b"))])).toBe("working");
+    expect(taskAttention(t, [])).toBe("starting");
+    const done = task("t", [{ sessionId: "s1", sessionRemoved: true }], {
+      state: "ended",
+    });
+    expect(taskAttention(done, [])).toBe("ended");
+    expect(taskAttention(task("t", [{ sessionId: "s1" }]), [])).toBe("idle");
+  });
+});
+
+describe(taskSteps, () => {
+  const review = (over: Partial<ReviewData> = {}): ReviewData => ({
+    ahead: 1,
+    behind: 0,
+    directory: wt("a"),
+    dirty: false,
+    files: [],
+    mode: "working",
+    pushed: false,
+    workspace: { clean: true },
+    ...over,
+  });
+  const checks = (status: "passed" | "failed"): ChecksView =>
+    ({
+      checks: [
+        { command: "tsc", name: "typecheck", timeout: 60, where: "container" },
+      ],
+      current: true,
+      errors: [],
+      run: {
+        directory: wt("a"),
+        dirty: false,
+        finishedAt: 2,
+        results: [
+          {
+            command: "tsc",
+            name: "typecheck",
+            output: [],
+            status,
+            where: "container",
+          },
+        ],
+        startedAt: 1,
+      },
+      teamWritable: false,
+    }) as unknown as ChecksView;
+  const states = (steps: ReturnType<typeof taskSteps>) =>
+    steps.map((s) => `${s.label}:${s.state}`);
+
+  it("has Agents · 2 current while both variants work", () => {
+    const t = task("t", [{ sessionId: "s1" }, { sessionId: "s2" }]);
+    const sessions = [
+      session("s1", wt("a"), { status: "running" }),
+      session("s2", wt("b"), { status: "running" }),
+    ];
+    expect(states(taskSteps(t, t.variants[0], { sessions }))).toStrictEqual([
+      "Brief:done",
+      "Agents · 2:current",
+      "Pick variant:todo",
+      "Review & checks:todo",
+      "Publish:todo",
+      "Pull request:todo",
+    ]);
+  });
+
+  it("has no Pick variant step for a single-variant task", () => {
+    const t = task("t", [{ sessionId: "s1" }]);
+    expect(
+      taskSteps(t, t.variants[0], { sessions: [] }).map((s) => s.id)
+    ).toStrictEqual(["brief", "agents", "review", "publish", "pull"]);
+  });
+
+  it("makes Pull request current once the picked variant is checked and pushed", () => {
+    const t = task("t", [
+      { discarded: true },
+      { picked: true, sessionId: "s2" },
+    ]);
+    const steps = taskSteps(t, t.variants[1], {
+      checks: checks("passed"),
+      review: review({ pushed: true }),
+      sessions: [session("s2", wt("b"))],
+    });
+    expect(steps.find((s) => s.state === "current")?.id).toBe("pull");
+    expect(steps.find((s) => s.id === "pick")?.state).toBe("done");
+  });
+
+  it("keeps Review & checks current while an AI review runs", () => {
+    const t = task("t", [{ sessionId: "s1" }]);
+    const input = {
+      checks: checks("passed"),
+      review: review(),
+      sessions: [session("s1", wt("a"))],
+    };
+    expect(
+      taskSteps(t, t.variants[0], { ...input, aiReviewRunning: true }).find(
+        (s) => s.state === "current"
+      )?.id
+    ).toBe("review");
+    expect(
+      taskSteps(t, t.variants[0], input).find((s) => s.state === "current")?.id
+    ).toBe("publish");
+  });
+
+  it("keeps Review & checks current while checks fail or changes aren't committed", () => {
+    const t = task("t", [{ sessionId: "s1" }]);
+    const sessions = [session("s1", wt("a"))];
+    const current = (over: Parameters<typeof taskSteps>[2]) =>
+      taskSteps(t, t.variants[0], over).find((s) => s.state === "current")?.id;
+    expect(
+      current({ checks: checks("failed"), review: review(), sessions })
+    ).toBe("review");
+    expect(
+      current({
+        checks: checks("passed"),
+        review: review({ dirty: true }),
+        sessions,
+      })
+    ).toBe("review");
+  });
+
+  it("counts data still loading as not done", () => {
+    const t = task("t", [{ sessionId: "s1" }]);
+    const steps = taskSteps(t, t.variants[0], {
+      sessions: [session("s1", wt("a"))],
+    });
+    expect(steps.find((s) => s.state === "current")?.id).toBe("review");
+    expect(
+      steps.filter((s) => s.state === "done").map((s) => s.id)
+    ).toStrictEqual(["brief", "agents"]);
+  });
+
+  it("has no steps for an AI review task", () => {
+    const t = task("t", [{ sessionId: "s1" }], { kind: "review" });
+    expect(taskSteps(t, t.variants[0], { sessions: [] })).toStrictEqual([]);
   });
 });

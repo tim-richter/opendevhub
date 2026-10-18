@@ -1,17 +1,12 @@
 import { Empty, muted } from "../../components/page";
 import { useSearchParams } from "../../routing";
 import { SessionView } from "../sessions/session-page";
-import type { PanelId } from "../sessions/side-panel";
 import { useTaskPage } from "./task-context";
-import { taskSessions } from "./tasks";
+import { showsVariants, taskSessions } from "./tasks";
 import { conversationCheckout, VariantWaiting } from "./variant-waiting";
 
-/** The selected conversation of this task variant (`?thread=`). */
-export const TaskConversation = ({
-  initialPanel,
-}: {
-  initialPanel?: PanelId;
-} = {}) => {
+/** The selected conversation of this task variant (`?thread=`); its changes, terminal and runtime are the page's tabs. */
+export const TaskConversation = () => {
   const { view, task, variant } = useTaskPage();
   const [params, setParams] = useSearchParams();
   const threads = taskSessions(view, task.id)
@@ -21,6 +16,11 @@ export const TaskConversation = ({
   const selected =
     threads.find((s) => s.id === params.get("thread")) ?? own ?? threads.at(-1);
   const checkout = selected && conversationCheckout(view, selected.directory);
+  const branch = checkout?.worktree?.branch ?? checkout?.label;
+  // Whom the composer writes to: the variant by number only when there are several to tell apart.
+  const composerLabel = showsVariants(task)
+    ? `To V${variant.n}${branch ? ` · ${branch}` : ""}`
+    : branch;
 
   const select = (id: string | undefined) =>
     setParams(
@@ -40,15 +40,12 @@ export const TaskConversation = ({
   if (selected && checkout) {
     body = (
       <SessionView
-        key={`${selected.id}:${initialPanel ?? ""}`}
+        key={selected.id}
         view={view}
         checkout={checkout}
         session={selected}
         showTask={selected.task?.id !== task.id}
-        changes
-        terminal
-        runtime
-        initialPanel={initialPanel}
+        composerLabel={composerLabel}
         onStarted={select}
       />
     );
@@ -56,7 +53,9 @@ export const TaskConversation = ({
     body =
       variant.sessionId && !variant.sessionRemoved ? (
         <Empty title="No open conversations">
-          <p className={muted}>Use + to start a conversation in this task.</p>
+          <p className={muted}>
+            Use New conversation to start one in this task.
+          </p>
         </Empty>
       ) : (
         <VariantWaiting view={view} variant={variant} />

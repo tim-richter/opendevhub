@@ -433,6 +433,69 @@ describe("environments", () => {
     expect(hub.environments.logLines(project.id)[0]).not.toBe("line 0");
   });
 
+  it("tags each log line with its environment, keeping /logs' branch prefix", async () => {
+    const s = await withEnv();
+    const lines = s.hub.environments.logLines(project.id);
+    expect(lines.some((l) => l.startsWith("[feat] "))).toBe(true);
+    const own = await s.hub.environments.envLogs(
+      project.id,
+      s.envId,
+      "setup",
+      500
+    );
+    expect(own.lines.length).toBeGreaterThan(0);
+    expect(own.lines.every((l) => !l.text.startsWith("[feat]"))).toBe(true);
+    expect(own.lines.every((l) => typeof l.at === "number")).toBe(true);
+    const main = await s.hub.environments.envLogs(
+      project.id,
+      project.id,
+      "setup",
+      500
+    );
+    // Every Setup line is the environment's own: prefixed with its branch in the project's log, or not for the main one.
+    for (const l of own.lines) {
+      expect(lines).toContain(`[feat] ${l.text}`);
+    }
+    for (const l of main.lines) {
+      expect(lines).toContain(l.text);
+    }
+    expect(main.lines.length + own.lines.length).toBe(lines.length);
+  });
+
+  it("reads a container's own output and opencode's log, or says why it can't", async () => {
+    const s = await withEnv();
+    s.containers.logs.mockResolvedValueOnce([{ at: 5, text: "booted" }]);
+    await expect(
+      s.hub.environments.envLogs(project.id, s.envId, "container", 50)
+    ).resolves.toStrictEqual({ lines: [{ at: 5, text: "booted" }] });
+    expect(s.containers.logs).toHaveBeenCalledWith("c2", 50);
+    s.containers.exec.mockResolvedValueOnce({
+      exitCode: 0,
+      stderr: "",
+      stdout: "listening on 4096\n\n",
+      timedOut: false,
+    });
+    await expect(
+      s.hub.environments.envLogs(project.id, s.envId, "opencode", 20)
+    ).resolves.toStrictEqual({ lines: [{ text: "listening on 4096" }] });
+    expect(s.containers.exec.mock.lastCall?.[1]).toStrictEqual([
+      "tail",
+      "-n",
+      "20",
+      "/tmp/opendevhub-opencode.log",
+    ]);
+    s.store.updateRuntime(s.envId, { containerState: "stopped" });
+    await expect(
+      s.hub.environments.envLogs(project.id, s.envId, "opencode", 20)
+    ).resolves.toMatchObject({
+      lines: [],
+      unavailable: expect.stringMatching(/stopped/u),
+    });
+    await expect(
+      s.hub.environments.envLogs(project.id, "nope", "setup", 20)
+    ).rejects.toThrow(NotFoundError);
+  });
+
   it("forwards configured ports on start, including skipped entries in runtime.ports", async () => {
     const { store, hub, forwarder } = setup();
     await hub.environments.rescan();

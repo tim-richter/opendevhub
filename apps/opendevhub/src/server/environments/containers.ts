@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type { Dotfiles, FeatureOptions } from "../../shared/personalization";
 import type { RunResult, Runner } from "../nodes/exec";
+import { cleanLogLine } from "./log-buffer";
 import { ensureSpawnHelperExecutable } from "./pty-helper";
 
 export const LABEL = "opendevhub.project";
@@ -233,6 +234,25 @@ const lastOutcome = (stdout: string): Record<string, unknown> | undefined => {
   }
   return undefined;
 };
+
+const TIMESTAMP = /^(?<at>\d{4}-\d\d-\d\dT\S+Z) ?(?<text>.*)$/u;
+
+/** `docker logs --timestamps` output as lines with their times, oldest first; stdout and stderr merged by time. */
+export const parseDockerLogs = (
+  output: string
+): { at?: number; text: string }[] =>
+  output
+    .split("\n")
+    .flatMap((raw): { at?: number; text: string }[] => {
+      const m = TIMESTAMP.exec(raw);
+      const at = m?.groups ? Date.parse(m.groups.at) : Number.NaN;
+      const text = cleanLogLine(m?.groups ? m.groups.text : raw);
+      if (!text) {
+        return [];
+      }
+      return Number.isNaN(at) ? [{ text }] : [{ at, text }];
+    })
+    .toSorted((a, b) => (a.at ?? 0) - (b.at ?? 0));
 
 export class Containers {
   private readonly run: Runner;
@@ -584,6 +604,25 @@ export class Containers {
     return this.run("docker", [...args, containerId, ...command], {
       timeoutMs: EXEC_TIMEOUT_MS,
     });
+  }
+
+  /** The container's own output (stdout and stderr), its last `lines` lines with their times. */
+  async logs(
+    containerId: string,
+    lines: number
+  ): Promise<{ at?: number; text: string }[]> {
+    const r = await this.run(
+      "docker",
+      ["logs", "--tail", String(lines), "--timestamps", containerId],
+      { timeoutMs: DOCKER_TIMEOUT_MS }
+    );
+    if (r.exitCode !== 0) {
+      throw new CommandError(
+        `docker logs failed: ${r.stderr.trim()}`,
+        tailLines(r.stderr)
+      );
+    }
+    return parseDockerLogs(`${r.stdout}\n${r.stderr}`);
   }
 
   async stop(containerId: string): Promise<void> {

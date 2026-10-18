@@ -56,6 +56,7 @@ import {
   reviewImage,
   jiraTicket,
   jiraTickets,
+  envLogs,
   logLines,
   models,
   ocrReview,
@@ -519,6 +520,11 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.get("/api/projects/:id/logs", () =>
       HttpResponse.json({ lines: logLines })
     ),
+    http.get("/api/projects/:id/envs/:env/logs", ({ request }) =>
+      HttpResponse.json(
+        envLogs(new URL(request.url).searchParams.get("source") ?? "setup")
+      )
+    ),
     http.get("/api/projects/:id/models", () => HttpResponse.json(models)),
     http.get("/api/projects/:id/review", async ({ request }) => {
       await wait();
@@ -529,7 +535,27 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
           turnReviewData(directory, query.get("from") ?? undefined)
         );
       }
-      return HttpResponse.json(reviewData(directory));
+      const data = reviewData(directory);
+      const file = query.get("file");
+      if (file) {
+        // One file's patch, as the server sends one that was too large for the list.
+        const lines = Array.from(
+          { length: 12 },
+          (_, i) => `+it("case ${i + 1}");`
+        );
+        return HttpResponse.json({
+          ...data,
+          files: data.files
+            .filter((f) => f.file === file)
+            .map((f) => ({
+              ...f,
+              patch:
+                f.patch ??
+                `diff --git a/${f.file} b/${f.file}\nnew file mode 100644\n--- /dev/null\n+++ b/${f.file}\n@@ -0,0 +1,12 @@\n${lines.join("\n")}\n`,
+            })),
+        });
+      }
+      return HttpResponse.json(data);
     }),
     http.get("/api/projects/:id/review/image", ({ request }) => {
       const query = new URL(request.url).searchParams;

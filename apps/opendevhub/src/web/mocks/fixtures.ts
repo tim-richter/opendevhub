@@ -43,6 +43,7 @@ import type {
   CleanupPlan,
   DashboardSnapshot,
   EnvironmentView,
+  EnvLogs,
   ModelsInfo,
   NodeView,
   ProjectTeamView,
@@ -1684,6 +1685,32 @@ export const logLines: string[] = [
   "[ports] Forwarded 5173 -> 45173 (web)",
   "[ports] 9229: port in use",
 ];
+
+/** One environment's log by source, at ten-second steps from a fixed time; the container's own output is empty. */
+export const envLogs = (source: string): EnvLogs => {
+  const at = (i: number) => Date.UTC(2026, 9, 18, 9, 0, i * 10);
+  if (source === "setup") {
+    return {
+      lines: [
+        "environment: starting the container",
+        "devcontainer up: container started (abc123def456)",
+        "ports: 3000 → localhost:43000",
+        "relay: active (exec)",
+      ].map((text, i) => ({ at: at(i * 2), text })),
+    };
+  }
+  if (source === "opencode") {
+    return {
+      lines: [
+        "opencode server listening on http://0.0.0.0:4096",
+        "session ses_rate: prompt received",
+      ].map((text) => ({ text })),
+    };
+  }
+  return {
+    lines: [{ at: at(1), text: "tini: started init process" }],
+  };
+};
 
 /** What opendevhub links to PR #42: tsk_rate made it, it is checked out once, and an AI review ran on it twice. */
 /** What an Open Code Review of the rate-limit pull request found. */

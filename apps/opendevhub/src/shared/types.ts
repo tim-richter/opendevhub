@@ -174,6 +174,15 @@ export interface ProjectRuntime {
 
 export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
 
+/** Where an environment's log lines come from: opendevhub's setup, the container's own output, or opencode's. */
+export type EnvLogSource = "setup" | "container" | "opencode";
+
+/** The end of one source of an environment's log; `unavailable` says why it couldn't be read. */
+export interface EnvLogs {
+  lines: { at?: number; text: string }[];
+  unavailable?: string;
+}
+
 /** A worktree's own container. */
 export interface EnvironmentView {
   id: EnvId;

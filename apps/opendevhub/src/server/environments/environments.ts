@@ -14,6 +14,8 @@ import {
 import type { ResolvedPersonalization } from "../../shared/personalization";
 import type {
   EnvId,
+  EnvLogs,
+  EnvLogSource,
   EnvWorktree,
   ForwardedPort,
   Isolation,
@@ -48,6 +50,7 @@ import { LOCAL_NODE } from "../nodes/host";
 import { isGone } from "../opencode/client";
 import type { OpencodeClient } from "../opencode/client";
 import {
+  OPENCODE_LOG_FILE,
   opencodeMount,
   opencodeVolume,
   VOLUME_LABEL,
@@ -118,6 +121,14 @@ export interface Env {
 
 export type TaskEnv = Env & { worktree: EnvWorktree };
 
+/** A line of a project's log: the environment that wrote it, when, and (for a task environment) its branch. */
+interface LogEntry {
+  envId: EnvId;
+  at: number;
+  line: string;
+  branch?: string;
+}
+
 /** The checkout (a task variant or a chat) an environment is started for: where its steps and log lines go, and who acts. */
 export interface EnvSetup {
   actor: Actor;
@@ -134,7 +145,7 @@ export interface EnvSetup {
 export class Environments {
   private readonly busy = new Set<EnvId>();
   private readonly monitors = new Map<EnvId, MonitorHandle>();
-  private readonly logs = new Map<ProjectId, LogBuffer>();
+  private readonly logs = new Map<ProjectId, LogBuffer<LogEntry>>();
   private readonly logListeners = new Set<
     (projectId: ProjectId, line: string) => void
   >();
@@ -188,8 +199,77 @@ export class Environments {
     return this.routes.get(id)?.opencode;
   }
 
+  /** The project's log as `/logs` shows it: a task environment's lines start with its branch. */
   logLines(id: ProjectId): string[] {
-    return this.logs.get(id)?.lines() ?? [];
+    return (this.logs.get(id)?.lines() ?? []).map((e) =>
+      e.branch ? `[${e.branch}] ${e.line}` : e.line
+    );
+  }
+
+  /**
+   * The last `lines` lines of one environment's log by source: what opendevhub wrote setting it up (`setup`), the
+   * container's own output (`container`), or the opencode server's (`opencode`). The main environment is addressed by
+   * the project's id. A source that can't be read says why in `unavailable`.
+   */
+  async envLogs(
+    projectId: ProjectId,
+    envId: EnvId,
+    source: EnvLogSource,
+    lines: number
+  ): Promise<EnvLogs> {
+    const env = this.envOf(envId);
+    if (!env || env.project.id !== projectId) {
+      throw new NotFoundError(envId, "environment");
+    }
+    if (source === "setup") {
+      return {
+        lines: (this.logs.get(projectId)?.lines() ?? [])
+          .filter((e) => e.envId === envId)
+          .slice(-lines)
+          .map((e) => ({ at: e.at, text: e.line })),
+      };
+    }
+    const rt = this.deps.store.runtime(env.id);
+    if (!rt.containerId) {
+      return { lines: [], unavailable: "The container hasn't been created." };
+    }
+    const kit = this.kitOf(env.node);
+    if (!kit) {
+      return { lines: [], unavailable: `Node ${env.node} is unreachable.` };
+    }
+    const { logs, exec } = kit.containers;
+    if (!logs || !exec) {
+      return { lines: [], unavailable: "Not available on remote nodes yet." };
+    }
+    if (source === "container") {
+      return { lines: await logs.call(kit.containers, rt.containerId, lines) };
+    }
+    if (rt.containerState !== "running") {
+      return {
+        lines: [],
+        unavailable:
+          "The container is stopped, so opencode's log can't be read.",
+      };
+    }
+    const r = await exec.call(kit.containers, env.target, [
+      "tail",
+      "-n",
+      String(lines),
+      OPENCODE_LOG_FILE,
+    ]);
+    if (r.exitCode !== 0) {
+      return {
+        lines: [],
+        unavailable: `opencode's log can't be read: ${r.stderr.trim() || `tail exited ${r.exitCode}`}`,
+      };
+    }
+    return {
+      lines: r.stdout
+        .split("\n")
+        .map(cleanLogLine)
+        .filter(Boolean)
+        .map((text) => ({ text })),
+    };
   }
 
   onLog(fn: (projectId: ProjectId, line: string) => void): () => void {
@@ -733,7 +813,8 @@ export class Environments {
     this.deps.store.updateRuntime(id, { worktrees: list });
   }
 
-  log(id: ProjectId, raw: string): void {
+  /** Adds a line to the project's log, as the environment `envId` (the main one unless given) wrote it. */
+  log(id: ProjectId, raw: string, envId: EnvId = id, branch?: string): void {
     const line = cleanLogLine(raw);
     if (!line) {
       return;
@@ -743,9 +824,10 @@ export class Environments {
       buffer = new LogBuffer();
       this.logs.set(id, buffer);
     }
-    buffer.push(line);
+    buffer.push({ at: Date.now(), envId, line, ...(branch ? { branch } : {}) });
+    const shown = branch ? `[${branch}] ${line}` : line;
     for (const fn of this.logListeners) {
-      fn(id, line);
+      fn(id, shown);
     }
   }
 
@@ -1610,10 +1692,7 @@ export class Environments {
       return;
     }
     this.setups.get(env.id)?.log(line);
-    this.log(
-      env.project.id,
-      env.worktree ? `[${env.worktree.branch}] ${line}` : line
-    );
+    this.log(env.project.id, line, env.id, env.worktree?.branch);
   }
 
   /** One lifecycle action per environment at a time; throws BusyError synchronously otherwise. */

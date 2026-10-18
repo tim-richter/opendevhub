@@ -144,6 +144,11 @@ function setup(webDir?: string) {
       restartOpencode: vi.fn(() => Promise.resolve()),
       rescan: vi.fn(async () => {}),
       logLines: vi.fn(() => ["a", "b"]),
+      envLogs: vi.fn(
+        async (_id: string, _env: string, _source: string, _lines: number) => ({
+          lines: [{ at: 1, text: "ready" }],
+        })
+      ),
       onLog: vi.fn(() => () => {}),
     },
     checkouts: {
@@ -1644,6 +1649,36 @@ describe("dashboard API", () => {
     await expect(
       (await app.request(`/api/projects/${project.id}/logs`)).json()
     ).resolves.toStrictEqual({ lines: ["a", "b"] });
+  });
+
+  it("GET /api/projects/:id/envs/:env/logs reads one source, capping the lines at 2000", async () => {
+    const { app, hub } = setup();
+    const res = await app.request(
+      `/api/projects/${project.id}/envs/e1/logs?source=opencode&lines=5000`
+    );
+    await expect(res.json()).resolves.toStrictEqual({
+      lines: [{ at: 1, text: "ready" }],
+    });
+    expect(hub.environments.envLogs).toHaveBeenCalledWith(
+      project.id,
+      "e1",
+      "opencode",
+      2000
+    );
+    await app.request(`/api/projects/${project.id}/envs/${project.id}/logs`);
+    expect(hub.environments.envLogs).toHaveBeenLastCalledWith(
+      project.id,
+      project.id,
+      "setup",
+      500
+    );
+    expect(
+      (
+        await app.request(
+          `/api/projects/${project.id}/envs/e1/logs?source=nope`
+        )
+      ).status
+    ).toBe(400);
   });
 
   it("GET /api/events starts with a snapshot event", async () => {

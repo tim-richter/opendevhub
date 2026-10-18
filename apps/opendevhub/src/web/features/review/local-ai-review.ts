@@ -44,6 +44,15 @@ const readRun = (key: string): AiReviewRun | undefined => {
   }
 };
 
+/** An AI review or Open Code Review was started for the checkout and hasn't finished or failed. */
+export const localAiReviewRunning = (
+  projectId: string,
+  directory: string
+): boolean => {
+  const stage = readRun(storageKey(projectId, directory))?.stage;
+  return stage !== undefined && stage !== "done" && stage !== "failed";
+};
+
 export const useLocalAiReview = (input: {
   projectId: string;
   directory: string;

@@ -14,8 +14,8 @@ import { App, createAppRouter } from "./app";
 import { DashboardProvider } from "./dashboard-context";
 import { PERSIST_MAX_AGE_MS, persistOptions } from "./lib/query-persistence";
 
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
+import "@fontsource-variable/instrument-sans";
+import "@fontsource-variable/jetbrains-mono";
 
 import "./styles.css";
 

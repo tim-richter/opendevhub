@@ -1,5 +1,6 @@
 import { modelShortName } from "../../../shared/tasks";
 import type {
+  ChecksView,
   ProjectView,
   ReviewData,
   ReviewFile,
@@ -14,6 +15,7 @@ import { chatHref, taskHref } from "../../../shared/urls";
 import type { TaskTab } from "../../../shared/urls";
 import { workspaceFolderOf } from "../../derive";
 import type { Tone } from "../../derive";
+import { checksState } from "../checks/checks";
 
 export const taskOf = (view: ProjectView, task: string): TaskView | undefined =>
   view.tasks.find((t) => t.id === task);
@@ -370,16 +372,175 @@ export const selectedVariant = (
   (v ? task.variants.find((x) => String(x.n) === v) : undefined) ??
   defaultVariant(task);
 
-/** The variants the switcher offers: those not discarded, plus the selected one if it was. */
+/** The variants not discarded: starting, running, idle, or failed and not yet dismissed. */
+export const activeVariants = (task: TaskView): VariantView[] =>
+  task.variants.filter((v) => !v.discarded);
+
+/** Two or more active variants: only then does the page tell variants apart (cards, switcher, Compare, "V2" labels). */
+export const showsVariants = (task: TaskView): boolean =>
+  activeVariants(task).length >= 2;
+
+/** The variants the switcher offers: the active ones, plus the selected one if it was discarded. */
 export const switchableVariants = (
   task: TaskView,
   selected: VariantView | undefined
-): VariantView[] =>
-  task.variants.filter((v) => !v.discarded || v.n === selected?.n);
+): VariantView[] => {
+  const active = activeVariants(task);
+  return selected?.discarded
+    ? task.variants.filter((v) => active.includes(v) || v.n === selected.n)
+    : active;
+};
 
 /** A task with several live variants to choose between and compare. */
 export const comparesVariants = (task: TaskView): boolean =>
-  task.kind === "task" && task.variants.filter((v) => !v.discarded).length > 1;
+  task.kind === "task" && showsVariants(task);
+
+export type VariantState =
+  | "working"
+  | "needs-you"
+  | "idle"
+  | "starting"
+  | "failed";
+
+export const VARIANT_STATE: Record<
+  VariantState,
+  { label: string; tone: Tone }
+> = {
+  failed: { label: "Failed", tone: "error" },
+  idle: { label: "Idle", tone: "ok" },
+  "needs-you": { label: "Needs you", tone: "attention" },
+  starting: { label: "Starting", tone: "running" },
+  working: { label: "Working", tone: "running" },
+};
+
+/** A variant's state for its card: failed or starting while set up, else its session's; an ended one is idle. */
+export const variantState = (
+  v: VariantView,
+  session: SessionSummary | undefined
+): VariantState => {
+  if (v.step === "failed") {
+    return "failed";
+  }
+  if (!v.sessionId) {
+    return "starting";
+  }
+  if (v.sessionRemoved || !session || session.status === "idle") {
+    return "idle";
+  }
+  return session.status === "running" ? "working" : "needs-you";
+};
+
+export type TaskAttention = VariantState | "ended";
+
+/** The header's one pill: Needs you, else Working, else Starting, else Ended for an ended task, else Idle. */
+export const taskAttention = (
+  task: TaskView,
+  sessions: readonly SessionSummary[]
+): TaskAttention => {
+  const states = new Set(
+    activeVariants(task).map((v) =>
+      variantState(
+        v,
+        sessions.find((s) => s.id === v.sessionId)
+      )
+    )
+  );
+  for (const state of ["needs-you", "working", "starting"] as const) {
+    if (states.has(state)) {
+      return state;
+    }
+  }
+  return task.state === "ended" ? "ended" : "idle";
+};
+
+export const ATTENTION: Record<TaskAttention, { label: string; tone: Tone }> = {
+  ...VARIANT_STATE,
+  ended: { label: "Ended", tone: "off" },
+};
+
+export type TaskStepId =
+  | "brief"
+  | "agents"
+  | "pick"
+  | "review"
+  | "publish"
+  | "pull";
+
+export interface TaskStep {
+  id: TaskStepId;
+  label: string;
+  state: "done" | "current" | "todo";
+}
+
+/**
+ * The task's progress, worked out from the task, the selected variant and its checkout. `review` and `checks` are
+ * undefined while they load (or null when they couldn't be read), which counts as not done. An AI review task has
+ * no steps. The first step not done is current; the ones after it are still to do.
+ */
+export const taskSteps = (
+  task: TaskView,
+  variant: VariantView | undefined,
+  input: {
+    sessions: readonly SessionSummary[];
+    review?: ReviewData | null;
+    checks?: ChecksView | null;
+    aiReviewRunning?: boolean;
+  }
+): TaskStep[] => {
+  if (task.kind !== "task") {
+    return [];
+  }
+  const active = activeVariants(task);
+  const agentsBusy = active.some((v) => {
+    const state = variantState(
+      v,
+      input.sessions.find((s) => s.id === v.sessionId)
+    );
+    return state === "working" || state === "needs-you" || state === "starting";
+  });
+  const { review, checks } = input;
+  const checksOk = !!checks && ["none", "passed"].includes(checksState(checks));
+  const steps: { id: TaskStepId; label: string; done: boolean }[] = [
+    { done: task.state !== "draft", id: "brief", label: "Brief" },
+    {
+      done: !agentsBusy,
+      id: "agents",
+      label: active.length >= 2 ? `Agents · ${active.length}` : "Agents",
+    },
+    ...(task.variants.length >= 2
+      ? [
+          {
+            done: task.variants.some((v) => v.picked),
+            id: "pick" as const,
+            label: "Pick variant",
+          },
+        ]
+      : []),
+    {
+      done: checksOk && !!review && !review.dirty && !input.aiReviewRunning,
+      id: "review",
+      label: "Review & checks",
+    },
+    { done: !!review?.pushed, id: "publish", label: "Publish" },
+    {
+      done:
+        !!variant &&
+        (task.pullRequests ?? []).some((p) => p.variant === variant.n),
+      id: "pull",
+      label: "Pull request",
+    },
+  ];
+  const current = steps.findIndex((s) => !s.done);
+  return steps.map((s, i) => {
+    let state: TaskStep["state"] = "todo";
+    if (current === -1 || i < current) {
+      state = "done";
+    } else if (i === current) {
+      state = "current";
+    }
+    return { id: s.id, label: s.label, state };
+  });
+};
 
 /** A spec-first task, or one implementing a change: it gets a Spec tab. */
 export const hasSpec = (task: TaskView): boolean =>
@@ -392,6 +553,9 @@ export const taskTabs = (task: TaskView): TaskTab[] => [
   "terminal",
   "runtime",
   ...(hasSpec(task) ? (["spec"] as const) : []),
+  // Listed in the tab bar only on phones; the rail and strip show checks wider up.
+  "checks",
+  // Opened from the header's Compare variants, not the tab bar.
   ...(comparesVariants(task) ? (["compare"] as const) : []),
 ];
 

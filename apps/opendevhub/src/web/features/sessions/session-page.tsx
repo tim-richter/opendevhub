@@ -38,6 +38,7 @@ export const SessionView = ({
   terminal = false,
   runtime = false,
   initialPanel,
+  composerLabel,
   onStarted,
   chips,
   actions,
@@ -53,6 +54,8 @@ export const SessionView = ({
   /** Offers the checkout runtime in a side panel. */
   runtime?: boolean;
   initialPanel?: PanelId;
+  /** Names whom the composer writes to, e.g. "To V2 · feat/oauth-b"; chats leave it out. */
+  composerLabel?: string;
   /** A conversation the composer's `/new` started in this checkout, with its chat. */
   onStarted?: (sessionId: string, chat?: string) => void;
   /** More chips for the header. */
@@ -91,6 +94,7 @@ export const SessionView = ({
       terminal={terminal}
       runtime={runtime}
       initialPanel={initialPanel}
+      composerLabel={composerLabel}
       chips={chips}
       actions={actions}
       onSend={async (message) => {

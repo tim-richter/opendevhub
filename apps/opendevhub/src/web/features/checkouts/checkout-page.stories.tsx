@@ -1,3 +1,5 @@
+import { http, HttpResponse } from "msw";
+
 import preview from "../../../../.storybook/preview";
 import { App } from "../../app";
 import { failing, pending } from "../../mocks/handlers";
@@ -61,9 +63,33 @@ export const OldSessionLink = meta.story({
   parameters: { route: "/p/acme-web/w/rate-limit/s/ses_perm01" },
 });
 
-/** Ports, container state and logs. */
+/** The project's shared container: its controls (Stop and Rebuild name the checkouts they affect), ports and logs. */
 export const Runtime = meta.story({
   parameters: { route: "/p/acme-web/main/runtime" },
+});
+
+/** A worktree's own container: it can also be removed, and Setup shows only its own lines. */
+export const RuntimeOwnContainer = meta.story({
+  parameters: { route: "/p/acme-web/w/dark-mode/runtime" },
+});
+
+/** A stopped container: Start instead of Stop, and opencode's log says why it can't be read. */
+export const RuntimeStopped = meta.story({
+  beforeEach: mockApi(
+    {},
+    http.get("/api/projects/:id/envs/:env/logs", ({ request }) =>
+      HttpResponse.json(
+        new URL(request.url).searchParams.get("source") === "opencode"
+          ? {
+              lines: [],
+              unavailable:
+                "The container is stopped, so opencode's log can't be read.",
+            }
+          : { lines: [{ at: 0, text: "environment: stopped" }] }
+      )
+    )
+  ),
+  parameters: { route: "/p/legacy-cms/main/runtime" },
 });
 
 /** A worktree that runs in its own container. */

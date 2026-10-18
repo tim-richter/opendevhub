@@ -16,22 +16,22 @@ export const cleanLogLine = (line: string): string => {
   return `${last.slice(0, MAX_LINE_LENGTH)}… (${last.length - MAX_LINE_LENGTH} more characters)`;
 };
 
-export class LogBuffer {
-  private buffer: string[] = [];
+export class LogBuffer<T = string> {
+  private buffer: T[] = [];
 
   private readonly max: number;
   constructor(max = 500) {
     this.max = max;
   }
 
-  push(line: string): void {
+  push(line: T): void {
     this.buffer.push(line);
     if (this.buffer.length > this.max) {
       this.buffer.splice(0, this.buffer.length - this.max);
     }
   }
 
-  lines(): string[] {
+  lines(): T[] {
     return [...this.buffer];
   }
 }

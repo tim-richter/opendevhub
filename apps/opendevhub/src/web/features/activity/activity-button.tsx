@@ -13,13 +13,15 @@ import type { ActivityFilter } from "../../../shared/activity";
 import { Tip } from "../../components/tip";
 import { ActivityFeed } from "./activity-feed";
 
-/** A small header button that opens the activity of one project, task or entity in a dialog. */
-export const ActivityButton = (props: {
+interface ActivityProps {
   filter: ActivityFilter;
   /** What the activity is of, named under the dialog's title. */
   subject: string;
   empty?: string;
-}) => {
+}
+
+/** A small header button that opens the activity of one project, task or entity in a dialog. */
+export const ActivityButton = (props: ActivityProps) => {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -34,23 +36,36 @@ export const ActivityButton = (props: {
           <HistoryIcon />
         </Button>
       </Tip>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Activity</DialogTitle>
-            <DialogDescription>{props.subject}</DialogDescription>
-          </DialogHeader>
-          {/* Mounted per opening, so the feed only polls while it's shown. */}
-          {open && (
-            <ActivityFeed
-              bare
-              filter={props.filter}
-              empty={props.empty}
-              className="-mx-6 -mb-6 min-h-0 overflow-y-auto border-t"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <ActivityDialog {...props} open={open} onOpenChange={setOpen} />
     </>
+  );
+};
+
+/** The activity dialog, opened from elsewhere, such as a menu item. */
+export const ActivityDialog = (
+  props: ActivityProps & {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }
+) => {
+  const { open } = props;
+  return (
+    <Dialog open={open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Activity</DialogTitle>
+          <DialogDescription>{props.subject}</DialogDescription>
+        </DialogHeader>
+        {/* Mounted per opening, so the feed only polls while it's shown. */}
+        {open && (
+          <ActivityFeed
+            bare
+            filter={props.filter}
+            empty={props.empty}
+            className="-mx-6 -mb-6 min-h-0 overflow-y-auto border-t"
+          />
+        )}
+      </DialogContent>
+    </Dialog>
   );
 };
