@@ -289,6 +289,36 @@ describe("CheckoutStore worktrees", () => {
     expect(s.events()).toEqual([]);
   });
 
+  it("brings back the same row when a worktree a listing dropped shows up again", () => {
+    const s = setup();
+    const wt = created(s);
+    s.checkouts.reconcileWorktrees(project.id, []);
+    s.events();
+    s.clock.now += 60_000;
+    s.checkouts.reconcileWorktrees(project.id, [
+      { branch: "task/add-login-1", path: wt.path },
+    ]);
+    expect(s.checkouts.worktreesOf(project.id)).toMatchObject([
+      { createdBy: { by: "variant", n: 1, task: T1 }, id: wt.id },
+    ]);
+    expect(s.checkouts.variantLinks(T1, 1).worktree?.id).toBe(wt.id);
+    expect(s.events()).toEqual([`worktree.adopted system ${T1}`]);
+  });
+
+  it("adopts anew a worktree removed on purpose, or gone for longer than a day", () => {
+    const s = setup();
+    const wt = created(s);
+    s.checkouts.removeWorktree(project.id, wt.path, undefined, USER);
+    s.checkouts.reconcileWorktrees(project.id, [{ path: wt.path }]);
+    const [again] = s.checkouts.worktreesOf(project.id);
+    expect(again.id).not.toBe(wt.id);
+    expect(again.createdBy).toEqual({ by: "unmanaged" });
+    s.checkouts.reconcileWorktrees(project.id, []);
+    s.clock.now += 25 * 60 * 60_000;
+    s.checkouts.reconcileWorktrees(project.id, [{ path: wt.path }]);
+    expect(s.checkouts.worktreesOf(project.id)[0].id).not.toBe(again.id);
+  });
+
   it("keeps node worktrees out of this machine's reconcile", () => {
     const s = setup();
     s.checkouts.insertWorktree(

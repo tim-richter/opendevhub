@@ -317,7 +317,7 @@ function setup(webDir?: string) {
       archiveTask: vi.fn((_id: string, _task: string) => {}),
       archivedTasks: vi.fn((_id: string) => []),
       restoreTask: vi.fn((_id: string, _task: string) => {}),
-      deleteArchivedTask: vi.fn((_id: string, _task: string) => {}),
+      deleteArchivedTask: vi.fn(async (_id: string, _task: string) => {}),
       createDraft: vi.fn((_id: string, _b: Record<string, unknown>) => ({
         task: "tsk_d",
       })),

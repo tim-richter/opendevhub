@@ -853,7 +853,12 @@ export class Sessions {
   ): Promise<void> {
     this.envs.requireProject(id);
     const found = this.deps.tasks.bySession(sessionId);
-    if (!found || found.task.projectId !== id || found.variant.discarded) {
+    if (
+      !found ||
+      found.task.projectId !== id ||
+      found.variant.discarded ||
+      this.deps.tasks.isSessionArchived(sessionId)
+    ) {
       throw new NotFoundError(sessionId, "task conversation");
     }
     const session = this.deps.store

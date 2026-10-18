@@ -16,12 +16,17 @@ import {
 } from "../../../src/server/opencode/client";
 import { StateStore } from "../../../src/server/projects/state";
 import { FIRST_TURN_TIMEOUT_MS } from "../../../src/server/tasks/checkout-setup";
+import {
+  FIRST_TURN_INTERRUPTED,
+  FIRST_TURN_SENDING,
+  firstTurnUnconfirmed,
+} from "../../../src/shared/tasks";
 import type {
   EnvWorktree,
   Project,
   SessionSummary,
 } from "../../../src/shared/types";
-import { startFakeOpencode } from "../../helpers/fake-opencode";
+import { rawSession, startFakeOpencode } from "../../helpers/fake-opencode";
 import { project, running, boxKit, setup } from "../../helpers/hub";
 
 describe("tasks", () => {
@@ -1148,6 +1153,120 @@ describe("starting tasks in the background", () => {
     expect(startingOf(s, task)?.state).toBe("starting");
   });
 
+  it("keeps a variant running with a note when its first message can't be confirmed", async () => {
+    const s = await started();
+    s.client.prompt.mockRejectedValueOnce(
+      new Error("opencode did not respond within 60 s")
+    );
+    const { task } = await s.hub.tasks.startTask(project.id, {
+      prompt: "Fix",
+      environment: "shared",
+    });
+    await vi.waitFor(() =>
+      expect(startingOf(s, task)?.variants[0].error).toBe(
+        firstTurnUnconfirmed("opencode did not respond within 60 s")
+      )
+    );
+    expect(startingOf(s, task)?.variants[0]).toMatchObject({
+      step: "session",
+      sessionId: "ses_1",
+    });
+    expect(startingOf(s, task)?.state).toBe("running");
+  });
+
+  it("notes a first message in flight, clears it once sent, and flags it after a restart", async () => {
+    const s = await started();
+    let sent!: () => void;
+    s.client.prompt.mockImplementationOnce(
+      () => new Promise<void>((r) => (sent = r))
+    );
+    const first = await s.hub.tasks.startTask(project.id, {
+      prompt: "Fix",
+      environment: "shared",
+    });
+    await vi.waitFor(() =>
+      expect(startingOf(s, first.task)?.variants[0].error).toBe(
+        FIRST_TURN_SENDING
+      )
+    );
+    sent();
+    await vi.waitFor(() =>
+      expect(startingOf(s, first.task)?.variants[0].error).toBeUndefined()
+    );
+    s.client.prompt.mockImplementationOnce(() => new Promise(() => {}));
+    const second = await s.hub.tasks.startTask(project.id, {
+      prompt: "Other",
+      environment: "shared",
+    });
+    await vi.waitFor(() =>
+      expect(startingOf(s, second.task)?.variants[0].error).toBe(
+        FIRST_TURN_SENDING
+      )
+    );
+    s.tasks.failInterrupted();
+    expect(startingOf(s, second.task)?.variants[0]).toMatchObject({
+      error: FIRST_TURN_INTERRUPTED,
+      step: "session",
+    });
+    expect(startingOf(s, second.task)?.state).toBe("running");
+  });
+
+  it("stops a variant a pick discarded while it was still starting", async () => {
+    const s = await started();
+    s.worktrees.add.mockImplementation(async (_p, a) => ({
+      path: `${a.root.container}/${a.branch}`,
+      hostPath: `${a.root.host}/${a.branch}`,
+      branch: a.branch,
+    }));
+    // The second variant's opencode is slow to list its commands, so it is still starting when the first is picked.
+    let release!: () => void;
+    s.client.commands.mockImplementation(async (directory: string) => {
+      if (directory.endsWith("-2")) {
+        await new Promise<void>((r) => (release = r));
+      }
+      return [{ name: "opsx-propose" }];
+    });
+    const { task } = await s.hub.tasks.startTask(project.id, {
+      prompt: "Fix",
+      environment: "shared",
+      spec: true,
+      variants: [{}, {}],
+    });
+    await vi.waitFor(() =>
+      expect(startingOf(s, task)?.variants[0].sessionId).toBe("ses_1")
+    );
+    await s.hub.tasks.pickVariant(project.id, task, "ses_1", false);
+    release();
+    await vi.waitFor(() =>
+      expect(s.tasks.get(task)?.variants[1]).toMatchObject({
+        discarded: true,
+        error: "discarded while it was starting",
+        step: "failed",
+      })
+    );
+    expect(s.client.createSession).toHaveBeenCalledTimes(1);
+    expect(s.client.command).toHaveBeenCalledTimes(1);
+    expect(startingOf(s, task)?.state).toBe("running");
+  });
+
+  it("starts sessions only after releasing the git lock", async () => {
+    const s = await started();
+    let sent!: () => void;
+    s.client.prompt.mockImplementationOnce(
+      () => new Promise<void>((r) => (sent = r))
+    );
+    await s.hub.tasks.startTask(project.id, {
+      prompt: "Fix",
+      environment: "shared",
+    });
+    await vi.waitFor(() => expect(s.client.prompt).toHaveBeenCalled());
+    // Another git action goes ahead while the first message is still on its way.
+    await expect(
+      s.hub.environments.withGit(project.id, async () => "free")
+    ).resolves.toBe("free");
+    sent();
+  });
+
   it("still refuses bad requests right away", async () => {
     const s = await started();
     await expect(
@@ -1315,9 +1434,9 @@ describe("starting tasks in the background", () => {
     expect(() => s.hub.tasks.restoreTask(project.id, task)).toThrow(
       NotFoundError
     );
-    expect(() => s.hub.tasks.deleteArchivedTask(project.id, task)).toThrow(
-      NotFoundError
-    );
+    await expect(
+      s.hub.tasks.deleteArchivedTask(project.id, task)
+    ).rejects.toThrow(NotFoundError);
     s.hub.tasks.archiveTask(project.id, task);
     expect(
       s.hub.tasks.archivedTasks(project.id).map((item) => item.id)
@@ -1326,9 +1445,53 @@ describe("starting tasks in the background", () => {
     s.hub.tasks.restoreTask(project.id, task);
     expect(s.tasks.get(task)?.archivedAt).toBeUndefined();
     s.hub.tasks.archiveTask(project.id, task);
-    s.hub.tasks.deleteArchivedTask(project.id, task);
+    await s.hub.tasks.deleteArchivedTask(project.id, task);
     expect(s.tasks.get(task)).toBeUndefined();
     expect(s.hub.tasks.archivedTasks(project.id)).toStrictEqual([]);
+  });
+
+  it("deletes an archived task's conversations, discarded ones too, so none comes back as a chat", async () => {
+    const s = await started();
+    const { task } = await s.hub.tasks.createTask(project.id, {
+      prompt: "x",
+      environment: "shared",
+      variants: [{}, {}],
+    });
+    s.tasks.pick(task, 1);
+    s.hub.tasks.archiveTask(project.id, task);
+    s.client.sessions.mockResolvedValue([
+      rawSession("ses_1", {
+        location: { directory: "/workspaces/demo.worktrees/x" },
+      }),
+      rawSession("ses_2", {
+        location: { directory: "/workspaces/demo.worktrees/x-2" },
+      }),
+    ]);
+    await s.hub.tasks.deleteArchivedTask(project.id, task);
+    expect(
+      s.client.deleteSession.mock.calls.map(([id]) => id).toSorted()
+    ).toStrictEqual(["ses_1", "ses_2"]);
+    expect(s.tasks.get(task)).toBeUndefined();
+  });
+
+  it("keeps an archived task whose conversation is still running", async () => {
+    const s = await started();
+    const { task } = await s.hub.tasks.createTask(project.id, {
+      prompt: "x",
+      environment: "shared",
+    });
+    s.hub.tasks.archiveTask(project.id, task);
+    s.client.sessions.mockResolvedValue([
+      rawSession("ses_1", {
+        location: { directory: "/workspaces/demo.worktrees/x" },
+      }),
+    ]);
+    s.client.active.mockResolvedValue(new Set(["ses_1"]));
+    await expect(
+      s.hub.tasks.deleteArchivedTask(project.id, task)
+    ).rejects.toThrow("kept the task: its conversation is still running");
+    expect(s.client.deleteSession).not.toHaveBeenCalled();
+    expect(s.tasks.get(task)).toBeDefined();
   });
 });
 

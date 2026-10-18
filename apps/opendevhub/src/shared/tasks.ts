@@ -1,5 +1,16 @@
 import type { ModelRef, TaskVariantSpec } from "./types";
 
+/** A started checkout's note while its first message is on its way; cleared once opencode accepts it. */
+export const FIRST_TURN_SENDING = "sending the first message…";
+
+/** What that note becomes when opendevhub restarted before opencode accepted the first message. */
+export const FIRST_TURN_INTERRUPTED =
+  "opendevhub restarted while sending the first message: check the conversation and send it again if it's missing";
+
+/** The note when sending the first message failed, though the conversation exists (opencode may still have it). */
+export const firstTurnUnconfirmed = (reason: string): string =>
+  `the first message may not have been sent (${reason}): check the conversation and send it again if it's missing`;
+
 export const TITLE_MAX = 60;
 export const MAX_VARIANTS = 4;
 const SLUG_MAX = 40;

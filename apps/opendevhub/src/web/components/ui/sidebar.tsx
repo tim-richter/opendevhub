@@ -95,14 +95,23 @@ const SidebarProvider = ({
       const nextWidth = Math.max(SIDEBAR_MIN_WIDTH, Math.min(maxWidth, width));
       setSidebarWidthState(nextWidth);
       if (persist) {
-        localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(nextWidth));
+        try {
+          localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(nextWidth));
+        } catch {
+          /* Storage may be disabled. */
+        }
       }
     },
     []
   );
 
   React.useEffect(() => {
-    const savedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    let savedWidth = 0;
+    try {
+      savedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    } catch {
+      /* Storage may be disabled. */
+    }
     if (Number.isFinite(savedWidth) && savedWidth > 0) {
       setSidebarWidth(savedWidth);
     }

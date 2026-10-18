@@ -1,4 +1,8 @@
-import { taskBranches } from "../../shared/tasks";
+import {
+  FIRST_TURN_SENDING,
+  firstTurnUnconfirmed,
+  taskBranches,
+} from "../../shared/tasks";
 import type {
   ComposerSendRequest,
   EnvId,
@@ -51,15 +55,35 @@ export interface SetupSink {
   taskId?: string;
   step: (patch: VariantPatch) => void;
   log: (line: string) => void;
-  /** Links the session the setup just created; called while the directory is claimed, so reconcile leaves it alone. */
+  /**
+   * Links the session the setup just created, with `note` as its error until the first message is confirmed; called
+   * while the directory is claimed, so reconcile leaves it alone.
+   */
   attach: (session: {
     sessionId: string;
     envId: EnvId;
     directory: string;
+    note?: string;
   }) => void;
   /** The worktree and branch rows the setup recorded. */
   created?: (rows: { branchId: number; worktreeId: number }) => void;
+  /** Whether the checkout was given up on meanwhile (a discarded variant): its setup stops at the next step. */
+  cancelled?: () => boolean;
 }
+
+/** A checkout given up on while it was being set up; it gets no container, session or first message. */
+class DiscardedError extends Error {
+  constructor() {
+    super("discarded while it was starting");
+    this.name = "DiscardedError";
+  }
+}
+
+const stopIfCancelled = (sink: SetupSink): void => {
+  if (sink.cancelled?.()) {
+    throw new DiscardedError();
+  }
+};
 
 /** One checkout to set up: where it reports, and its session's title, model and agent. */
 export interface SetupSlot {
@@ -141,6 +165,8 @@ export class CheckoutSetup {
       ? { isolated: true, notice: undefined }
       : localIsolation();
     const own: (EnvWorktree | undefined)[] = [];
+    /** Where each slot that runs in an existing container starts its session, once the git lock is released. */
+    const shared: (string | undefined)[] = [];
     const step = (i: number, patch: VariantPatch) => slots[i].sink.step(patch);
     const fail = (
       i: number,
@@ -209,6 +235,7 @@ export class CheckoutSetup {
         slotResults.push(result);
         const onLine = (l: string) => this.slotLog(id, sink, l);
         try {
+          stopIfCancelled(sink);
           if (job.where === "existing") {
             if (!existing) {
               throw new InvalidRequestError(
@@ -292,15 +319,7 @@ export class CheckoutSetup {
             }
           }
           step(i, { step: "session" });
-          await this.startSession(
-            client,
-            id,
-            slot,
-            result,
-            result.directory ?? ws,
-            turn
-          );
-          settled.add(i);
+          shared[i] = result.directory ?? ws;
         } catch (error) {
           fail(i, branch, result, error);
         }
@@ -326,19 +345,39 @@ export class CheckoutSetup {
       }
       return slotResults;
     });
-    await Promise.all(
-      own.map(async (worktree, i) => {
+    // Sessions start outside the git lock: a slow first turn must not hold up every other git action on the project.
+    const startShared = shared.map(async (directory, i) => {
+      if (directory === undefined) {
+        return;
+      }
+      const result = results[i];
+      try {
+        await this.startSession(client, id, slots[i], result, directory, turn);
+        settled.add(i);
+      } catch (error) {
+        fail(i, result.branch, result, error);
+      }
+    });
+    await Promise.all([
+      ...startShared,
+      ...own.map(async (worktree, i) => {
         if (!worktree) {
           return;
         }
         const result = results[i];
         const slot = slots[i];
         try {
+          stopIfCancelled(slot.sink);
           const env = await this.envs
             .ensureTaskEnv(project, worktree, node, this.envSetup(slot.sink))
             .catch((error: unknown) => {
               throw new Error(`its container did not start: ${message(error)}`);
             });
+          if (slot.sink.cancelled?.()) {
+            // Its container was started for it alone; the worktree and branch stay.
+            await this.envs.destroy(env).catch(() => undefined);
+            throw new DiscardedError();
+          }
           result.envId = env.id;
           step(i, { envId: env.id, step: "session" });
           await this.startSession(
@@ -353,8 +392,8 @@ export class CheckoutSetup {
         } catch (error) {
           fail(i, worktree.branch, result, error);
         }
-      })
-    );
+      }),
+    ]);
     const started = results.filter((r) => r.sessionId).length;
     const of = slots.length;
     this.envs.log(
@@ -451,6 +490,7 @@ export class CheckoutSetup {
       }
     }
     const { spec, sink } = slot;
+    stopIfCancelled(sink);
     const release = this.deps.tasks.claim(envId, directory);
     try {
       const session = await client.createSession(
@@ -463,25 +503,43 @@ export class CheckoutSetup {
         FIRST_TURN_TIMEOUT_MS
       );
       result.sessionId = session.id;
-      sink.attach({ directory, envId, sessionId: session.id });
+      sink.attach({
+        directory,
+        envId,
+        note: FIRST_TURN_SENDING,
+        sessionId: session.id,
+      });
     } finally {
       release();
     }
+    // Discarded while its session was being created: it stays empty, and hidden with its variant.
+    stopIfCancelled(sink);
     const { sessionId } = result;
     const { attachments, text } = resolved;
-    await (command
-      ? client.command(sessionId, command, text, directory, {
-          ...attachments,
-          timeoutMs: FIRST_TURN_TIMEOUT_MS,
-        })
-      : client.prompt(
-          sessionId,
-          text,
-          undefined,
-          directory,
-          attachments,
-          FIRST_TURN_TIMEOUT_MS
-        ));
+    try {
+      await (command
+        ? client.command(sessionId, command, text, directory, {
+            ...attachments,
+            timeoutMs: FIRST_TURN_TIMEOUT_MS,
+          })
+        : client.prompt(
+            sessionId,
+            text,
+            undefined,
+            directory,
+            attachments,
+            FIRST_TURN_TIMEOUT_MS
+          ));
+    } catch (error) {
+      // The conversation exists and opencode may well have taken the message (a timeout says nothing about that), so
+      // the checkout runs on, with a note instead of a failure.
+      const note = firstTurnUnconfirmed(message(error));
+      result.notice = note;
+      sink.step({ error: note });
+      sink.log(note);
+      return;
+    }
+    sink.step({ error: null });
   }
 
   private failed(

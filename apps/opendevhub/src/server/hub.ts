@@ -23,12 +23,13 @@ export const createHub = (deps: HubDeps): Hub => {
   const environments = new Environments(deps);
   const sessions = new Sessions(deps, environments);
   const checkouts = new Checkouts(deps, environments, sessions);
+  const cleanupTargets = new CleanupTargets(deps, environments, checkouts);
   const setup = new CheckoutSetup(deps, environments);
-  const tasks = new Tasks(deps, environments, setup);
+  const tasks = new Tasks(deps, environments, setup, cleanupTargets);
   return {
     chat: new Chat(deps, environments, sessions, setup, tasks),
     checkouts,
-    cleanupTargets: new CleanupTargets(deps, environments, checkouts),
+    cleanupTargets,
     environments,
     reviews: new ReviewActions(deps, environments, sessions, checkouts),
     sessions,

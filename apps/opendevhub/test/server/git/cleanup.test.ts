@@ -184,6 +184,8 @@ function repo(o: {
   remotes?: string[];
   remoteHead?: string;
   fetchFails?: string;
+  /** Branches that never got a commit of their own. */
+  fresh?: string[];
 }) {
   const git = {
     remotes: vi.fn(async () => o.remotes ?? ["origin"]),
@@ -206,6 +208,9 @@ function repo(o: {
         }
         return inBase.includes(b);
       }
+    ),
+    neverMoved: vi.fn(async (_p: Project, _d: string, b: string) =>
+      (o.fresh ?? []).includes(b)
     ),
     isClean: vi.fn(
       async (_p: Project, dir: string) => !(o.dirty ?? []).includes(dir)
@@ -323,6 +328,39 @@ describe(scanBranches, () => {
       workspace: WS,
       worktrees: [],
       envOf: () => {},
+    });
+    expect(r.items.map((i) => i.branch)).toStrictEqual(["feat"]);
+  });
+
+  it("leaves out a branch that never got a commit of its own, though its base contains it", async () => {
+    const git = repo({
+      refs: [ref("fresh"), ref("feat")],
+      merged: { main: ["fresh", "feat"] },
+      remoteHead: "main",
+      fresh: ["fresh"],
+    });
+    const r = await scanBranches(git, {
+      project,
+      workspace: WS,
+      worktrees: [wt("fresh"), wt("feat")],
+      envOf: () => {},
+    });
+    expect(r.items.map((i) => i.branch)).toStrictEqual(["feat"]);
+  });
+
+  it("leaves out branches and worktrees in use", async () => {
+    const git = repo({
+      refs: [ref("busy"), ref("starting"), ref("feat")],
+      merged: { main: ["busy", "starting", "feat"] },
+      remoteHead: "main",
+    });
+    const r = await scanBranches(git, {
+      project,
+      workspace: WS,
+      worktrees: [wt("busy"), wt("feat")],
+      envOf: () => {},
+      inUse: (branch, path) =>
+        branch === "starting" || path === wt("busy").path,
     });
     expect(r.items.map((i) => i.branch)).toStrictEqual(["feat"]);
   });

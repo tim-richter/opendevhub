@@ -5,8 +5,12 @@ import type { EnvId, Isolation, ProjectId } from "../../shared/types";
 
 const MAX_LABEL = 63;
 const BRANCH_SLUG_MAX = 20;
+const HASH_CHARS = 8;
 
-/** `<projectId>-<branch slug>-<hash4>`, at most 63 characters so it works as a hostname label. */
+/**
+ * `<projectId>-<branch slug>-<hash8>`, at most 63 characters so it works as a hostname label. The slug is cut short,
+ * so worktrees of similarly named branches tell apart by the hash alone. Ids already recorded keep their shorter hash.
+ */
 export const envIdFor = (
   projectId: ProjectId,
   worktreePath: string,
@@ -15,7 +19,7 @@ export const envIdFor = (
   const hash = createHash("sha256")
     .update(`${projectId}\0${worktreePath}`)
     .digest("hex")
-    .slice(0, 4);
+    .slice(0, HASH_CHARS);
   const tail = `-${slugify(branch, BRANCH_SLUG_MAX) || "worktree"}-${hash}`;
   return projectId.slice(0, MAX_LABEL - tail.length).replace(/-+$/u, "") + tail;
 };

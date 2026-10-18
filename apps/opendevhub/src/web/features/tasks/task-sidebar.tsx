@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-import { modelShortName } from "../../../shared/tasks";
+import { FIRST_TURN_SENDING, modelShortName } from "../../../shared/tasks";
 import type {
   ProjectView,
   SessionSummary,
@@ -140,6 +140,19 @@ const VariantCard = (props: {
       )}
       {state === "failed" && v.error && (
         <span className="text-destructive line-clamp-2 text-xs">{v.error}</span>
+      )}
+      {/* A running variant's error is a note about its first message, e.g. that it may not have been sent. */}
+      {state !== "failed" && v.sessionId && v.error && (
+        <span
+          className={cn(
+            "line-clamp-3 text-xs",
+            v.error === FIRST_TURN_SENDING
+              ? "text-muted-foreground"
+              : "text-warn"
+          )}
+        >
+          {v.error}
+        </span>
       )}
       {v.branch && (
         <span className="text-muted-foreground truncate font-mono text-xs">

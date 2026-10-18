@@ -203,6 +203,8 @@ function containerGit(
     head?: string;
     recordedBase?: string;
     list?: string;
+    /** Folders that exist already. */
+    existing?: string[];
   } = {}
 ) {
   const calls: string[][] = [];
@@ -219,6 +221,12 @@ function containerGit(
       timedOut: false,
     });
     const sub = command.slice(3).join(" ");
+    if (command[0] === "test") {
+      return {
+        ...ok(),
+        exitCode: (opts.existing ?? []).includes(command[2]) ? 0 : 1,
+      };
+    }
     if (command[1] === "--version") {
       return ok(`git version ${opts.version ?? "2.49.0"}\n`);
     }
@@ -266,6 +274,29 @@ function hostGit(version = "2.49.0") {
     c.cmd === "git" ? { stdout: `git version ${version}\n` } : {}
   );
 }
+
+describe("Worktrees.add folders", () => {
+  it("takes the next free folder when another branch or a leftover holds the name", async () => {
+    const c = containerGit({
+      existing: [
+        "/workspaces/demo.worktrees/feature-x",
+        "/workspaces/demo.worktrees/feature-x-2",
+      ],
+    });
+    const wt = await new Worktrees({ containers: c, run: hostGit().run }).add(
+      project,
+      {
+        workspaceFolder: "/workspaces/demo",
+        root,
+        branch: "feature/x",
+        onLine: () => {},
+      }
+    );
+    expect(wt.path).toBe("/workspaces/demo.worktrees/feature-x-3");
+    expect(wt.hostPath).toBe(`${root.host}/feature-x-3`);
+    expect(addCall(c)).toContain("/workspaces/demo.worktrees/feature-x-3");
+  });
+});
 
 describe("Worktrees.add", () => {
   const add = (

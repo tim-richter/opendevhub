@@ -21,6 +21,7 @@ import type { ReactNode } from "react";
 import { confirm } from "@/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 
+import { FIRST_TURN_SENDING } from "../../../shared/tasks";
 import type {
   ChecksView,
   ProjectView,
@@ -344,6 +345,17 @@ export const ProjectTask = () => {
             {current === "conversation" && !setup && (
               <PhoneThreadSelect {...frame} />
             )}
+            {!setup &&
+              current === "conversation" &&
+              variant.sessionId &&
+              variant.error &&
+              variant.error !== FIRST_TURN_SENDING && (
+                <Alert className="border-warn/40 bg-warn/10">
+                  <AlertDescription className="text-warn">
+                    {variant.error}
+                  </AlertDescription>
+                </Alert>
+              )}
             {setup ? (
               <VariantSetup
                 variant={variant}

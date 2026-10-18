@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_PORT,
@@ -49,28 +49,21 @@ describe("config", () => {
     expect(loadConfig(dir)).toStrictEqual({ port: 9000 });
   });
 
-  it("backs up a corrupt file and starts fresh", () => {
-    fs.writeFileSync(path.join(dir, "config.json"), "{not json");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(loadConfig(dir)).toStrictEqual({ port: DEFAULT_PORT });
-    expect(fs.existsSync(path.join(dir, "config.json.bak"))).toBeTruthy();
-    expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
+  it("refuses a corrupt file, naming it, and leaves it as it is", () => {
+    const file = path.join(dir, "config.json");
+    fs.writeFileSync(file, "{not json");
+    expect(() => loadConfig(dir)).toThrow(`${file} is not valid JSON`);
+    expect(fs.readFileSync(file, "utf-8")).toBe("{not json");
+    expect(fs.existsSync(`${file}.bak`)).toBeFalsy();
   });
 
   it.each(["null", "[]", '"invalid"', "42", "true"])(
-    "backs up an invalid top-level config value %j and uses defaults",
+    "refuses an invalid top-level config value %j",
     (text) => {
       const file = path.join(dir, "config.json");
       fs.writeFileSync(file, text);
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      try {
-        expect(loadConfig(dir)).toStrictEqual({ port: DEFAULT_PORT });
-        expect(fs.readFileSync(`${file}.bak`, "utf-8")).toBe(text);
-        expect(warn).toHaveBeenCalledOnce();
-      } finally {
-        warn.mockRestore();
-      }
+      expect(() => loadConfig(dir)).toThrow("must hold a JSON object");
+      expect(fs.readFileSync(file, "utf-8")).toBe(text);
     }
   );
 });

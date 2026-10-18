@@ -542,6 +542,33 @@ describe("git", () => {
       );
     });
 
+    it("tells a branch that never moved from one with commits of its own", async () => {
+      const reflog = (lines: number) =>
+        ops((cmd) =>
+          cmd.includes("reflog")
+            ? { exitCode: 0, stdout: "a\n".repeat(lines) }
+            : { exitCode: 0, stdout: "c1\nc2\n" }
+        ).git;
+      await expect(
+        reflog(1).neverMoved(p, "/w", "feat", "main")
+      ).resolves.toBeTruthy();
+      await expect(
+        reflog(2).neverMoved(p, "/w", "feat", "main")
+      ).resolves.toBeFalsy();
+      // Without a reflog, only a branch at its base's commit never moved.
+      await expect(
+        reflog(0).neverMoved(p, "/w", "feat", "main")
+      ).resolves.toBeFalsy();
+      const same = ops((cmd) =>
+        cmd.includes("reflog")
+          ? { exitCode: 128 }
+          : { exitCode: 0, stdout: "c1\nc1\n" }
+      ).git;
+      await expect(
+        same.neverMoved(p, "/w", "feat", "main")
+      ).resolves.toBeTruthy();
+    });
+
     it("lists remotes and branch refs", async () => {
       const { git, calls } = ops((cmd) => ({
         stdout: cmd[3] === "remote" ? "origin\nfork\n" : "feat\t\t\n",

@@ -129,6 +129,52 @@ describe("cleanup", () => {
     expect(git.deleteBranch).not.toHaveBeenCalled();
   });
 
+  it("never lists or deletes a branch whose worktree has a running session", async () => {
+    const { hub, store, worktrees, git } = await running();
+    store.setSessions(project.id, [
+      {
+        id: "ses_busy",
+        projectId: project.id,
+        title: "busy",
+        directory: featWt.path,
+        updatedAt: 1,
+        status: "running",
+      },
+    ]);
+    expect(
+      (await hub.cleanupTargets.cleanupScan(project.id)).items
+    ).toStrictEqual([]);
+    await expect(
+      hub.cleanupTargets.cleanupBranch(project.id, item)
+    ).resolves.toStrictEqual({
+      outcome: "skipped",
+      message: "changed since scan: a session is using it",
+    });
+    expect(worktrees.remove).not.toHaveBeenCalled();
+    expect(git.deleteBranch).not.toHaveBeenCalled();
+  });
+
+  it("never lists the branch of a task variant still being set up", async () => {
+    const { hub, tasks } = await running();
+    tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: project.id,
+      prompt: "Fix",
+      title: "Fix",
+      variants: [{}],
+    });
+    tasks.updateVariant(
+      "tsk_1",
+      1,
+      { branch: "feat", step: "container" },
+      SYSTEM
+    );
+    expect(
+      (await hub.cleanupTargets.cleanupScan(project.id)).items
+    ).toStrictEqual([]);
+  });
+
   it("removes the worktree's own container first", async () => {
     const { hub, store, containers, dbs } = await running();
     store.putEnvironment({

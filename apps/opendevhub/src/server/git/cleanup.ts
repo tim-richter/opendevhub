@@ -157,6 +157,7 @@ export type BranchGit = Pick<
   | "branchRefs"
   | "remoteHead"
   | "isAncestor"
+  | "neverMoved"
   | "recordedBase"
   | "currentBranch"
   | "isClean"
@@ -170,6 +171,8 @@ export interface BranchScanInput {
   worktrees: Worktree[];
   /** The task environment serving a worktree, if it has its own container. */
   envOf: (worktreePath: string) => EnvId | undefined;
+  /** Whether a running session or a checkout being set up uses the branch or its worktree; those are never listed. */
+  inUse?: (branch: string, worktreePath: string | undefined) => boolean;
 }
 
 const message = (err: unknown): string =>
@@ -199,7 +202,10 @@ const baseOf = async (
   );
 };
 
-/** Merged into its base, or pushed once and deleted on the remote since. Throws when git can't compare. */
+/**
+ * Merged into its base, or pushed once and deleted on the remote since. A branch that never got a commit of its own
+ * is neither: it is an ancestor of its base only because nothing happened on it yet. Throws when git can't compare.
+ */
 const verdict = async (
   git: BranchGit,
   p: Project,
@@ -208,7 +214,9 @@ const verdict = async (
   base: string
 ) => {
   if (await git.isAncestor(p, ws, ref.name, base)) {
-    return "merged" as const;
+    return (await git.neverMoved(p, ws, ref.name, base))
+      ? undefined
+      : ("merged" as const);
   }
   if (ref.upstream && ref.gone) {
     return "upstream-gone" as const;
@@ -245,6 +253,9 @@ export const scanBranches = async (
       continue;
     }
     const worktree = input.worktrees.find((w) => w.branch === ref.name);
+    if (input.inUse?.(ref.name, worktree?.path)) {
+      continue;
+    }
     // A worktree whose status can't be read counts as dirty, so it's never removed by default.
     const dirty = worktree
       ? !(await git.isClean(p, worktree.path).catch(() => false))
@@ -279,7 +290,8 @@ export const branchChanged = async (
   p: Project,
   ws: string,
   item: BranchCleanupItem,
-  worktrees: Worktree[]
+  worktrees: Worktree[],
+  inUse?: BranchScanInput["inUse"]
 ): Promise<string | undefined> => {
   const result = await git.branchRefs(p, ws);
   const ref = result.find((r) => r.name === item.branch);
@@ -301,6 +313,9 @@ export const branchChanged = async (
   const worktree = worktrees.find((w) => w.branch === item.branch);
   if (worktree?.path !== item.worktree) {
     return "changed since scan";
+  }
+  if (inUse?.(item.branch, worktree?.path)) {
+    return "changed since scan: a session is using it";
   }
   if (
     worktree &&
