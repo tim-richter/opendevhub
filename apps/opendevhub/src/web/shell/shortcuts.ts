@@ -3,7 +3,7 @@
  * acts (the shell, the sidebar, a dialog or a card) and can be rebound in Settings; add new ones here.
  */
 import { normalizeHotkey } from "@tanstack/react-hotkeys";
-import type { Hotkey } from "@tanstack/react-hotkeys";
+import type { HotkeyChord } from "@tanstack/react-hotkeys";
 
 /** Where a shortcut works. Shortcuts only clash with others in their own scope or with a global one. */
 export type ShortcutScope =
@@ -19,7 +19,7 @@ export interface ShortcutGroup {
   title: string;
   /** Where the shortcuts work. */
   hint: string;
-  shortcuts: { id: ShortcutId; label: string; default: Hotkey }[];
+  shortcuts: { id: ShortcutId; label: string; default: HotkeyChord }[];
 }
 
 export const SHORTCUT_GROUPS = [
@@ -93,14 +93,14 @@ export const SHORTCUT_GROUPS = [
     title: "Review",
   },
 ] as const satisfies readonly (Omit<ShortcutGroup, "shortcuts"> & {
-  shortcuts: readonly { id: string; label: string; default: Hotkey }[];
+  shortcuts: readonly { id: string; label: string; default: HotkeyChord }[];
 })[];
 
 export type ShortcutId =
   (typeof SHORTCUT_GROUPS)[number]["shortcuts"][number]["id"];
 
 /** A shortcut's key, or `null` once the user has turned it off. */
-export type Binding = Hotkey | null;
+export type Binding = HotkeyChord | null;
 
 /** What the user changed; shortcuts left out keep their default. */
 export type ShortcutOverrides = Partial<Record<ShortcutId, Binding>>;
@@ -109,7 +109,7 @@ const SCOPE_OF = new Map<ShortcutId, ShortcutScope>(
   SHORTCUT_GROUPS.flatMap((g) => g.shortcuts.map((s) => [s.id, g.scope]))
 );
 
-const DEFAULTS = new Map<ShortcutId, Hotkey>(
+const DEFAULTS = new Map<ShortcutId, HotkeyChord>(
   SHORTCUT_GROUPS.flatMap((g) => g.shortcuts.map((s) => [s.id, s.default]))
 );
 
@@ -120,8 +120,8 @@ const LABELS = new Map<ShortcutId, string>(
 export const isShortcutId = (id: string): id is ShortcutId =>
   DEFAULTS.has(id as ShortcutId);
 
-export const defaultBinding = (id: ShortcutId): Hotkey =>
-  DEFAULTS.get(id) as Hotkey;
+export const defaultBinding = (id: ShortcutId): HotkeyChord =>
+  DEFAULTS.get(id) as HotkeyChord;
 
 export const bindingOf = (
   id: ShortcutId,
@@ -162,7 +162,7 @@ export const withBinding = (
     : { ...rest, [id]: binding };
 };
 
-const sameHotkey = (a: Hotkey, b: Hotkey): boolean =>
+const sameHotkey = (a: HotkeyChord, b: HotkeyChord): boolean =>
   normalizeHotkey(a) === normalizeHotkey(b);
 
 const scopesClash = (a: ShortcutScope, b: ShortcutScope): boolean =>
@@ -171,7 +171,7 @@ const scopesClash = (a: ShortcutScope, b: ShortcutScope): boolean =>
 /** The label of another shortcut `hotkey` would clash with if `id` took it. */
 export const conflictFor = (
   id: ShortcutId,
-  hotkey: Hotkey,
+  hotkey: HotkeyChord,
   overrides: ShortcutOverrides
 ): string | undefined => {
   const scope = SCOPE_OF.get(id) as ShortcutScope;

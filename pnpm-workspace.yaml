@@ -9,9 +9,9 @@ allowBuilds:
 autoDedupe: true
 
 permissions:
-  '@tanstack/charts':
+  "@tanstack/charts":
     skills: true
-  '@tanstack/devtools-vite':
+  "@tanstack/devtools-vite":
     skills: true
   ultracite:
     skills: false

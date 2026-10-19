@@ -2,7 +2,7 @@ import { spawn, execSync } from "node:child_process";
 
 import { chromium } from "playwright-core";
 
-const T = process.argv[2];
+const T = process.argv.at(2);
 const env = {
   ...process.env,
   XDG_CONFIG_HOME: `${T}/cfg`,
@@ -16,11 +16,16 @@ const start = () =>
 const up = async () => {
   for (;;) {
     try {
-      if ((await fetch("http://localhost:7791/api/health")).ok) {
+      const health = await fetch("http://localhost:7791/api/health");
+      if (health.ok) {
         return;
       }
-    } catch {}
-    await new Promise((r) => setTimeout(r, 300));
+    } catch {
+      // Not listening yet.
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 300);
+    });
   }
 };
 let server = start();
@@ -37,7 +42,9 @@ console.log(
   await page.evaluate(() => !!navigator.serviceWorker.controller)
 );
 server.kill("SIGTERM");
-await new Promise((r) => server.once("exit", r));
+await new Promise((resolve) => {
+  server.once("exit", resolve);
+});
 await page.goto("http://localhost:7791/settings");
 console.log("down:", await page.title(), page.url());
 await page.screenshot({ path: `${T}/offline.png` });
