@@ -13,6 +13,7 @@ import {
 } from "../../shared/personalization";
 import type { ResolvedPersonalization } from "../../shared/personalization";
 import type {
+  ConfigApprovalSource,
   EnvId,
   EnvLogs,
   EnvLogSource,
@@ -20,6 +21,7 @@ import type {
   ForwardedPort,
   Isolation,
   NodeId,
+  PendingConfigApproval,
   Project,
   ProjectId,
   Worktree,
@@ -28,7 +30,12 @@ import type {
 import { stateDir } from "../config";
 import { USER } from "../db/events";
 import type { Actor } from "../db/events";
-import { BusyError, NotFoundError, UnavailableError } from "../errors";
+import {
+  BusyError,
+  ConflictError,
+  NotFoundError,
+  UnavailableError,
+} from "../errors";
 import {
   InvalidRequestError,
   daemonSourceToHostPath,
@@ -58,6 +65,7 @@ import {
 import type { EnvRecord } from "../projects/state";
 import { reconcileSessions } from "../sessions/reconcile";
 import type { Presence } from "../sessions/reconcile";
+import { ApprovalRequiredError, NotApprovedError } from "./approvals";
 import {
   buildOverrideConfig,
   envIdFor,
@@ -67,8 +75,14 @@ import {
   resolveEnvSettings,
 } from "./config";
 import type { EnvSettings } from "./config";
+import { composeFiles, hostSurface } from "./config-surface";
 import { CommandError, envLabels, LABEL } from "./containers";
-import type { ContainerInfo, ExecTarget, PortConfig } from "./containers";
+import type {
+  ConfigRead,
+  ContainerInfo,
+  ExecTarget,
+  PortConfig,
+} from "./containers";
 import { EnvFiles } from "./files";
 import { cleanLogLine, LogBuffer } from "./log-buffer";
 import { Monitor } from "./monitor";
@@ -134,8 +148,10 @@ export interface EnvSetup {
   actor: Actor;
   /** The task the environment is recorded for, when a variant asked for it. */
   taskId?: string;
-  step: (step: "image" | "container") => void;
+  step: (step: "approval" | "image" | "container") => void;
   log: (line: string) => void;
+  /** Whether the checkout was given up on meanwhile; ends a wait for approval. */
+  cancelled?: () => boolean;
 }
 
 /**
@@ -186,6 +202,12 @@ export class Environments {
   private readonly deps: HubDeps;
   constructor(deps: HubDeps) {
     this.deps = deps;
+    const { approvals } = deps;
+    if (approvals) {
+      // A pick, a dismissal or a removed chat ends a checkout's wait for approval at once.
+      deps.tasks.subscribe(() => approvals.recheckCancelled());
+      deps.chats.subscribe(() => approvals.recheckCancelled());
+    }
   }
 
   async rescan(): Promise<void> {
@@ -676,11 +698,88 @@ export class Environments {
       this.setups.set(env.id, setup);
     }
     try {
+      // Outside exclusiveEnv: the worktree's other actions (remove, logs) stay usable while it waits.
+      await this.awaitApproval(env, setup);
       await this.exclusiveEnv(env, () => this.bringUpTask(env));
     } finally {
       this.setups.delete(env.id);
     }
     return env;
+  }
+
+  /**
+   * Approve on the banner: records exactly the reviewed settings `fingerprint`, once every checkout it blocks still
+   * has them (re-read now), and starts what they blocked. A checkout whose config changed since makes it a
+   * ConflictError, and the banner then shows its new pending approval.
+   */
+  async approveConfig(projectId: ProjectId, fp: string): Promise<void> {
+    const approvals = this.requireApprovals();
+    const pending = approvals.pendingOf(projectId, fp);
+    if (!pending) {
+      // Throws the "no longer pending" conflict.
+      approvals.approve(projectId, fp);
+      return;
+    }
+    const project = this.requireProject(projectId);
+    let changed = false;
+    for (const source of pending.sources) {
+      const env = this.envOfSource(project, source);
+      if (!env) {
+        approvals.forget(projectId, source);
+        continue;
+      }
+      const now = await this.readAndCheck(env);
+      if (now.pending?.fingerprint !== fp) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      throw new ConflictError(
+        "the devcontainer config changed since the review; review it again"
+      );
+    }
+    approvals.approve(projectId, fp);
+  }
+
+  /** Keep stopped on the banner: clears the pending settings without approving them; waiting variants fail. */
+  refuseConfig(projectId: ProjectId, fp: string): void {
+    this.requireProject(projectId);
+    this.requireApprovals().refuse(projectId, fp);
+  }
+
+  private requireApprovals(): NonNullable<HubDeps["approvals"]> {
+    if (!this.deps.approvals) {
+      throw new UnavailableError("config approvals are not available");
+    }
+    return this.deps.approvals;
+  }
+
+  /** The environment a pending approval's checkout is, if it still exists. */
+  private envOfSource(
+    project: Project,
+    source: ConfigApprovalSource
+  ): Env | undefined {
+    if (source.kind === "main") {
+      return this.mainEnv(project);
+    }
+    const rec = this.deps.store.environment(source.envId);
+    return rec ? this.taskEnv(project, rec) : undefined;
+  }
+
+  /**
+   * For a start or rebuild from the dashboard, before it runs in the background: fails at once with the pending
+   * approval when the checkout's config needs one, and approving it runs `retry` (the same action).
+   */
+  async checkConfig(
+    projectId: ProjectId,
+    envId: EnvId | undefined,
+    retry: () => void
+  ): Promise<void> {
+    const project = this.requireProject(projectId);
+    const env = envId
+      ? this.requireTaskEnv(projectId, envId)
+      : this.mainEnv(project);
+    await this.requireApproved(env, retry);
   }
 
   /** The remote environment whose worktree is `directory`, if one is. */
@@ -1167,7 +1266,7 @@ export class Environments {
   }
 
   /** Moves the starting checkout an environment is set up for to its next step. */
-  private setupStep(env: Env, step: "image" | "container"): void {
+  private setupStep(env: Env, step: "approval" | "image" | "container"): void {
     this.setups.get(env.id)?.step(step);
   }
 
@@ -1203,6 +1302,18 @@ export class Environments {
           "task environments are not available in this build"
         );
       }
+      // Checked again right before the build: the config may have changed since ensureTaskEnv's check. A variant
+      // that started waiting then fails here instead of waiting again.
+      const read =
+        (await this.requireApproved(
+          env,
+          this.setups.has(env.id)
+            ? undefined
+            : () =>
+                void this.startEnv(env.project.id, env.id).catch(
+                  () => undefined
+                )
+        )) ?? (await containers.readConfig(env.worktree.hostPath));
       this.setupStep(env, "image");
       const personal = this.personalizationOf(env.project);
       const image = await images.ensureBase(
@@ -1213,7 +1324,6 @@ export class Environments {
         noCache,
         personal.features
       );
-      const read = await containers.readConfig(env.worktree.hostPath);
       const blocker = isolationBlocker(
         read.configuration,
         read.workspaceFolder
@@ -1371,6 +1481,10 @@ export class Environments {
       opencode: "absent",
     });
     try {
+      await this.requireApproved(
+        env,
+        () => void this.start(project.id).catch(() => undefined)
+      );
       const mounts = [
         ...(await this.worktreeMounts(project)),
         ...(await this.opencodeMounts(env)),
@@ -1435,6 +1549,10 @@ export class Environments {
       );
     } catch (error) {
       this.fail(env, error);
+      // The one failure a start's caller hears of: the API answers it with the pending approval.
+      if (error instanceof ApprovalRequiredError) {
+        throw error;
+      }
     }
   }
 
@@ -1463,6 +1581,120 @@ export class Environments {
       password: result.password,
     });
     this.startMonitor(env);
+  }
+
+  /** The checkout a pending approval names for an environment. */
+  private approvalSource(env: Env): ConfigApprovalSource {
+    return env.worktree
+      ? {
+          branch: env.worktree.branch,
+          envId: env.id,
+          kind: "worktree",
+          node: env.node,
+        }
+      : { kind: "main" };
+  }
+
+  /**
+   * Reads the checkout's devcontainer config on its node, Compose files included, and checks its host-affecting
+   * settings against the project's approvals. Without approvals wired (some tests) nothing is read.
+   */
+  private async readAndCheck(
+    env: Env
+  ): Promise<{ read?: ConfigRead; pending?: PendingConfigApproval }> {
+    const { approvals } = this.deps;
+    if (!approvals) {
+      return {};
+    }
+    const { containers } = this.kit(env);
+    const root = env.worktree?.hostPath ?? env.project.path;
+    const read = await containers.readConfig(root);
+    if (read.mergedError) {
+      this.envLog(
+        env,
+        `environment: its features' metadata could not be read (${read.mergedError}), so the features themselves count as host-affecting settings`
+      );
+    }
+    const files: Record<string, string> = {};
+    for (const file of composeFiles(read, root)) {
+      if (!containers.readFile) {
+        throw new UnavailableError(
+          "Docker Compose files can't be read on this node"
+        );
+      }
+      files[file] = await containers.readFile(file);
+    }
+    const result = approvals.check(
+      env.project.id,
+      hostSurface(read, root, files),
+      this.approvalSource(env),
+      read.mergedError
+    );
+    return result.ok ? { read } : { pending: result.pending, read };
+  }
+
+  /** The checkout's config when it may be used; throws ApprovalRequiredError otherwise, and approving runs `retry`. */
+  private async requireApproved(
+    env: Env,
+    retry?: () => void
+  ): Promise<ConfigRead | undefined> {
+    const { read, pending } = await this.readAndCheck(env);
+    if (pending) {
+      if (retry) {
+        this.deps.approvals?.retryOnApprove(
+          env.project.id,
+          pending.fingerprint,
+          this.approvalSource(env),
+          retry
+        );
+      }
+      throw new ApprovalRequiredError(pending);
+    }
+    return read;
+  }
+
+  /**
+   * Before a task container is built or started: a starting variant waits at step `approval` until the user answers
+   * (and checks again once approved, as the config may have changed meanwhile); without one it fails at once.
+   */
+  private async awaitApproval(env: TaskEnv, setup?: EnvSetup): Promise<void> {
+    const { approvals } = this.deps;
+    if (!approvals) {
+      return;
+    }
+    for (;;) {
+      const { pending } = await this.readAndCheck(env);
+      if (!pending) {
+        return;
+      }
+      if (!setup) {
+        approvals.retryOnApprove(
+          env.project.id,
+          pending.fingerprint,
+          this.approvalSource(env),
+          () =>
+            void this.startEnv(env.project.id, env.id).catch(() => undefined)
+        );
+        throw new ApprovalRequiredError(pending);
+      }
+      setup.step("approval");
+      this.envLog(
+        env,
+        "environment: waiting for approval of its devcontainer config's host-affecting settings"
+      );
+      const outcome = await approvals.wait(
+        env.project.id,
+        pending.fingerprint,
+        () => setup.cancelled?.() ?? false
+      );
+      if (outcome === "refused") {
+        throw new NotApprovedError();
+      }
+      if (outcome === "cancelled") {
+        approvals.forget(env.project.id, this.approvalSource(env));
+        throw new Error("discarded while it waited for approval");
+      }
+    }
   }
 
   private mainEnv(project: Project): Env {

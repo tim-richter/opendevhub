@@ -7,6 +7,7 @@ const SETUP_STEPS: ReadonlySet<StartStep> = new Set([
   "queued",
   "pushing",
   "worktree",
+  "approval",
   "image",
   "container",
 ]);

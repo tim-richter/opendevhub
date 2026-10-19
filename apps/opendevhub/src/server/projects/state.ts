@@ -28,6 +28,7 @@ import type { Actor, EventStore } from "../db/events";
 import { SYSTEM } from "../db/events";
 import type { LinkStore, TaskLinks } from "../db/links";
 import type { TaskRecord, TaskStore } from "../db/tasks";
+import type { ConfigApprovals } from "../environments/approvals";
 import type { RunningContainer } from "../environments/resources";
 import { compareSessions } from "../sessions/status";
 
@@ -88,6 +89,7 @@ export class StateStore {
   private listeners = new Set<() => void>();
   private roots: string[] = [];
   private preflightState: Preflight = { errors: [] };
+  private approvals?: Pick<ConfigApprovals, "pending" | "subscribe">;
   private editorList: EditorInfo[] = [];
   private envs = new Map<EnvId, EnvRecord>();
   private isolationInfo = new Map<ProjectId, IsolationInfo>();
@@ -364,6 +366,15 @@ export class StateStore {
     this.emit();
   }
 
+  /** Lists each project's pending config approvals in the snapshot, and sends a new one on every change. */
+  watchApprovals(
+    approvals: Pick<ConfigApprovals, "pending" | "subscribe">
+  ): void {
+    this.approvals = approvals;
+    approvals.subscribe(() => this.emit());
+    this.emit();
+  }
+
   setPreflight(preflight: Preflight): void {
     this.preflightState = preflight;
     this.emit();
@@ -462,6 +473,9 @@ export class StateStore {
           tasks: this.tasksOf(project.id),
           chats: this.chatsOf(project.id),
           ...(isolation ? { isolation } : {}),
+          ...(this.approvals?.pending(project.id).length
+            ? { approvals: this.approvals.pending(project.id) }
+            : {}),
         };
       }),
       roots: this.roots,

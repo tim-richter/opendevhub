@@ -45,6 +45,7 @@ describe("openDatabase", () => {
     expect(tables(db)).toStrictEqual([
       "branches",
       "chats",
+      "config_approvals",
       "environments",
       "events",
       "forgejo_filter_presets",

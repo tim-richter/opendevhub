@@ -371,6 +371,9 @@ export class CheckoutSetup {
           const env = await this.envs
             .ensureTaskEnv(project, worktree, node, this.envSetup(slot.sink))
             .catch((error: unknown) => {
+              if (slot.sink.cancelled?.()) {
+                throw new DiscardedError();
+              }
               throw new Error(`its container did not start: ${message(error)}`);
             });
           if (slot.sink.cancelled?.()) {
@@ -415,6 +418,7 @@ export class CheckoutSetup {
       actor: sink.actor,
       log: (line) => sink.log(line),
       step: (s) => sink.step({ step: s }),
+      ...(sink.cancelled ? { cancelled: sink.cancelled } : {}),
       ...(sink.taskId ? { taskId: sink.taskId } : {}),
     };
   }

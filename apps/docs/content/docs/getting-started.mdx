@@ -33,7 +33,9 @@ npx opendevhub --port 8080 --no-open
 
 On first start, open **Settings → General** and add the folders that hold your git repos (for example `~/code`). They are saved in `config.json` and scanned on every start. The dashboard port is remembered too.
 
-The dashboard opens at `http://localhost:7777`. Containers keep running when opendevhub exits. The next time it starts, it reconnects to them.
+opendevhub prints the dashboard's link, `http://localhost:7777/?token=…`, and opens it. The token gives your browser access; other processes, agents in containers among them, can't use the dashboard without it. You need the link once per browser. Later, `opendevhub open` prints and opens it again. See [Dashboard access and config approvals](/docs/access-and-approvals).
+
+Containers keep running when opendevhub exits. The next time it starts, it reconnects to them.
 
 ## How opendevhub reaches containers
 

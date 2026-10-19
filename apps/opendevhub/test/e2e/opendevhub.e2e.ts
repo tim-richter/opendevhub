@@ -40,6 +40,7 @@ import { StateStore } from "../../src/server/projects/state";
 import { startServer } from "../../src/server/server";
 import { UsageStore, trackUsage } from "../../src/server/sessions/usage";
 import type { CheckRun, Project } from "../../src/shared/types";
+import { testAccess } from "../helpers/access";
 import { memoryStores } from "../helpers/stores";
 
 const fixture = path.resolve("test/e2e/fixture");
@@ -47,12 +48,13 @@ const fixture = path.resolve("test/e2e/fixture");
 function getViaHost(
   port: number,
   host: string,
-  urlPath: string
+  urlPath: string,
+  cookie: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     http
       .get(
-        { host: "127.0.0.1", port, path: urlPath, headers: { host } },
+        { host: "127.0.0.1", port, path: urlPath, headers: { cookie, host } },
         (res) => {
           let body = "";
           res.on("data", (c) => (body += c));
@@ -470,7 +472,9 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
         ).stdout.trim()
       ).toBe("");
 
+      const grant = testAccess();
       const server = await startServer({
+        access: grant.access,
         port: 0,
         app: new Hono(),
         resolveTarget: () => ({ ...address, password: rt.password! }),
@@ -478,13 +482,15 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
       const info = await getViaHost(
         server.port,
         `${project.id}.localhost:${server.port}`,
-        "/api/info"
+        "/api/info",
+        grant.envCookie(project.id)
       );
       expect(JSON.parse(info).version).toMatch(/^2\./u);
       const html = await getViaHost(
         server.port,
         `${project.id}.localhost:${server.port}`,
-        "/"
+        "/",
+        grant.envCookie(project.id)
       );
       expect(html).toContain("<html");
       await server.close();

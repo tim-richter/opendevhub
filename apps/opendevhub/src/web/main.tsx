@@ -13,6 +13,7 @@ import { ConfirmDialogHost } from "@/components/confirm-dialog";
 import { App, createAppRouter } from "./app";
 import { DashboardProvider } from "./dashboard-context";
 import { PERSIST_MAX_AGE_MS, persistOptions } from "./lib/query-persistence";
+import { AccessGate } from "./shell/access-gate";
 
 import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
@@ -34,27 +35,29 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <PersistQueryClientProvider
-      client={queryClient}
-      persistOptions={persistOptions}
-    >
-      <RouterContextProvider router={router}>
-        <DashboardProvider>
-          <TooltipProvider>
-            <App />
-            <ConfirmDialogHost />
-          </TooltipProvider>
-        </DashboardProvider>
-      </RouterContextProvider>
-      <TanStackDevtools
-        plugins={[
-          { name: "TanStack Query", render: <ReactQueryDevtoolsPanel /> },
-          {
-            name: "TanStack Router",
-            render: <TanStackRouterDevtoolsPanel router={router} />,
-          },
-        ]}
-      />
-    </PersistQueryClientProvider>
+    <AccessGate>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={persistOptions}
+      >
+        <RouterContextProvider router={router}>
+          <DashboardProvider>
+            <TooltipProvider>
+              <App />
+              <ConfirmDialogHost />
+            </TooltipProvider>
+          </DashboardProvider>
+        </RouterContextProvider>
+        <TanStackDevtools
+          plugins={[
+            { name: "TanStack Query", render: <ReactQueryDevtoolsPanel /> },
+            {
+              name: "TanStack Router",
+              render: <TanStackRouterDevtoolsPanel router={router} />,
+            },
+          ]}
+        />
+      </PersistQueryClientProvider>
+    </AccessGate>
   </StrictMode>
 );

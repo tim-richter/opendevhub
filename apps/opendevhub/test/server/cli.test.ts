@@ -2,13 +2,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { loadToken } from "../../src/server/access";
 import {
   loadAndSaveStartupConfig,
   parseCli,
   proxyTargets,
   runNodesCommand,
+  runOpenCommand,
+  runTokenCommand,
 } from "../../src/server/cli";
 import { loadConfig, saveConfig } from "../../src/server/config";
 import { USER } from "../../src/server/db/events";
@@ -205,5 +208,61 @@ describe(runNodesCommand, () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("dashboard link commands", () => {
+  const setup = () => {
+    const config = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-"));
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), "odh-cli-state-"));
+    saveConfig(config, { port: 9123 });
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const out = {
+      error: (l: string) => errors.push(l),
+      log: (l: string) => lines.push(l),
+    };
+    return { dirs: { config, state }, errors, lines, out };
+  };
+
+  it("opens the running dashboard with the token", async () => {
+    const { dirs, lines, out } = setup();
+    const openUrl = vi.fn(async () => {});
+    const answers = vi.fn(async () => true);
+    await expect(
+      runOpenCommand([], dirs, out, { answers, openUrl })
+    ).resolves.toBe(0);
+    const url = `http://localhost:9123/?token=${loadToken(dirs.state)}`;
+    expect(answers).toHaveBeenCalledWith(9123);
+    expect(lines).toStrictEqual([url]);
+    expect(openUrl).toHaveBeenCalledWith(url);
+  });
+
+  it("doesn't open with --no-open", async () => {
+    const { dirs, out } = setup();
+    const openUrl = vi.fn(async () => {});
+    await runOpenCommand(["--no-open"], dirs, out, {
+      answers: async () => true,
+      openUrl,
+    });
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("says so when nothing answers on the port", async () => {
+    const { dirs, errors, out } = setup();
+    await expect(
+      runOpenCommand([], dirs, out, { answers: async () => false })
+    ).resolves.toBe(1);
+    expect(errors[0]).toContain("not running on port 9123");
+  });
+
+  it("replaces the token and prints the new link", () => {
+    const { dirs, lines, out } = setup();
+    const old = loadToken(dirs.state);
+    expect(runTokenCommand(["--reset"], dirs, out)).toBe(0);
+    const token = loadToken(dirs.state);
+    expect(token).not.toBe(old);
+    expect(lines.at(-1)).toBe(`http://localhost:9123/?token=${token}`);
+    expect(runTokenCommand([], dirs, out)).toBe(2);
   });
 });

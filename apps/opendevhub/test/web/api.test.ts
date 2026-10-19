@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  checkAccess,
   fetchJiraSettings,
   saveJiraSettings,
   fetchJiraTickets,
@@ -54,6 +55,24 @@ const stubFetch = (status: number, body: unknown) => {
 
 describe("api", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  describe(checkAccess, () => {
+    it("is denied on 401 and granted on 200", async () => {
+      const fetchMock = stubFetch(401, { error: "no dashboard access" });
+      await expect(checkAccess()).resolves.toBe(false);
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/access");
+      stubFetch(200, { ok: true });
+      await expect(checkAccess()).resolves.toBe(true);
+    });
+
+    it("counts an unreachable server as access, so the dashboard shows itself offline", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => Promise.reject(new TypeError("down")))
+      );
+      await expect(checkAccess()).resolves.toBe(true);
+    });
+  });
 
   describe("Jira API", () => {
     it("keeps saved tokens server-side and supports cancellable search and ticket requests", async () => {

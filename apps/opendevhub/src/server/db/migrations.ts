@@ -273,6 +273,16 @@ ALTER TABLE task_sessions ADD COLUMN archived_at INTEGER;
   `
 ALTER TABLE environments ADD COLUMN personalization TEXT;
 `,
+  `
+CREATE TABLE config_approvals (
+  id          INTEGER PRIMARY KEY,
+  project_id  TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  surface     TEXT NOT NULL,
+  approved_at INTEGER NOT NULL,
+  UNIQUE (project_id, fingerprint)
+);
+`,
 ];
 
 export class NewerDatabaseError extends Error {

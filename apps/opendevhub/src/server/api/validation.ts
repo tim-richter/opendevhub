@@ -327,6 +327,9 @@ export const bodies = {
     deleteBranch: actionFlag,
   }),
   environment: z.object({ path: text }),
+  configApproval: z.object({
+    fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  }),
   session: directory.extend({ title: text, prompt: text }),
   prompt: z.object({ text }),
   composerSend,

@@ -929,13 +929,45 @@ export interface ProjectView {
   tasks: TaskView[];
   /** Its chats that are not internal, archived, removed or adopted, newest first. */
   chats: ChatView[];
+  /** Host-affecting container settings waiting for the user's approval; see `PendingConfigApproval`. */
+  approvals?: PendingConfigApproval[];
 }
 
-/** Where a starting task variant is: its worktree, its environment (image, container), then its session. */
+/** A checkout whose container start a pending approval blocks: the main checkout, or a worktree. */
+export type ConfigApprovalSource =
+  | { kind: "main" }
+  | { kind: "worktree"; envId: EnvId; branch: string; node: NodeId };
+
+/** One host-affecting setting against the closest approved settings. */
+export interface ConfigApprovalChange {
+  key: string;
+  kind: "added" | "changed" | "removed" | "unchanged";
+  before?: unknown;
+  after?: unknown;
+}
+
+/** Host-affecting settings of a project's devcontainer config that no approval of the project matches. */
+export interface PendingConfigApproval {
+  /** The settings' fingerprint; approving or refusing names it. */
+  fingerprint: string;
+  sources: ConfigApprovalSource[];
+  /** The settings, normalized as compared. */
+  surface: Record<string, unknown>;
+  /** Against the closest approval, or every setting as added when the project has none. */
+  changes: ConfigApprovalChange[];
+  /** Whether the project had no approval yet. */
+  first: boolean;
+  /** Why features count by themselves: their metadata couldn't be read. */
+  mergedError?: string;
+  at: number;
+}
+
+/** Where a starting task variant is: its worktree, its environment (approval, image, container), then its session. */
 export type StartStep =
   | "queued"
   | "pushing"
   | "worktree"
+  | "approval"
   | "image"
   | "container"
   | "session"

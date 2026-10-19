@@ -8,15 +8,17 @@ const fake = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock(import("node-pty"), () => ({ spawn: fake.spawn }));
 import { terminalCommand } from "../../../src/server/environments/terminals";
 import { startServer } from "../../../src/server/server";
+import { testAccess } from "../../helpers/access";
 
 let server: Awaited<ReturnType<typeof startServer>> | undefined;
+const { access, cookie } = testAccess();
 afterEach(async () => {
   await server?.close();
   server = undefined;
   vi.clearAllMocks();
 });
 
-function connect(origin?: string, terminal?: string) {
+function connect(origin?: string, terminal?: string, withCookie = true) {
   const params = new URLSearchParams({
     project: "p",
     directory: "/workspaces/branch",
@@ -27,7 +29,7 @@ function connect(origin?: string, terminal?: string) {
   }
   return new WebSocket(
     `ws://localhost:${server!.port}/api/terminal?${params}`,
-    { origin }
+    { origin, headers: withCookie ? { cookie } : {} }
   );
 }
 
@@ -45,6 +47,7 @@ describe("terminal routing", () => {
     fake.spawn.mockReturnValueOnce(firstPty).mockReturnValueOnce(secondPty);
     server = await startServer({
       port: 0,
+      access,
       app: new Hono(),
       resolveTarget: () => {},
       terminalTarget: () => ({ containerId: "c" }),
@@ -88,6 +91,7 @@ describe("terminal routing", () => {
     fake.spawn.mockReturnValueOnce(firstPty).mockReturnValueOnce(secondPty);
     server = await startServer({
       port: 0,
+      access,
       app: new Hono(),
       resolveTarget: () => {},
       terminalTarget: () => ({ containerId: "c" }),
@@ -199,6 +203,7 @@ describe("terminal routing", () => {
       const target = vi.fn(() => ({ containerId: "c" }));
       server = await startServer({
         port: 0,
+        access,
         app: new Hono(),
         resolveTarget: () => {},
         terminalTarget: target,
@@ -218,6 +223,28 @@ describe("terminal routing", () => {
     }
   );
 
+  it("rejects a socket without the dashboard cookie before resolving", async () => {
+    const target = vi.fn(() => ({ containerId: "c" }));
+    server = await startServer({
+      port: 0,
+      access,
+      app: new Hono(),
+      resolveTarget: () => {},
+      terminalTarget: target,
+    });
+    const ws = connect(`http://localhost:${server.port}`, undefined, false);
+    ws.on("error", () => {});
+    const status = await new Promise<number>((resolve) =>
+      ws.on("unexpected-response", (_req, res) => {
+        res.resume();
+        ws.terminate();
+        resolve(res.statusCode!);
+      })
+    );
+    expect(status).toBe(401);
+    expect(target).not.toHaveBeenCalled();
+  });
+
   it("routes input and resize, replays output on reconnect and kills on shutdown", async () => {
     const events = new EventEmitter();
     const pty = {
@@ -234,6 +261,7 @@ describe("terminal routing", () => {
     }));
     server = await startServer({
       port: 0,
+      access,
       app: new Hono(),
       resolveTarget: () => {},
       terminalTarget: target,

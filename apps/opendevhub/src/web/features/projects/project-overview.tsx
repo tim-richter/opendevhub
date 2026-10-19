@@ -40,6 +40,8 @@ import {
 import { checkoutResources } from "../../lib/resources";
 import { Link, Navigate, useSearchParams } from "../../routing";
 import { ActivityButton } from "../activity/activity-button";
+import { ApprovalBanner, ProjectApprovals } from "../approvals/approval-review";
+import { worktreeApproval } from "../approvals/approvals";
 import { chatActivity, chatNeedsYou } from "../chat/chat";
 import { ChatRow } from "../chat/chat-rows";
 import {
@@ -175,6 +177,8 @@ export const ProjectOverview = () => {
         }
       />
 
+      <ProjectApprovals view={view} />
+
       {runtime.error && (
         <Alert variant="destructive">
           <AlertDescription>{runtime.error}</AlertDescription>
@@ -303,6 +307,9 @@ const CheckoutRow = ({
   const to = checkoutPath(view.project.id, c.target);
   const { snapshot } = useDash();
   const resources = checkoutResources(snapshot, view, c);
+  const approval = c.worktree
+    ? worktreeApproval(view, c.worktree.branch, env?.node)
+    : undefined;
 
   return (
     <li
@@ -394,6 +401,11 @@ const CheckoutRow = ({
           }
         />
       </div>
+      {approval && (
+        <div className="relative md:col-span-4">
+          <ApprovalBanner view={view} approval={approval} compact />
+        </div>
+      )}
     </li>
   );
 };

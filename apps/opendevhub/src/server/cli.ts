@@ -6,6 +6,7 @@ import open from "open";
 
 import { readProjectAppearance } from "../shared/project-appearance";
 import type { NodeId, Project } from "../shared/types";
+import { Access, accessUrl, resetToken } from "./access";
 import {
   FileForgeStore,
   FileProjectSettings,
@@ -31,6 +32,7 @@ import { ProjectStore } from "./db/projects";
 import { ProvenanceStore } from "./db/provenance";
 import { TaskStore } from "./db/tasks";
 import { TodoStore } from "./db/todos";
+import { ConfigApprovals } from "./environments/approvals";
 import { Checks } from "./environments/checks";
 import { Containers } from "./environments/containers";
 import { Credentials } from "./environments/credentials";
@@ -92,6 +94,10 @@ const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
   -p, --port <n>     Dashboard port (default 7777, saved)
       --no-open      Do not open the browser
   -h, --help         Show this help
+
+Dashboard access:
+  opendevhub open [--no-open]   Print and open the dashboard link of a running opendevhub
+  opendevhub token --reset      Replace the access token; every browser needs the new link
 
 Remote nodes:
   opendevhub nodes add <ssh-destination> [--label <name>]
@@ -241,9 +247,88 @@ export const runNodesCommand = (
   }
 };
 
+interface Out {
+  log: (s: string) => void;
+  error: (s: string) => void;
+}
+
+/** Whether something answers on the dashboard port; any HTTP answer counts. */
+const dashboardAnswers = async (port: number): Promise<boolean> => {
+  try {
+    await fetch(`http://localhost:${port}/api/access`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** `opendevhub open`: the link of the opendevhub already running on the saved port, a service included. */
+export const runOpenCommand = async (
+  argv: string[],
+  dirs: { config: string; state: string },
+  out: Out,
+  deps: {
+    answers?: (port: number) => Promise<boolean>;
+    openUrl?: (url: string) => Promise<unknown>;
+  } = {}
+): Promise<number> => {
+  let noOpen: boolean;
+  try {
+    const { values } = parseArgs({
+      args: argv,
+      options: { "no-open": { type: "boolean" } },
+      strict: true,
+    });
+    noOpen = values["no-open"] === true;
+  } catch {
+    out.error("usage: opendevhub open [--no-open]");
+    return 2;
+  }
+  const { port } = loadConfig(dirs.config);
+  if (!(await (deps.answers ?? dashboardAnswers)(port))) {
+    out.error(
+      `opendevhub is not running on port ${port}; start it with: opendevhub`
+    );
+    return 1;
+  }
+  const url = accessUrl(port, new Access(dirs.state).token());
+  out.log(url);
+  if (!noOpen) {
+    await (deps.openUrl ?? open)(url).catch(() => undefined);
+  }
+  return 0;
+};
+
+/** `opendevhub token --reset`: a new token, so every cookie issued for the old one is refused. */
+export const runTokenCommand = (
+  argv: string[],
+  dirs: { config: string; state: string },
+  out: Out
+): number => {
+  if (argv.length !== 1 || argv[0] !== "--reset") {
+    out.error("usage: opendevhub token --reset");
+    return 2;
+  }
+  const token = resetToken(dirs.state);
+  out.log("Replaced the access token. Open the dashboard with its new link:");
+  out.log(accessUrl(loadConfig(dirs.config).port, token));
+  return 0;
+};
+
 export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   if (argv[0] === "nodes") {
     process.exitCode = runNodesCommand(argv.slice(1), configDir(), console);
+    return;
+  }
+  const dirs = { config: configDir(), state: stateDir() };
+  if (argv[0] === "open") {
+    process.exitCode = await runOpenCommand(argv.slice(1), dirs, console);
+    return;
+  }
+  if (argv[0] === "token") {
+    process.exitCode = runTokenCommand(argv.slice(1), dirs, console);
     return;
   }
   let opts: CliOptions;
@@ -281,6 +366,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   const environments = new EnvironmentStore(db);
   const links = new LinkStore(db);
   const events = new EventStore(db);
+  const approvals = new ConfigApprovals(db);
   events.pruneOld();
   // The jobs that were setting these variants up died with the previous process.
   tasks.failInterrupted();
@@ -306,6 +392,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     tasks,
   });
   store.setRoots(roots);
+  store.watchApprovals(approvals);
   const nodes = new Nodes({
     configDir: dir,
     controlDir: path.join(dir, "ssh"),
@@ -336,6 +423,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
       name: projectName(p, teamSettings.get(p), projectSettings.get(p.path)),
     }));
   const hub = createHub({
+    approvals,
     store,
     projects,
     tasks,
@@ -551,7 +639,9 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     ...(usage ? { usage } : {}),
     webDir: findWebDir(),
   });
+  const access = new Access(stateDir());
   const server = await startServer({
+    access,
     app,
     ...(process.env.OPENDEVHUB_DEV === "1"
       ? { devUi: await startDevUi() }
@@ -575,12 +665,14 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   );
   const sampler = startResourceSampler({ run: spawnRunner, store });
 
-  console.log(`opendevhub running at ${server.url}`);
+  // The link carries the token: opening it is what gives a browser access.
+  const link = accessUrl(server.port, access.token());
+  console.log(`opendevhub running at ${link}`);
   for (const e of store.preflight().errors) {
     console.warn(`warning: ${e}`);
   }
   if (opts.open) {
-    await open(server.url).catch(() => undefined);
+    await open(link).catch(() => undefined);
   }
 
   const shutdown = async () => {

@@ -1,0 +1,67 @@
+---
+title: Dashboard access and config approvals
+description: Why the dashboard needs its link, and why some devcontainer changes wait for your approval.
+icon: ShieldCheck
+---
+
+Agents run in containers, but they edit the repositories opendevhub starts those containers from, `devcontainer.json` included. Two safeguards keep an agent from reaching your machine through that:
+
+- **Dashboard access.** Only your browser can use the dashboard. A process in a container can't call its API, even when it can reach the dashboard's port.
+- **Config approvals.** A devcontainer config whose settings act on your machine is only used once you have approved those settings.
+
+## Opening the dashboard
+
+opendevhub keeps a random access token in `~/.local/state/opendevhub/access-token` (owner-only). When it starts, it prints the dashboard link with the token and opens it:
+
+```text
+opendevhub running at http://localhost:7777/?token=…
+```
+
+Opening the link gives the browser a cookie and drops the token from the address bar. You need the link once per browser. Without the cookie, the dashboard shows how to get it instead of your projects.
+
+| Command | Effect |
+| --- | --- |
+| `opendevhub open` | Prints and opens the link of the opendevhub already running, a login service included. `--no-open` only prints it. |
+| `opendevhub token --reset` | Replaces the token. Every browser then needs the new link, which the command prints. |
+
+Every API call, the live updates, the terminals and each environment's opencode (`<environment>.localhost`) need the cookie. Links from the dashboard to an environment's opencode go through the dashboard, which hands that environment a one-time code (valid for a minute). The environment's own cookie works for that environment only, so one container can't drive another's opencode.
+
+<Callout type="warn" title="Host ports">
+  A [host port](/docs/host-browser) lets containers reach a port on your
+  machine. Don't add the dashboard's port as one. The token still protects it,
+  but nothing in a container needs it.
+</Callout>
+
+## Config approvals
+
+Before opendevhub builds an image for, creates, starts or rebuilds a container (the project's, a worktree's own, on this machine or on a [remote node](/docs/remote-nodes)), it reads the checkout's resolved devcontainer configuration. It then compares the settings that act on the host with the ones you approved for the project:
+
+- `initializeCommand`, which runs on your machine;
+- `mounts` and `workspaceMount`, including mounts that features add;
+- `runArgs`, `privileged`, `capAdd`, `securityOpt` and `appPort`, including what features add;
+- the build context's location (marked when it is outside the repository) and `build.options`;
+- the contents of every Docker Compose file, with `service` and `runServices`.
+
+Everything else, such as `postCreateCommand`, `containerEnv` or a new base image, runs inside the container and never asks. A config without any of these settings never asks either. Settings opendevhub adds itself (its mounts, your [personalization](/docs/personalization)) don't count.
+
+When a feature's metadata can't be fetched (offline), the features themselves count as host-affecting settings, so adding or changing one asks.
+
+### Approving
+
+When the settings match none you approved, nothing is built or started. Instead, the project page shows a banner, and so does the worktree's row:
+
+- **Review** shows each setting as added, changed or removed against the closest set you approved, and Compose files as a line diff.
+- **Approve** remembers exactly the settings you reviewed and starts what they blocked. If the config changed again since you opened the review, the approval is refused and the banner shows the new settings.
+- **Keep stopped** forgets the request without approving anything.
+
+Approvals belong to the project: settings approved once are allowed in every checkout, branch and node of it, and you can approve several sets. They are kept in opendevhub's state database.
+
+A task variant whose container needs approval waits at **Needs approval**, with the banner on its card. It goes on once you approve, fails if you keep it stopped, and ends when you pick another variant or dismiss the task. Restarting opendevhub fails it like any other starting step.
+
+Starting or rebuilding a container from the dashboard fails at once with the pending approval. Approving runs that start again.
+
+Containers already running when opendevhub starts are adopted without asking. Their next start asks. After upgrading, each project whose config has host-affecting settings asks once, on its next start.
+
+## Can containers reach the dashboard?
+
+The dashboard listens on `127.0.0.1` only. On Linux, containers on Docker's bridge network can't reach the host's loopback. Docker Desktop and OrbStack forward `host.docker.internal` to the host, and may reach its loopback through it. This hasn't been checked on macOS yet. The token protects the dashboard either way.

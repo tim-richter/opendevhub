@@ -6,6 +6,9 @@ export type HostRoute =
 
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
+/** Whether `id` can be an environment host's label. */
+export const isEnvLabel = (id: string): boolean => LABEL.test(id);
+
 export const classifyHost = (
   host: string | undefined,
   port: number

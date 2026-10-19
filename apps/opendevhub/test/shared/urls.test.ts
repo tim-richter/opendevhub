@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionUrl, taskHref } from "../../src/shared/urls";
+import { enterUrl, sessionUrl, taskHref } from "../../src/shared/urls";
 
 describe(sessionUrl, () => {
   it("builds opencode's per-session route for the project origin", () => {
@@ -11,6 +11,23 @@ describe(sessionUrl, () => {
     expect(sessionUrl(base, "ses_1")).toBe(
       `http://demo-abc123.localhost:7777/server/${key}/session/ses_1`
     );
+  });
+});
+
+describe(enterUrl, () => {
+  it("routes an environment host's page through the dashboard's enter route", () => {
+    expect(
+      enterUrl("http://demo-abc123.localhost:7777/server/k/session/s?x=1")
+    ).toBe(
+      `/api/envs/demo-abc123/enter?next=${encodeURIComponent("/server/k/session/s?x=1")}`
+    );
+  });
+
+  it("leaves other URLs alone", () => {
+    expect(enterUrl("https://git.example.com/pr/1")).toBe(
+      "https://git.example.com/pr/1"
+    );
+    expect(enterUrl("/p/app")).toBe("/p/app");
   });
 });
 

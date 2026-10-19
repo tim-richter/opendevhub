@@ -1,0 +1,96 @@
+{
+  "configuration": {
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "initializeCommand": "echo hi",
+    "mounts": ["source=/tmp,target=/host-tmp,type=bind"],
+    "runArgs": ["--network=host"],
+    "features": {
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    },
+    "postCreateCommand": "echo created",
+    "configFilePath": {
+      "$mid": 1,
+      "fsPath": "/src/demo/.devcontainer/devcontainer.json",
+      "path": "/src/demo/.devcontainer/devcontainer.json",
+      "scheme": "vscode-fileHost"
+    }
+  },
+  "workspace": {
+    "workspaceFolder": "/workspaces/demo",
+    "workspaceMount": "type=bind,source=/src/demo,target=/workspaces/demo"
+  },
+  "featuresConfiguration": {
+    "featureSets": [
+      {
+        "sourceInformation": {
+          "type": "oci",
+          "manifestDigest": "sha256:25b9f05705ffba7dbe503230ac76081419306f8c8bc88e0ce78c4ecd99a0c78c",
+          "featureRef": {
+            "scheme": "https",
+            "id": "docker-in-docker",
+            "owner": "devcontainers",
+            "namespace": "devcontainers/features",
+            "registry": "ghcr.io",
+            "resource": "ghcr.io/devcontainers/features/docker-in-docker",
+            "path": "devcontainers/features/docker-in-docker",
+            "version": "2",
+            "tag": "2"
+          },
+          "userFeatureId": "ghcr.io/devcontainers/features/docker-in-docker:2",
+          "userFeatureIdWithoutVersion": "ghcr.io/devcontainers/features/docker-in-docker"
+        },
+        "features": [
+          {
+            "id": "docker-in-docker",
+            "privileged": true,
+            "mounts": [
+              {
+                "source": "dind-var-lib-docker-${devcontainerId}",
+                "target": "/var/lib/docker",
+                "type": "volume"
+              }
+            ],
+            "included": true,
+            "value": {}
+          }
+        ],
+        "internalVersion": "2",
+        "computedDigest": "sha256:25b9f05705ffba7dbe503230ac76081419306f8c8bc88e0ce78c4ecd99a0c78c"
+      }
+    ]
+  },
+  "mergedConfiguration": {
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "initializeCommand": "echo hi",
+    "mounts": [
+      {
+        "source": "dind-var-lib-docker-${devcontainerId}",
+        "target": "/var/lib/docker",
+        "type": "volume"
+      },
+      "source=/tmp,target=/host-tmp,type=bind"
+    ],
+    "runArgs": ["--network=host"],
+    "features": {
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    },
+    "configFilePath": {
+      "$mid": 1,
+      "fsPath": "/src/demo/.devcontainer/devcontainer.json",
+      "path": "/src/demo/.devcontainer/devcontainer.json",
+      "scheme": "vscode-fileHost"
+    },
+    "init": false,
+    "privileged": true,
+    "entrypoints": ["/usr/local/share/docker-init.sh"],
+    "onCreateCommands": [],
+    "updateContentCommands": [],
+    "postCreateCommands": ["echo created"],
+    "postStartCommands": [],
+    "postAttachCommands": [],
+    "remoteUser": "vscode",
+    "remoteEnv": {},
+    "containerEnv": {},
+    "portsAttributes": {}
+  }
+}

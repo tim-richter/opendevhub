@@ -260,6 +260,7 @@ export const modelFromKey = (
 };
 
 const STEP_LABELS: Record<StartStep, string> = {
+  approval: "Needs approval",
   container: "Starting the container",
   failed: "Failed",
   image: "Preparing the image",

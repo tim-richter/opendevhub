@@ -1,7 +1,9 @@
 import { expect, it, vi } from "vitest";
 
+import { ConfigApprovals } from "../../src/server/environments/approvals";
 import { envIdFor } from "../../src/server/environments/config";
 import type {
+  ConfigRead,
   ContainerInfo,
   ExecTarget,
 } from "../../src/server/environments/containers";
@@ -142,9 +144,9 @@ export function boxKit() {
         forwardPorts: [] as unknown[],
         portsAttributes: {} as Record<string, unknown>,
       })),
-      readConfig: vi.fn(async (_f: string) => ({
-        configuration: { image: "node:22" } as Record<string, unknown>,
-        workspaceFolder: "/workspaces/fix" as string | undefined,
+      readConfig: vi.fn(async (_f: string): Promise<ConfigRead> => ({
+        configuration: { image: "node:22" },
+        workspaceFolder: "/workspaces/fix",
       })),
       remove: vi.fn(async (_id: string) => {}),
       removeImage: vi.fn(async (_ref: string) => true),
@@ -371,13 +373,13 @@ export function setup(
       portsAttributes: { "3000": { label: "web" } } as Record<string, unknown>,
       configuration: undefined as Record<string, unknown> | undefined,
     })),
-    readConfig: vi.fn(async (_folder: string) => ({
+    readConfig: vi.fn(async (_folder: string): Promise<ConfigRead> => ({
       configuration: {
         image: "node:22",
         postCreateCommand: "npm ci",
         forwardPorts: [3000],
-      } as Record<string, unknown>,
-      workspaceFolder: "/workspaces/feat" as string | undefined,
+      },
+      workspaceFolder: "/workspaces/feat",
     })),
     remove: vi.fn(async (_id: string) => {}),
     removeImage: vi.fn(async (_ref: string) => true),
@@ -766,7 +768,10 @@ export function setup(
     }
   );
   const recordUsage = vi.fn();
+  const approvals = new ConfigApprovals(dbs.db, () => clock.now);
+  store.watchApprovals(approvals);
   const hub = createHub({
+    approvals,
     store,
     projects: dbs.projects,
     tasks: dbs.tasks,
@@ -818,6 +823,7 @@ export function setup(
     },
   });
   return {
+    approvals,
     store,
     dbs,
     environments: dbs.environments,
