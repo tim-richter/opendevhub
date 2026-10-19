@@ -7,6 +7,8 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import type {
+  CheckDef,
+  CheckResult,
   ChecksView,
   ContainerState,
   ProjectView,
@@ -21,7 +23,12 @@ import { envOfDirectory } from "../../derive";
 import type { Tone } from "../../derive";
 import { Link } from "../../routing";
 import { checkoutOf, checkoutRuntime } from "../checkouts/checkouts";
-import { checksState, failedNames, resultOf } from "../checks/checks";
+import {
+  checkSections,
+  checksState,
+  failedNames,
+  resultOf,
+} from "../checks/checks";
 import { ChecksIcon, useChecks } from "../checks/checks-panel";
 import { checksQuery } from "../checks/checks-queries";
 import { localAiReviewRunning } from "../review/local-ai-review";
@@ -150,7 +157,29 @@ const RESULT_TONE = {
   running: "running",
 } as const;
 
-/** Each check's state, with Run all. Failures aren't handed to the agent from here. */
+const CheckItem = ({
+  check,
+  result,
+}: {
+  check: CheckDef;
+  result?: CheckResult;
+}) => {
+  const status = result ? result.status : "not run";
+  return (
+    <li className="flex min-w-0 items-center gap-2">
+      <StatusDot
+        tone={result ? RESULT_TONE[result.status] : "off"}
+        label={status}
+      />
+      <span className="truncate">{check.name}</span>
+      <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+        {status}
+      </span>
+    </li>
+  );
+};
+
+/** Each check's state, grouped as on the Review page, with Run all and a Run for each group. Failures aren't handed to the agent from here. */
 const Checks = ({
   directory,
   view,
@@ -171,29 +200,51 @@ const Checks = ({
     return <p className={muted}>No checks set up.</p>;
   }
   const stale = checksState(data) === "stale";
+  const running = checks.state === "running";
   return (
     <div className="flex flex-col gap-2">
-      <ul className="flex flex-col gap-1 text-sm">
-        {data.checks.map((c) => {
-          const result = resultOf(data.run, c);
-          const tone = result ? RESULT_TONE[result.status] : "off";
-          return (
-            <li
-              key={`${c.where}:${c.name}:${c.command}`}
-              className="flex min-w-0 items-center gap-2"
-            >
-              <StatusDot
-                tone={tone}
-                label={result ? result.status : "not run"}
+      {checkSections(data.checks).map((section) => {
+        const items = (
+          <ul className="flex flex-col gap-1 text-sm">
+            {section.checks.map((c) => (
+              <CheckItem
+                key={`${c.where}:${c.name}:${c.command}`}
+                check={c}
+                result={resultOf(data.run, c)}
               />
-              <span className="truncate">{c.name}</span>
-              <span className="text-muted-foreground ml-auto shrink-0 text-xs">
-                {result ? result.status : "not run"}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+            ))}
+          </ul>
+        );
+        if (!section.group) {
+          return <div key="">{items}</div>;
+        }
+        const names = section.checks.map((c) => c.name);
+        return (
+          <section
+            key={section.group}
+            aria-label={section.group}
+            className="flex flex-col gap-1"
+          >
+            <header className="flex min-w-0 items-center gap-2">
+              <h4 className="text-muted-foreground truncate text-xs font-medium">
+                {section.group}
+              </h4>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="ml-auto"
+                aria-label={`Run group ${section.group}`}
+                title={`Run group ${section.group}`}
+                disabled={running}
+                onClick={() => void checks.start({ names })}
+              >
+                <PlayIcon />
+              </Button>
+            </header>
+            {items}
+          </section>
+        );
+      })}
       {stale && <p className="text-warn text-xs">Ran on an older commit.</p>}
       {checks.error && (
         <p className="text-destructive text-xs">{checks.error}</p>
@@ -202,7 +253,7 @@ const Checks = ({
         variant="outline"
         size="sm"
         className="self-start"
-        disabled={checks.state === "running"}
+        disabled={running}
         onClick={() => void checks.start()}
       >
         <PlayIcon /> Run all
@@ -258,7 +309,12 @@ export const TaskStatusPanel = ({ className }: { className?: string }) => {
       <RailSection
         title="Checks"
         action={
-          status.checks && <ChecksIcon state={checksState(status.checks)} />
+          status.checks && (
+            // Clipped so the spinner's rotating corners don't overflow the rail and flash a scrollbar.
+            <span className="flex size-4 items-center justify-center overflow-hidden [&_svg]:size-4">
+              <ChecksIcon state={checksState(status.checks)} />
+            </span>
+          )
         }
       >
         {variant.node ? (
