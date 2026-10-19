@@ -5,3 +5,13 @@ packages:
 allowBuilds:
   esbuild: false
   node-pty: true
+
+autoDedupe: true
+
+permissions:
+  '@tanstack/charts':
+    skills: true
+  '@tanstack/devtools-vite':
+    skills: true
+  ultracite:
+    skills: false
