@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   ReviewBase,
   ReviewFile,
@@ -109,6 +111,10 @@ export const NO_LIMITS: PatchLimits = {
   fileLines: Infinity,
 };
 
+/** Identifies a file's diff, so the review can tell when a file changed after it was marked viewed. */
+const patchHash = (patch: string): string =>
+  createHash("sha1").update(patch).digest("base64url").slice(0, 16);
+
 /**
  * Keeps patches within the budget in order; files that don't fit, large ones (marked) and binaries are listed
  * with stats only, for the review to load one by one.
@@ -122,7 +128,13 @@ export const toReviewFiles = (
   let truncated = false;
   const files = raw.map(
     ({ file, status, additions, deletions, patch }): ReviewFile => {
-      const stats = { additions, deletions, file, status };
+      const stats = {
+        additions,
+        deletions,
+        file,
+        hash: patchHash(patch),
+        status,
+      };
       if (isBinaryPatch(patch)) {
         return { ...stats, binary: true };
       }

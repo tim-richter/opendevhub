@@ -1,7 +1,7 @@
 import { getFiletypeFromFileName, parsePatchFiles } from "@pierre/diffs";
 import { describe, expect, it } from "vitest";
 
-import type { ProjectView } from "../../../../src/shared/types";
+import type { ProjectView, ReviewFile } from "../../../../src/shared/types";
 import {
   aheadHint,
   acceptSuggestion,
@@ -12,7 +12,12 @@ import {
   commonDirectory,
   ensurePatchHeader,
   fileVersions,
+  isViewed,
+  markViewed,
   publishBlocker,
+  readViewed,
+  viewedKey,
+  writeViewed,
   selectionFor,
   statsDecoration,
   treeGitStatus,
@@ -297,6 +302,59 @@ describe("draft storage", () => {
       writeComments("k", [{ id: "1", text: "x" }], throwing)
     ).not.toThrow();
     expect(readComments("k")).toStrictEqual([]);
+  });
+});
+
+describe("viewed files", () => {
+  const file = (name: string, hash: string): ReviewFile => ({
+    additions: 1,
+    deletions: 0,
+    file: name,
+    hash,
+    status: "modified",
+  });
+
+  it("stays viewed only while the file's diff is unchanged", () => {
+    const a = file("a", "h1");
+    const viewed = markViewed({}, [a], a, true);
+    expect(isViewed(viewed, a)).toBeTruthy();
+    expect(isViewed(viewed, file("a", "h2"))).toBeFalsy();
+  });
+
+  it("unmarks a file and drops marks of files that left the diff", () => {
+    const a = file("a", "h1");
+    const b = file("b", "h2");
+    const both = markViewed(markViewed({}, [a, b], a, true), [a, b], b, true);
+    expect(both).toStrictEqual({ a: "h1", b: "h2" });
+    expect(markViewed(both, [a, b], a, false)).toStrictEqual({ b: "h2" });
+    expect(markViewed(both, [b], b, true)).toStrictEqual({ b: "h2" });
+  });
+
+  it("falls back to the patch when the server sends no hash", () => {
+    const a: ReviewFile = { ...file("a", ""), hash: undefined, patch: "x" };
+    const viewed = markViewed({}, [a], a, true);
+    expect(isViewed(viewed, a)).toBeTruthy();
+    expect(isViewed(viewed, { ...a, patch: "y" })).toBeFalsy();
+  });
+
+  it("is stored per diff like the drafts, and survives bad storage", () => {
+    expect(viewedKey("p", "wt", "branch", "main")).toBe(
+      "opendevhub:review-viewed:p:wt:main"
+    );
+    const m = new Map<string, string>();
+    const s = {
+      getItem: (k: string) => m.get(k) ?? null,
+      removeItem: (k: string) => void m.delete(k),
+      setItem: (k: string, v: string) => void m.set(k, v),
+    };
+    writeViewed("k", { a: "h1" }, s);
+    expect(readViewed("k", s)).toStrictEqual({ a: "h1" });
+    writeViewed("k", {}, s);
+    expect(m.has("k")).toBeFalsy();
+    s.setItem("k", JSON.stringify({ a: 1, b: "h" }));
+    expect(readViewed("k", s)).toStrictEqual({ b: "h" });
+    s.setItem("k", "[1]");
+    expect(readViewed("k", s)).toStrictEqual({});
   });
 });
 

@@ -125,7 +125,24 @@ describe(toReviewFiles, () => {
       status: "modified",
       additions: 1,
       deletions: 0,
+      hash: expect.any(String),
     });
+  });
+
+  it("hashes every diff, also one sent without its patch, so a changed file can be told apart", () => {
+    const [a, same, other, large] = toReviewFiles(
+      [
+        diff("a", "x"),
+        diff("a", "x"),
+        diff("a", "y"),
+        diff("big", "z", { additions: 5000 }),
+      ],
+      {}
+    ).files;
+    expect(a.hash).toBe(same.hash);
+    expect(a.hash).not.toBe(other.hash);
+    expect(large.patch).toBeUndefined();
+    expect(large.hash).toBeTruthy();
   });
 
   it("accepts only relative paths inside the checkout", () => {
@@ -163,6 +180,7 @@ describe(toReviewFiles, () => {
           status: "added",
           additions: 1,
           deletions: 0,
+          hash: expect.any(String),
           binary: true,
         },
       ],
@@ -176,7 +194,7 @@ describe(toReviewFiles, () => {
       const patch = `@@ -1 +1 @@\n${prefix}GIT binary patch\n`;
       expect(isBinaryPatch(patch)).toBeFalsy();
       expect(toReviewFiles([diff("notes.txt", patch)])).toStrictEqual({
-        files: [diff("notes.txt", patch)],
+        files: [{ ...diff("notes.txt", patch), hash: expect.any(String) }],
         truncated: false,
       });
     }
@@ -198,6 +216,7 @@ describe(toReviewFiles, () => {
         status: "modified",
         additions: 300,
         deletions: 101,
+        hash: expect.any(String),
         large: true,
       },
       {
@@ -205,6 +224,7 @@ describe(toReviewFiles, () => {
         status: "modified",
         additions: 1,
         deletions: 0,
+        hash: expect.any(String),
         large: true,
       },
       {
@@ -212,6 +232,7 @@ describe(toReviewFiles, () => {
         status: "modified",
         additions: 300,
         deletions: 100,
+        hash: expect.any(String),
         patch: "z".repeat(40),
       },
     ]);

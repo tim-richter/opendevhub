@@ -41,6 +41,8 @@ export default function PatchView<A = undefined>(props: {
   selectedLines?: SelectedLineRange | null;
   renderAnnotation?: (annotation: DiffLineAnnotation<A>) => ReactNode;
   renderHeaderPrefix?: () => ReactNode;
+  /** Drawn at the end of the header, after the file's stats. */
+  renderHeaderMetadata?: () => ReactNode;
 }) {
   const { collapsed, disableHeader, onComment, split, fullFile, name } = props;
   // A controlled selection isn't painted while the gutter is dragged, so the drag's range is shown from here.
@@ -80,6 +82,7 @@ export default function PatchView<A = undefined>(props: {
     lineAnnotations: props.annotations,
     options,
     renderAnnotation: props.renderAnnotation,
+    renderHeaderMetadata: props.renderHeaderMetadata,
     renderHeaderPrefix: props.renderHeaderPrefix,
     selectedLines: dragged ?? props.selectedLines,
   };

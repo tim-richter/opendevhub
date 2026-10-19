@@ -52,6 +52,7 @@ import type { JiraTaskSource } from "../../../shared/jira";
 import type {
   ProjectView,
   PublishResult,
+  ReviewFile,
   ReviewMode,
   UpdateResult,
 } from "../../../shared/types";
@@ -92,16 +93,26 @@ import {
   conflictPrompt,
   draftKey,
   diffKey,
+  isViewed,
+  markViewed,
   newId,
   readComments,
   readDiffView,
   readReviewMode,
+  readViewed,
   sentKey,
+  viewedKey,
   writeComments,
   writeDiffView,
   writeReviewMode,
+  writeViewed,
 } from "./review";
-import type { DiffView, LineAnchor, ReviewComment } from "./review";
+import type {
+  DiffView,
+  LineAnchor,
+  ReviewComment,
+  ViewedFiles,
+} from "./review";
 import {
   BaseDialog,
   CommentsDialog,
@@ -198,6 +209,17 @@ const ReviewTarget = ({
     setComments(next);
     writeComments(keyRef.current, next);
   }, []);
+  // Viewed files per diff, like the drafts; a mark lapses when its file's diff changes.
+  const viewedStorageKey = viewedKey(projectId, target, shownMode, baseName);
+  const [viewed, setViewed] = useState<ViewedFiles>({});
+  useEffect(() => setViewed(readViewed(viewedStorageKey)), [viewedStorageKey]);
+  const changeViewed = (file: ReviewFile, on: boolean) => {
+    const next = markViewed(viewed, data?.files ?? [], file, on);
+    setViewed(next);
+    writeViewed(viewedStorageKey, next);
+  };
+  const viewedCount =
+    data?.files.filter((f) => isViewed(viewed, f)).length ?? 0;
   const revision = data
     ? `${data.mode === "branch" ? `branch:${data.base?.name ?? ""}` : "working"}:${data.files.map(diffKey).join("|")}`
     : undefined;
@@ -550,6 +572,14 @@ const ReviewTarget = ({
           </div>
         )}
         <div className="ml-auto flex items-center gap-1.5">
+          {!!data?.files.length && (
+            <Tip label="Files marked viewed">
+              <span className="text-muted-foreground px-1 text-sm whitespace-nowrap tabular-nums">
+                {viewedCount}/{data.files.length}
+                <span className="max-sm:sr-only"> viewed</span>
+              </span>
+            </Tip>
+          )}
           <ToggleGroup
             type="single"
             variant="outline"
@@ -938,6 +968,8 @@ const ReviewTarget = ({
                   side,
                 })
           }
+          viewed={viewed}
+          onViewed={changeViewed}
           comments={comments}
           notes={aiNotes}
           renderNote={(id) => suggestionCard(id, true)}

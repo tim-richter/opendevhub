@@ -230,6 +230,13 @@ export const draftKey = (
   return `opendevhub:review:${projectId}:${target || "main-checkout"}:${scope}`;
 };
 
+/** Files marked viewed, per diff like the drafts. */
+export const viewedKey = (...args: Parameters<typeof draftKey>): string =>
+  draftKey(...args).replace(
+    /^opendevhub:review:/u,
+    "opendevhub:review-viewed:"
+  );
+
 const modeKey = (projectId: string, target: string): string =>
   `opendevhub:review-mode:${projectId}:${target || "main-checkout"}`;
 
@@ -371,6 +378,69 @@ export const writeComments = (
     }
   } catch {
     // storage full or blocked: drafts stay in memory only
+  }
+};
+
+/** The files marked viewed, each with the hash of the diff seen then. */
+export type ViewedFiles = Record<string, string>;
+
+/** What a viewed mark is tied to: the server's hash of the diff, else what the review has of it. */
+export const viewedHash = (f: ReviewFile): string => f.hash ?? diffKey(f);
+
+/** Viewed until the file's diff changes. */
+export const isViewed = (viewed: ViewedFiles, f: ReviewFile): boolean =>
+  viewed[f.file] === viewedHash(f);
+
+/** Marks or unmarks a file; marks of files no longer in the diff are dropped. */
+export const markViewed = (
+  viewed: ViewedFiles,
+  files: ReviewFile[],
+  file: ReviewFile,
+  on: boolean
+): ViewedFiles => {
+  const next: ViewedFiles = {};
+  for (const f of files) {
+    const hash = f.file === file.file ? viewedHash(f) : viewed[f.file];
+    const keep = f.file === file.file ? on : hash !== undefined;
+    if (keep) {
+      next[f.file] = hash;
+    }
+  }
+  return next;
+};
+
+export const readViewed = (
+  key: string,
+  storage: Pick<Storage, "getItem"> | undefined = defaultStorage()
+): ViewedFiles => {
+  try {
+    const parsed: unknown = JSON.parse(storage?.getItem(key) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, v]) => typeof v === "string")
+    ) as ViewedFiles;
+  } catch {
+    return {};
+  }
+};
+
+export const writeViewed = (
+  key: string,
+  viewed: ViewedFiles,
+  storage:
+    | Pick<Storage, "setItem" | "removeItem">
+    | undefined = defaultStorage()
+): void => {
+  try {
+    if (Object.keys(viewed).length === 0) {
+      storage?.removeItem(key);
+    } else {
+      storage?.setItem(key, JSON.stringify(viewed));
+    }
+  } catch {
+    // storage full or blocked: marks last until reload
   }
 };
 

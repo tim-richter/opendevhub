@@ -313,6 +313,8 @@ export interface ReviewFile {
   status: "added" | "deleted" | "modified";
   additions: number;
   deletions: number;
+  /** Identifies the diff's content, also when its patch isn't sent. */
+  hash?: string;
   /** Missing when the response ran out of patch budget, the diff is large (load it with `?file=`) or the file is binary. */
   patch?: string;
   binary?: boolean;

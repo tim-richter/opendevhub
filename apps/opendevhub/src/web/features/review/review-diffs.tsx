@@ -1,5 +1,6 @@
 import { Button } from "@opendevhub/ui/button";
 import { Card } from "@opendevhub/ui/card";
+import { Checkbox } from "@opendevhub/ui/checkbox";
 import { Textarea } from "@opendevhub/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@opendevhub/ui/toggle-group";
 import { useStableCallback } from "@pierre/diffs/react";
@@ -20,7 +21,9 @@ import {
 } from "lucide-react";
 import {
   Component,
+  useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -46,6 +49,7 @@ import {
   anchorFromRange,
   diffKey,
   ensurePatchHeader,
+  isViewed,
   linesLabel,
   selectionFor,
 } from "./review";
@@ -56,6 +60,7 @@ import type {
   LineAnchor,
   ReviewAnnotation,
   ReviewComment,
+  ViewedFiles,
 } from "./review";
 
 /** The tooltip trigger takes over `data-state`, so a toggle inside one shows its selection from `aria-checked`. */
@@ -279,6 +284,9 @@ export const ReviewDiffs = (props: {
   onAnchor?: (file: string, anchor: LineAnchor) => void;
   /** The comment to scroll to, from `useCommentStepper`. */
   focus?: CommentFocus;
+  /** With `onViewed`, each diff has a Viewed checkbox; a viewed diff starts collapsed. */
+  viewed?: ViewedFiles;
+  onViewed?: (file: ReviewFile, viewed: boolean) => void;
   /** These three must be stable: annotations may keep the first ones they were rendered with. */
   onAdd: (file: string, anchor: LineAnchor, text: string) => void;
   onCancel: () => void;
@@ -359,6 +367,8 @@ export const ReviewDiffs = (props: {
               id={`review-file-${i}`}
               file={f}
               selected={selectedFile === f.file}
+              viewed={props.viewed && isViewed(props.viewed, f)}
+              onViewed={props.onViewed && ((on) => props.onViewed?.(f, on))}
               load={
                 props.load &&
                 (() => props.load?.(f.file) ?? Promise.resolve(undefined))
@@ -417,10 +427,36 @@ const Stats = ({ file }: { file: ReviewFile }) => (
   </span>
 );
 
+/** Marks a diff as looked at; it unchecks itself once the file changes. */
+const ViewedBox = (props: {
+  viewed: boolean;
+  onChange: (viewed: boolean) => void;
+}) => {
+  const id = useId();
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Checkbox
+        id={id}
+        checked={props.viewed}
+        onCheckedChange={(v) => props.onChange(v === true)}
+      />
+      <label
+        htmlFor={id}
+        className="text-muted-foreground cursor-pointer font-sans text-xs whitespace-nowrap select-none"
+      >
+        Viewed
+      </label>
+    </span>
+  );
+};
+
 interface FileDiffProps {
   id: string;
   file: ReviewFile;
   selected: boolean;
+  /** Undefined when the review doesn't track viewed files. */
+  viewed?: boolean;
+  onViewed?: (viewed: boolean) => void;
   load?: () => Promise<string | undefined>;
   view: DiffView;
   wholeFilePatch: boolean;
@@ -448,7 +484,9 @@ const DeferredFileDiff = (props: FileDiffProps) => {
     props.file.patch === undefined ||
     props.file.binary ||
     props.open !== undefined ||
-    props.reveal !== undefined;
+    props.reveal !== undefined ||
+    // Collapsed, so only its header renders.
+    props.viewed === true;
 
   useEffect(() => {
     if (ready) {
@@ -484,6 +522,9 @@ const DeferredFileDiff = (props: FileDiffProps) => {
               {props.file.file}
             </span>
             <Stats file={props.file} />
+            {props.onViewed && (
+              <ViewedBox viewed={false} onChange={props.onViewed} />
+            )}
           </header>
         </Card>
       )}
@@ -493,13 +534,19 @@ const DeferredFileDiff = (props: FileDiffProps) => {
 
 const FileDiff = (props: FileDiffProps) => {
   const { file } = props;
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(props.viewed === true);
   const [revealed, setRevealed] = useState(props.reveal);
   if (props.reveal !== revealed) {
     setRevealed(props.reveal);
     if (props.reveal !== undefined) {
       setCollapsed(false);
     }
+  }
+  // Marking a diff viewed closes it; unmarking it, or the file changing since, opens it again.
+  const [wasViewed, setWasViewed] = useState(props.viewed);
+  if (props.viewed !== wasViewed) {
+    setWasViewed(props.viewed);
+    setCollapsed(props.viewed === true);
   }
   const [patch, setPatch] = useState(file.patch);
   const [loading, setLoading] = useState(false);
@@ -564,23 +611,36 @@ const FileDiff = (props: FileDiffProps) => {
       );
     }
   );
-  const toggle = useStableCallback(() => (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className="h-auto w-auto p-0 pr-1 hover:bg-transparent"
-      onClick={() => setCollapsed((c) => !c)}
-      aria-expanded={!collapsed}
-      title={collapsed ? "Show diff" : "Hide diff"}
-    >
-      {collapsed ? (
-        <ChevronRightIcon className="size-3.5" />
-      ) : (
-        <ChevronDownIcon className="size-3.5" />
-      )}
-    </Button>
-  ));
+  // These are called while rendering, where a stable callback would still see the previous render's state; they
+  // change with what they draw instead.
+  const toggle = useCallback(
+    () => (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        className="h-auto w-auto p-0 pr-1 hover:bg-transparent"
+        onClick={() => setCollapsed((c) => !c)}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Show diff" : "Hide diff"}
+      >
+        {collapsed ? (
+          <ChevronRightIcon className="size-3.5" />
+        ) : (
+          <ChevronDownIcon className="size-3.5" />
+        )}
+      </Button>
+    ),
+    [collapsed]
+  );
+  const onViewed = useStableCallback((on: boolean) => props.onViewed?.(on));
+  const tracksViewed = props.onViewed !== undefined;
+  const viewed = props.viewed === true;
+  const viewedBox = useCallback(
+    () =>
+      tracksViewed ? <ViewedBox viewed={viewed} onChange={onViewed} /> : null,
+    [tracksViewed, viewed, onViewed]
+  );
 
   // A collapsed diff shows only its header: @pierre/diffs parses and highlights the whole patch even when
   // collapsed, which for a lockfile or a generated spec blocks the page for seconds.
@@ -593,6 +653,7 @@ const FileDiff = (props: FileDiffProps) => {
             {file.file}
           </span>
           <Stats file={file} />
+          {viewedBox()}
         </header>
       </Card>
     );
@@ -611,6 +672,7 @@ const FileDiff = (props: FileDiffProps) => {
             selectedLines={selectedLines}
             renderAnnotation={renderAnnotation}
             renderHeaderPrefix={toggle}
+            renderHeaderMetadata={tracksViewed ? viewedBox : undefined}
           />
         </DiffBoundary>
       </Card>
@@ -647,6 +709,7 @@ const FileDiff = (props: FileDiffProps) => {
       <header className="bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-1.5">
         <span className="font-mono text-sm">{file.file}</span>
         <Stats file={file} />
+        {viewedBox()}
       </header>
       {file.binary ? (
         <p className="text-muted-foreground px-3 py-2.5 text-sm">binary</p>
