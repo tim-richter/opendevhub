@@ -1,6 +1,6 @@
 import { Kbd, KbdGroup } from "@opendevhub/ui/kbd";
 import { formatForDisplay } from "@tanstack/react-hotkeys";
-import type { Hotkey } from "@tanstack/react-hotkeys";
+import type { HotkeyChord } from "@tanstack/react-hotkeys";
 
 import type { ShortcutId } from "../shell/shortcuts";
 import { useBinding } from "../shell/use-shortcut";
@@ -10,7 +10,7 @@ export const HotkeyKeys = ({
   hotkey,
   className,
 }: {
-  hotkey: Hotkey;
+  hotkey: HotkeyChord;
   className?: string;
 }) => (
   <KbdGroup>
