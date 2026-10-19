@@ -12,7 +12,7 @@ const changed = {
 
 const setup = (reviewData = changed) => {
   const review = vi.fn(async () => reviewData);
-  const startSession = vi.fn(async (..._args: unknown[]) => ({
+  const startInCheckout = vi.fn(async (..._args: unknown[]) => ({
     sessionId: "review-session",
   }));
   const generateIn = vi.fn(async (..._args: unknown[]) => ({
@@ -28,7 +28,7 @@ const setup = (reviewData = changed) => {
     ...({} as DashboardDeps),
     hub: {
       reviews: { review },
-      sessions: { generateIn, startSession },
+      sessions: { generateIn, startInCheckout },
     } as unknown as DashboardDeps["hub"],
     ocr: { service: { reviewLocal } } as unknown as DashboardDeps["ocr"],
   });
@@ -38,16 +38,17 @@ const setup = (reviewData = changed) => {
       headers: { "content-type": "application/json" },
       method: "POST",
     });
-  return { generateIn, post, review, reviewLocal, startSession };
+  return { generateIn, post, review, reviewLocal, startInCheckout };
 };
 
 describe("local AI review routes", () => {
   it("starts an investigation of the selected comparison and collects findings", async () => {
-    const { post, review, startSession, generateIn } = setup();
+    const { post, review, startInCheckout, generateIn } = setup();
     const response = await post("ai-session", {
       base: "main",
       directory: "/work/repo",
       mode: "branch",
+      sessionId: "task-session",
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -57,9 +58,10 @@ describe("local AI review routes", () => {
       base: "main",
       mode: "branch",
     });
-    expect(startSession.mock.calls[0]?.[3]).toContain(
+    expect(startInCheckout.mock.calls[0]?.[3]).toContain(
       "all changes compared with main"
     );
+    expect(startInCheckout.mock.calls[0]?.[4]).toBe("task-session");
 
     const findings = await post("ai-findings", {
       directory: "/work/repo",

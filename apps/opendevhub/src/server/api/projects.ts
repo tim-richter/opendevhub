@@ -601,11 +601,12 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
             "Look for bugs, regressions, unhandled edge cases, security problems, and missing tests for risky logic. Skip formatter and linter issues. Do not praise.",
             "For each finding, note severity and a short actionable comment. Include a file and line only for a specific line; otherwise use a general comment. End with a short summary.",
           ].join("\n\n");
-          return hub.sessions.startSession(
+          return hub.sessions.startInCheckout(
             id,
             input.directory,
             "Review changes",
-            prompt
+            prompt,
+            input.sessionId
           );
         })
     )

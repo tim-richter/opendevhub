@@ -564,7 +564,12 @@ export const fetchReview = (
 
 export const startLocalAiReview = async (
   projectId: string,
-  input: { directory: string; mode: "working" | "branch"; base?: string }
+  input: {
+    directory: string;
+    mode: "working" | "branch";
+    base?: string;
+    sessionId?: string;
+  }
 ) => {
   const result = await read(
     project.review["ai-session"].$post({

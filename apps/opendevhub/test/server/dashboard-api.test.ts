@@ -233,6 +233,15 @@ function setup(webDir?: string) {
       ]),
       removeSession: vi.fn(async (_id: string, _sid: string) => {}),
       killShell: vi.fn(async (_id: string, _sid: string, _shid: string) => {}),
+      startInCheckout: vi.fn(
+        async (
+          _id: string,
+          _dir: string,
+          _title: string,
+          _prompt: string,
+          _taskSession?: string
+        ) => ({ sessionId: "ses_1" })
+      ),
       startTaskConversation: vi.fn(
         async (_id: string, _sid: string) => "ses_new"
       ),

@@ -150,6 +150,64 @@ describe("task conversations", () => {
     ).resolves.toBe("ses_new");
     expect(s.tasks.get("task_1")?.variants[0].sessionId).toBe("ses_new");
   });
+
+  it("starts a review of a task's checkout as a conversation in that task, not a chat", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.tasks.createTask({
+      id: "task_1",
+      projectId: project.id,
+      title: "Implement login",
+      prompt: "Login",
+      createdAt: 1,
+      variants: [{}],
+    });
+    s.tasks.attachSession(
+      "task_1",
+      1,
+      { sessionId: "ses_1", envId: project.id, directory: "/workspaces/demo" },
+      USER
+    );
+
+    await expect(
+      s.hub.sessions.startInCheckout(
+        project.id,
+        "/workspaces/demo",
+        "Review changes",
+        "Review it",
+        "ses_1"
+      )
+    ).resolves.toStrictEqual({ sessionId: "ses_new" });
+    expect(s.client.createSession).toHaveBeenLastCalledWith(
+      "/workspaces/demo",
+      expect.objectContaining({ title: "Review changes" })
+    );
+    expect(s.client.prompt).toHaveBeenLastCalledWith(
+      "ses_new",
+      "Review it",
+      undefined,
+      "/workspaces/demo",
+      {}
+    );
+    expect(s.tasks.bySession("ses_new")?.task.id).toBe("task_1");
+    expect(s.dbs.chats.listForProject(project.id)).toStrictEqual([]);
+  });
+
+  it("starts a review as a chat when the page's conversation isn't a task's", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    const started = await s.hub.sessions.startInCheckout(
+      project.id,
+      "/workspaces/demo",
+      "Review changes",
+      "Review it",
+      "ses_unknown"
+    );
+    expect(started.chat).toBeDefined();
+    expect(s.tasks.bySession(started.sessionId)).toBeUndefined();
+  });
 });
 
 describe("responding", () => {

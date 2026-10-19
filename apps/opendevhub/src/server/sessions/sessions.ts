@@ -127,6 +127,33 @@ export class Sessions {
   }
 
   /**
+   * Starts a conversation in a checkout with `prompt` as its first turn: a new conversation of the task variant
+   * `taskSession` belongs to when that variant works in the checkout, else a chat.
+   */
+  async startInCheckout(
+    id: ProjectId,
+    directory: string,
+    title: string,
+    prompt: string,
+    taskSession?: string
+  ): Promise<{ sessionId: string; chat?: string }> {
+    const owner = taskSession && this.deps.tasks.bySession(taskSession);
+    if (
+      owner &&
+      owner.task.projectId === id &&
+      !owner.variant.discarded &&
+      owner.variant.directory === directory
+    ) {
+      const sessionId = await this.startTaskConversation(id, taskSession, {
+        prompt,
+        title,
+      });
+      return { sessionId };
+    }
+    return this.startSession(id, directory, title, prompt);
+  }
+
+  /**
    * Starts a chat in a checkout with a composer message as its first turn: a
    * command the checkout has, or a prompt. The message is resolved first, so that a bad mention starts nothing.
    * Hub commands are the caller's to refuse.
@@ -802,11 +829,16 @@ export class Sessions {
     }
   }
 
-  /** Starts with empty context while preserving ownership and the checkout. */
+  /** Starts with empty context while preserving ownership and the checkout; `prompt` becomes its first turn. */
   async startTaskConversation(
     id: ProjectId,
     sessionId: string,
-    options: { model?: ModelRef; agent?: string } = {}
+    options: {
+      model?: ModelRef;
+      agent?: string;
+      title?: string;
+      prompt?: string;
+    } = {}
   ): Promise<string> {
     this.envs.requireProject(id);
     const found = this.deps.tasks.bySession(sessionId);
@@ -820,30 +852,33 @@ export class Sessions {
     }
     this.envs.checkDirectory(id, directory);
     const envId = variant.envId ?? id;
+    const client = this.envs.opencodeClient(envId);
     const release = this.deps.tasks.claim(envId, directory);
+    let session: RawSession;
     try {
-      const session = await this.envs
-        .opencodeClient(envId)
-        .createSession(directory, {
-          title: task.title,
-          model:
-            options.model ??
-            this.deps.store.sessionsOf(id).find((s) => s.id === sessionId)
-              ?.model ??
-            variant.model,
-          agent: options.agent ?? variant.agent,
-        });
+      session = await client.createSession(directory, {
+        title: options.title ?? task.title,
+        model:
+          options.model ??
+          this.deps.store.sessionsOf(id).find((s) => s.id === sessionId)
+            ?.model ??
+          variant.model,
+        agent: options.agent ?? variant.agent,
+      });
       this.deps.tasks.attachSession(
         task.id,
         variant.n,
         { sessionId: session.id, envId, directory },
         USER
       );
-      this.envs.reconcile(envId);
-      return session.id;
     } finally {
       release();
     }
+    if (options.prompt?.trim()) {
+      await client.prompt(session.id, options.prompt, undefined, directory, {});
+    }
+    this.envs.reconcile(envId);
+    return session.id;
   }
 
   /** Closes a task conversation; cleanup removes its opencode session later. */

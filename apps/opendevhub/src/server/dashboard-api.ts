@@ -83,6 +83,7 @@ export interface DashboardHub {
   sessions: Pick<
     Sessions,
     | "startSession"
+    | "startInCheckout"
     | "generateIn"
     | "replyPermission"
     | "replyForm"

@@ -57,8 +57,10 @@ export const useLocalAiReview = (input: {
   projectId: string;
   directory: string;
   data?: ReviewData;
+  /** The page's conversation: when it is a task's, the review starts as a new conversation in that task. */
+  sessionId?: string;
 }) => {
-  const { projectId, directory, data } = input;
+  const { projectId, directory, data, sessionId: pageSession } = input;
   const key = storageKey(projectId, directory);
   const [run, setRunState] = useState(() => readRun(key));
   const runRef = useRef(run);
@@ -181,6 +183,7 @@ export const useLocalAiReview = (input: {
           ...(current.headSha === "working"
             ? {}
             : { base: current.headSha.slice("branch:".length) }),
+          ...(pageSession ? { sessionId: pageSession } : {}),
         });
         sawBusy.current = false;
         patch(current.id, {
@@ -194,7 +197,7 @@ export const useLocalAiReview = (input: {
         busy.current = false;
       }
     })();
-  }, [run?.stage, projectId, directory, patch]);
+  }, [run?.stage, projectId, directory, pageSession, patch]);
 
   useEffect(() => {
     const { current } = runRef;

@@ -158,7 +158,7 @@ const ReviewTarget = ({
     placeholderData: keepPreviousData,
   });
   const { data } = review;
-  const ai = useLocalAiReview({ projectId, directory, data });
+  const ai = useLocalAiReview({ projectId, directory, data, sessionId });
   const ocr = useProjectOcr(projectId);
   const [projectSettings, setProjectSettings] = useState(false);
   const loading = review.isFetching;

@@ -248,6 +248,8 @@ export const bodies = {
       .string()
       .regex(/^[a-z0-9-]{1,100}$/u)
       .optional(),
+    /** The conversation the review page sends to; a task's starts the review in that task. */
+    sessionId: text,
   }),
   localAiFindings: z.object({ directory: z.string(), sessionId: z.string() }),
   ocrSettings: z.object({ provider: ocrProvider, limits: ocrLimits }),
