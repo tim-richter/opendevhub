@@ -1,5 +1,6 @@
 import { jiraTicketUrl } from "../../shared/jira";
 import type { JiraTaskSource } from "../../shared/jira";
+import { FIRST_TURN_INTERRUPTED, FIRST_TURN_SENDING } from "../../shared/tasks";
 import type {
   ArchivedTask,
   EnvId,
@@ -38,6 +39,14 @@ export class ChatTakenError extends Error {
   constructor(chat: string) {
     super(`chat ${chat} already belongs to a task or has no conversation`);
     this.name = "ChatTakenError";
+  }
+}
+
+/** A draft that started meanwhile, e.g. by a second Start. */
+export class DraftStartedError extends Error {
+  constructor(task: string) {
+    super(`task ${task} has already started`);
+    this.name = "DraftStartedError";
   }
 }
 
@@ -108,7 +117,8 @@ export interface ChatAdoption {
 
 export type VariantPatch = Partial<{
   step: StartStep;
-  error: string;
+  /** null clears it. */
+  error: string | null;
   branch: string;
   directory: string;
   envId: EnvId;
@@ -304,7 +314,8 @@ export class TaskStore {
   addVariants(
     taskId: string,
     variants: readonly NewVariant[],
-    actor: Actor = USER
+    actor: Actor = USER,
+    opts: { draft?: boolean } = {}
   ): number[] {
     const at = this.now();
     let added: number[] = [];
@@ -320,6 +331,10 @@ export class TaskStore {
           )
           .get(taskId) as { n: number }
       ).n;
+      // Checked in the same transaction, so two Starts can't both add variants to one draft.
+      if (opts.draft && max > 0) {
+        throw new DraftStartedError(taskId);
+      }
       const spec: TaskStartSpec | undefined =
         task.spec_first === 1 ? { phase: "propose" } : undefined;
       added = this.insertVariants(taskId, max + 1, variants, spec);
@@ -570,11 +585,16 @@ export class TaskStore {
     });
   }
 
-  /** Links a variant to the session its job just created. */
+  /** Links a variant to the session its job just created; `note` becomes its error, else the error is cleared. */
   attachSession(
     taskId: string,
     n: number,
-    session: { sessionId: string; envId: EnvId; directory: string },
+    session: {
+      sessionId: string;
+      envId: EnvId;
+      directory: string;
+      note?: string;
+    },
     actor: Actor
   ): void {
     const at = this.now();
@@ -601,10 +621,17 @@ export class TaskStore {
         .run(session.sessionId);
       this.db
         .prepare(
-          `UPDATE variants SET session_id = ?, env_id = ?, directory = ?, step = 'session', error = NULL,
+          `UPDATE variants SET session_id = ?, env_id = ?, directory = ?, step = 'session', error = ?,
            session_removed_at = NULL WHERE task_id = ? AND n = ?`
         )
-        .run(session.sessionId, session.envId, session.directory, taskId, n);
+        .run(
+          session.sessionId,
+          session.envId,
+          session.directory,
+          session.note ?? null,
+          taskId,
+          n
+        );
       this.event(
         at,
         actor,
@@ -745,7 +772,10 @@ export class TaskStore {
     ).map((r) => r.session_id);
   }
 
-  /** Keeps variant `keep`: records the pick on it and the discard on every other variant not yet discarded. */
+  /**
+   * Keeps variant `keep`: records the pick on it and the discard on every other variant not yet discarded. An earlier
+   * pick is dropped, so only one variant counts as picked.
+   */
   pick(taskId: string, keep: number, actor: Actor = USER): void {
     const at = this.now();
     this.write(() => {
@@ -754,6 +784,11 @@ export class TaskStore {
         return false;
       }
       const stateBefore = this.state(taskId);
+      this.db
+        .prepare(
+          "UPDATE variants SET picked_at = NULL WHERE task_id = ? AND n <> ? AND picked_at IS NOT NULL"
+        )
+        .run(taskId, keep);
       for (const v of this.variants(taskId)) {
         const object = { id: `${taskId}/${v.n}`, type: "variant" as const };
         if (v.n === keep) {
@@ -928,14 +963,17 @@ export class TaskStore {
     });
   }
 
-  /** Conversations still present for an archived task, including earlier tabs, with the environment of each. */
+  /**
+   * Conversations that may still be present for an archived task, including earlier tabs (whose removal isn't
+   * tracked, so each is listed), with the environment of each.
+   */
   liveSessions(taskId: string): { sessionId: string; envId?: EnvId }[] {
     const rows = this.db
       .prepare(`
       SELECT session_id, env_id FROM variants WHERE task_id = ? AND session_id IS NOT NULL AND session_removed_at IS NULL
       UNION
       SELECT s.session_id, v.env_id FROM task_sessions s JOIN variants v ON v.task_id = s.task_id AND v.n = s.n
-      WHERE s.task_id = ? AND v.session_removed_at IS NULL
+      WHERE s.task_id = ? AND (s.session_id IS NOT v.session_id OR v.session_removed_at IS NULL)
     `)
       .all(taskId, taskId) as { session_id: string; env_id: EnvId | null }[];
     return rows.map((row) => ({
@@ -946,10 +984,13 @@ export class TaskStore {
 
   /**
    * On start: a variant still being set up lost the job that was setting it up. Marks each failed, and returns
-   * how many.
+   * how many. One whose session existed but whose first message wasn't confirmed keeps running, with a note.
    */
   failInterrupted(): number {
     const at = this.now();
+    this.db
+      .prepare("UPDATE variants SET error = ? WHERE error = ?")
+      .run(FIRST_TURN_INTERRUPTED, FIRST_TURN_SENDING);
     const stuck = (
       this.db
         .prepare(
@@ -1038,15 +1079,53 @@ export class TaskStore {
     return task && variant ? { task, variant } : undefined;
   }
 
-  /** Hides one task conversation while keeping it in opencode until cleanup deletes it. */
+  /** The variant's conversations not closed, but `except`, newest first. */
+  private openSessions(taskId: string, n: number, except: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT session_id FROM task_sessions WHERE task_id = ? AND n = ? AND archived_at IS NULL AND session_id <> ?
+           ORDER BY rowid DESC`
+        )
+        .all(taskId, n, except) as { session_id: string }[]
+    ).map((r) => r.session_id);
+  }
+
+  /**
+   * Hides one task conversation while keeping it in opencode until cleanup deletes it. Closing the variant's own
+   * conversation makes its newest other open one its own, if it has one. False when no variant has it or it is
+   * closed already.
+   */
   archiveSession(sessionId: string): boolean {
+    const found = this.bySession(sessionId);
+    if (!found) {
+      return false;
+    }
+    const { task, variant } = found;
     return this.write(() => {
+      // A variant's first session (an adopted chat's, a review's) has no row until a second one starts.
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO task_sessions (session_id, task_id, n) VALUES (?, ?, ?)"
+        )
+        .run(sessionId, task.id, variant.n);
       const result = this.db
         .prepare(
           "UPDATE task_sessions SET archived_at = ? WHERE session_id = ? AND archived_at IS NULL"
         )
         .run(this.now(), sessionId);
-      return result.changes > 0;
+      if (result.changes === 0) {
+        return false;
+      }
+      const [next] = this.openSessions(task.id, variant.n, sessionId);
+      if (variant.sessionId === sessionId && next) {
+        this.db
+          .prepare(
+            "UPDATE variants SET session_id = ?, session_removed_at = NULL WHERE task_id = ? AND n = ?"
+          )
+          .run(next, task.id, variant.n);
+      }
+      return true;
     });
   }
 

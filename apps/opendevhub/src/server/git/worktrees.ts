@@ -9,6 +9,8 @@ export const WORKTREES_SUFFIX = ".worktrees";
 /** `git worktree add --relative-paths` (and `worktree.useRelativePaths`) landed in git 2.48. */
 const RELATIVE_PATHS_SINCE: [number, number] = [2, 48];
 const GIT_TIMEOUT_MS = 120_000;
+/** How many `<name>-<n>` folders `add` tries before giving up. */
+const MAX_DIR_SUFFIX = 50;
 
 export class InvalidRequestError extends Error {
   constructor(message: string) {
@@ -201,7 +203,8 @@ export class Worktrees {
         `worktrees need the workspace folder to be the git root (git root is ${top})`
       );
     }
-    const target = path.posix.join(root.container, worktreeDirName(branch));
+    const dir = await this.freeDir(project, root, worktreeDirName(branch));
+    const target = path.posix.join(root.container, dir);
     const relative = await this.relativeLinks(project, ws, root, onLine);
     const result2 = await this.deps.containers.exec(project, [
       "git",
@@ -254,15 +257,39 @@ export class Worktrees {
     onLine(
       `worktree: added ${target} (${exists ? "existing" : "new"} branch ${branch}${relative ? "" : ", absolute links"})`
     );
-    const hostPath = root.mounted
-      ? path.join(root.host, worktreeDirName(branch))
-      : undefined;
+    const hostPath = root.mounted ? path.join(root.host, dir) : undefined;
     return {
       branch,
       hostPath,
       path: target,
       ...(recorded ? { base: recorded } : {}),
     };
+  }
+
+  /**
+   * `name`, or `name-2`, `name-3`… whichever folder doesn't exist under the root yet: `feat/x` and `feat-x` share a
+   * folder name, and a folder can outlive its worktree.
+   */
+  private async freeDir(
+    project: Project,
+    root: WorktreeRoot,
+    name: string
+  ): Promise<string> {
+    let dir = name;
+    for (let n = 2; n <= MAX_DIR_SUFFIX; n += 1) {
+      const r = await this.deps.containers.exec(project, [
+        "test",
+        "-e",
+        path.posix.join(root.container, dir),
+      ]);
+      if (r.exitCode !== 0) {
+        return dir;
+      }
+      dir = `${name}-${n}`;
+    }
+    throw new InvalidRequestError(
+      `no free folder for ${name} under ${root.container}; remove old ones there`
+    );
   }
 
   async remove(

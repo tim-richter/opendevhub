@@ -379,6 +379,39 @@ export class GitOps {
     throw failure(args, r);
   }
 
+  /**
+   * Whether the branch never got a commit of its own: its reflog holds only its creation, or (without a reflog) it
+   * points at `base`'s commit. A brand-new task branch is an ancestor of its base, yet nothing was merged.
+   */
+  async neverMoved(
+    p: ExecTarget,
+    dir: string,
+    branch: string,
+    base: string
+  ): Promise<boolean> {
+    const log = await this.exec(p, dir, [
+      "reflog",
+      "show",
+      "-n",
+      "2",
+      "--format=%H",
+      `refs/heads/${branch}`,
+      "--",
+    ]);
+    const entries =
+      log.exitCode === 0 ? log.stdout.split("\n").filter((l) => l.trim()) : [];
+    if (entries.length > 0) {
+      return entries.length === 1;
+    }
+    const tips = await this.exec(p, dir, [
+      "rev-parse",
+      `refs/heads/${branch}^{commit}`,
+      `${base}^{commit}`,
+    ]);
+    const [own, of] = tips.stdout.split("\n").map((l) => l.trim());
+    return tips.exitCode === 0 && own !== undefined && own === of;
+  }
+
   async recordedBase(
     p: ExecTarget,
     dir: string,

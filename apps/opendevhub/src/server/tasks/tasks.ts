@@ -12,11 +12,13 @@ import type {
   TaskVariantSpec,
 } from "../../shared/types";
 import { USER, variantActor } from "../db/events";
+import { DraftStartedError } from "../db/tasks";
 import type { TaskRecord } from "../db/tasks";
 import { CommandError } from "../environments/containers";
 import type { Environments } from "../environments/environments";
 import type { HubDeps, NodeKit } from "../environments/ports";
-import { NotFoundError, UnavailableError } from "../errors";
+import { ConflictError, NotFoundError, UnavailableError } from "../errors";
+import type { CleanupTargets } from "../git/cleanup-targets";
 import { InvalidRequestError } from "../git/worktrees";
 import { LOCAL_NODE } from "../nodes/host";
 import type { OpencodeClient } from "../opencode/client";
@@ -64,10 +66,17 @@ export class Tasks {
   private readonly deps: HubDeps;
   private readonly envs: Environments;
   private readonly setup: CheckoutSetup;
-  constructor(deps: HubDeps, envs: Environments, setup?: CheckoutSetup) {
+  private readonly conversations?: Pick<CleanupTargets, "cleanupConversation">;
+  constructor(
+    deps: HubDeps,
+    envs: Environments,
+    setup?: CheckoutSetup,
+    conversations?: Pick<CleanupTargets, "cleanupConversation">
+  ) {
     this.deps = deps;
     this.envs = envs;
     this.setup = setup ?? new CheckoutSetup(deps, envs);
+    this.conversations = conversations;
   }
 
   /**
@@ -142,15 +151,33 @@ export class Tasks {
     }
   }
 
-  deleteArchivedTask(id: ProjectId, task: string): void {
+  /**
+   * Deletes an archived task with its conversations, discarded variants' included: left in opencode, they would come
+   * back as chats once the task no longer claims them. Keeps the task when one of them can't go now (it is running, or
+   * its container is stopped). Worktrees and branches stay.
+   */
+  async deleteArchivedTask(id: ProjectId, task: string): Promise<void> {
     this.envs.requireProject(id);
     if (!TASK_ID.test(task)) {
       throw new InvalidRequestError(`not a task id: ${task}`);
     }
-    if (
-      this.deps.tasks.get(task)?.projectId !== id ||
-      !this.deps.tasks.deleteArchived(task, USER)
-    ) {
+    const record = this.deps.tasks.get(task);
+    if (record?.projectId !== id || record.archivedAt === undefined) {
+      throw new NotFoundError(task, "archived task");
+    }
+    for (const session of this.deps.tasks.liveSessions(task)) {
+      const outcome = await this.conversations?.cleanupConversation(
+        id,
+        session.envId,
+        session.sessionId
+      );
+      if (outcome && outcome.outcome !== "removed") {
+        throw new ConflictError(
+          `kept the task: ${outcome.message ?? "a conversation could not be deleted"}`
+        );
+      }
+    }
+    if (!this.deps.tasks.deleteArchived(task, USER)) {
       throw new NotFoundError(task, "archived task");
     }
   }
@@ -225,7 +252,15 @@ export class Tasks {
       specFirst: req.spec !== undefined,
       title,
     });
-    const first = this.addRows(task, prepared);
+    let first: number;
+    try {
+      first = this.addRows(task, prepared, { draft: true });
+    } catch (error) {
+      if (error instanceof DraftStartedError) {
+        throw new InvalidRequestError("the task has already started");
+      }
+      throw error;
+    }
     void this.run(prepared, task, title, first).catch(() => undefined);
     return { task, variants: [] };
   }
@@ -363,11 +398,16 @@ export class Tasks {
   }
 
   /** Records the request's variants on an existing task; returns the first new variant's number. */
-  private addRows(task: string, { req, remoteKit, node }: Prepared): number {
+  private addRows(
+    task: string,
+    { req, remoteKit, node }: Prepared,
+    opts: { draft?: boolean } = {}
+  ): number {
     const added = this.deps.tasks.addVariants(
       task,
       req.variants.map((v) => ({ ...v, ...(remoteKit ? { node } : {}) })),
-      USER
+      USER,
+      opts
     );
     return added[0] ?? 1;
   }
@@ -409,6 +449,10 @@ export class Tasks {
       actor,
       attach: (session) =>
         this.deps.tasks.attachSession(task, n, session, actor),
+      // A pick while it is still starting discards it; it must not go on to run its first turn unseen.
+      cancelled: () =>
+        this.deps.tasks.get(task)?.variants.find((v) => v.n === n)
+          ?.discarded === true,
       creator: { by: "variant", n, task },
       log: (line) => this.deps.store.appendStartingLog(task, n, line),
       step: (patch) => this.deps.tasks.updateVariant(task, n, patch, actor),

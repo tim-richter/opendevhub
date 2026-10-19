@@ -82,10 +82,14 @@ export const reconcileSessions = async (
   const archived = new Set(
     input.sessions.filter((s) => s.time.archived !== undefined).map((s) => s.id)
   );
-  const unlisted = [
+  const live = () => [
     ...tasks.liveSessionsIn(envId),
     ...chats.liveSessionsIn(envId),
-  ].filter((id) => !present.has(id) && !archived.has(id));
+  ];
+  const known = new Set(live());
+  const unlisted = [...known].filter(
+    (id) => !present.has(id) && !archived.has(id)
+  );
   if (unlisted.length > 0) {
     const answers = await Promise.all(
       unlisted.map((id, i) =>
@@ -94,6 +98,12 @@ export const reconcileSessions = async (
     );
     for (const [i, id] of unlisted.entries()) {
       if (answers[i] !== "gone") {
+        present.add(id);
+      }
+    }
+    // Sessions attached while opencode was asked are newer than the listing, which can't speak for them.
+    for (const id of live()) {
+      if (!known.has(id)) {
         present.add(id);
       }
     }

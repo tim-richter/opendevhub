@@ -505,7 +505,7 @@ const TasksCard = ({ view }: { view: ProjectView }) => {
       const approved = await confirm({
         title: `Delete “${task.title}”?`,
         description:
-          "This permanently removes the task record and its variant links. Conversations and worktrees stay in place.",
+          "This permanently removes the task record and its conversations, discarded variants' included. Worktrees and branches stay in place.",
         confirmLabel: "Delete task",
         destructive: true,
       });

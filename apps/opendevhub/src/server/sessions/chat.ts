@@ -249,12 +249,17 @@ export class Chat {
           chat.directory ?? "",
           {}
         )
-        .catch((error: unknown) =>
-          this.envs.log(
-            id,
-            `task ${title}: could not run ${PROPOSE_COMMAND}: ${error instanceof Error ? error.message : String(error)}`
-          )
-        );
+        .catch((error: unknown) => {
+          const why = `could not run ${PROPOSE_COMMAND}: ${error instanceof Error ? error.message : String(error)}`;
+          this.envs.log(id, `task ${title}: ${why}`);
+          // Shown on the variant, which otherwise waits for a proposal that never comes.
+          this.deps.tasks.updateVariant(
+            task,
+            1,
+            { error: `${why}; run it in the conversation` },
+            USER
+          );
+        });
     }
     const extra = body.variants ?? [];
     if (extra.length > 0) {

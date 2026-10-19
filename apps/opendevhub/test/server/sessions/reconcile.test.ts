@@ -177,4 +177,36 @@ describe("reconcileSessions", () => {
     expect(s.lookup).not.toHaveBeenCalled();
     expect(s.chatList()).toHaveLength(1);
   });
+
+  it("leaves alone a session attached while opencode was being asked about others", async () => {
+    const s = setup();
+    s.tasks.createTask({
+      createdAt: 1,
+      id: T1,
+      projectId: project.id,
+      prompt: "Fix",
+      title: "Fix",
+      variants: [{}, {}],
+    });
+    s.tasks.attachSession(
+      T1,
+      1,
+      { directory: WS, envId: project.id, sessionId: "ses_old" },
+      variantActor(T1, 1)
+    );
+    s.lookup.mockImplementationOnce(async () => {
+      // Variant 2's setup attaches its new session meanwhile; the listing predates it.
+      s.tasks.attachSession(
+        T1,
+        2,
+        { directory: WS, envId: project.id, sessionId: "ses_new" },
+        variantActor(T1, 2)
+      );
+      return "gone";
+    });
+    await s.run([]);
+    expect(
+      s.tasks.get(T1)?.variants.map((v) => v.sessionRemoved)
+    ).toStrictEqual([true, undefined]);
+  });
 });

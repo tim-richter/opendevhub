@@ -49,19 +49,20 @@ const readJson = <T extends object>(file: string, fallback: T): T => {
     }
     throw error;
   }
+  // Never replaced with defaults: a typo would otherwise cost every project and setting on the next save.
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(text);
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("Expected a JSON object");
-    }
-    return value as T;
-  } catch {
-    fs.renameSync(file, `${file}.bak`);
-    console.warn(
-      `opendevhub: ${file} was corrupt; moved to ${file}.bak and starting fresh`
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(
+      `${file} is not valid JSON (${error instanceof Error ? error.message : String(error)}); fix or remove it`,
+      { cause: error }
     );
-    return fallback;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${file} must hold a JSON object; fix or remove it`);
+  }
+  return value as T;
 };
 
 export const writeJson = (file: string, value: unknown, mode: number): void => {

@@ -514,6 +514,9 @@ export function setup(
     isAncestor: vi.fn(
       async (_p: Project, _dir: string, _b: string, _base: string) => true
     ),
+    neverMoved: vi.fn(
+      async (_p: Project, _dir: string, _b: string, _base: string) => false
+    ),
     mergeBase: vi.fn(
       async (
         _p: Project,

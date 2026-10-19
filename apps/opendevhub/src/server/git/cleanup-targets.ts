@@ -39,6 +39,7 @@ export class CleanupTargets {
       const envs = this.deps.store.environments(id);
       return scanBranches(this.deps.git, {
         envOf: (dir) => envs.find((e) => e.worktree.path === dir)?.id,
+        inUse: this.inUse(id),
         project: p,
         workspace: ws,
         worktrees,
@@ -56,7 +57,14 @@ export class CleanupTargets {
       const root = this.deps.store.runtime(id).worktreeRoot;
       const listed = await this.deps.worktrees.list(p, ws, root);
       this.envs.setWorktrees(id, listed);
-      const changed = await branchChanged(this.deps.git, p, ws, item, listed);
+      const changed = await branchChanged(
+        this.deps.git,
+        p,
+        ws,
+        item,
+        listed,
+        this.inUse(id)
+      );
       if (changed) {
         return { message: changed, outcome: "skipped" };
       }
@@ -207,6 +215,39 @@ export class CleanupTargets {
     );
     this.envs.reconcile(env);
     return { outcome: "removed" };
+  }
+
+  /**
+   * Whether a branch or worktree is in use now: a session there is running or waiting on someone, or a task variant
+   * or chat is still being set up on it. Idle sessions don't count, or every finished task would keep its worktree.
+   */
+  private inUse(
+    id: ProjectId
+  ): (branch: string, worktreePath: string | undefined) => boolean {
+    const dirs = new Set<string>();
+    const branches = new Set<string>();
+    for (const s of this.deps.store.sessionsOf(id)) {
+      if (s.status !== "idle") {
+        dirs.add(s.directory);
+      }
+    }
+    const starting = [
+      ...this.deps.tasks
+        .listForProject(id)
+        .flatMap((t) => t.variants.filter((v) => !v.discarded)),
+      ...this.deps.chats.listForProject(id),
+    ].filter((c) => !c.sessionId && c.step !== "failed");
+    for (const c of starting) {
+      if (c.branch) {
+        branches.add(c.branch);
+      }
+      if (c.directory) {
+        dirs.add(c.directory);
+      }
+    }
+    return (branch, worktreePath) =>
+      branches.has(branch) ||
+      (worktreePath !== undefined && dirs.has(worktreePath));
   }
 
   /** Current worktree paths, here and on other nodes, or undefined when git can't list them. */

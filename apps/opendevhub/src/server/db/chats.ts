@@ -1,3 +1,4 @@
+import { FIRST_TURN_INTERRUPTED, FIRST_TURN_SENDING } from "../../shared/tasks";
 import type {
   ChatOrigin,
   ChatView,
@@ -38,7 +39,8 @@ export interface NewChat {
 
 export type ChatPatch = Partial<{
   step: StartStep;
-  error: string;
+  /** null clears it. */
+  error: string | null;
   branch: string;
   directory: string;
   envId: EnvId;
@@ -185,10 +187,15 @@ export class ChatStore {
     );
   }
 
-  /** Links a chat to the session its setup just created. */
+  /** Links a chat to the session its setup just created; `note` becomes its error, else the error is cleared. */
   attachSession(
     id: string,
-    session: { sessionId: string; envId: EnvId; directory: string }
+    session: {
+      sessionId: string;
+      envId: EnvId;
+      directory: string;
+      note?: string;
+    }
   ): void {
     this.write(() => {
       // A session reconcile adopted before this ran (a claim can't cover a crash) keeps only this chat.
@@ -201,11 +208,16 @@ export class ChatStore {
         Number(
           this.db
             .prepare(
-              `UPDATE chats SET session_id = ?, env_id = ?, directory = ?, step = 'session', error = NULL,
+              `UPDATE chats SET session_id = ?, env_id = ?, directory = ?, step = 'session', error = ?,
                session_removed_at = NULL WHERE id = ?`
             )
-            .run(session.sessionId, session.envId, session.directory, id)
-            .changes
+            .run(
+              session.sessionId,
+              session.envId,
+              session.directory,
+              session.note ?? null,
+              id
+            ).changes
         ) > 0
       );
     });
@@ -342,6 +354,9 @@ export class ChatStore {
    * many.
    */
   failInterrupted(): number {
+    this.db
+      .prepare("UPDATE chats SET error = ? WHERE error = ?")
+      .run(FIRST_TURN_INTERRUPTED, FIRST_TURN_SENDING);
     const stuck = (
       this.db
         .prepare(

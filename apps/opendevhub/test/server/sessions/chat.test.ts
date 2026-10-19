@@ -289,6 +289,22 @@ describe("make task", () => {
     });
   });
 
+  it("shows on variant 1 that opsx-propose could not run", async () => {
+    const s = await withChat();
+    s.client.command.mockRejectedValueOnce(new Error("opencode is busy"));
+    const { task } = await s.hub.chat.makeTask(project.id, s.chat, {
+      brief: "Add a dark mode toggle",
+      spec: true,
+      title: "Dark mode",
+    });
+    expect(s.tasks.get(task)?.variants[0]).toMatchObject({
+      error:
+        "could not run opsx-propose: opencode is busy; run it in the conversation",
+      step: "session",
+    });
+    expect(s.tasks.get(task)?.state).toBe("running");
+  });
+
   it("adds extra variants after variant 1, and keeps the task when one fails", async () => {
     const s = await withChat();
     s.worktrees.add.mockRejectedValueOnce(new Error("no space left"));

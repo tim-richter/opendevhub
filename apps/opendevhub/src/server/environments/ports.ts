@@ -67,6 +67,7 @@ export type GitPort = Pick<
   | "branchRefs"
   | "remoteHead"
   | "isAncestor"
+  | "neverMoved"
   | "mergeBase"
   | "fileBytes"
 >;

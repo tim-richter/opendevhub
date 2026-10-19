@@ -19,7 +19,7 @@ describe(envIdFor, () => {
         "/workspaces/demo.worktrees/feature-login",
         "feature/login"
       )
-    ).toMatch(/^demo-abc123-feature-login-[0-9a-f]{4}$/u);
+    ).toMatch(/^demo-abc123-feature-login-[0-9a-f]{8}$/u);
   });
 
   it("differs per worktree and is stable", () => {
@@ -40,7 +40,7 @@ describe(envIdFor, () => {
 
   it("names a branch with no usable characters 'worktree'", () => {
     expect(envIdFor("demo-abc123", "/w/x", "___")).toMatch(
-      /^demo-abc123-worktree-[0-9a-f]{4}$/u
+      /^demo-abc123-worktree-[0-9a-f]{8}$/u
     );
   });
 });

@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { eventsSince, variantActor } from "../../../src/server/db/events";
+import { USER, eventsSince, variantActor } from "../../../src/server/db/events";
 import type { NewTask } from "../../../src/server/db/tasks";
-import { RESTART_ERROR, TaskStore } from "../../../src/server/db/tasks";
+import {
+  DraftStartedError,
+  RESTART_ERROR,
+  TaskStore,
+} from "../../../src/server/db/tasks";
 import type { Project } from "../../../src/shared/types";
 import { memoryStores, taskEnvironment } from "../../helpers/stores";
 
@@ -77,6 +81,33 @@ describe("TaskStore.archiveSession", () => {
     expect(s.tasks.sessionRef("ses_old")?.id).toBe(T1);
     expect(s.tasks.bySession("ses_new")?.task.id).toBe(T1);
     expect(s.tasks.archiveSession("ses_old")).toBe(false);
+  });
+
+  it("hides a variant's first conversation too, which has no row of its own yet", () => {
+    const s = setup();
+    const id = s.tasks.startReview({
+      createdAt: 1,
+      directory: "/w",
+      envId: project.id,
+      projectId: project.id,
+      reviewOf: s.links.ensurePull("https://forge.example/o/r/pulls/1").id,
+      sessionId: "ses_review",
+      title: "Review #1",
+    });
+    expect(s.tasks.archiveSession("ses_review")).toBe(true);
+    expect(s.tasks.isSessionArchived("ses_review")).toBe(true);
+    expect(s.tasks.get(id)?.variants[0].sessionId).toBe("ses_review");
+  });
+
+  it("gives the variant its newest open conversation when its own is closed", () => {
+    const s = setup();
+    s.tasks.createTask(s.task({ variants: [{}] }));
+    s.attach(T1, 1, "ses_a");
+    s.attach(T1, 1, "ses_b");
+    s.attach(T1, 1, "ses_c");
+    expect(s.tasks.archiveSession("ses_c")).toBe(true);
+    expect(s.tasks.get(T1)?.variants[0].sessionId).toBe("ses_b");
+    expect(s.tasks.bySession("ses_c")?.task.id).toBe(T1);
   });
 });
 
@@ -329,6 +360,33 @@ describe("TaskStore drafts", () => {
     ]);
     // A started task is no longer a draft to edit.
     expect(s.tasks.updateDraft(T1, { title: "x" })).toBeFalsy();
+  });
+
+  it("keeps only the latest pick", () => {
+    const s = setup();
+    s.tasks.createTask(s.task({ variants: [{}, {}] }));
+    s.tasks.pick(T1, 1);
+    s.tasks.addVariants(T1, [{}]);
+    s.tasks.pick(T1, 3);
+    expect(
+      s.tasks.get(T1)?.variants.map((v) => [v.n, !!v.picked, !!v.discarded])
+    ).toStrictEqual([
+      [1, false, true],
+      [2, false, true],
+      [3, true, false],
+    ]);
+  });
+
+  it("starts a draft only once", () => {
+    const s = setup();
+    s.tasks.createTask(s.task({ variants: [] }));
+    expect(s.tasks.addVariants(T1, [{}], USER, { draft: true })).toStrictEqual([
+      1,
+    ]);
+    expect(() => s.tasks.addVariants(T1, [{}], USER, { draft: true })).toThrow(
+      DraftStartedError
+    );
+    expect(s.tasks.get(T1)?.variants).toHaveLength(1);
   });
 
   it("numbers variants added to a running task after its last", () => {

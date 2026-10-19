@@ -184,6 +184,12 @@ const WORKTREE_SELECT = `SELECT w.*, b.name AS branch_name, v.task_id AS task_id
 const sameNode = "COALESCE(w.node_id, '') = ?";
 
 /**
+ * How long a worktree a listing stopped showing may come back as the same row. A worktree git briefly reports as
+ * prunable (its folder not mounted yet, a container recreated without the mount) keeps its id, creator and links.
+ */
+export const REVIVE_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
  * Branches and worktrees: which branch each checkout is on, who made them, and what a branch was published as.
  * Every change writes its events in the same transaction; `subscribe` hears about each change.
  */
@@ -639,6 +645,30 @@ export class CheckoutStore {
     node: NodeId | undefined,
     branchId: number | undefined
   ): void {
+    // Only a row a listing removed comes back; one removed on purpose stays removed.
+    const lost = this.db
+      .prepare(
+        `SELECT w.id FROM worktrees w WHERE w.project_id = ? AND ${sameNode} AND w.path = ?
+           AND w.removed_at IS NOT NULL AND w.removed_at >= ?
+           AND (SELECT e.actor_type FROM events e WHERE e.object_type = 'worktree' AND e.object_id = CAST(w.id AS TEXT)
+                AND e.verb = 'worktree.removed' ORDER BY e.id DESC LIMIT 1) = 'system'
+         ORDER BY w.removed_at DESC, w.id DESC LIMIT 1`
+      )
+      .get(projectId, node ?? "", w.path, at - REVIVE_WINDOW_MS) as
+      | { id: number }
+      | undefined;
+    if (lost) {
+      this.db
+        .prepare(
+          "UPDATE worktrees SET removed_at = NULL, branch_id = ?, host_path = COALESCE(?, host_path) WHERE id = ?"
+        )
+        .run(branchId ?? null, w.hostPath ?? null, lost.id);
+      const row = this.worktreeById(lost.id);
+      if (row) {
+        this.worktreeEvent(at, actor, "worktree.adopted", row);
+      }
+      return;
+    }
     const id = Number(
       this.db
         .prepare(

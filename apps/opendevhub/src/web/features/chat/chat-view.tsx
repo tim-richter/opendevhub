@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@opendevhub/ui/alert";
 import { Button } from "@opendevhub/ui/button";
 import { Skeleton } from "@opendevhub/ui/skeleton";
 import {
@@ -10,6 +11,7 @@ import { useParams } from "@tanstack/react-router";
 import { ArchiveIcon, ListTodoIcon } from "lucide-react";
 import { useState } from "react";
 
+import { FIRST_TURN_SENDING } from "../../../shared/tasks";
 import type { ChatView as Chat, ProjectView } from "../../../shared/types";
 import { taskHref } from "../../../shared/urls";
 import { archiveChat, fetchChat } from "../../api";
@@ -106,6 +108,17 @@ const ChatPage = ({ view, chat }: { view: ProjectView; chat: Chat }) => {
 
   return (
     <ChatColumn centred={false}>
+      {/* A running chat's error is a note about its first message, e.g. that it may not have been sent. */}
+      {session &&
+        checkout &&
+        chat.error &&
+        chat.error !== FIRST_TURN_SENDING && (
+          <Alert className="border-warn/40 bg-warn/10">
+            <AlertDescription className="text-warn">
+              {chat.error}
+            </AlertDescription>
+          </Alert>
+        )}
       {session && checkout ? (
         <SessionView
           view={view}
