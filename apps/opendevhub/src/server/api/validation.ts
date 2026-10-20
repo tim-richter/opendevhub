@@ -421,6 +421,7 @@ export const bodies = {
     scope,
   }),
   runChecks: directory.extend({ names: strings, approve: strings }),
+  cancelCheck: directory.extend({ name: z.string().optional() }),
   reviseSpec: directory.extend({ change: z.string(), feedback: z.string() }),
   approveSpec: directory.extend({
     newConversation: z.boolean().optional(),

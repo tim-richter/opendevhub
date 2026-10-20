@@ -647,6 +647,8 @@ export class Containers {
       onStderrLine?: (line: string) => void;
       /** Written to the command's stdin: for secrets, which `--remote-env` would show in the process list. */
       input?: string;
+      /** Ends the local `devcontainer exec`; the command in the container may outlive it. */
+      signal?: AbortSignal;
     } = {}
   ): Promise<RunResult> {
     const args = ["exec", ...this.idArgs(target)];
@@ -658,6 +660,7 @@ export class Containers {
       ...(opts.onLine ? { onLine: opts.onLine } : {}),
       ...(opts.onStderrLine ? { onStderrLine: opts.onStderrLine } : {}),
       ...(opts.input === undefined ? {} : { input: opts.input }),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
   }
 

@@ -301,7 +301,7 @@ describe(Checks, () => {
     const { checks, execCalls, log, finished } = setup({
       exec: (command, o) => {
         o.onLine?.("\u001B[31mred\u001B[0m line");
-        return command.at(-1) === "pnpm test" ? { exitCode: 1 } : {};
+        return command.at(-2) === "pnpm test" ? { exitCode: 1 } : {};
       },
     });
     const started = await checks.start("demo", "/workspaces/demo");
@@ -319,12 +319,15 @@ describe(Checks, () => {
     ]);
     expect(run.results[0].output).toStrictEqual(["red line"]);
     expect(execCalls[0].command.slice(0, 2)).toStrictEqual(["sh", "-c"]);
-    expect(execCalls[0].command.slice(3)).toStrictEqual([
+    expect(execCalls[0].command.slice(3, 7)).toStrictEqual([
       "sh",
       "/workspaces/demo",
       "900",
       "pnpm lint",
     ]);
+    expect(execCalls[0].command[7]).toMatch(
+      /^\/tmp\/opendevhub-check-[0-9a-f]{16}-[0-9a-f]{8}\.pid$/u
+    );
     expect(execCalls[0].env).toStrictEqual({
       OPENDEVHUB_CHECK: "lint",
       OPENDEVHUB_BRANCH: "feature",
@@ -385,6 +388,77 @@ describe(Checks, () => {
     await expect(
       checks.start("demo", "/workspaces/demo")
     ).resolves.toBeDefined();
+  });
+
+  it("cancels the running check in the container and goes on with the next", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { checks, execCalls, log, finished } = setup({
+      exec: (command) => {
+        if (command.at(-1)?.endsWith(".pid") && command[2].includes("kill")) {
+          release();
+        }
+        return {};
+      },
+    });
+    const { exec } = (checks as unknown as { deps: ChecksDeps }).deps
+      .containers;
+    // Hold lint until the cancel's kill reaches the container.
+    (checks as unknown as { deps: ChecksDeps }).deps.containers.exec = async (
+      t,
+      command,
+      o
+    ) => {
+      const r = await exec(t, command, o);
+      if (command.at(-2) === "pnpm lint") {
+        await gate;
+        return { ...r, exitCode: 143 };
+      }
+      return r;
+    };
+    await checks.start("demo", "/workspaces/demo");
+    await vi.waitFor(() => {
+      if (
+        checks.latest("demo", "/workspaces/demo").run?.results[0].status !==
+        "running"
+      ) {
+        throw new Error("not running yet");
+      }
+    });
+    // A cancel meant for another check does nothing.
+    await checks.cancel("demo", "/workspaces/demo", "test");
+    expect(execCalls).toHaveLength(1);
+    await checks.cancel("demo", "/workspaces/demo", "lint");
+    expect(execCalls[1].command.at(-1)).toBe(execCalls[0].command.at(-1));
+    const run = await finished();
+    expect(run.results.map((r) => [r.name, r.status])).toStrictEqual([
+      ["lint", "cancelled"],
+      ["test", "passed"],
+    ]);
+    expect(log[0]).toMatch(/^checks: lint cancelled after /u);
+  });
+
+  it("cancels a running host check through the runner's signal", async () => {
+    const { checks, finished, hostCalls } = setup({
+      checks: [{ name: "build", command: "make", where: "host" }],
+    });
+    const deps = (checks as unknown as { deps: ChecksDeps }).deps;
+    deps.settings.update(project.path, {
+      approvedHostChecks: [hostCheckHash("make")],
+    });
+    deps.run = async (_cmd, args, o = {}) => {
+      hostCalls.push({ args, opts: o });
+      await new Promise((r) => o.signal?.addEventListener("abort", r));
+      return { exitCode: 143, stdout: "", stderr: "", timedOut: false };
+    };
+    await checks.start("demo", "/workspaces/demo");
+    await vi.waitFor(() => {
+      if (hostCalls.length === 0) {
+        throw new Error("not running yet");
+      }
+    });
+    await checks.cancel("demo", "/workspaces/demo");
+    expect((await finished()).results[0].status).toBe("cancelled");
   });
 
   it("validates the directory and the names", async () => {

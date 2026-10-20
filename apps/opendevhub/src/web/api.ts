@@ -1246,6 +1246,22 @@ export const runChecks = (
     "run checks"
   );
 
+/** Stops the check running now in the checkout, only if it is `name`; the queued ones still run. */
+export const cancelCheck = async (
+  projectId: string,
+  directory: string,
+  name: string
+) => {
+  const data = await read(
+    project.checks.cancel.$post({
+      param: projectParam(projectId),
+      json: { directory, name },
+    }),
+    "cancel the check"
+  );
+  return data.run;
+};
+
 /** Saves the project's own list of checks, or goes back to devcontainer.json's with null. */
 /** Saves the user's own checks (null removes them), or with `team` the team's list in devcontainer.json. */
 export const saveChecks = (

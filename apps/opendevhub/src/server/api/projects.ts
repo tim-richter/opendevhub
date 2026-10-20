@@ -827,6 +827,15 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
         });
       })
     )
+    .post(
+      "/api/projects/:id/checks/cancel",
+      validateJson(bodies.cancelCheck),
+      (c) =>
+        json(c, (id) => {
+          const b = c.req.valid("json");
+          return checks.cancel(id, str(b.directory) ?? "", b.name);
+        })
+    )
     .get(
       "/api/projects/:id/checks/run",
       validateQuery(queries.directory),

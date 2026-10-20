@@ -1,7 +1,12 @@
 import { Button } from "@opendevhub/ui/button";
 import { Skeleton } from "@opendevhub/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRightIcon, GitBranchIcon, PlayIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  GitBranchIcon,
+  PlayIcon,
+  SquareIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -150,6 +155,7 @@ const Target = ({ status }: { status: VariantStatus }) => {
 };
 
 const RESULT_TONE = {
+  cancelled: "off",
   error: "error",
   failed: "error",
   passed: "ok",
@@ -157,12 +163,15 @@ const RESULT_TONE = {
   running: "running",
 } as const;
 
+/** One check and its status; the running one has a button that cancels it. */
 const CheckItem = ({
   check,
   result,
+  onCancel,
 }: {
   check: CheckDef;
   result?: CheckResult;
+  onCancel: () => void;
 }) => {
   const status = result ? result.status : "not run";
   return (
@@ -175,6 +184,17 @@ const CheckItem = ({
       <span className="text-muted-foreground ml-auto shrink-0 text-xs">
         {status}
       </span>
+      {result?.status === "running" && (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Cancel ${check.name}`}
+          title={`Cancel ${check.name}`}
+          onClick={onCancel}
+        >
+          <SquareIcon className="fill-current" />
+        </Button>
+      )}
     </li>
   );
 };
@@ -211,6 +231,7 @@ const Checks = ({
                 key={`${c.where}:${c.name}:${c.command}`}
                 check={c}
                 result={resultOf(data.run, c)}
+                onCancel={() => void checks.cancel(c.name)}
               />
             ))}
           </ul>

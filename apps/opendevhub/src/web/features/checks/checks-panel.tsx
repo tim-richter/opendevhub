@@ -14,6 +14,7 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   CircleIcon,
+  CircleSlashIcon,
   CircleXIcon,
   LayersIcon,
   ListChecksIcon,
@@ -21,6 +22,7 @@ import {
   MonitorIcon,
   PlayIcon,
   ShieldAlertIcon,
+  SquareIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -30,7 +32,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import type { CheckDef, CheckResult, ChecksView } from "../../../shared/types";
-import { runChecks } from "../../api";
+import { cancelCheck, runChecks } from "../../api";
 import { Chip } from "../../components/page";
 import {
   checkSections,
@@ -65,6 +67,14 @@ export const useChecks = (projectId: string, directory: string) => {
           }
       ),
   });
+  const cancelMutation = useMutation({
+    mutationFn: (name: string) => cancelCheck(projectId, directory, name),
+    onSuccess: (latest) =>
+      queryClient.setQueryData<ChecksView>(
+        checksKey(projectId, directory),
+        (v) => v && withRun(v, latest)
+      ),
+  });
   const { refetch } = query;
   const load = useCallback(() => refetch(), [refetch]);
   const { mutateAsync } = run;
@@ -75,9 +85,17 @@ export const useChecks = (projectId: string, directory: string) => {
     },
     [mutateAsync]
   );
+  const { mutateAsync: cancelAsync } = cancelMutation;
+  const cancel = useCallback(
+    async (name: string) => {
+      await cancelAsync(name).catch(() => undefined);
+    },
+    [cancelAsync]
+  );
   const view = query.data;
   return {
-    error: (run.error ?? query.error)?.message,
+    cancel,
+    error: (run.error ?? cancelMutation.error ?? query.error)?.message,
     load,
     start,
     state: checksState(view),
@@ -157,6 +175,9 @@ const ResultIcon = ({ result }: { result?: CheckResult }) => {
     case "passed": {
       return <CircleCheckIcon className={cn(cls, "text-ok")} />;
     }
+    case "cancelled": {
+      return <CircleSlashIcon className={cn(cls, "text-muted-foreground")} />;
+    }
     default: {
       return <CircleXIcon className={cn(cls, "text-destructive")} />;
     }
@@ -180,6 +201,9 @@ const outcome = (r: CheckResult | undefined): string => {
   if (r.status === "passed") {
     return time;
   }
+  if (r.status === "cancelled") {
+    return `cancelled · ${time}`;
+  }
   return r.timedOut ? `timed out · ${time}` : `exit ${r.exitCode} · ${time}`;
 };
 
@@ -190,7 +214,7 @@ export const ChecksPanel = (props: {
   onFix?: (results: CheckResult[]) => void;
   onClose: () => void;
 }) => {
-  const { view, error, start, state } = props.checks;
+  const { view, error, start, cancel, state } = props.checks;
   /** The run waiting for host commands to be approved: all checks, or the named ones. */
   const [approval, setApproval] = useState<{ names?: string[] }>();
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -367,6 +391,7 @@ export const ChecksPanel = (props: {
               })
             }
             onRun={() => go([c.name])}
+            onCancel={() => cancel(c.name)}
           />
         ));
         if (!section.group) {
@@ -460,9 +485,17 @@ const CheckRow = (props: {
   disabled: boolean;
   onToggle: () => void;
   onRun: () => void;
+  onCancel: () => void;
 }) => {
   const { check: c, result: r, expanded } = props;
   const hasOutput = !!r && (r.output.length > 0 || !!r.reason);
+  const [cancelling, setCancelling] = useState(false);
+  const isRunning = r?.status === "running";
+  useEffect(() => {
+    if (!isRunning) {
+      setCancelling(false);
+    }
+  }, [isRunning]);
   return (
     <li className="border-t first:border-t-0">
       <div className="flex min-w-0 items-center gap-2 px-4 py-2 text-sm">
@@ -492,16 +525,36 @@ const CheckRow = (props: {
         <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
           {outcome(r)}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Run ${c.name}`}
-          title={`Run ${c.name}`}
-          disabled={props.disabled}
-          onClick={props.onRun}
-        >
-          <PlayIcon />
-        </Button>
+        {isRunning ? (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Cancel ${c.name}`}
+            title={`Cancel ${c.name}`}
+            disabled={cancelling}
+            onClick={() => {
+              setCancelling(true);
+              props.onCancel();
+            }}
+          >
+            {cancelling ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : (
+              <SquareIcon className="fill-current" />
+            )}
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Run ${c.name}`}
+            title={`Run ${c.name}`}
+            disabled={props.disabled}
+            onClick={props.onRun}
+          >
+            <PlayIcon />
+          </Button>
+        )}
       </div>
       {expanded && hasOutput && (
         <pre className="bg-muted/40 max-h-80 overflow-auto border-t px-4 py-2 font-mono text-xs whitespace-pre-wrap">

@@ -7,6 +7,7 @@ import { ChecksPanel } from "./checks-panel";
 const panelProps = (view: ChecksView) => ({
   busy: false,
   checks: {
+    cancel: () => Promise.resolve(),
     error: undefined,
     load: () => Promise.resolve(undefined as never),
     start: () => Promise.resolve(),
@@ -32,7 +33,7 @@ const meta = preview.meta({
 /** `static` groups typecheck and lint, with a Run group button on its heading; test stays on its own. */
 export const Groups = meta.story({ args: panelProps(checksView) });
 
-/** A group mid-run: its heading counts what passed so far and its button spins. */
+/** A group mid-run: its heading counts what passed so far, its button spins, and the running check can be cancelled. */
 export const GroupRunning = meta.story({
   args: panelProps({
     ...checksView,

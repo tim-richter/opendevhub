@@ -186,7 +186,7 @@ export interface DashboardDeps {
   gitSetup?: Pick<GitSetupProbe, "view" | "test">;
   push: PushPort;
   cleanup: Pick<Cleanup, "scan" | "apply">;
-  checks: Pick<Checks, "view" | "latest" | "start" | "saveSettings">;
+  checks: Pick<Checks, "view" | "latest" | "start" | "cancel" | "saveSettings">;
   /** Absent in tests that don't need it. */
   specs?: Pick<Specs, "view" | "revise" | "approve" | "implement" | "archive">;
   /** Absent when the usage ledger couldn't be opened. */

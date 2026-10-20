@@ -18,6 +18,8 @@ export interface RunOptions {
   detached?: boolean;
   /** Written to the command's stdin, which is then closed. Without it stdin is ignored. */
   input?: string | Buffer;
+  /** Ends the command (its whole group when detached) like a timeout does, without marking it timed out. */
+  signal?: AbortSignal;
 }
 
 export type Runner = (
@@ -79,13 +81,21 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
     child.stdout?.on("data", (c: Buffer) => feed("out", c));
     child.stderr?.on("data", (c: Buffer) => feed("err", c));
 
+    const stop = () => {
+      kill("SIGTERM");
+      setTimeout(() => kill("SIGKILL"), 5000).unref();
+    };
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          kill("SIGTERM");
-          setTimeout(() => kill("SIGKILL"), 5000).unref();
+          stop();
         }, opts.timeoutMs)
       : undefined;
+    if (opts.signal?.aborted) {
+      stop();
+    } else {
+      opts.signal?.addEventListener("abort", stop, { once: true });
+    }
 
     const finish = (exitCode: number) => {
       if (settled) {
@@ -93,6 +103,7 @@ export const spawnRunner: Runner = (cmd, args, opts = {}) =>
       }
       settled = true;
       clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", stop);
       if (carry.out.trim()) {
         opts.onLine?.(carry.out);
       }

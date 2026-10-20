@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -36,11 +36,26 @@ const GRACE_MS = 30_000;
 /**
  * Runs a check's command in its folder, under `timeout` when the container has one that takes `-k`
  * (it signals the command's whole process group, so a timed-out check leaves nothing running).
+ * The shell's pid, which `exec` hands on, goes to the file `$4` for a cancel to find; the files of the
+ * check's earlier runs (`$4` up to its last `-`) are removed, so a cancel never finds an old pid.
  */
 const CONTAINER_SCRIPT = [
   'cd "$1" || exit 125',
+  'rm -f "${4%-*}"-*.pid 2>/dev/null',
+  'echo $$ >"$4" 2>/dev/null',
   'if timeout -k 1 5 true >/dev/null 2>&1; then exec timeout -k 10 "$2" sh -c "$3"; fi',
   'exec sh -c "$3"',
+].join("\n");
+
+/**
+ * Ends the check whose pid is in the file `$1`: its process group when `timeout` leads one, else the process.
+ * `timeout` passes the signal on, so the command ends the same way either way.
+ */
+const CANCEL_SCRIPT = [
+  'pid=$(cat "$1" 2>/dev/null) || exit 0',
+  'rm -f "$1"',
+  'kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null',
+  "exit 0",
 ].join("\n");
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -246,6 +261,11 @@ const seconds = (ms: number): string =>
 export class Checks {
   private readonly runs = new Map<string, CheckRun>();
   private readonly running = new Set<string>();
+  /** How to stop the check that is running now, per checkout. */
+  private readonly cancels = new Map<
+    string,
+    { name: string; cancel: () => Promise<void> }
+  >();
 
   private readonly deps: ChecksDeps;
   constructor(deps: ChecksDeps) {
@@ -315,6 +335,25 @@ export class Checks {
     this.requireProject(projectId);
     const run = this.runs.get(this.key(projectId, directory));
     return run ? { run: structuredClone(run) } : {};
+  }
+
+  /**
+   * Stops the check running now in the checkout; the checks queued after it still run. With `name`, only
+   * when that is the one running, so a late click doesn't stop the next check.
+   */
+  async cancel(
+    projectId: ProjectId,
+    directory: string,
+    name?: string
+  ): Promise<{ run?: CheckRun }> {
+    this.requireProject(projectId);
+    const key = this.key(projectId, directory);
+    const current = this.cancels.get(key);
+    if (current && (name === undefined || current.name === name)) {
+      this.cancels.delete(key);
+      await current.cancel();
+    }
+    return this.latest(projectId, directory);
   }
 
   /**
@@ -525,6 +564,25 @@ export class Checks {
 
     result.status = "running";
     const started = this.now();
+    const key = this.key(project.id, directory);
+    const abort = new AbortController();
+    let cancelled = false;
+    const pidFile = `/tmp/opendevhub-check-${createHash("sha256").update(`${key}\0${result.name}`).digest("hex").slice(0, 16)}-${randomUUID().slice(0, 8)}.pid`;
+    this.cancels.set(key, {
+      cancel: async () => {
+        cancelled = true;
+        if (result.where === "container") {
+          // Ending `devcontainer exec` alone would leave the command running in the container.
+          await this.deps.containers
+            .exec(target.exec, ["sh", "-c", CANCEL_SCRIPT, "sh", pidFile], {
+              timeoutMs: 15_000,
+            })
+            .catch(() => undefined);
+        }
+        abort.abort();
+      },
+      name: result.name,
+    });
     const onLine = (raw: string) => {
       const line = cleanLogLine(raw);
       if (!line) {
@@ -551,6 +609,7 @@ export class Checks {
           detached: true,
           env,
           onLine,
+          signal: abort.signal,
           timeoutMs: timerMs(timeout),
         });
       } else {
@@ -564,10 +623,12 @@ export class Checks {
             directory,
             String(timeout),
             result.command,
+            pidFile,
           ],
           {
             env,
             onLine,
+            signal: abort.signal,
             timeoutMs: timerMs(timeout + GRACE_MS / 1000),
           }
         );
@@ -581,9 +642,22 @@ export class Checks {
         }
       }
     } catch (error) {
-      return fail(error instanceof Error ? error.message : String(error));
+      if (!cancelled) {
+        return fail(error instanceof Error ? error.message : String(error));
+      }
+      r = { exitCode: 1, stderr: "", stdout: "", timedOut: false };
+    } finally {
+      this.cancels.delete(key);
     }
     result.durationMs = this.now() - started;
+    if (cancelled) {
+      result.status = "cancelled";
+      this.deps.log(
+        project.id,
+        `checks: ${result.name} cancelled after ${seconds(result.durationMs)}`
+      );
+      return;
+    }
     result.exitCode = r.exitCode;
     if (r.timedOut) {
       result.timedOut = true;

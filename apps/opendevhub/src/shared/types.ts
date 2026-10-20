@@ -374,7 +374,13 @@ export interface ChecksConfig {
   errors: string[];
 }
 
-export type CheckStatus = "queued" | "running" | "passed" | "failed" | "error";
+export type CheckStatus =
+  | "queued"
+  | "running"
+  | "passed"
+  | "failed"
+  | "error"
+  | "cancelled";
 
 export interface CheckResult {
   name: string;

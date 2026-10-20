@@ -415,6 +415,9 @@ function setup(webDir?: string) {
         _opts?: { names?: string[]; approve?: string[] }
       ) => run
     ),
+    cancel: vi.fn(async (_id: string, _dir: string, _name?: string) => ({
+      run,
+    })),
     saveSettings: vi.fn(async (_id: string, _checks: unknown) => config),
   };
   return {
@@ -2625,6 +2628,23 @@ describe("checks endpoints", () => {
     });
     await post(app, "checks/run", { directory: "/w" });
     expect(checks.start).toHaveBeenLastCalledWith("demo-abc123", "/w", {});
+  });
+
+  it("cancels the running check, named or not", async () => {
+    const { app, checks } = setup();
+    const res = await post(app, "checks/cancel", {
+      directory: "/w",
+      name: "lint",
+    });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      run: { directory: "/w" },
+    });
+    await post(app, "checks/cancel", { directory: "/w" });
+    expect(checks.cancel.mock.calls).toStrictEqual([
+      ["demo-abc123", "/w", "lint"],
+      ["demo-abc123", "/w", undefined],
+    ]);
   });
 
   it("maps a run already going to 409 and a bad request to 400", async () => {

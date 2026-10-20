@@ -654,6 +654,9 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.post("/api/projects/:id/checks/run", () =>
       HttpResponse.json(checksView.run)
     ),
+    http.post("/api/projects/:id/checks/cancel", () =>
+      HttpResponse.json({ run: checksView.run })
+    ),
     http.post("/api/projects/:id/checks/settings", () =>
       HttpResponse.json(checksView)
     ),
