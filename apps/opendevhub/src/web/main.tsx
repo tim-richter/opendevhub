@@ -35,29 +35,29 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <AccessGate>
-      <PersistQueryClientProvider
-        client={queryClient}
-        persistOptions={persistOptions}
-      >
-        <RouterContextProvider router={router}>
-          <DashboardProvider>
-            <TooltipProvider>
+    <TooltipProvider>
+      <AccessGate>
+        <PersistQueryClientProvider
+          client={queryClient}
+          persistOptions={persistOptions}
+        >
+          <RouterContextProvider router={router}>
+            <DashboardProvider>
               <App />
               <ConfirmDialogHost />
-            </TooltipProvider>
-          </DashboardProvider>
-        </RouterContextProvider>
-        <TanStackDevtools
-          plugins={[
-            { name: "TanStack Query", render: <ReactQueryDevtoolsPanel /> },
-            {
-              name: "TanStack Router",
-              render: <TanStackRouterDevtoolsPanel router={router} />,
-            },
-          ]}
-        />
-      </PersistQueryClientProvider>
-    </AccessGate>
+            </DashboardProvider>
+          </RouterContextProvider>
+          <TanStackDevtools
+            plugins={[
+              { name: "TanStack Query", render: <ReactQueryDevtoolsPanel /> },
+              {
+                name: "TanStack Router",
+                render: <TanStackRouterDevtoolsPanel router={router} />,
+              },
+            ]}
+          />
+        </PersistQueryClientProvider>
+      </AccessGate>
+    </TooltipProvider>
   </StrictMode>
 );
