@@ -41,7 +41,7 @@ import type {
   SubagentSummary,
   SessionTurn,
 } from "../../../shared/types";
-import { sessionUrl } from "../../../shared/urls";
+import { sessionLink } from "../../../shared/urls";
 import { Chip, muted } from "../../components/page";
 import { SessionBadge } from "../../components/status";
 import { Tip } from "../../components/tip";
@@ -485,7 +485,7 @@ export const SubagentsPanel = (props: {
         </span>
         <a
           className="row-span-2 inline-flex items-center gap-1 text-sm font-medium hover:underline"
-          href={sessionUrl(openUrlOf(props.view, props.session.envId), sub.id)}
+          href={sessionLink(openUrlOf(props.view, props.session.envId), sub.id)}
           target="_blank"
           rel="noopener noreferrer"
         >

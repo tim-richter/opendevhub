@@ -71,6 +71,30 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
     }
   };
 
+  /**
+   * A container start or rebuild: fails at once (409) when the checkout's config needs approval, and approving it
+   * runs the same action again; otherwise runs in the background like any action.
+   */
+  const startAction = async (
+    c: Context,
+    envId: string | undefined,
+    run: () => Promise<void>
+  ) => {
+    if (store.preflight().errors.length > 0) {
+      return action(c, run);
+    }
+    try {
+      await hub.environments.checkConfig(
+        param(c, "id"),
+        envId,
+        () => void run().catch(() => undefined)
+      );
+    } catch (error) {
+      return errorResponse(c, error);
+    }
+    return action(c, run);
+  };
+
   return new Hono()
     .post("/api/projects/:id/name", validateJson(bodies.projectName), (c) =>
       ok(c, async (id) => {
@@ -224,16 +248,18 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
       ok(c, (id) => requireTodos().remove(id, todoId(param(c, "todo"))))
     )
     .post("/api/projects/:id/rebuild", (c) =>
-      action(c, () => actions["rebuild"](param(c, "id")))
+      startAction(c, undefined, () => actions["rebuild"](param(c, "id")))
     )
     .post("/api/projects/:id/rebuild-no-cache", (c) =>
-      action(c, () => actions["rebuild-no-cache"](param(c, "id")))
+      startAction(c, undefined, () =>
+        actions["rebuild-no-cache"](param(c, "id"))
+      )
     )
     .post("/api/projects/:id/restart-opencode", (c) =>
       action(c, () => actions["restart-opencode"](param(c, "id")))
     )
     .post("/api/projects/:id/start", (c) =>
-      action(c, () => actions["start"](param(c, "id")))
+      startAction(c, undefined, () => actions["start"](param(c, "id")))
     )
     .post("/api/projects/:id/stop", (c) =>
       action(c, () => actions["stop"](param(c, "id")))
@@ -271,6 +297,17 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           );
         })
     )
+    .post(
+      "/api/projects/:id/config-approvals",
+      validateJson(bodies.configApproval),
+      (c) =>
+        ok(c, (id) =>
+          hub.environments.approveConfig(id, c.req.valid("json").fingerprint)
+        )
+    )
+    .delete("/api/projects/:id/config-approvals/:fingerprint", (c) =>
+      ok(c, (id) => hub.environments.refuseConfig(id, param(c, "fingerprint")))
+    )
     .post("/api/projects/:id/envs", validateJson(bodies.environment), (c) =>
       json(c, (id) => {
         const b = c.req.valid("json");
@@ -278,10 +315,12 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
       })
     )
     .post("/api/projects/:id/envs/:env/rebuild", (c) =>
-      action(c, () => envActions["rebuild"](param(c, "id"), param(c, "env")))
+      startAction(c, param(c, "env"), () =>
+        envActions["rebuild"](param(c, "id"), param(c, "env"))
+      )
     )
     .post("/api/projects/:id/envs/:env/rebuild-no-cache", (c) =>
-      action(c, () =>
+      startAction(c, param(c, "env"), () =>
         envActions["rebuild-no-cache"](param(c, "id"), param(c, "env"))
       )
     )
@@ -291,7 +330,9 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
       )
     )
     .post("/api/projects/:id/envs/:env/start", (c) =>
-      action(c, () => envActions["start"](param(c, "id"), param(c, "env")))
+      startAction(c, param(c, "env"), () =>
+        envActions["start"](param(c, "id"), param(c, "env"))
+      )
     )
     .post("/api/projects/:id/envs/:env/stop", (c) =>
       action(c, () => envActions["stop"](param(c, "id"), param(c, "env")))

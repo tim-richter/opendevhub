@@ -201,7 +201,7 @@ const install = async (deps: ServiceDeps, port: number | undefined) => {
   }
   deps.out.log(`installed ${file}`);
   deps.out.log(
-    `opendevhub now starts at login on http://localhost:${spec.port}/ (node ${spec.node})`
+    `opendevhub now starts at login on port ${spec.port} (node ${spec.node}). Open the dashboard with: opendevhub open`
   );
   deps.out.log(
     "If opendevhub is still running in a terminal, stop it; the service takes over its port."

@@ -17,7 +17,7 @@ import { confirm } from "@/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 
 import type { SessionSummary } from "../../../shared/types";
-import { sessionUrl } from "../../../shared/urls";
+import { sessionLink } from "../../../shared/urls";
 import { removeSession } from "../../api";
 import { Chip } from "../../components/page";
 import { SessionBadge } from "../../components/status";
@@ -164,7 +164,7 @@ export const SessionRow = (props: {
             "inline-flex items-center gap-1 px-1 text-sm font-medium whitespace-nowrap hover:underline",
             waiting && !session.pending && "text-attention"
           )}
-          href={sessionUrl(openUrl, session.id)}
+          href={sessionLink(openUrl, session.id)}
           target="_blank"
           rel="noreferrer"
         >

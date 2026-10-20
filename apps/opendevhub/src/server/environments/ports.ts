@@ -24,6 +24,7 @@ import type {
 } from "../opencode/client";
 import type { OpencodeRuntime } from "../opencode/runtime";
 import type { StateStore } from "../projects/state";
+import type { ConfigApprovals } from "./approvals";
 import type { Containers } from "./containers";
 import type { Credentials } from "./credentials";
 import type { EditorLauncher } from "./editors";
@@ -45,7 +46,9 @@ export type ContainersPort = Pick<
   | "ensureVolume"
   | "removeVolume"
 > &
-  Partial<Pick<Containers, "remoteEnv" | "exec" | "copyIn" | "logs">>;
+  Partial<
+    Pick<Containers, "remoteEnv" | "exec" | "copyIn" | "logs" | "readFile">
+  >;
 export type ImagesPort = Pick<Images, "ensureBase">;
 export type EnvFilesPort = Pick<EnvFiles, "path" | "write" | "remove">;
 export type GitPort = Pick<
@@ -192,6 +195,11 @@ export interface HubDeps {
   hostPortTunnel?: HostPortTunnelFactory;
   /** Other nodes' kits; absent when nodes aren't wired (and then every environment is local). */
   nodes?: NodeKitsPort;
+  /**
+   * The project's approved host-affecting container settings; every container build and start is checked against
+   * them. Absent only in tests that don't exercise the gate.
+   */
+  approvals?: ConfigApprovals;
 }
 
 export const sleep = (ms: number): Promise<void> =>

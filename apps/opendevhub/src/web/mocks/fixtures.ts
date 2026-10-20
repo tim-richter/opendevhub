@@ -47,6 +47,7 @@ import type {
   ModelsInfo,
   NodeView,
   ProjectTeamView,
+  PendingConfigApproval,
   ProjectView,
   PublishInfo,
   ReviewData,
@@ -248,6 +249,74 @@ const darkEnv: EnvironmentView = {
     path: WEB_ISOLATED_WORKTREE,
   },
   worktreeId: 3,
+};
+
+/** A worktree's config that added a privileged feature and changed its Compose file since the last approval. */
+export const configApproval: PendingConfigApproval = {
+  at: ago(5 * MINUTE),
+  changes: [
+    {
+      after: {
+        ".devcontainer/compose.yml":
+          "services:\n  app:\n    build: .\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n",
+      },
+      before: {
+        ".devcontainer/compose.yml": "services:\n  app:\n    build: .\n",
+      },
+      key: "dockerComposeFile",
+      kind: "changed",
+    },
+    {
+      after: "npm run prepare-host",
+      key: "initializeCommand",
+      kind: "added",
+    },
+    {
+      after: [
+        {
+          feature: "ghcr.io/devcontainers/features/docker-in-docker",
+          mount: {
+            source: "dind-var-lib-docker-${devcontainerId}",
+            target: "/var/lib/docker",
+            type: "volume",
+          },
+        },
+      ],
+      key: "mounts",
+      kind: "added",
+    },
+    { after: "app", before: "app", key: "service", kind: "unchanged" },
+  ],
+  fingerprint: "9f2c".repeat(16),
+  first: false,
+  sources: [
+    {
+      branch: "feat/dark-mode",
+      envId: "acme-web-dark",
+      kind: "worktree",
+      node: "local",
+    },
+  ],
+  surface: {},
+};
+
+/** A project's first approval: every host-affecting setting is new. */
+export const firstConfigApproval: PendingConfigApproval = {
+  at: ago(2 * MINUTE),
+  changes: [
+    {
+      after: [
+        "source=${localWorkspaceFolder}/../cache,target=/cache,type=bind",
+      ],
+      key: "mounts",
+      kind: "added",
+    },
+    { after: ["--network=host"], key: "runArgs", kind: "added" },
+  ],
+  fingerprint: "1a7e".repeat(16),
+  first: true,
+  sources: [{ kind: "main" }],
+  surface: {},
 };
 
 export const webProject: ProjectView = {

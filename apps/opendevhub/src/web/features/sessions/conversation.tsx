@@ -15,7 +15,7 @@ import type {
   SessionDetail,
   SessionSummary,
 } from "../../../shared/types";
-import { sessionUrl } from "../../../shared/urls";
+import { sessionLink } from "../../../shared/urls";
 import { Chip } from "../../components/page";
 import { SessionBadge } from "../../components/status";
 import { Tip } from "../../components/tip";
@@ -246,7 +246,7 @@ export const Conversation = (props: {
                 <li key={agent.id} className="shrink-0">
                   <a
                     className="hover:bg-muted inline-flex max-w-52 items-center gap-1.5 rounded-md border px-2 py-1"
-                    href={sessionUrl(openUrlOf(view, session.envId), agent.id)}
+                    href={sessionLink(openUrlOf(view, session.envId), agent.id)}
                     rel="noopener noreferrer"
                     target="_blank"
                     title={agent.title}

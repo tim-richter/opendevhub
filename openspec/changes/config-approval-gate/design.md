@@ -70,6 +70,10 @@ _Alternative:_ storing approvals in `config.json`. Rejected: a typo there now st
   - Without an `EnvSetup` (the Worktrees tab) it throws `ApprovalRequiredError`.
   - Inside `bringUpTask`, the config is re-read and checked again (`ensureBase` now comes after that read). This closes the window between the check and the build: a mismatch now throws instead of waiting.
 - **Adoption** of running containers at startup is not gated.
+- _Changed while implementing:_ the dashboard's start and rebuild actions run in the background and answer 202, so to fail "at once" the API first awaits `Environments.checkConfig(project, env?, retry)`. It answers 409 with the pending approval and registers the same action as the retry. `bringUp`/`bringUpTask` still check by themselves, so the config is read twice for a dashboard start.
+- _Changed while implementing:_ Approve (`Environments.approveConfig`) re-reads every source checkout's config first. If one no longer has the reviewed settings, it answers 409 "changed" and the banner shows the new pending approval. This implements "Config changed while reviewing" without a file watcher.
+- Compose file contents are kept in the surface itself (keyed by path relative to the checkout), not as separate hashes. The fingerprint covers them the same way, and the review can diff them against the closest approval.
+- Strings in the surface have the checkout's own path replaced by `${localWorkspaceFolder}`. The CLI expands that variable, and without this, mounts using it would differ between the main checkout and each worktree.
 
 Waiting outside `exclusiveEnv` keeps the worktree's other actions (remove, logs) usable while a variant waits.
 
@@ -103,7 +107,9 @@ _Alternative:_ gating in `Containers.up`. Rejected: too low. It can't wait or re
 - **Environment host:**
   - `/__odh/enter?code=` exchanges the code for a host-only `odh_env` cookie and 302s to `/`.
   - Any other request, the WebSocket upgrade included, requires `odh_env` for that env id, or gets a 401 (an HTML page for navigations).
-- **Opening an environment:** `GET /api/envs/:env/enter`, behind `odh`, mints a code and 302s to `http://<env>.localhost:<port>/__odh/enter?code=…`. The snapshot's `openUrl` points at this route, so links keep working without client code. A top-level navigation from the dashboard is same-site, so the Strict cookie is sent. A link on another site is not, so it gets 401.
+- **Opening an environment:** `GET /api/envs/:env/enter?next=<path>`, behind `odh`, mints a code and 302s to `http://<env>.localhost:<port>/__odh/enter?code=…&next=<path>`, which sets `odh_env` and 302s to `next` (same-host paths only). A top-level navigation from the dashboard is same-site, so the Strict `odh` cookie is sent. A link on another site is not, so it gets 401.
+  - _Changed while implementing:_ the snapshot's `openUrl` stays the environment's origin. opencode's session links (`sessionUrl`) encode that origin as their server key, so it can't become a dashboard route. The web instead sends every environment link through `enterUrl` (`shared/urls.ts`), which turns `http://<env>.localhost:<port><path>` into the enter route with `next=<path>`.
+  - _Changed while implementing:_ `odh_env` is `SameSite=Lax`, not Strict. `localhost` and `<env>.localhost` are different sites, so a Strict cookie would never be sent on a link from the dashboard, nor on the redirect that lands after the code exchange. Lax still keeps it off cross-site subrequests, and a process in a container has no cookie either way.
 
 The Hono app stays unaware of auth, so `dashboard-api` tests that call `app.request` are unchanged. Server tests and the e2e harness get the cookie from a helper.
 

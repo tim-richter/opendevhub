@@ -6,7 +6,7 @@ import type {
   SessionStatus,
   SessionSummary,
 } from "../shared/types";
-import { sessionUrl } from "../shared/urls";
+import { sessionLink } from "../shared/urls";
 
 /** Tags of shown notifications whose permission or question is no longer pending; other tags never go stale. */
 export const staleNotificationTags = (
@@ -213,7 +213,7 @@ export const openUrlOf = (
 export const sessionHref = (
   view: ProjectView,
   session: SessionSummary
-): string => sessionUrl(openUrlOf(view, session.envId), session.id);
+): string => sessionLink(openUrlOf(view, session.envId), session.id);
 
 export const envTone = (env: Pick<EnvironmentView, "runtime">): Tone => {
   const { containerState, opencode } = env.runtime;

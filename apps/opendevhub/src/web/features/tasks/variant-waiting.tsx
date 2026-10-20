@@ -1,5 +1,7 @@
 import type { ProjectView, VariantView } from "../../../shared/types";
 import { Empty, muted } from "../../components/page";
+import { ApprovalBanner } from "../approvals/approval-review";
+import { worktreeApproval } from "../approvals/approvals";
 import { checkoutOf } from "../checkouts/checkouts";
 import type { Checkout } from "../checkouts/checkouts";
 import { startStepLabel } from "./tasks";
@@ -49,9 +51,18 @@ export const VariantWaiting = ({
     // Created, but not yet in the snapshot.
     progress = "Opening the conversation…";
   }
+  const approval =
+    variant.step === "approval"
+      ? worktreeApproval(view, variant.branch, variant.node)
+      : undefined;
   return (
     <Empty title="No conversation yet">
       <p className={muted}>{progress}</p>
+      {approval && (
+        <div className="w-full max-w-xl text-left">
+          <ApprovalBanner view={view} approval={approval} compact />
+        </div>
+      )}
       {details && variant.error && (
         <p className="text-destructive max-w-prose text-sm break-words">
           {variant.error}

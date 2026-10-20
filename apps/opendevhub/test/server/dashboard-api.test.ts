@@ -21,6 +21,7 @@ import { CommandError } from "../../src/server/environments/containers";
 import { EditorUnavailableError } from "../../src/server/environments/editors";
 import {
   AlreadyAnsweredError,
+  ConflictError,
   BusyError,
   NotFoundError,
   UnavailableError,
@@ -128,6 +129,11 @@ function setup(webDir?: string) {
       ),
     },
     environments: {
+      checkConfig: vi.fn(
+        async (_id: string, _env: string | undefined, _retry: () => void) => {}
+      ),
+      approveConfig: vi.fn(async (_id: string, _fp: string) => {}),
+      refuseConfig: vi.fn((_id: string, _fp: string) => {}),
       createEnv: vi.fn(async (_id: string, _path: string) => ({
         envId: "demo-abc123-x-0a1b",
       })),
@@ -1197,6 +1203,50 @@ describe("dashboard API", () => {
     expect(
       (await app.request(`/api/projects/x/start`, { method: "POST" })).status
     ).toBe(404);
+  });
+
+  it("fails a start at once with 409 when the config needs approval, and starts nothing", async () => {
+    const { app, hub } = setup();
+    hub.environments.checkConfig.mockRejectedValueOnce(
+      new ConflictError("review and approve them on the project's banner")
+    );
+    const res = await app.request(`/api/projects/${project.id}/start`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringContaining("approve"),
+    });
+    expect(hub.environments.start).not.toHaveBeenCalled();
+    // The retry it registers is the same action.
+    const [, envId, retry] = hub.environments.checkConfig.mock.calls[0];
+    expect(envId).toBeUndefined();
+    retry();
+    expect(hub.environments.start).toHaveBeenCalledWith(project.id);
+  });
+
+  it("approves and refuses pending config approvals", async () => {
+    const { app, hub } = setup();
+    const fp = "a".repeat(64);
+    const approve = (body: unknown) =>
+      app.request(`/api/projects/${project.id}/config-approvals`, {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+    expect((await approve({ fingerprint: fp })).status).toBe(200);
+    expect(hub.environments.approveConfig).toHaveBeenCalledWith(project.id, fp);
+    expect((await approve({ fingerprint: "nope" })).status).toBe(400);
+    hub.environments.approveConfig.mockRejectedValueOnce(
+      new ConflictError("the devcontainer config changed since the review")
+    );
+    expect((await approve({ fingerprint: fp })).status).toBe(409);
+    const refused = await app.request(
+      `/api/projects/${project.id}/config-approvals/${fp}`,
+      { method: "DELETE" }
+    );
+    expect(refused.status).toBe(200);
+    expect(hub.environments.refuseConfig).toHaveBeenCalledWith(project.id, fp);
   });
 
   it("creates, starts, stops and removes a worktree's own container", async () => {

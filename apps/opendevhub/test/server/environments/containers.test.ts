@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -428,19 +430,62 @@ describe("task environment containers", () => {
     ]);
   });
 
-  it("reads a folder's configuration and the workspace folder the CLI would use", async () => {
+  it("reads a folder's configuration, merged with its features, and the workspace folder", async () => {
+    const stdout = fs.readFileSync(
+      "test/fixtures/devcontainer/read-configuration-merged.json",
+      "utf-8"
+    );
+    const { run, calls } = fakeRunner(() => ({ stdout }));
+    const read = await new Containers(run).readConfig("/src/demo");
+    expect(calls.map((c) => c.args)).toStrictEqual([
+      [
+        "read-configuration",
+        "--workspace-folder",
+        "/src/demo",
+        "--include-merged-configuration",
+      ],
+    ]);
+    expect(read.configuration).not.toHaveProperty("configFilePath");
+    expect(read.configuration.initializeCommand).toBe("echo hi");
+    expect(read.configFile).toBe("/src/demo/.devcontainer/devcontainer.json");
+    expect(read.workspaceFolder).toBe("/workspaces/demo");
+    expect(read.merged?.privileged).toBe(true);
+    expect(read.merged?.mounts).toHaveLength(2);
+    expect(read.features).toStrictEqual([
+      {
+        feature: "ghcr.io/devcontainers/features/docker-in-docker",
+        mounts: [
+          {
+            source: "dind-var-lib-docker-${devcontainerId}",
+            target: "/var/lib/docker",
+            type: "volume",
+          },
+        ],
+        privileged: true,
+      },
+    ]);
+    expect(read.mergedError).toBeUndefined();
+  });
+
+  it("falls back to the plain read when the merged one fails, and says so", async () => {
     const stdout = JSON.stringify({
       configuration: { image: "node", configFilePath: { fsPath: "/x" } },
       workspace: { workspaceFolder: "/workspaces/feat" },
     });
-    const { run, calls } = fakeRunner(() => ({ stdout }));
+    const { run, calls } = fakeRunner(({ args }) =>
+      args.includes("--include-merged-configuration")
+        ? { exitCode: 1, stderr: "Error: failed to fetch ghcr.io/x/y\n" }
+        : { stdout }
+    );
     await expect(
       new Containers(run).readConfig("/src/demo.worktrees/feat")
     ).resolves.toStrictEqual({
+      configFile: "/x",
       configuration: { image: "node" },
+      mergedError: "Error: failed to fetch ghcr.io/x/y",
       workspaceFolder: "/workspaces/feat",
     });
-    expect(calls[0].args).toStrictEqual([
+    expect(calls[1].args).toStrictEqual([
       "read-configuration",
       "--workspace-folder",
       "/src/demo.worktrees/feat",

@@ -254,6 +254,62 @@ export const parseDockerLogs = (
     })
     .toSorted((a, b) => (a.at ?? 0) - (b.at ?? 0));
 
+/** What a feature adds to the container's host-affecting settings, by the id the config names it with (no version). */
+export interface FeatureContribution {
+  feature: string;
+  mounts?: unknown[];
+  privileged?: boolean;
+  capAdd?: unknown[];
+  securityOpt?: unknown[];
+}
+
+/** `Containers.readConfig`: a folder's devcontainer configuration, plain and merged with its features. */
+export interface ConfigRead {
+  /** As written, variables filled in; without `configFilePath`. */
+  configuration: Record<string, unknown>;
+  workspaceFolder?: string;
+  /** The devcontainer.json's path on the node. */
+  configFile?: string;
+  /** The configuration merged with its features' metadata, when the CLI could fetch it. */
+  merged?: Record<string, unknown>;
+  features?: FeatureContribution[];
+  /** Why there is no merged form. */
+  mergedError?: string;
+}
+
+const withoutKey = (
+  record: Record<string, unknown>,
+  key: string
+): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
+
+const featureContributions = (sets: unknown): FeatureContribution[] => {
+  const out: FeatureContribution[] = [];
+  for (const set of Array.isArray(sets) ? sets : []) {
+    const info = (set as { sourceInformation?: Record<string, unknown> })
+      .sourceInformation;
+    const { features } = set as { features?: unknown };
+    for (const f of Array.isArray(features) ? features : []) {
+      const meta = f as Record<string, unknown>;
+      const id =
+        info?.userFeatureIdWithoutVersion ?? info?.userFeatureId ?? meta.id;
+      if (typeof id !== "string") {
+        continue;
+      }
+      out.push({
+        feature: id,
+        ...(Array.isArray(meta.mounts) ? { mounts: meta.mounts } : {}),
+        ...(meta.privileged === true ? { privileged: true } : {}),
+        ...(Array.isArray(meta.capAdd) ? { capAdd: meta.capAdd } : {}),
+        ...(Array.isArray(meta.securityOpt)
+          ? { securityOpt: meta.securityOpt }
+          : {}),
+      });
+    }
+  }
+  return out;
+};
+
 export class Containers {
   private readonly run: Runner;
   constructor(run: Runner) {
@@ -425,16 +481,23 @@ export class Containers {
     return infos.filter((i): i is ContainerInfo => i !== undefined);
   }
 
-  /** The devcontainer.json a folder would use, with the CLI's variables filled in, and where it would mount the folder. */
-  async readConfig(folder: string): Promise<{
-    configuration: Record<string, unknown>;
-    workspaceFolder?: string;
-  }> {
-    const r = await this.run(
+  /**
+   * The devcontainer.json a folder would use, with the CLI's variables filled in, and where it would mount the
+   * folder. Also the merged form, with what its features contribute; fetching their metadata can fail (offline), and
+   * then the plain read stands alone with `mergedError` saying why.
+   */
+  async readConfig(folder: string): Promise<ConfigRead> {
+    const base = ["read-configuration", "--workspace-folder", folder];
+    let mergedError: string | undefined;
+    let r = await this.run(
       "devcontainer",
-      ["read-configuration", "--workspace-folder", folder],
+      [...base, "--include-merged-configuration"],
       { timeoutMs: 60_000 }
     );
+    if (r.exitCode !== 0) {
+      mergedError = tailLines(r.stderr, 1)[0] ?? `exit ${r.exitCode}`;
+      r = await this.run("devcontainer", base, { timeoutMs: 60_000 });
+    }
     if (r.exitCode !== 0) {
       throw new CommandError(
         `devcontainer read-configuration failed (exit ${r.exitCode})`,
@@ -443,6 +506,8 @@ export class Containers {
     }
     let parsed: {
       configuration?: Record<string, unknown>;
+      mergedConfiguration?: Record<string, unknown>;
+      featuresConfiguration?: { featureSets?: unknown };
       workspace?: { workspaceFolder?: unknown };
     };
     try {
@@ -453,13 +518,37 @@ export class Containers {
         tailLines(r.stdout)
       );
     }
-    const { configFilePath: _file, ...configuration } =
-      parsed.configuration ?? {};
+    const { configFilePath, ...configuration } = parsed.configuration ?? {};
+    const configFile = (configFilePath as { fsPath?: unknown } | undefined)
+      ?.fsPath;
     const workspaceFolder = parsed.workspace?.workspaceFolder;
+    const merged = parsed.mergedConfiguration;
+    if (!merged && !mergedError) {
+      mergedError = "the CLI returned no merged configuration";
+    }
     return {
       configuration,
       ...(typeof workspaceFolder === "string" ? { workspaceFolder } : {}),
+      ...(typeof configFile === "string" ? { configFile } : {}),
+      ...(merged
+        ? {
+            features: featureContributions(
+              parsed.featuresConfiguration?.featureSets
+            ),
+            merged: withoutKey(merged, "configFilePath"),
+          }
+        : {}),
+      ...(mergedError ? { mergedError } : {}),
     };
+  }
+
+  /** A text file on this runner's machine (the node's, for a remote kit). */
+  async readFile(file: string): Promise<string> {
+    const r = await this.run("cat", ["--", file], { timeoutMs: 30_000 });
+    if (r.exitCode !== 0) {
+      throw new CommandError(`could not read ${file}`, tailLines(r.stderr));
+    }
+    return r.stdout;
   }
 
   /** Builds the image a folder's config describes (Dockerfile and features), without a container or lifecycle commands. */

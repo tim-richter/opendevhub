@@ -187,6 +187,13 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
         })
       );
     }),
+    http.get("/api/access", () => HttpResponse.json({ ok: true })),
+    http.post("/api/projects/:id/config-approvals", () =>
+      HttpResponse.json({ ok: true })
+    ),
+    http.delete("/api/projects/:id/config-approvals/:fingerprint", () =>
+      HttpResponse.json({ ok: true })
+    ),
     sse<{ snapshot: string; log: string }>("/api/events", ({ client }) => {
       if (snap) {
         client.send({ data: JSON.stringify(snap), event: "snapshot" });

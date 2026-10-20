@@ -1277,6 +1277,19 @@ export const saveChecks = (
     "save checks"
   );
 
+/**
+ * Whether this browser has dashboard access (its cookie). An unreachable server counts as access, so the
+ * dashboard shows itself disconnected instead of the access page.
+ */
+export const checkAccess = async (): Promise<boolean> => {
+  try {
+    const res = await fetch("/api/access", { cache: "no-store" });
+    return res.status !== 401;
+  } catch {
+    return true;
+  }
+};
+
 export const subscribe = (handlers: {
   onSnapshot: (s: DashboardSnapshot) => void;
   onLog: (e: LogEvent) => void;
@@ -1293,6 +1306,25 @@ export const subscribe = (handlers: {
   source.onerror = () => handlers.onConnection(false);
   return () => source.close();
 };
+
+/** Approve on the approval banner: exactly the settings the review showed, named by their fingerprint. */
+export const approveConfig = (projectId: string, fingerprint: string) =>
+  complete(
+    project["config-approvals"].$post({
+      json: { fingerprint },
+      param: projectParam(projectId),
+    }),
+    "approve the container config"
+  );
+
+/** Keep stopped on the approval banner. */
+export const refuseConfig = (projectId: string, fingerprint: string) =>
+  complete(
+    project["config-approvals"][":fingerprint"].$delete({
+      param: { ...projectParam(projectId), fingerprint },
+    }),
+    "keep the container stopped"
+  );
 
 export const createEnv = (projectId: string, path: string) =>
   read(

@@ -300,11 +300,14 @@ describe("task environments", () => {
       updatedAt: 1,
       status: "idle" as const,
     };
-    expect(sessionHref(view(), s)).toMatch(
-      /^http:\/\/p-feat-0a1b\.localhost:7777\/server\/.+\/session\/ses_1$/u
+    // Through the dashboard, which hands the environment host a one-time code.
+    const href = new URL(sessionHref(view(), s), "http://localhost:7777");
+    expect(href.pathname).toBe("/api/envs/p-feat-0a1b/enter");
+    expect(href.searchParams.get("next")).toMatch(
+      /^\/server\/.+\/session\/ses_1$/u
     );
     expect(sessionHref(view(), { ...s, envId: undefined })).toMatch(
-      /^http:\/\/p\.localhost:7777\//u
+      /^\/api\/envs\/p\/enter\?/u
     );
   });
 

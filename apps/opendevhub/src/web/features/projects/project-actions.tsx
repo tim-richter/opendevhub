@@ -10,7 +10,7 @@ import { EllipsisIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
 
 import type { ProjectView } from "../../../shared/types";
-import { sessionUrl } from "../../../shared/urls";
+import { sessionLink } from "../../../shared/urls";
 import { envAction } from "../../api";
 import { useDash } from "../../dashboard-context";
 import { envOfDirectory, openUrlOf } from "../../derive";
@@ -52,7 +52,7 @@ export const openSessionTab = async (
       ? openUrlOf(view, envOfDirectory(view, directory)?.id)
       : view.openUrl;
     if (id && tab) {
-      tab.location.href = sessionUrl(base, id);
+      tab.location.href = sessionLink(base, id);
     } else {
       tab?.close();
     }
