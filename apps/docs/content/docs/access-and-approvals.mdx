@@ -64,4 +64,6 @@ Containers already running when opendevhub starts are adopted without asking. Th
 
 ## Can containers reach the dashboard?
 
-The dashboard listens on `127.0.0.1` only. On Linux, containers on Docker's bridge network can't reach the host's loopback. Docker Desktop and OrbStack forward `host.docker.internal` to the host, and may reach its loopback through it. This hasn't been checked on macOS yet. The token protects the dashboard either way.
+The dashboard listens on `127.0.0.1` only. On Linux, containers on Docker's bridge network can't reach the host's loopback. Docker Desktop and OrbStack forward `host.docker.internal` to the host.
+
+On macOS with Docker Desktop, containers reach the dashboard through it, both plain ones and the ones opendevhub starts. A request to `http://host.docker.internal:7777` answers 421, because its Host header doesn't name the dashboard, but a process can send `Host: localhost:7777` instead. Only the token stops it. OrbStack hasn't been checked yet.

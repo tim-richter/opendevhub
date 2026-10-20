@@ -29,7 +29,7 @@
 
 - [x] 5.1 Docs: a page on dashboard access and config approvals (what counts as host-affecting, approving, the link and `opendevhub open`), and a Getting started note about the link. Verify the docs build.
 - [x] 5.2 Add a changeset flagging the one-time link after upgrading. Verify `pnpm changeset status`.
-- [ ] 5.3 Check on macOS with Docker Desktop or OrbStack whether a container can reach the dashboard through `host.docker.internal`, and record the result in the docs page. Verify by a manual note in the PR.
+- [x] 5.3 Check on macOS with Docker Desktop or OrbStack whether a container can reach the dashboard through `host.docker.internal`, and record the result in the docs page. Verify by a manual note in the PR.
 
 ## Workflow follow-up
 
