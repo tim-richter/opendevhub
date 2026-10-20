@@ -204,6 +204,40 @@
     @apply bg-background text-foreground text-sm antialiased;
     letter-spacing: var(--tracking-normal);
   }
+
+  /* Thin, rounded overlay-style scrollbars everywhere. Firefox only gets the standard properties:
+     Chromium ignores the ::-webkit-scrollbar rules once scrollbar-color/width are set. */
+  @supports (-moz-appearance: none) {
+    * {
+      scrollbar-color: color-mix(in oklch, var(--foreground) 24%, transparent)
+        transparent;
+      scrollbar-width: thin;
+    }
+    *:hover {
+      scrollbar-color: color-mix(in oklch, var(--foreground) 40%, transparent)
+        transparent;
+    }
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--foreground) 24%, transparent);
+    background-clip: padding-box;
+  }
+  :hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 40%, transparent);
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
 }
 
 /* Map typography plugin colors to the shadcn theme tokens. */

@@ -279,7 +279,7 @@ export const Conversation = (props: {
             ref={scrollRef}
             aria-label="Conversation transcript"
             role="region"
-            className="conversation-scrollbar absolute inset-0 overflow-y-auto"
+            className="absolute inset-0 overflow-y-auto"
           >
             <div ref={contentRef} className={cn("mx-auto px-1 py-5", COLUMN)}>
               {props.error && (
