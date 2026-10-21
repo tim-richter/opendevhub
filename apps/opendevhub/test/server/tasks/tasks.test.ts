@@ -1134,6 +1134,19 @@ describe("starting tasks in the background", () => {
     expect(startingOf(s, result.task)?.state).toBe("running");
   });
 
+  it("gives a starting task's first sessions no briefing", async () => {
+    const s = await started();
+    const { task } = await s.hub.tasks.startTask(project.id, {
+      prompt: "Fix login",
+      environment: "shared",
+    });
+    await vi.waitFor(() =>
+      expect(startingOf(s, task)?.variants[0].step).toBe("session")
+    );
+    await vi.waitFor(() => expect(s.client.prompt).toHaveBeenCalled());
+    expect(s.client.putInstruction).not.toHaveBeenCalled();
+  });
+
   it("fails a variant a restart interrupted, and keeps listing it", async () => {
     const s = await started();
     s.worktrees.add.mockImplementationOnce(() => new Promise(() => {}));

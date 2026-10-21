@@ -385,6 +385,23 @@ describe(OpencodeClient, () => {
     ]);
   });
 
+  it("puts a session's instruction entry on opencode's experimental route", async () => {
+    await client.putInstruction("ses_1", "opendevhub-task", "# Task", "/w/x");
+    expect(fake.requests).toContain(
+      "PUT /api/experimental/session/ses_1/instructions/entries/opendevhub-task"
+    );
+    expect(fake.state.instructions).toStrictEqual({
+      ses_1: { "opendevhub-task": "# Task" },
+    });
+  });
+
+  it("surfaces an opencode without the instructions route as a 404", async () => {
+    fake.state.noInstructions = true;
+    await expect(
+      client.putInstruction("ses_1", "opendevhub-task", "# Task")
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
   it("switches a session's agent", async () => {
     await client.switchAgent("ses_1", "plan", "/w/x");
     expect(fake.state.agentSwitches).toStrictEqual([

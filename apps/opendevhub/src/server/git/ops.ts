@@ -105,6 +105,9 @@ export const hostHeadObjects = async (
   return parseHeadObjects(r.stdout, paths);
 };
 
+const lines = (out: string): string[] =>
+  out.split("\n").filter((l) => l.trim());
+
 /** Local git work for review, run in the project's container on one checkout. Callers validate refs and paths. */
 export class GitOps {
   private readonly deps: { containers: Pick<Containers, "exec"> };
@@ -429,6 +432,27 @@ export class GitOps {
   ): Promise<string | undefined> {
     const r = await this.exec(p, dir, ["merge-base", base, "HEAD"]);
     return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : undefined;
+  }
+
+  /** `git log` since `since` (exclusive), one `<short sha> <subject>` line per commit, newest first. */
+  async commitsSince(
+    p: ExecTarget,
+    dir: string,
+    since: string
+  ): Promise<string[]> {
+    return lines(
+      await this.git(p, dir, ["log", "--format=%h %s", `${since}..HEAD`])
+    );
+  }
+
+  /** `git diff --stat` from `from` to HEAD: a line per file, then the summary line. */
+  async diffStat(p: ExecTarget, dir: string, from: string): Promise<string[]> {
+    return lines(await this.git(p, dir, ["diff", "--stat=120", from, "HEAD"]));
+  }
+
+  /** `git status --short`: a line per uncommitted change. */
+  async statusLines(p: ExecTarget, dir: string): Promise<string[]> {
+    return lines(await this.git(p, dir, ["status", "--short"]));
   }
 
   /**

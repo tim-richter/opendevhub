@@ -15,8 +15,10 @@ import type {
   SessionDetail,
   SessionSummary,
   SpecWorkflow,
+  VariantView,
 } from "../../shared/types";
 import { USER } from "../db/events";
+import type { TaskRecord } from "../db/tasks";
 import type { Environments } from "../environments/environments";
 import type { HubDeps } from "../environments/ports";
 import { AlreadyAnsweredError, NotFoundError } from "../errors";
@@ -28,6 +30,7 @@ import type {
   RawCommand,
   RawSession,
 } from "../opencode/client";
+import { BRIEFING_KEY, buildBriefing, gatherBriefing } from "../tasks/briefing";
 import { OPENSPEC_CLI_CHECK, specWorkflow } from "../tasks/openspec";
 import { toModelsInfo } from "../tasks/request";
 import {
@@ -36,6 +39,7 @@ import {
   toBreakdown,
   toSessionTurns,
   toTranscript,
+  withBriefing,
 } from "./detail";
 import {
   attachmentsOf,
@@ -395,13 +399,18 @@ export class Sessions {
       throw new NotFoundError(sessionId, "session");
     }
     const client = this.envs.opencodeClient(session.envId ?? id);
-    const [raw, messages, all, children, models] = await Promise.all([
-      client.session(sessionId),
-      client.messages(sessionId, DETAIL_MESSAGES),
-      client.sessions(),
-      client.childSessions(sessionId),
-      client.models(session.directory).catch(() => []),
-    ]);
+    const briefed = this.deps.tasks.bySession(sessionId) !== undefined;
+    const [raw, messages, all, children, models, instructions] =
+      await Promise.all([
+        client.session(sessionId),
+        client.messages(sessionId, DETAIL_MESSAGES),
+        client.sessions(),
+        client.childSessions(sessionId),
+        client.models(session.directory).catch(() => []),
+        briefed
+          ? client.instructions(sessionId, session.directory).catch(() => [])
+          : [],
+      ]);
     const model =
       messages.find((message) => message.type === "assistant" && message.model)
         ?.model ??
@@ -420,7 +429,11 @@ export class Sessions {
           [...all, ...children].map((entry) => [entry.id, entry])
         ).values(),
       ]),
-      transcript: toTranscript(messages),
+      transcript: withBriefing(
+        toTranscript(messages),
+        instructions,
+        raw.time.created
+      ),
       turns: toSessionTurns(messages),
       ...(raw.agent ? { agent: raw.agent } : {}),
       ...(raw.outcome ? { outcome: raw.outcome } : {}),
@@ -874,11 +887,56 @@ export class Sessions {
     } finally {
       release();
     }
+    await this.brief(client, task, { ...variant, directory }, session.id);
     if (options.prompt?.trim()) {
       await client.prompt(session.id, options.prompt, undefined, directory, {});
     }
     this.envs.reconcile(envId);
     return session.id;
+  }
+
+  /**
+   * Gives a new conversation of a task variant its task briefing, as an instruction entry. A briefing that can't be
+   * built or attached, as with an opencode without the instructions route, is logged and the conversation goes on.
+   */
+  private async brief(
+    client: OpencodeClient,
+    task: TaskRecord,
+    variant: VariantView & { directory: string },
+    sessionId: string
+  ): Promise<void> {
+    const warn = (what: string, error: unknown) =>
+      console.warn(
+        `task briefing for task ${task.id}, session ${sessionId}: ${what}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    try {
+      const project = this.envs.requireProject(task.projectId);
+      const remote = this.envs.remoteEnvAt(project, variant.directory);
+      const titles = new Map(
+        this.deps.store.sessionsOf(task.projectId).map((s) => [s.id, s.title])
+      );
+      const earlier = this.deps.tasks
+        .variantSessions(task.id, variant.n)
+        .filter((id) => id !== sessionId)
+        .map((id) => titles.get(id))
+        .filter((title): title is string => Boolean(title));
+      const input = await gatherBriefing({
+        earlier,
+        git: remote ? this.envs.kit(remote).git : this.deps.git,
+        onError: (step, error) => warn(`could not read ${step}`, error),
+        target: remote ? remote.target : project,
+        task,
+        variant,
+      });
+      await client.putInstruction(
+        sessionId,
+        BRIEFING_KEY,
+        buildBriefing(input),
+        variant.directory
+      );
+    } catch (error) {
+      warn("not attached", error);
+    }
   }
 
   /** Closes a task conversation; cleanup removes its opencode session later. */

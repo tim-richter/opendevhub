@@ -9,10 +9,12 @@ import type {
 import type {
   RawAssistantContent,
   RawFileAttachment,
+  RawInstruction,
   RawMessage,
   RawSession,
   RawTokens,
 } from "../opencode/client";
+import { BRIEFING_KEY } from "../tasks/briefing";
 import { rollUp, tokenTotal } from "./status";
 
 /** How many of a session's newest messages its page reads, the most opencode returns at once; older turns are left out. */
@@ -186,6 +188,30 @@ export const toTranscript = (newestFirst: RawMessage[]): TranscriptMessage[] =>
     .toReversed()
     .map(toTranscriptMessage)
     .filter((m): m is TranscriptMessage => m !== undefined);
+
+/**
+ * The transcript with the task briefing first, when the session's instruction entries hold one. opencode adds no
+ * message for an entry set before the first prompt, so the row comes from the entry itself.
+ */
+export const withBriefing = (
+  transcript: TranscriptMessage[],
+  instructions: RawInstruction[],
+  created: number
+): TranscriptMessage[] => {
+  const value = instructions.find((i) => i.key === BRIEFING_KEY)?.value;
+  if (typeof value !== "string" || !value.trim()) {
+    return transcript;
+  }
+  return [
+    {
+      created,
+      id: BRIEFING_KEY,
+      role: "briefing",
+      text: cut(value, PART_CHARS),
+    },
+    ...transcript,
+  ];
+};
 
 /** The session's direct subagents, newest first, each with its own subagents' cost and tokens added in. */
 export const subagentsOf = (

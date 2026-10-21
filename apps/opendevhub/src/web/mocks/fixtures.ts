@@ -1012,6 +1012,18 @@ const tool = (
   status: "pending" | "running" | "completed" | "error" = "completed"
 ) => ({ kind: "tool" as const, name, status, title });
 
+/** What a later conversation of the rate-limit task was told about it. */
+const RATE_BRIEFING = [
+  "# Task briefing",
+  "You are starting a fresh conversation in an ongoing task; earlier conversations in it did not carry over. This briefing describes the task as it stands now. The branch's git history and, for a spec-first task, its OpenSpec change folder are the record of earlier work: read them when you need more.",
+  "## Task\n\n**Add burst limit to the login rate limiter**\n\nLet a client go over the per-minute limit for a short burst.\n\nTicket: ACME-118 — Login limiter blocks legitimate retries",
+  "## Checkout\n\n- Branch: `rate-limit`\n- Base: `main`\n- Path: `/workspaces/billing-api.worktrees/rate-limit`",
+  "## Commits since the base\n\n- 9c1e4d2 Add a burst allowance to the token bucket\n- 41f0a7b Test the limiter's refill",
+  "## Changes against the base\n\n```\n src/server/config.ts       |  3 +-\n src/server/rate-limit.ts   | 18 ++++++++++++------\n test/rate-limit.test.ts    | 42 ++++++++++++++++++++++++++++++++++++++++++\n 3 files changed, 55 insertions(+), 8 deletions(-)\n```",
+  "## Uncommitted changes\n\n```\n M src/server/routes.ts\n```",
+  "## Earlier conversations\n\n1. Find where requests are counted",
+].join("\n\n");
+
 /** The rate-limit worktree's session as a transcript: an explanation, a change with a failed test run, and a newest turn waiting on a permission. */
 const rateLimitTranscript = (
   model: SessionSummary["model"]
@@ -1032,6 +1044,12 @@ const rateLimitTranscript = (
     ...(model ? { model } : {}),
   });
   return [
+    {
+      created: first.created - 1000,
+      id: "opendevhub-task",
+      role: "briefing",
+      text: RATE_BRIEFING,
+    },
     { created: first.created, id: first.id, role: "user", text: first.text },
     reply(
       "msg_01a",

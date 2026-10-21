@@ -8,6 +8,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CircleDashedIcon,
+  ClipboardListIcon,
   FileIcon,
   ImageIcon,
   LoaderCircleIcon,
@@ -46,7 +47,8 @@ type Block =
       attachments: TranscriptAttachment[];
     }
   | { key: string; kind: "agent"; items: AgentItem[] }
-  | { key: string; kind: "compaction" };
+  | { key: string; kind: "compaction" }
+  | { key: string; kind: "briefing"; text: string };
 
 type Row =
   | Exclude<Block, { kind: "agent" }>
@@ -94,16 +96,18 @@ const toBlocks = (transcript: TranscriptMessage[]): Block[] => {
       continue;
     }
     flush();
-    blocks.push(
-      m.role === "user"
-        ? {
-            attachments: m.attachments ?? [],
-            key: m.id,
-            kind: "user",
-            text: m.text,
-          }
-        : { key: m.id, kind: "compaction" }
-    );
+    if (m.role === "user") {
+      blocks.push({
+        attachments: m.attachments ?? [],
+        key: m.id,
+        kind: "user",
+        text: m.text,
+      });
+    } else if (m.role === "briefing") {
+      blocks.push({ key: m.id, kind: "briefing", text: m.text });
+    } else {
+      blocks.push({ key: m.id, kind: "compaction" });
+    }
   }
   flush();
   return blocks;
@@ -198,6 +202,20 @@ const Thinking = ({ text }: { text: string }) => (
   </Collapsible>
 );
 
+/** What the agent was told about its task, collapsed until asked for. */
+const Briefing = ({ text }: { text: string }) => (
+  <Collapsible className="rounded-md border">
+    <CollapsibleTrigger className="hover:bg-muted/50 text-muted-foreground hover:text-foreground group flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs">
+      <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+      <ClipboardListIcon className="size-3.5 shrink-0" aria-hidden />
+      <span className="font-medium">Task briefing</span>
+    </CollapsibleTrigger>
+    <CollapsibleContent className="border-t px-3 py-2.5">
+      <MarkdownBody>{text}</MarkdownBody>
+    </CollapsibleContent>
+  </Collapsible>
+);
+
 const AgentItemView = ({ item }: { item: AgentItem }) => {
   if (item.kind === "text") {
     return <MarkdownBody>{item.text}</MarkdownBody>;
@@ -288,6 +306,9 @@ const TranscriptRow = ({ row, openHref }: { row: Row; openHref: string }) => {
       </div>
     );
   }
+  if (row.kind === "briefing") {
+    return <Briefing text={row.text} />;
+  }
   if (row.kind === "compaction") {
     return (
       <div
@@ -329,7 +350,7 @@ export const Transcript = (props: {
     if (props.more) {
       flattened.unshift({ key: "more", kind: "more" });
     }
-    if (props.transcript.length === 0) {
+    if (props.transcript.every((m) => m.role === "briefing")) {
       flattened.push({ key: "empty", kind: "empty" });
     }
     if (props.working) {

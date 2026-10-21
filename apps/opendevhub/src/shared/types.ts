@@ -891,7 +891,9 @@ export type TranscriptMessage =
       model?: ModelRef;
     }
   /** The conversation was compacted here. */
-  | { id: string; role: "compaction"; created: number };
+  | { id: string; role: "compaction"; created: number }
+  /** What opendevhub told the agent about its task when the conversation started in it. */
+  | { id: string; role: "briefing"; created: number; text: string };
 
 /** A subagent (child session) of a session. */
 export interface SubagentSummary {

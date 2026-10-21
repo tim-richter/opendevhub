@@ -92,6 +92,12 @@ export interface RawModel {
   limit?: { context?: number };
 }
 
+/** One of a session's instruction entries, as `putInstruction` set it. */
+export interface RawInstruction {
+  key: string;
+  value: unknown;
+}
+
 export interface RawAgent {
   id: string;
   name: string;
@@ -388,7 +394,7 @@ export class OpencodeClient {
   }
 
   private async request(
-    method: "POST" | "DELETE" | "PATCH",
+    method: "POST" | "PUT" | "DELETE" | "PATCH",
     path: string,
     body?: unknown,
     directory?: string,
@@ -433,7 +439,7 @@ export class OpencodeClient {
   }
 
   private async send(
-    method: "POST" | "DELETE" | "PATCH",
+    method: "POST" | "PUT" | "DELETE" | "PATCH",
     path: string,
     body?: unknown,
     directory?: string,
@@ -584,6 +590,38 @@ export class OpencodeClient {
       directory,
       timeoutMs ?? timeoutOf(opts)
     );
+  }
+
+  /**
+   * Attaches or replaces the session's instruction entry `key`, which the agent reads as context rather than as a
+   * turn. opencode 2.0.27 marks the route experimental: `PUT /api/experimental/session/:id/instructions/entries/:key`.
+   * An entry set before the first prompt joins the session's first instructions; a later change is announced at
+   * the next step.
+   */
+  putInstruction(
+    sessionId: string,
+    key: string,
+    value: unknown,
+    directory?: string
+  ): Promise<void> {
+    return this.send(
+      "PUT",
+      `/api/experimental/session/${encodeURIComponent(sessionId)}/instructions/entries/${encodeURIComponent(key)}`,
+      { value },
+      directory
+    );
+  }
+
+  /** The session's instruction entries, by key; experimental like `putInstruction`. */
+  async instructions(
+    sessionId: string,
+    directory?: string
+  ): Promise<RawInstruction[]> {
+    const result = await this.get<{ data: RawInstruction[] }>(
+      `/api/experimental/session/${encodeURIComponent(sessionId)}/instructions/entries`,
+      directory
+    );
+    return result.data;
   }
 
   /** Sets the model the session's next turns use. */

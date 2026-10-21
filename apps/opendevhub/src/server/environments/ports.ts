@@ -73,6 +73,9 @@ export type GitPort = Pick<
   | "neverMoved"
   | "mergeBase"
   | "fileBytes"
+  | "commitsSince"
+  | "diffStat"
+  | "statusLines"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;

@@ -1079,6 +1079,24 @@ export class TaskStore {
     return task && variant ? { task, variant } : undefined;
   }
 
+  /** The variant's conversations, closed ones included, oldest first. */
+  variantSessions(taskId: string, n: number): string[] {
+    const own = this.db
+      .prepare("SELECT session_id FROM variants WHERE task_id = ? AND n = ?")
+      .get(taskId, n) as { session_id: string | null } | undefined;
+    const rows = (
+      this.db
+        .prepare(
+          "SELECT session_id FROM task_sessions WHERE task_id = ? AND n = ? ORDER BY rowid"
+        )
+        .all(taskId, n) as { session_id: string }[]
+    ).map((r) => r.session_id);
+    // A variant's first session has no row until a second one starts.
+    return own?.session_id && !rows.includes(own.session_id)
+      ? [own.session_id, ...rows]
+      : rows;
+  }
+
   /** The variant's conversations not closed, but `except`, newest first. */
   private openSessions(taskId: string, n: number, except: string): string[] {
     return (

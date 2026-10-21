@@ -534,6 +534,21 @@ export function setup(
         _o: { rev?: string; maxBytes: number }
       ): Promise<Buffer | undefined> => Buffer.from(file)
     ),
+    commitsSince: vi.fn(
+      async (_p: Project, _dir: string, _since: string): Promise<string[]> => [
+        "b2 second",
+        "a1 first",
+      ]
+    ),
+    diffStat: vi.fn(
+      async (_p: Project, _dir: string, _from: string): Promise<string[]> => [
+        " a.ts | 1 +",
+        " 1 file changed, 1 insertion(+)",
+      ]
+    ),
+    statusLines: vi.fn(
+      async (_p: Project, _dir: string): Promise<string[]> => []
+    ),
   };
   // Each session gets its own id, as in opencode: a session belongs to one task variant only.
   let created = 0;
@@ -652,6 +667,15 @@ export function setup(
     generate: vi.fn(
       async (_sid: string, _prompt: string, _dir?: string, _timeout?: number) =>
         "feat: do things"
+    ),
+    instructions: vi.fn(
+      async (
+        _sid: string,
+        _dir?: string
+      ): Promise<{ key: string; value: unknown }[]> => []
+    ),
+    putInstruction: vi.fn(
+      async (_sid: string, _key: string, _value: unknown, _dir?: string) => {}
     ),
     interrupt: vi.fn(async (_sid: string, _dir?: string) => {}),
     switchModel: vi.fn(

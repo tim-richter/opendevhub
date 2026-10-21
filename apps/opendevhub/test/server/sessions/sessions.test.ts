@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { USER } from "../../../src/server/db/events";
 import {
@@ -149,6 +149,158 @@ describe("task conversations", () => {
       s.hub.sessions.startTaskConversation(project.id, "ses_1")
     ).resolves.toBe("ses_new");
     expect(s.tasks.get("task_1")?.variants[0].sessionId).toBe("ses_new");
+  });
+
+  it("briefs a new task conversation before any prompt reaches it", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.tasks.createTask({
+      id: "task_1",
+      projectId: project.id,
+      title: "Implement login",
+      prompt: "Add a login page",
+      createdAt: 1,
+      variants: [{}],
+    });
+    s.tasks.attachSession(
+      "task_1",
+      1,
+      { sessionId: "ses_1", envId: project.id, directory: "/workspaces/demo" },
+      USER
+    );
+    s.store.setSessions(project.id, [
+      {
+        id: "ses_1",
+        projectId: project.id,
+        title: "First attempt",
+        directory: "/workspaces/demo",
+        updatedAt: 1,
+        status: "idle",
+      },
+    ]);
+    const order: string[] = [];
+    s.client.putInstruction.mockImplementation(async () => {
+      order.push("brief");
+    });
+    s.client.prompt.mockImplementation(async () => {
+      order.push("prompt");
+    });
+
+    await s.hub.sessions.startTaskConversation(project.id, "ses_1");
+    expect(s.client.putInstruction).toHaveBeenCalledWith(
+      "ses_new",
+      "opendevhub-task",
+      expect.any(String),
+      "/workspaces/demo"
+    );
+    const briefing = s.client.putInstruction.mock.calls[0][2] as string;
+    expect(briefing).toContain("**Implement login**");
+    expect(briefing).toContain("Add a login page");
+    expect(briefing).toContain("- Base: `main`");
+    expect(briefing).toContain("- b2 second\n- a1 first");
+    expect(briefing).toContain("1. First attempt");
+    expect(s.client.prompt).not.toHaveBeenCalled();
+
+    const { sessionId } = await s.hub.sessions.startInCheckout(
+      project.id,
+      "/workspaces/demo",
+      "Next step",
+      "carry on",
+      "ses_1"
+    );
+    expect(sessionId).toBe("ses_new_2");
+    expect(order).toStrictEqual(["brief", "brief", "prompt"]);
+  });
+
+  it("shows a task conversation's briefing first in its transcript", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.tasks.createTask({
+      id: "task_1",
+      projectId: project.id,
+      title: "Implement login",
+      prompt: "Login",
+      createdAt: 1,
+      variants: [{}],
+    });
+    s.tasks.attachSession(
+      "task_1",
+      1,
+      { sessionId: "ses_1", envId: project.id, directory: "/workspaces/demo" },
+      USER
+    );
+    s.store.setSessions(project.id, [
+      {
+        id: "ses_1",
+        projectId: project.id,
+        title: "Implement login",
+        directory: "/workspaces/demo",
+        updatedAt: 1,
+        status: "idle",
+      },
+    ]);
+    s.client.instructions.mockResolvedValue([
+      { key: "opendevhub-task", value: "# Task briefing" },
+    ]);
+    const detail = await s.hub.sessions.sessionDetail(project.id, "ses_1");
+    expect(detail.transcript).toStrictEqual([
+      {
+        created: 1,
+        id: "opendevhub-task",
+        role: "briefing",
+        text: "# Task briefing",
+      },
+    ]);
+    expect(s.client.instructions).toHaveBeenCalledWith(
+      "ses_1",
+      "/workspaces/demo"
+    );
+  });
+
+  it("starts the conversation and sends its prompt when opencode has no instructions route", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.tasks.createTask({
+      id: "task_1",
+      projectId: project.id,
+      title: "Implement login",
+      prompt: "Login",
+      createdAt: 1,
+      variants: [{}],
+    });
+    s.tasks.attachSession(
+      "task_1",
+      1,
+      { sessionId: "ses_1", envId: project.id, directory: "/workspaces/demo" },
+      USER
+    );
+    s.client.putInstruction.mockRejectedValue(
+      new OpencodeHttpError(
+        404,
+        "/api/experimental/session/ses_new/instructions"
+      )
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      s.hub.sessions.startTaskConversation(project.id, "ses_1", {
+        prompt: "go",
+      })
+    ).resolves.toBe("ses_new");
+    expect(s.client.prompt).toHaveBeenCalledWith(
+      "ses_new",
+      "go",
+      undefined,
+      "/workspaces/demo",
+      {}
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/task task_1, session ses_new: not attached.*404/u)
+    );
+    warn.mockRestore();
   });
 
   it("starts a review of a task's checkout as a conversation in that task, not a chat", async () => {
@@ -635,6 +787,35 @@ describe("composer", () => {
     expect(tasks.bySession("ses_1")?.task.id).toBe("task_1");
     expect(tasks.bySession("ses_new")?.task.id).toBe("task_1");
     expect(tasks.get("task_1")?.variants[0].sessionId).toBe("ses_new");
+  });
+
+  it("briefs a task conversation /new starts, then prompts it with the rest", async () => {
+    const { hub, client, tasks } = await started();
+    tasks.createTask({
+      id: "task_1",
+      projectId: project.id,
+      title: "Implement login",
+      prompt: "Login",
+      createdAt: 1,
+      variants: [{}],
+    });
+    tasks.attachSession(
+      "task_1",
+      1,
+      { sessionId: "ses_1", envId: project.id, directory: ws },
+      USER
+    );
+    const order: string[] = [];
+    client.putInstruction.mockImplementation(async (_sid, key) => {
+      order.push(key);
+    });
+    client.prompt.mockImplementation(async (_sid, text) => {
+      order.push(text);
+    });
+    await hub.sessions.sendMessage(project.id, "ses_1", {
+      text: "/new fix the failing test",
+    });
+    expect(order).toStrictEqual(["opendevhub-task", "fix the failing test"]);
   });
 
   it("starts a new conversation in the same checkout with /new, prompting it with the rest", async () => {

@@ -6,7 +6,9 @@ import {
   subagentsOf,
   toSessionTurns,
   toTranscript,
+  withBriefing,
 } from "../../../src/server/sessions/detail";
+import type { TranscriptMessage } from "../../../src/shared/types";
 import { rawSession } from "../../helpers/fake-opencode";
 
 const tokens = (input: number) => ({
@@ -268,5 +270,52 @@ describe(toTranscript, () => {
       PART_CHARS,
     ]);
     expect(texts.every((t) => t.endsWith("…"))).toBe(true);
+  });
+});
+
+describe(withBriefing, () => {
+  const prompt: TranscriptMessage = {
+    created: 5,
+    id: "msg_1",
+    role: "user",
+    text: "go",
+  };
+
+  it("puts the task briefing entry first", () => {
+    expect(
+      withBriefing(
+        [prompt],
+        [
+          { key: "other", value: "x" },
+          { key: "opendevhub-task", value: "# Task briefing" },
+        ],
+        2
+      )
+    ).toStrictEqual([
+      {
+        created: 2,
+        id: "opendevhub-task",
+        role: "briefing",
+        text: "# Task briefing",
+      },
+      prompt,
+    ]);
+  });
+
+  it("adds nothing without a text briefing entry", () => {
+    expect(withBriefing([prompt], [], 2)).toStrictEqual([prompt]);
+    expect(
+      withBriefing([prompt], [{ key: "opendevhub-task", value: { a: 1 } }], 2)
+    ).toStrictEqual([prompt]);
+  });
+
+  it("keeps opencode's system messages out of the transcript", () => {
+    const system = {
+      id: "msg_sys",
+      metadata: { instructionSources: ["api/opendevhub-task"] },
+      text: 'The context under "opendevhub-task" changed',
+      type: "system",
+    } as RawMessage;
+    expect(toTranscript([system])).toStrictEqual([]);
   });
 });

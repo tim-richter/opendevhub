@@ -48,6 +48,10 @@ export interface FakeState {
   vcs: Record<string, FakeVcs>;
   diffQueries: { directory: string; mode: string; base?: string }[];
   prompts: { sessionId: string; body: unknown; directory?: string }[];
+  /** Instruction entries per session, by key, as `PUT /api/experimental/session/:id/instructions/entries/:key` set them. */
+  instructions: Record<string, Record<string, unknown>>;
+  /** Answer 404 on the instructions routes, like an opencode without them. */
+  noInstructions?: boolean;
   /** Every `POST /api/session/:id/command`. */
   commandRuns: { sessionId: string; body: unknown; directory?: string }[];
   /** `GET /api/fs/find` entries per directory; matched by substring, as many as `limit` (default 50). */
@@ -96,6 +100,7 @@ export async function startFakeOpencode(
     diffQueries: [],
     turnQueries: [],
     prompts: [],
+    instructions: {},
     commandRuns: [],
     findQueries: [],
     patches: [],
@@ -424,6 +429,38 @@ export async function startFakeOpencode(
             res.end();
           });
           return;
+        }
+        const instruction = url.pathname.match(
+          /^\/api\/experimental\/session\/([^/]+)\/instructions\/entries(?:\/([^/]+))?$/u
+        );
+        if (instruction) {
+          if (state.noInstructions) {
+            res.writeHead(404);
+            res.end();
+            return;
+          }
+          const sessionId = decodeURIComponent(instruction[1]);
+          if (req.method === "GET" && !instruction[2]) {
+            return json({
+              data: Object.entries(state.instructions[sessionId] ?? {}).map(
+                ([key, value]) => ({ key, value })
+              ),
+            });
+          }
+          if (req.method === "PUT" && instruction[2]) {
+            let raw = "";
+            req.on("data", (c: Buffer) => (raw += c.toString("utf-8")));
+            req.on("end", () => {
+              const { value } = JSON.parse(raw) as { value: unknown };
+              state.instructions[sessionId] = {
+                ...state.instructions[sessionId],
+                [decodeURIComponent(instruction[2])]: value,
+              };
+              res.writeHead(204);
+              res.end();
+            });
+            return;
+          }
         }
         const sessionCall = url.pathname.match(
           /^\/api\/session\/([^/]+)\/(prompt|command|generate)$/u
