@@ -1010,8 +1010,9 @@ export const turnReviewData = (
 const tool = (
   name: string,
   title: string,
-  status: "pending" | "running" | "completed" | "error" = "completed"
-) => ({ kind: "tool" as const, name, status, title });
+  status: "pending" | "running" | "completed" | "error" = "completed",
+  result: { output?: string; error?: string } = {}
+) => ({ kind: "tool" as const, name, status, title, ...result });
 
 /** What a later conversation of the rate-limit task was told about it. */
 const RATE_BRIEFING = [
@@ -1057,11 +1058,15 @@ const rateLimitTranscript = (
       first.created + 5000,
       [
         {
+          duration: 4300,
           kind: "reasoning",
           text: "The user wants to know how requests are counted. Start from the middleware, then the bucket.",
         },
         tool("read", "src/server/rate-limit.ts"),
-        tool("grep", "perMinute"),
+        tool("grep", "perMinute", "completed", {
+          output:
+            "src/server/rate-limit.ts:12:  perMinute: number;\nsrc/server/config.ts:40:    perMinute: 60,",
+        }),
         tool("read", "src/server/routes.ts"),
         {
           kind: "text",
@@ -1081,7 +1086,10 @@ const rateLimitTranscript = (
       tool("read", "test/rate-limit.test.ts"),
       tool("edit", "src/server/rate-limit.ts"),
       tool("edit", "test/rate-limit.test.ts"),
-      tool("bash", "pnpm vitest run rate-limit", "error"),
+      tool("bash", "pnpm vitest run rate-limit", "error", {
+        error:
+          "FAIL  test/rate-limit.test.ts > resets the window after a minute\nAssertionError: expected 429 to be 200",
+      }),
     ]),
     reply("msg_02b", burst.created + 3 * MINUTE, [
       {
@@ -1092,8 +1100,13 @@ const rateLimitTranscript = (
       tool("bash", "pnpm vitest run rate-limit"),
       tool("read", "src/server/config.ts"),
       tool("edit", "src/server/config.ts"),
-      tool("bash", "pnpm typecheck"),
-      tool("bash", "pnpm vitest run"),
+      tool("bash", "pnpm typecheck", "completed", {
+        output: "> tsc --noEmit\n",
+      }),
+      tool("bash", "pnpm vitest run", "completed", {
+        output:
+          " Test Files  24 passed (24)\n      Tests  318 passed (318)\n   Duration  2.41s",
+      }),
     ]),
     reply(
       "msg_02c",

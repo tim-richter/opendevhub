@@ -1,19 +1,46 @@
 import {
+  Attachment,
+  AttachmentContent,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@opendevhub/ui/attachment";
+import { Bubble, BubbleContent } from "@opendevhub/ui/bubble";
+import { CodeBlock, CodeBlockContent } from "@opendevhub/ui/code-block";
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@opendevhub/ui/collapsible";
+import { Message, MessageContent } from "@opendevhub/ui/message";
+import { MessageScrollerItem } from "@opendevhub/ui/message-scroller";
 import {
-  BrainIcon,
-  CheckIcon,
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@opendevhub/ui/trace";
+import {
+  BotIcon,
+  CircleCheckIcon,
   ChevronRightIcon,
-  CircleDashedIcon,
   ClipboardListIcon,
   FileIcon,
+  FilePenIcon,
+  FileTextIcon,
+  FolderIcon,
+  GlobeIcon,
   ImageIcon,
+  ListTodoIcon,
   LoaderCircleIcon,
-  XIcon,
+  SearchIcon,
+  TerminalIcon,
+  WrenchIcon,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -35,7 +62,14 @@ type AgentMessage = Extract<TranscriptMessage, { role: "assistant" }>;
 /** What a run of the agent's messages shows, in order: its text and reasoning, its tool calls in runs, its errors. */
 type AgentItem =
   | { key: string; kind: "text"; text: string }
-  | { key: string; kind: "reasoning"; text: string }
+  /** `streaming`: it is the last part of a message the agent is still writing. */
+  | {
+      key: string;
+      kind: "reasoning";
+      text: string;
+      duration?: number;
+      streaming: boolean;
+    }
   | { key: string; kind: "tools"; tools: ToolPart[] }
   | { key: string; kind: "error"; error: string };
 
@@ -51,8 +85,7 @@ type Block =
   | { key: string; kind: "briefing"; text: string };
 
 type Row =
-  | Exclude<Block, { kind: "agent" }>
-  | { key: string; kind: "agent-item"; item: AgentItem; lastInRun: boolean }
+  | Block
   | { key: string; kind: "more" }
   | { key: string; kind: "empty" }
   | { key: string; kind: "working" };
@@ -62,8 +95,13 @@ const agentItems = (messages: AgentMessage[]): AgentItem[] => {
   for (const m of messages) {
     for (const [i, part] of m.parts.entries()) {
       const key = `${m.id}:${i}`;
-      if (part.kind === "text" || part.kind === "reasoning") {
+      if (part.kind === "text") {
         items.push({ key, ...part });
+        continue;
+      }
+      if (part.kind === "reasoning") {
+        const streaming = m.completed === undefined && i === m.parts.length - 1;
+        items.push({ key, ...part, streaming });
         continue;
       }
       const last = items.at(-1);
@@ -113,94 +151,175 @@ const toBlocks = (transcript: TranscriptMessage[]): Block[] => {
   return blocks;
 };
 
-const STATUS_ICON = {
-  completed: { icon: CheckIcon, label: "Done", tone: "text-ok" },
-  error: { icon: XIcon, label: "Failed", tone: "text-destructive" },
-  pending: {
-    icon: CircleDashedIcon,
-    label: "Pending",
-    tone: "text-muted-foreground",
-  },
-  running: {
-    icon: LoaderCircleIcon,
-    label: "Running",
-    tone: "text-muted-foreground animate-spin",
-  },
-} as const;
+/** How a tool call reads while it runs, once it is done and when it failed, by tool name. */
+const TOOL_VERBS: Record<
+  string,
+  { doing: string; done: string; failed: string }
+> = {
+  bash: { doing: "Running", done: "Ran", failed: "Failed to run" },
+  edit: { doing: "Editing", done: "Edited", failed: "Failed to edit" },
+  glob: { doing: "Finding", done: "Found", failed: "Failed to find" },
+  grep: { doing: "Searching", done: "Searched", failed: "Failed to search" },
+  list: { doing: "Listing", done: "Listed", failed: "Failed to list" },
+  read: { doing: "Reading", done: "Read", failed: "Failed to read" },
+  webfetch: { doing: "Fetching", done: "Fetched", failed: "Failed to fetch" },
+  write: { doing: "Writing", done: "Wrote", failed: "Failed to write" },
+};
+const OTHER_TOOL_VERBS = {
+  doing: "Calling",
+  done: "Called",
+  failed: "Failed to call",
+};
 
-const ToolRow = ({ tool }: { tool: ToolPart }) => {
-  const { icon: Icon, label, tone } = STATUS_ICON[tool.status];
+const TOOL_ICONS: Record<string, LucideIcon> = {
+  bash: TerminalIcon,
+  edit: FilePenIcon,
+  glob: SearchIcon,
+  grep: SearchIcon,
+  list: FolderIcon,
+  read: FileTextIcon,
+  task: BotIcon,
+  todowrite: ListTodoIcon,
+  webfetch: GlobeIcon,
+  write: FilePenIcon,
+};
+
+/**
+ * One tool call as a Trace line: what it did, and once it is done, what it returned behind a disclosure. A call
+ * left running or pending once the agent stopped failed. `working`: the agent is still at it.
+ */
+const ToolLine = ({ tool, working }: { tool: ToolPart; working: boolean }) => {
+  const verbs = TOOL_VERBS[tool.name];
+  const Icon = TOOL_ICONS[tool.name] ?? WrenchIcon;
+  const subject = verbs
+    ? (tool.title ?? tool.name)
+    : [tool.name, tool.title].filter(Boolean).join(" ");
+  const { doing, done, failed } = verbs ?? OTHER_TOOL_VERBS;
+  const settled = tool.status === "completed" || tool.status === "error";
+  const errored = tool.status === "error" || (!settled && !working);
+  let status: "running" | "pending" | "error" | undefined;
+  let verb = done;
+  if (errored) {
+    status = "error";
+    verb = failed;
+  } else if (!settled) {
+    status = tool.status === "pending" ? "pending" : "running";
+    verb = doing;
+  }
+  const line = (
+    <TraceLine status={status}>
+      <TraceIcon>
+        <Icon />
+      </TraceIcon>
+      <TraceTitle>
+        {verb} {subject}
+      </TraceTitle>
+    </TraceLine>
+  );
+  const output =
+    tool.status === "error" ? (tool.error ?? tool.output) : tool.output;
+  if (!output) {
+    return line;
+  }
   return (
-    <li className="flex min-w-0 items-center gap-2 px-2.5 py-1 text-xs">
-      <Icon className={cn("size-3.5 shrink-0", tone)} aria-label={label} />
-      <span className="font-mono font-medium">{tool.name}</span>
-      {tool.title && (
-        <span className="text-muted-foreground min-w-0 truncate font-mono">
-          {tool.title}
-        </span>
-      )}
-    </li>
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <CodeBlock size="sm" variant={errored ? "destructive" : "default"}>
+          <CodeBlockContent wrap className="max-h-64">
+            {output}
+          </CodeBlockContent>
+        </CodeBlock>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 };
 
-const ToolGroup = ({ tools }: { tools: ToolPart[] }) => {
-  const [open, setOpen] = useState(false);
-  const rows = (
-    <ul className="divide-y">
+/** A run of tool calls, one line each; a long run folds into one "N tool calls" line. */
+const ToolGroup = ({
+  tools,
+  working,
+}: {
+  tools: ToolPart[];
+  working: boolean;
+}) => {
+  const lines = (
+    <Trace>
       {tools.map((tool, i) => (
         // Tool calls carry no id of their own; their place in the run is stable.
         // oxlint-disable-next-line react/no-array-index-key
-        <ToolRow key={i} tool={tool} />
+        <ToolLine key={i} tool={tool} working={working} />
       ))}
-    </ul>
+    </Trace>
   );
   if (tools.length <= TOOL_GROUP_MAX) {
-    return <div className="rounded-md border">{rows}</div>;
+    return lines;
   }
   const failed = tools.filter((t) => t.status === "error").length;
-  const working = tools.some((t) => t.status === "running");
+  const running =
+    working &&
+    tools.some((t) => t.status === "running" || t.status === "pending");
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className="rounded-md border"
-    >
-      <CollapsibleTrigger className="hover:bg-muted/50 flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs">
-        <ChevronRightIcon
-          className={cn(
-            "size-3.5 shrink-0 transition-transform",
-            open && "rotate-90"
-          )}
-        />
-        <span className="font-medium">{tools.length} tool calls</span>
-        {failed > 0 && (
-          <span className="text-destructive">{failed} failed</span>
-        )}
-        {working && (
-          <LoaderCircleIcon
-            className="text-muted-foreground size-3.5 animate-spin"
-            aria-label="Running"
-          />
-        )}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">{rows}</CollapsibleContent>
-    </Collapsible>
+    <Trace>
+      <TraceCollapsible>
+        <TraceCollapsibleTrigger>
+          <TraceLine status={running ? "running" : undefined}>
+            <TraceIcon>
+              <WrenchIcon />
+            </TraceIcon>
+            <TraceTitle>{tools.length} tool calls</TraceTitle>
+            {failed > 0 && <TraceDescription>{failed} failed</TraceDescription>}
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>{lines}</TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
   );
 };
 
-const Thinking = ({ text }: { text: string }) => (
-  <Collapsible>
-    <CollapsibleTrigger className="text-muted-foreground hover:text-foreground group flex items-center gap-1.5 text-xs">
-      <ChevronRightIcon className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
-      <BrainIcon className="size-3.5" /> Thinking
-    </CollapsibleTrigger>
-    <CollapsibleContent>
-      <p className="text-muted-foreground mt-1.5 border-l-2 pl-3 text-xs break-words whitespace-pre-wrap">
-        {text}
-      </p>
-    </CollapsibleContent>
-  </Collapsible>
-);
+/** Whole seconds, at least one, so a quick thought doesn't read "0s". */
+const seconds = (ms: number): string =>
+  `${Math.max(1, Math.round(ms / 1000))}s`;
+
+/**
+ * The agent's thinking: open while it thinks, closed once it is done, unless the user opened or closed it. `duration`
+ * is how long it thought, in milliseconds.
+ */
+const Reasoning = ({
+  text,
+  running,
+  duration,
+}: {
+  text: string;
+  running: boolean;
+  duration?: number;
+}) => {
+  const [open, setOpen] = useState<boolean>();
+  return (
+    <Trace>
+      <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
+        <TraceCollapsibleTrigger>
+          <TraceLine status={running ? "running" : undefined}>
+            <TraceIcon>
+              {running ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <CircleCheckIcon />
+              )}
+            </TraceIcon>
+            <TraceTitle>{running ? "Thinking" : "Thought"}</TraceTitle>
+            {!running && duration !== undefined && (
+              <TraceDescription>{seconds(duration)}</TraceDescription>
+            )}
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent className="whitespace-pre-wrap">
+          {text}
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
+  );
+};
 
 /** What the agent was told about its task, collapsed until asked for. */
 const Briefing = ({ text }: { text: string }) => (
@@ -216,15 +335,27 @@ const Briefing = ({ text }: { text: string }) => (
   </Collapsible>
 );
 
-const AgentItemView = ({ item }: { item: AgentItem }) => {
+const AgentItemView = ({
+  item,
+  working,
+}: {
+  item: AgentItem;
+  working: boolean;
+}) => {
   if (item.kind === "text") {
     return <MarkdownBody>{item.text}</MarkdownBody>;
   }
   if (item.kind === "reasoning") {
-    return <Thinking text={item.text} />;
+    return (
+      <Reasoning
+        text={item.text}
+        running={working && item.streaming}
+        duration={item.duration}
+      />
+    );
   }
   if (item.kind === "tools") {
-    return <ToolGroup tools={item.tools} />;
+    return <ToolGroup tools={item.tools} working={working} />;
   }
   return (
     <p
@@ -240,7 +371,15 @@ const AgentItemView = ({ item }: { item: AgentItem }) => {
  * A conversation's messages, oldest at the top: the user's as bubbles, the agent's text as markdown with its
  * reasoning and tool calls collapsed. `more` says older messages are left out and links to `openHref` for them.
  */
-const TranscriptRow = ({ row, openHref }: { row: Row; openHref: string }) => {
+const TranscriptRow = ({
+  row,
+  openHref,
+  working,
+}: {
+  row: Row;
+  openHref: string;
+  working: boolean;
+}) => {
   if (row.kind === "more") {
     return (
       <p className={cn(muted, "text-center text-xs")}>
@@ -273,103 +412,98 @@ const TranscriptRow = ({ row, openHref }: { row: Row; openHref: string }) => {
   }
   if (row.kind === "user") {
     return (
-      <div className="flex flex-col items-end">
-        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
-          {row.attachments.length > 0 && (
-            <ul
-              aria-label="Attached files"
-              className="flex flex-wrap justify-end gap-1.5"
-            >
-              {row.attachments.map((a, i) => (
-                <li
-                  key={`${i}:${a.name}`}
-                  className="bg-muted text-muted-foreground flex max-w-56 items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
-                >
-                  {a.mime?.startsWith("image/") ? (
-                    <ImageIcon className="size-3.5 shrink-0" aria-hidden />
-                  ) : (
-                    <FileIcon className="size-3.5 shrink-0" aria-hidden />
-                  )}
-                  <span className="truncate" title={a.name}>
-                    {a.name}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+      <Message align="end">
+        <MessageContent>
+          {row.attachments.map((a, i) => (
+            <Attachment key={`${i}:${a.name}`} size="sm">
+              <AttachmentMedia>
+                {a.mime?.startsWith("image/") ? (
+                  <ImageIcon aria-hidden />
+                ) : (
+                  <FileIcon aria-hidden />
+                )}
+              </AttachmentMedia>
+              <AttachmentContent>
+                <AttachmentTitle title={a.name}>{a.name}</AttachmentTitle>
+              </AttachmentContent>
+            </Attachment>
+          ))}
           {(row.text || row.attachments.length === 0) && (
-            <div className="bg-muted rounded-2xl rounded-br-sm px-4 py-2.5 text-sm break-words whitespace-pre-wrap">
-              {row.text || "(empty message)"}
-            </div>
+            <Bubble align="end" variant="muted">
+              {/* Keeps the line breaks of what the user typed. */}
+              <BubbleContent className="whitespace-pre-wrap">
+                {row.text || "(empty message)"}
+              </BubbleContent>
+            </Bubble>
           )}
-        </div>
-      </div>
+        </MessageContent>
+      </Message>
+    );
+  }
+  if (row.kind === "agent") {
+    return (
+      <Message>
+        <MessageContent>
+          {row.items.map((item) => (
+            <AgentItemView key={item.key} item={item} working={working} />
+          ))}
+        </MessageContent>
+      </Message>
     );
   }
   if (row.kind === "briefing") {
     return <Briefing text={row.text} />;
   }
-  if (row.kind === "compaction") {
-    return (
-      <div
-        role="separator"
-        className="text-muted-foreground flex items-center gap-3 text-xs"
-      >
-        <span className="bg-border h-px flex-1" />
-        Conversation compacted
-        <span className="bg-border h-px flex-1" />
-      </div>
-    );
-  }
-  return <AgentItemView item={row.item} />;
+  return (
+    <div
+      role="separator"
+      className="text-muted-foreground flex items-center gap-3 text-xs"
+    >
+      <span className="bg-border h-px flex-1" />
+      Conversation compacted
+      <span className="bg-border h-px flex-1" />
+    </div>
+  );
 };
 
+/**
+ * The conversation's messages as Message Scroller items, one per message: the user's anchor the scroller, so a new
+ * question settles near the top and the reply streams in under it. `className` sets each item's column.
+ */
 export const Transcript = (props: {
   transcript: TranscriptMessage[];
   more: boolean;
   openHref: string;
   /** The agent is at it and not waiting on the user. */
   working: boolean;
+  className?: string;
 }) => {
   const rows = useMemo(() => {
-    const flattened: Row[] = [];
-    for (const block of toBlocks(props.transcript)) {
-      if (block.kind === "agent") {
-        for (const [index, item] of block.items.entries()) {
-          flattened.push({
-            item,
-            key: item.key,
-            kind: "agent-item",
-            lastInRun: index === block.items.length - 1,
-          });
-        }
-      } else {
-        flattened.push(block);
-      }
-    }
+    const all: Row[] = toBlocks(props.transcript);
     if (props.more) {
-      flattened.unshift({ key: "more", kind: "more" });
+      all.unshift({ key: "more", kind: "more" });
     }
     if (props.transcript.every((m) => m.role === "briefing")) {
-      flattened.push({ key: "empty", kind: "empty" });
+      all.push({ key: "empty", kind: "empty" });
     }
     if (props.working) {
-      flattened.push({ key: "working", kind: "working" });
+      all.push({ key: "working", kind: "working" });
     }
-    return flattened;
+    return all;
   }, [props.transcript, props.more, props.working]);
-  return (
-    <div className="w-full">
-      {rows.map((row) => (
-        <div
-          key={row.key}
-          className={
-            row.kind === "agent-item" && !row.lastInRun ? "pb-2.5" : "pb-5"
-          }
-        >
-          <TranscriptRow row={row} openHref={props.openHref} />
-        </div>
-      ))}
-    </div>
-  );
+  return rows.map((row) => (
+    <MessageScrollerItem
+      key={row.key}
+      messageId={row.key}
+      scrollAnchor={row.kind === "user"}
+    >
+      <div className={props.className}>
+        <TranscriptRow
+          row={row}
+          openHref={props.openHref}
+          working={props.working}
+        />
+      </div>
+    </MessageScrollerItem>
+  ));
 };

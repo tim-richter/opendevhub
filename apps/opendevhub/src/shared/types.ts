@@ -872,13 +872,22 @@ export interface SessionTurn {
 /** One piece of an assistant message in a transcript. */
 export type TranscriptPart =
   | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string }
+  | {
+      kind: "reasoning";
+      text: string;
+      /** How long the model thought, in milliseconds; missing until it stops or when opencode doesn't time it. */
+      duration?: number;
+    }
   | {
       kind: "tool";
       name: string;
-      /** What the call did, such as the command it ran, when opencode gives one. */
+      /** What the call did, such as the command it ran or the file it read. */
       title?: string;
       status: "pending" | "running" | "completed" | "error";
+      /** The text it returned, cut to its start; set once it is done. */
+      output?: string;
+      /** Why it failed; set on an error. */
+      error?: string;
     };
 
 /** A file a user message carried; the bytes stay with opencode. */

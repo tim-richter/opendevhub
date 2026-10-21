@@ -43,16 +43,23 @@ export interface RawAssistantContent {
   type: string;
   /** Set on text and reasoning. */
   text?: string;
+  /** Set on reasoning: when the model started thinking and, once it stopped, when it did. */
+  time?: { created: number; completed?: number };
   /** Set on a tool call. */
   name?: string;
   /**
    * Set on a tool call: its status, "pending", "running", "completed" or "error", and what it did, such as the
-   * command it ran, when opencode gives one; a shell call's `metadata.shellID` names the shell it runs.
+   * command it ran, when opencode gives one; a shell call's `metadata.shellID` names the shell it runs. `input` is
+   * what the agent called it with (a string while it is still being written), `content` what it returned and
+   * `error` why it failed.
    */
   state?: {
     status: string;
     title?: string;
     metadata?: Record<string, unknown>;
+    input?: Record<string, unknown> | string;
+    content?: { type: string; text?: string }[];
+    error?: { message?: string };
   };
 }
 

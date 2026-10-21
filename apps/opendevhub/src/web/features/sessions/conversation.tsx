@@ -1,7 +1,15 @@
 import { Alert, AlertDescription } from "@opendevhub/ui/alert";
 import { Button } from "@opendevhub/ui/button";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@opendevhub/ui/message-scroller";
 import { Skeleton } from "@opendevhub/ui/skeleton";
-import { ArrowDownIcon, ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -39,10 +47,12 @@ import {
 import type { OpenPanel, PanelId } from "./side-panel";
 import { Transcript } from "./transcript";
 import { UsagePopover } from "./usage-popover";
-import { useStickToBottom } from "./use-stick-to-bottom";
 
 /** The transcript's and the composer's width: as wide as reads well. */
 const COLUMN = "w-full max-w-4xl";
+
+/** A transcript item's width, centred in the scroller. */
+const column = cn("mx-auto", COLUMN);
 
 /** How long a send's notice stays under the transcript. */
 const NOTICE_MS = 5000;
@@ -83,10 +93,6 @@ export const Conversation = (props: {
 }) => {
   const { view, checkout, session, detail } = props;
   const projectId = view.project.id;
-  const { behind, contentRef, scrollRef, scrollToBottom } = useStickToBottom(
-    session.id,
-    !!detail
-  );
   const { panel, toggle, close } = useSidePanel(props.initialPanel);
   const [notice, setNotice] = useState<string>();
   useEffect(() => {
@@ -274,46 +280,42 @@ export const Conversation = (props: {
 
         <BackgroundShells session={session} />
 
-        <div className="relative min-h-48 flex-1">
-          <div
-            ref={scrollRef}
-            aria-label="Conversation transcript"
-            role="region"
-            className="absolute inset-0 overflow-y-auto"
-          >
-            <div ref={contentRef} className={cn("mx-auto px-1 py-5", COLUMN)}>
-              {props.error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{props.error}</AlertDescription>
-                </Alert>
-              )}
-              {!detail && !props.error && (
-                <div className="flex flex-col gap-3">
-                  <Skeleton className="h-10 w-1/2 self-end" />
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-4 w-2/3" />
-                </div>
-              )}
-              {detail && (
-                <Transcript
-                  transcript={detail.transcript}
-                  more={detail.more}
-                  openHref={openHref}
-                  working={running && !needsAttention(session.status)}
-                />
-              )}
-            </div>
-          </div>
-          {behind && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md"
-              onClick={scrollToBottom}
-            >
-              <ArrowDownIcon /> Jump to latest
-            </Button>
-          )}
+        <div className="min-h-48 flex-1">
+          {/* Keyed so another conversation opens at its own end. */}
+          <MessageScrollerProvider key={session.id} autoScroll>
+            <MessageScroller>
+              <MessageScrollerViewport aria-label="Conversation transcript">
+                <MessageScrollerContent className="px-1 py-5">
+                  {props.error && (
+                    <MessageScrollerItem>
+                      <Alert variant="destructive" className={column}>
+                        <AlertDescription>{props.error}</AlertDescription>
+                      </Alert>
+                    </MessageScrollerItem>
+                  )}
+                  {!detail && !props.error && (
+                    <MessageScrollerItem>
+                      <div className={cn("flex flex-col gap-3", column)}>
+                        <Skeleton className="h-10 w-1/2 self-end" />
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-4 w-2/3" />
+                      </div>
+                    </MessageScrollerItem>
+                  )}
+                  {detail && (
+                    <Transcript
+                      transcript={detail.transcript}
+                      more={detail.more}
+                      openHref={openHref}
+                      working={running && !needsAttention(session.status)}
+                      className={column}
+                    />
+                  )}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton className="dark:bg-background dark:hover:bg-muted shadow-md" />
+            </MessageScroller>
+          </MessageScrollerProvider>
         </div>
 
         <footer
@@ -346,10 +348,7 @@ export const Conversation = (props: {
             agent={detail?.agent ?? detail?.turns[0]?.agent}
             hubCommands
             onSend={props.onSend}
-            onSent={(sent) => {
-              setNotice(sent);
-              scrollToBottom();
-            }}
+            onSent={setNotice}
           />
         </footer>
       </div>

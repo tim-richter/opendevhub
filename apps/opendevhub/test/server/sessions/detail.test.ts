@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { RawMessage } from "../../../src/server/opencode/client";
 import {
   PART_CHARS,
+  TOOL_OUTPUT_CHARS,
   subagentsOf,
   toSessionTurns,
   toTranscript,
@@ -200,12 +201,18 @@ describe(toTranscript, () => {
     ]);
   });
 
-  it("keeps an assistant message's parts in order with each tool call's status and title", () => {
+  it("keeps an assistant message's parts in order with each tool call's status and title and how long each thought took", () => {
     const [message] = toTranscript([
       {
         agent: "build",
         content: [
           { text: "planning", type: "reasoning" },
+          {
+            text: "checking",
+            time: { completed: 4200, created: 1000 },
+            type: "reasoning",
+          },
+          { text: "still at it", time: { created: 5000 }, type: "reasoning" },
           { text: "   ", type: "text" },
           {
             name: "bash",
@@ -233,6 +240,8 @@ describe(toTranscript, () => {
       model: { id: "m", providerID: "p" },
       parts: [
         { kind: "reasoning", text: "planning" },
+        { duration: 3200, kind: "reasoning", text: "checking" },
+        { kind: "reasoning", text: "still at it" },
         { kind: "tool", name: "bash", status: "error", title: "pnpm test" },
         { kind: "tool", name: "read", status: "running" },
         { kind: "tool", name: "edit", status: "pending" },
@@ -241,6 +250,77 @@ describe(toTranscript, () => {
       ],
       role: "assistant",
     });
+  });
+
+  it("carries a tool call's output and error, titling it from its input when opencode gives no title", () => {
+    const [message] = toTranscript([
+      {
+        content: [
+          {
+            name: "bash",
+            state: {
+              content: [
+                { text: "M a.ts\n", type: "text" },
+                { type: "file" },
+                { text: "?? b.ts", type: "text" },
+              ],
+              input: { command: "git status --short", description: "Status" },
+              status: "completed",
+            },
+            type: "tool",
+          },
+          {
+            name: "read",
+            state: {
+              error: { message: "No such file" },
+              input: { filePath: "/src/x.ts" },
+              status: "error",
+            },
+            type: "tool",
+          },
+          {
+            name: "edit",
+            state: { input: '{"filePa', status: "pending" },
+            type: "tool",
+          },
+          {
+            name: "bash",
+            state: {
+              content: [
+                { text: "x".repeat(TOOL_OUTPUT_CHARS + 10), type: "text" },
+              ],
+              status: "completed",
+            },
+            type: "tool",
+          },
+        ],
+        id: "msg_1",
+        type: "assistant",
+      },
+    ]);
+    expect(message.role === "assistant" && message.parts).toStrictEqual([
+      {
+        kind: "tool",
+        name: "bash",
+        output: "M a.ts\n\n?? b.ts",
+        status: "completed",
+        title: "git status --short",
+      },
+      {
+        error: "No such file",
+        kind: "tool",
+        name: "read",
+        status: "error",
+        title: "/src/x.ts",
+      },
+      { kind: "tool", name: "edit", status: "pending" },
+      {
+        kind: "tool",
+        name: "bash",
+        output: `${"x".repeat(TOOL_OUTPUT_CHARS - 1)}…`,
+        status: "completed",
+      },
+    ]);
   });
 
   it("cuts long text, reasoning and prompts short", () => {

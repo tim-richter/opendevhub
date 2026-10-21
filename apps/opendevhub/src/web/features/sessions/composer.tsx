@@ -1,3 +1,12 @@
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@opendevhub/ui/attachment";
 import { Button } from "@opendevhub/ui/button";
 import {
   Command,
@@ -6,16 +15,21 @@ import {
   CommandItem,
   CommandList,
 } from "@opendevhub/ui/command";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@opendevhub/ui/input-group";
 import { Popover, PopoverAnchor, PopoverContent } from "@opendevhub/ui/popover";
-import { Textarea } from "@opendevhub/ui/textarea";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   ArrowUpIcon,
   BotIcon,
   FileIcon,
   ListEndIcon,
-  PaperclipIcon,
   PlayIcon,
+  PlusIcon,
   SquareSlashIcon,
   XIcon,
 } from "lucide-react";
@@ -607,9 +621,10 @@ export const Composer = (props: {
         send();
       }}
     >
-      <div
+      <InputGroup
+        data-disabled={!target.ready}
         className={cn(
-          "bg-card focus-within:border-ring/60 flex flex-col rounded-xl border shadow-sm transition-colors",
+          "bg-card dark:bg-card rounded-xl shadow-sm",
           dragging && "ring-ring/60 ring-2"
         )}
         onDragOver={onDragOver}
@@ -623,50 +638,46 @@ export const Composer = (props: {
         onDrop={onDrop}
       >
         {attachments.length > 0 && (
-          <ul
-            aria-label="Attached files"
-            className="flex flex-wrap gap-2 px-3 pt-3"
-          >
-            {attachments.map((a) => (
-              <li
-                key={a.id}
-                className="bg-muted flex max-w-60 items-center gap-2 rounded-md border py-1 pr-1 pl-1.5 text-xs"
-              >
-                {a.mime.startsWith("image/") ? (
-                  <img
-                    src={a.url}
-                    alt=""
-                    className="size-8 shrink-0 rounded object-cover"
-                  />
-                ) : (
-                  <FileIcon
-                    className="text-muted-foreground size-4 shrink-0"
-                    aria-hidden
-                  />
-                )}
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium" title={a.name}>
-                    {a.name}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {formatSize(a.size)}
-                  </span>
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground size-6 shrink-0"
-                  aria-label={`Remove ${a.name}`}
-                  onClick={() =>
-                    setAttachments((held) => held.filter((h) => h.id !== a.id))
-                  }
-                >
-                  <XIcon />
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <InputGroupAddon align="block-start">
+            <ul
+              aria-label="Attached files"
+              className="flex min-w-0 flex-wrap gap-2"
+            >
+              {attachments.map((a) => (
+                <li key={a.id} className="min-w-0">
+                  <Attachment size="sm" className="max-w-60 min-w-0">
+                    {a.mime.startsWith("image/") ? (
+                      <AttachmentMedia variant="image">
+                        <img src={a.url} alt="" />
+                      </AttachmentMedia>
+                    ) : (
+                      <AttachmentMedia>
+                        <FileIcon aria-hidden />
+                      </AttachmentMedia>
+                    )}
+                    <AttachmentContent>
+                      <AttachmentTitle title={a.name}>{a.name}</AttachmentTitle>
+                      <AttachmentDescription>
+                        {formatSize(a.size)}
+                      </AttachmentDescription>
+                    </AttachmentContent>
+                    <AttachmentActions>
+                      <AttachmentAction
+                        aria-label={`Remove ${a.name}`}
+                        onClick={() =>
+                          setAttachments((held) =>
+                            held.filter((h) => h.id !== a.id)
+                          )
+                        }
+                      >
+                        <XIcon />
+                      </AttachmentAction>
+                    </AttachmentActions>
+                  </Attachment>
+                </li>
+              ))}
+            </ul>
+          </InputGroupAddon>
         )}
         <Popover
           open={open}
@@ -676,11 +687,11 @@ export const Composer = (props: {
             }
           }}
         >
-          <div className="relative">
+          <div className="relative w-full">
             <label htmlFor="session-prompt" className="sr-only">
               Message the agent
             </label>
-            <Textarea
+            <InputGroupTextarea
               ref={textarea}
               id="session-prompt"
               autoFocus={props.autoFocus}
@@ -693,7 +704,7 @@ export const Composer = (props: {
               disabled={!target.ready}
               placeholder={placeholder}
               className={cn(
-                "max-h-[40svh] resize-none rounded-xl border-0 bg-transparent px-3.5 pt-3 shadow-none focus-visible:ring-0 dark:bg-transparent",
+                "max-h-[40svh] p-3",
                 hero ? "min-h-24 text-base md:text-base" : "min-h-14"
               )}
               value={value.text}
@@ -794,7 +805,7 @@ export const Composer = (props: {
             </Command>
           </PopoverContent>
         </Popover>
-        <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
+        <InputGroupAddon align="block-end" className="min-w-0 gap-1">
           <input
             ref={fileInput}
             type="file"
@@ -806,17 +817,16 @@ export const Composer = (props: {
             }}
           />
           <Tip label="Attach files or images">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground size-7"
+            <InputGroupButton
+              size="icon-sm"
+              variant="outline"
+              className="rounded-full"
               aria-label="Attach files or images"
               disabled={!target.ready}
               onClick={() => fileInput.current?.click()}
             >
-              <PaperclipIcon />
-            </Button>
+              <PlusIcon />
+            </InputGroupButton>
           </Tip>
           {!target.ready && (
             <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1.5 px-1 text-xs">
@@ -848,19 +858,20 @@ export const Composer = (props: {
             <Tip
               label={`${running ? "Queue behind the current turn" : "Send"}${sendKeys ? ` (${sendKeys})` : ""}`}
             >
-              <Button
+              <InputGroupButton
                 type="submit"
-                size="icon"
-                className="ml-1 size-8 rounded-full"
+                size="icon-sm"
+                variant="default"
+                className="ml-1 rounded-full"
                 aria-label={running ? "Queue" : "Send"}
                 disabled={!canSend}
               >
                 {running ? <ListEndIcon /> : <ArrowUpIcon />}
-              </Button>
+              </InputGroupButton>
             </Tip>
           </div>
-        </div>
-      </div>
+        </InputGroupAddon>
+      </InputGroup>
       {props.footer}
       {!target.ready && (
         <p id="composer-why" className="text-muted-foreground text-sm">

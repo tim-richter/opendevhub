@@ -23,7 +23,19 @@ const PROMPT_CHARS = 2000;
 const REPLY_CHARS = 1200;
 /** The most of a transcript's text or reasoning part the detail carries. */
 export const PART_CHARS = 20_000;
+/** The most of a tool call's output the detail carries. */
+export const TOOL_OUTPUT_CHARS = 4000;
 const TOOL_STATUSES = new Set(["pending", "running", "completed", "error"]);
+/** The input fields that say what a tool call did when opencode gives it no title, most telling first. */
+const TOOL_SUBJECTS = [
+  "command",
+  "filePath",
+  "path",
+  "pattern",
+  "url",
+  "query",
+  "description",
+] as const;
 
 const cut = (text: string, max: number): string => {
   const trimmed = text.trim();
@@ -110,19 +122,63 @@ export const toSessionTurns = (newestFirst: RawMessage[]): SessionTurn[] => {
   return turns;
 };
 
+type RawToolState = NonNullable<RawAssistantContent["state"]>;
+
+/** What a tool call did: opencode's title for it, else the first telling field of its input. */
+const toolTitle = (state: RawToolState | undefined): string | undefined => {
+  if (state?.title) {
+    return state.title;
+  }
+  const input = state?.input;
+  if (!input || typeof input === "string") {
+    return undefined;
+  }
+  for (const key of TOOL_SUBJECTS) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      return cut(value, PROMPT_CHARS);
+    }
+  }
+  return undefined;
+};
+
+/** The text a tool call returned, if any. */
+const toolOutput = (state: RawToolState | undefined): string | undefined => {
+  const text = (state?.content ?? [])
+    .filter((p) => p.type === "text" && p.text?.trim())
+    .map((p) => p.text)
+    .join("\n");
+  return text.trim() ? cut(text, TOOL_OUTPUT_CHARS) : undefined;
+};
+
 const toPart = (c: RawAssistantContent): TranscriptPart | undefined => {
-  if ((c.type === "text" || c.type === "reasoning") && c.text?.trim()) {
-    return { kind: c.type, text: cut(c.text, PART_CHARS) };
+  if (c.type === "text" && c.text?.trim()) {
+    return { kind: "text", text: cut(c.text, PART_CHARS) };
+  }
+  if (c.type === "reasoning" && c.text?.trim()) {
+    const { created, completed } = c.time ?? {};
+    return {
+      kind: "reasoning",
+      text: cut(c.text, PART_CHARS),
+      ...(created !== undefined && completed !== undefined
+        ? { duration: completed - created }
+        : {}),
+    };
   }
   if (c.type === "tool" && c.name) {
     const status = c.state?.status ?? "pending";
+    const title = toolTitle(c.state);
+    const output = toolOutput(c.state);
+    const error = c.state?.error?.message?.trim();
     return {
       kind: "tool",
       name: c.name,
       status: TOOL_STATUSES.has(status)
         ? (status as Extract<TranscriptPart, { kind: "tool" }>["status"])
         : "pending",
-      ...(c.state?.title ? { title: c.state.title } : {}),
+      ...(title ? { title } : {}),
+      ...(output ? { output } : {}),
+      ...(error ? { error: cut(error, TOOL_OUTPUT_CHARS) } : {}),
     };
   }
   return undefined;
