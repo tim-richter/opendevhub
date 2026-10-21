@@ -105,9 +105,9 @@ _Alternative:_ gating in `Containers.up`. Rejected: too low. It can't wait or re
   - Pages and static files: always served.
 - **Terminal upgrade:** requires the `odh` cookie, beside its existing Origin check.
 - **Environment host:**
-  - `/__odh/enter?code=` exchanges the code for a host-only `odh_env` cookie and 302s to `/`.
+  - `/api/__odh/enter?code=` exchanges the code for a host-only `odh_env` cookie and 302s to `/`.
   - Any other request, the WebSocket upgrade included, requires `odh_env` for that env id, or gets a 401 (an HTML page for navigations).
-- **Opening an environment:** `GET /api/envs/:env/enter?next=<path>`, behind `odh`, mints a code and 302s to `http://<env>.localhost:<port>/__odh/enter?code=…&next=<path>`, which sets `odh_env` and 302s to `next` (same-host paths only). A top-level navigation from the dashboard is same-site, so the Strict `odh` cookie is sent. A link on another site is not, so it gets 401.
+- **Opening an environment:** `GET /api/envs/:env/enter?next=<path>`, behind `odh`, mints a code and 302s to `http://<env>.localhost:<port>/api/__odh/enter?code=…&next=<path>`, which sets `odh_env` and 302s to `next` (same-host paths only). A top-level navigation from the dashboard is same-site, so the Strict `odh` cookie is sent. A link on another site is not, so it gets 401.
   - _Changed while implementing:_ the snapshot's `openUrl` stays the environment's origin. opencode's session links (`sessionUrl`) encode that origin as their server key, so it can't become a dashboard route. The web instead sends every environment link through `enterUrl` (`shared/urls.ts`), which turns `http://<env>.localhost:<port><path>` into the enter route with `next=<path>`.
   - _Changed while implementing:_ `odh_env` is `SameSite=Lax`, not Strict. `localhost` and `<env>.localhost` are different sites, so a Strict cookie would never be sent on a link from the dashboard, nor on the redirect that lands after the code exchange. Lax still keeps it off cross-site subrequests, and a process in a container has no cookie either way.
 

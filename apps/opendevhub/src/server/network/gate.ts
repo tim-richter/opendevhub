@@ -4,8 +4,12 @@ import { DASHBOARD_COOKIE, ENV_COOKIE, setCookie } from "../access";
 import type { Access } from "../access";
 import { isEnvLabel } from "./hosts";
 
-/** Where an environment host sends its code back to; the redirect then lands on `next`. */
-export const ENV_ENTER_PATH = "/__odh/enter";
+/**
+ * Where an environment host sends its code back to; the redirect then lands on `next`. Under `/api/` because
+ * opencode's service worker answers every other navigation with its own cached page, so the request would
+ * never reach the gate.
+ */
+export const ENV_ENTER_PATH = "/api/__odh/enter";
 const ENTER_ROUTE = /^\/api\/envs\/(?<env>[^/?]+)\/enter$/u;
 
 const escapeHtml = (text: string): string =>
