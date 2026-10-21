@@ -65,6 +65,20 @@ export const checkoutPath = (
   return tab ? `${base}/${tab}` : base;
 };
 
+/** The Saved permissions section's anchor on a checkout's Container tab. */
+export const SAVED_PERMISSIONS_ID = "saved-permissions";
+
+/** The Saved permissions section of the environment a checkout runs in, or undefined for an unknown checkout. */
+export const savedPermissionsPath = (
+  view: ProjectView,
+  directory: string
+): string | undefined => {
+  const checkout = checkoutOf(view, directory);
+  return checkout
+    ? `${checkoutPath(view.project.id, checkout.target, "runtime")}#${SAVED_PERMISSIONS_ID}`
+    : undefined;
+};
+
 /**
  * Where a session lives: its task's Conversation tab with its variant selected (and the session as the thread when it
  * isn't the variant's own), else its checkout's page while the session has no task yet, else the project overview.

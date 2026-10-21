@@ -238,6 +238,25 @@ export type FormAnswer = Record<string, string | number | boolean | string[]>;
 
 export type PermissionDecision = "once" | "always" | "reject";
 
+/** A rule opencode saved when someone answered a permission prompt with "always": `action` is allowed on `resource`. */
+export interface SavedPermission {
+  id: string;
+  /** Such as `bash` or `edit`. */
+  action: string;
+  /** A pattern, such as `git push *` or `src/**`. */
+  resource: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SavedPermissionsView {
+  rules: SavedPermission[];
+  /** Whether rules can be edited, not just removed (opencode 2.1+). */
+  canEdit: boolean;
+  /** Why no rules could be read, such as a stopped container. */
+  unavailable?: string;
+}
+
 export interface PendingPermission {
   id: string;
   /** The session that asked (may be a subagent); used in the reply path. */

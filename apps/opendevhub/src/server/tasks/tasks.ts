@@ -131,6 +131,7 @@ export class Tasks {
     ) {
       throw new NotFoundError(task, "task");
     }
+    this.syncArchive(id, task, true);
   }
 
   archivedTasks(id: ProjectId): ArchivedTask[] {
@@ -148,6 +149,41 @@ export class Tasks {
       !this.deps.tasks.restore(task, USER)
     ) {
       throw new NotFoundError(task, "archived task");
+    }
+    this.syncArchive(id, task, false);
+  }
+
+  /**
+   * Archives every conversation of the task's variants in opencode, closed and discarded ones included, or on restore
+   * unarchives those of variants not discarded that weren't closed on their own. Best effort, in the background.
+   */
+  private syncArchive(id: ProjectId, task: string, archived: boolean): void {
+    const { tasks } = this.deps;
+    const byEnv = new Map<
+      string,
+      { sessionId: string; directory?: string }[]
+    >();
+    for (const { sessionId, envId } of tasks.liveSessions(task)) {
+      const variant = tasks.bySession(sessionId)?.variant;
+      if (
+        !archived &&
+        (variant?.discarded || tasks.isSessionArchived(sessionId))
+      ) {
+        continue;
+      }
+      const env = envId ?? id;
+      byEnv.set(env, [
+        ...(byEnv.get(env) ?? []),
+        {
+          sessionId,
+          ...(variant?.directory ? { directory: variant.directory } : {}),
+        },
+      ]);
+    }
+    for (const [env, sessions] of byEnv) {
+      void (archived
+        ? this.envs.archiveSync.archive(env, sessions)
+        : this.envs.archiveSync.unarchive(env, sessions));
     }
   }
 

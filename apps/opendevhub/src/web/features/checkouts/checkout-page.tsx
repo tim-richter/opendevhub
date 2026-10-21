@@ -67,6 +67,7 @@ import {
 } from "./checkouts";
 import { OpenInMenu } from "./open-in-menu";
 import { RuntimeControls, RuntimeLogs } from "./runtime-controls";
+import { SavedPermissions } from "./saved-permissions";
 import { WorktreeCreator } from "./worktree-creator";
 import {
   checkoutReady,
@@ -444,7 +445,7 @@ const Group = (props: {
   );
 };
 
-/** The checkout's container at work: its controls, then its forwarded ports beside its log. */
+/** The checkout's container at work: its controls, its forwarded ports beside its log, then its saved permissions. */
 export const CheckoutRuntime = ({
   sidebar = false,
 }: { sidebar?: boolean } = {}) => (
@@ -457,6 +458,7 @@ export const CheckoutRuntime = ({
       <CheckoutPorts />
       <RuntimeLogs />
     </div>
+    <SavedPermissions />
   </div>
 );
 

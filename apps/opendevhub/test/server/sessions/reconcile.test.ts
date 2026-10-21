@@ -28,17 +28,19 @@ const setup = () => {
   const s = memoryStores(() => 1000);
   s.projects.upsertAll([project]);
   const lookup = vi.fn(async (_id: string): Promise<Presence> => "gone");
+  const keptArchived = vi.fn((_id: string) => false);
   const run = (sessions: RawSession[], envId = project.id) =>
     reconcileSessions(s, {
       branchOf: (dir) => (dir === WS ? undefined : "feat"),
       envId,
+      keptArchived,
       lookup,
       projectId: project.id,
       sessions,
     });
   const verbs = () => eventsSince(s.db).map((e) => `${e.verb} ${e.object.id}`);
   const chats = () => s.chats.listForProject(project.id);
-  return { ...s, chatList: chats, lookup, run, verbs };
+  return { ...s, chatList: chats, keptArchived, lookup, run, verbs };
 };
 
 describe("reconcileSessions", () => {
@@ -138,6 +140,17 @@ describe("reconcileSessions", () => {
     expect(s.chatList()).toStrictEqual([]);
     await s.run([raw("ses_a")]);
     expect(s.chatList().map((c) => c.sessionId)).toStrictEqual(["ses_a"]);
+  });
+
+  it("keeps a session opendevhub archived itself, so cleanup can still delete it", async () => {
+    const s = setup();
+    await s.run([raw("ses_a")]);
+    s.keptArchived.mockImplementation((id) => id === "ses_a");
+    await s.run([
+      raw("ses_a", { time: { archived: 300, created: 100, updated: 300 } }),
+    ]);
+    expect(s.lookup).not.toHaveBeenCalled();
+    expect(s.chats.bySession("ses_a")?.sessionRemoved).toBeFalsy();
   });
 
   it("marks a variant's session removed as before", async () => {

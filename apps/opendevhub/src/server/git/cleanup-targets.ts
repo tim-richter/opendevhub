@@ -8,10 +8,60 @@ import type {
 } from "../../shared/types";
 import { USER } from "../db/events";
 import type { Environments } from "../environments/environments";
+import { MAX_SESSION_LOOKUPS } from "../environments/monitor";
 import type { HubDeps } from "../environments/ports";
-import { rootOf } from "../sessions/status";
+import { OpencodeHttpError } from "../opencode/client";
+import type { OpencodeClient, RawSession } from "../opencode/client";
 import type { Checkouts } from "./checkouts";
 import { branchChanged, scanBranches, staleSessions } from "./cleanup";
+
+/** One session by id; undefined only when opencode answers 404. Any other failure throws. */
+const lookUp = async (
+  client: OpencodeClient,
+  id: string
+): Promise<RawSession | undefined> => {
+  try {
+    return await client.session(id);
+  } catch (error) {
+    if (error instanceof OpencodeHttpError && error.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Whether `root` or one of its subagent sessions is among the `active` ones: walks `parentID` up from each active
+ * session with cached single lookups, so a root outside the newest page is found too. Past the lookup cap it can't
+ * tell, and answers true so the conversation is kept.
+ */
+const runsUnder = async (
+  client: OpencodeClient,
+  active: Set<string>,
+  root: RawSession
+): Promise<boolean> => {
+  const known = new Map<string, RawSession | undefined>([[root.id, root]]);
+  let lookups = 0;
+  for (const start of active) {
+    const seen = new Set<string>();
+    let id: string | undefined = start;
+    while (id && !seen.has(id)) {
+      if (id === root.id) {
+        return true;
+      }
+      seen.add(id);
+      if (!known.has(id)) {
+        if (lookups >= MAX_SESSION_LOOKUPS) {
+          return true;
+        }
+        lookups += 1;
+        known.set(id, await lookUp(client, id));
+      }
+      id = known.get(id)?.parentID;
+    }
+  }
+  return false;
+};
 
 /** The branches and sessions of one project that cleanup may delete, scanned and deleted through its environments. */
 export class CleanupTargets {
@@ -189,20 +239,30 @@ export class CleanupTargets {
       };
     }
     const client = this.envs.opencodeClient(env);
-    const [sessions, active] = await Promise.all([
-      client.sessions(),
-      client.active(),
-    ]);
-    const session = sessions.find((s) => s.id === sessionId);
+    let session: RawSession | undefined;
+    let running: boolean;
+    try {
+      const [found, active] = await Promise.all([
+        lookUp(client, sessionId),
+        client.active(),
+      ]);
+      session = found;
+      running = found ? await runsUnder(client, active, found) : false;
+    } catch (error) {
+      // Unknown is not gone: keep the record and say why.
+      return {
+        message: `could not check its conversation: ${error instanceof Error ? error.message : String(error)}`,
+        outcome: "skipped",
+      };
+    }
     if (!session) {
       this.envs.reconcile(env);
       return { outcome: "removed" };
     }
-    const parents = new Map(sessions.map((s) => [s.id, s.parentID]));
     const waiting = this.deps.store
       .sessionsOf(id)
       .some((s) => s.id === sessionId && s.status !== "idle");
-    if ([...active].some((a) => rootOf(a, parents) === sessionId) || waiting) {
+    if (waiting || running) {
       return {
         message: "its conversation is still running",
         outcome: "skipped",
@@ -272,7 +332,13 @@ export class CleanupTargets {
   ): Promise<SessionCleanupItem[]> {
     const client = this.envs.opencodeClient(envId);
     const [sessions, active] = await Promise.all([
-      client.sessions(),
+      client.allSessions({
+        onCapped: (cap) =>
+          this.envs.log(
+            p.id,
+            `cleanup: ${envId === p.id ? "" : `${envId}: `}read only the newest ${cap} sessions`
+          ),
+      }),
       client.active(),
     ]);
     const waiting = this.deps.store

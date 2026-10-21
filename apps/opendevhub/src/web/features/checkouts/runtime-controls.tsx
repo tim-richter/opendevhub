@@ -48,7 +48,7 @@ const sharedCheckouts = (view: ProjectView): string[] =>
     .map((c) => c.label);
 
 /** The environment a checkout runs in: its own container, or the project's shared one (addressed by the project's id). */
-const useEnvironment = () => {
+export const useEnvironment = () => {
   const { view, checkout } = useCheckoutContext();
   const own = envOfDirectory(view, checkout.directory);
   return {

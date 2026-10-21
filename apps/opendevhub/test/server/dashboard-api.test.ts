@@ -60,6 +60,8 @@ import type {
   ModelsInfo,
   PickResult,
   Project,
+  SavedPermission,
+  SavedPermissionsView,
   SessionDetail,
   StoredAiReview,
   TaskResult,
@@ -320,6 +322,29 @@ function setup(webDir?: string) {
         pushedFrom: "host" as const,
         output: [],
       })),
+    },
+    permissions: {
+      list: vi.fn(
+        async (_id: string, _env: string): Promise<SavedPermissionsView> => ({
+          canEdit: true,
+          rules: [],
+        })
+      ),
+      update: vi.fn(
+        async (
+          _id: string,
+          _env: string,
+          rule: string,
+          patch: { action?: string; resource?: string }
+        ): Promise<SavedPermission> => ({
+          action: patch.action ?? "bash",
+          createdAt: 1,
+          id: rule,
+          resource: patch.resource ?? "pnpm *",
+          updatedAt: 2,
+        })
+      ),
+      remove: vi.fn(async (_id: string, _env: string, _rule: string) => {}),
     },
     tasks: {
       startTask: vi.fn(
@@ -1741,6 +1766,46 @@ describe("dashboard API", () => {
         )
       ).status
     ).toBe(400);
+  });
+
+  it("lists, edits and removes an environment's saved permissions, refusing empty values", async () => {
+    const { app, hub } = setup();
+    const base = `/api/projects/${project.id}/envs/e1/permissions/saved`;
+    await expect((await app.request(base)).json()).resolves.toStrictEqual({
+      canEdit: true,
+      rules: [],
+    });
+    expect(hub.permissions.list).toHaveBeenCalledWith(project.id, "e1");
+    const patch = (body: unknown) =>
+      app.request(`${base}/per_1`, {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "PATCH",
+      });
+    const res = await patch({ resource: "pnpm test *" });
+    expect(res.status).toBe(200);
+    expect(hub.permissions.update).toHaveBeenCalledWith(
+      project.id,
+      "e1",
+      "per_1",
+      { resource: "pnpm test *" }
+    );
+    expect((await patch({ resource: "  " })).status).toBe(400);
+    expect((await patch({ action: "" })).status).toBe(400);
+    expect((await patch({})).status).toBe(400);
+    hub.permissions.update.mockRejectedValueOnce(
+      new ConflictError(
+        "editing saved permissions needs opencode 2.1.0 or later"
+      )
+    );
+    expect((await patch({ action: "bash" })).status).toBe(409);
+    const del = await app.request(`${base}/per_1`, { method: "DELETE" });
+    await expect(del.json()).resolves.toStrictEqual({ ok: true });
+    expect(hub.permissions.remove).toHaveBeenCalledWith(
+      project.id,
+      "e1",
+      "per_1"
+    );
   });
 
   it("GET /api/events starts with a snapshot event", async () => {

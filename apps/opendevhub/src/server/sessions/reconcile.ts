@@ -20,6 +20,11 @@ export interface ReconcileInput {
   rowsOf?: (directory: string) => { branchId?: number; worktreeId?: number };
   /** Asks opencode about one session; the listing holds only the newest ones. */
   lookup: (sessionId: string) => Promise<Presence>;
+  /**
+   * Whether opendevhub archived this session itself (and so archived it in opencode too). Such a session is still
+   * there for cleanup to delete, so being archived in opencode doesn't make it gone.
+   */
+  keptArchived?: (sessionId: string) => boolean;
 }
 
 export interface ReconcileStores {
@@ -79,9 +84,17 @@ export const reconcileSessions = async (
     });
   }
   const present = new Set(listed.map((s) => s.id));
-  const archived = new Set(
-    input.sessions.filter((s) => s.time.archived !== undefined).map((s) => s.id)
-  );
+  const archived = new Set<string>();
+  for (const s of input.sessions) {
+    if (s.time.archived === undefined) {
+      continue;
+    }
+    if (input.keptArchived?.(s.id)) {
+      present.add(s.id);
+    } else {
+      archived.add(s.id);
+    }
+  }
   const live = () => [
     ...tasks.liveSessionsIn(envId),
     ...chats.liveSessionsIn(envId),

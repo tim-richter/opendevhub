@@ -1375,6 +1375,53 @@ export const fetchEnvLogs = (
     "logs"
   );
 
+const savedRules = project.envs[":env"].permissions.saved;
+const envParam = (projectId: string, envId: string) => ({
+  ...projectParam(projectId),
+  env: encodeURIComponent(envId),
+});
+
+/** The rules opencode saved from "always" answers in an environment; read from opencode each time. */
+export const fetchSavedPermissions = (
+  projectId: string,
+  envId: string,
+  signal?: AbortSignal
+) =>
+  read(
+    savedRules.$get(
+      { param: envParam(projectId, envId) },
+      { init: { cache: "no-store", signal } }
+    ),
+    "list saved permissions"
+  );
+
+export const updateSavedPermission = (
+  projectId: string,
+  envId: string,
+  rule: string,
+  changes: { action?: string; resource?: string }
+) =>
+  read(
+    savedRules[":rule"].$patch({
+      json: changes,
+      param: { ...envParam(projectId, envId), rule: encodeURIComponent(rule) },
+    }),
+    "edit saved permission"
+  );
+
+export const removeSavedPermission = async (
+  projectId: string,
+  envId: string,
+  rule: string
+) => {
+  await complete(
+    savedRules[":rule"].$delete({
+      param: { ...envParam(projectId, envId), rule: encodeURIComponent(rule) },
+    }),
+    "remove saved permission"
+  );
+};
+
 export const removeEnv = (projectId: string, envId: string) =>
   read(
     project.envs[":env"].remove.$post({

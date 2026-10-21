@@ -137,7 +137,15 @@ describe("task conversations", () => {
       },
     ]);
 
+    s.store.updateRuntime(project.id, { opencodeVersion: "2.1.0" });
     await s.hub.sessions.archiveTaskConversation(project.id, "ses_1");
+    await vi.waitFor(() =>
+      expect(s.client.setArchived).toHaveBeenCalledWith(
+        "ses_1",
+        true,
+        "/workspaces/demo"
+      )
+    );
     expect(s.client.interrupt).toHaveBeenCalledWith(
       "ses_1",
       "/workspaces/demo"

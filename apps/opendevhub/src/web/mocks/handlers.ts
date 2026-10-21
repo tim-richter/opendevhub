@@ -29,6 +29,8 @@ import type {
   DashboardSnapshot,
   ProjectLinks,
   ProjectTodo,
+  SavedPermission,
+  SavedPermissionsView,
 } from "../../shared/types";
 import {
   activityPage,
@@ -57,6 +59,7 @@ import {
   jiraTicket,
   jiraTickets,
   envLogs,
+  savedPermissions,
   logLines,
   models,
   ocrReview,
@@ -87,6 +90,8 @@ export interface MockOptions {
   projectOcr?: OcrProjectSettings;
   /** What Test connection answers. */
   ocrTest?: OcrTestResult;
+  /** Every environment's saved permissions; removing and editing change this copy. */
+  savedPermissions?: SavedPermissionsView;
 }
 
 const aiReview: AiReviewResult = {
@@ -125,6 +130,7 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     ocrTest = { ok: true },
   } = options;
   let ocr = options.ocr ?? ocrSettings;
+  const saved = structuredClone(options.savedPermissions ?? savedPermissions());
   let personalization: Personalization = readPersonalization({
     features: { "ghcr.io/devcontainers/features/github-cli:1": {} },
     setupCommand: "git config --global alias.co checkout",
@@ -531,6 +537,34 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
       HttpResponse.json(
         envLogs(new URL(request.url).searchParams.get("source") ?? "setup")
       )
+    ),
+    http.get("/api/projects/:id/envs/:env/permissions/saved", async () => {
+      await wait();
+      return HttpResponse.json(saved);
+    }),
+    http.patch(
+      "/api/projects/:id/envs/:env/permissions/saved/:rule",
+      async ({ params, request }) => {
+        await wait();
+        const changes = (await request.json()) as Partial<SavedPermission>;
+        const rule = saved.rules.find((r) => r.id === params.rule);
+        if (!rule) {
+          return HttpResponse.json(
+            { error: "saved permission not found" },
+            { status: 404 }
+          );
+        }
+        Object.assign(rule, changes, { updatedAt: Date.now() });
+        return HttpResponse.json(rule);
+      }
+    ),
+    http.delete(
+      "/api/projects/:id/envs/:env/permissions/saved/:rule",
+      async ({ params }) => {
+        await wait();
+        saved.rules = saved.rules.filter((r) => r.id !== params.rule);
+        return ok();
+      }
     ),
     http.get("/api/projects/:id/models", () => HttpResponse.json(models)),
     http.get("/api/projects/:id/review", async ({ request }) => {

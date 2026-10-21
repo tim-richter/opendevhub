@@ -7,6 +7,7 @@ import type {
   RawForm,
   RawMessage,
   RawPermissionRequest,
+  RawSavedPermission,
   RawSession,
   RawShell,
 } from "../../src/server/opencode/client";
@@ -75,6 +76,10 @@ export interface FakeState {
   agentSwitches: { sessionId: string; body: unknown }[];
   /** Session ids `DELETE /api/session/:id` removed. */
   deleted: string[];
+  /** Rules saved from "always" answers (`/api/permission/saved`). */
+  saved?: RawSavedPermission[];
+  /** `GET /api/project` ids. */
+  projects?: string[];
   /** Each session's messages, oldest first; user messages carry `text` and `time`. */
   messages?: Record<string, RawMessage[]>;
   /** `GET /api/session/:id/diff` data per session, keyed by the `from` user message id. */
@@ -220,20 +225,48 @@ export async function startFakeOpencode(
           });
           return;
         }
-        return json({
-          data: state.sessions
-            .filter((session) => {
-              const parentId = url.searchParams.get("parentID");
-              if (parentId === null) {
-                return true;
-              }
-              if (parentId === "null") {
-                return !session.parentID;
-              }
-              return session.parentID === parentId;
+        // Like opencode 2.1, the cursor carries the filters, and the last non-empty page still has a `next`.
+        const cursor = url.searchParams.get("cursor");
+        const from = cursor
+          ? (JSON.parse(Buffer.from(cursor, "base64url").toString()) as {
+              offset: number;
+              parentID: string | null;
             })
-            .slice(0, state.listLimit),
-          cursor: {},
+          : { offset: 0, parentID: url.searchParams.get("parentID") };
+        const limit = Number(
+          url.searchParams.get("limit") ?? state.listLimit ?? Infinity
+        );
+        const page = state.sessions
+          .filter((session) => {
+            if (from.parentID === null) {
+              return true;
+            }
+            if (from.parentID === "null") {
+              return !session.parentID;
+            }
+            return session.parentID === from.parentID;
+          })
+          .slice(from.offset, from.offset + limit);
+        const next = Buffer.from(
+          JSON.stringify({
+            offset: from.offset + page.length,
+            parentID: from.parentID,
+          })
+        ).toString("base64url");
+        return json({
+          data: page,
+          cursor: { next: page.length > 0 ? next : null },
+        });
+      }
+      case "/api/project": {
+        return json((state.projects ?? []).map((id) => ({ id })));
+      }
+      case "/api/permission/saved": {
+        const projectId = url.searchParams.get("projectID");
+        return json({
+          data: (state.saved ?? []).filter(
+            (r) => !projectId || r.projectID === projectId
+          ),
         });
       }
       case "/api/session/active": {
@@ -348,6 +381,7 @@ export async function startFakeOpencode(
             const body = JSON.parse(raw) as {
               title?: string;
               metadata?: Record<string, unknown>;
+              archived?: boolean;
             };
             const session = state.sessions.find((s) => s.id === sessionId);
             if (!session) {
@@ -360,6 +394,10 @@ export async function startFakeOpencode(
             // opencode 2.0.22 replaces metadata as a whole; it does not merge.
             if (body.metadata !== undefined) {
               session.metadata = body.metadata;
+            }
+            if (body.archived !== undefined) {
+              const { archived: _was, ...time } = session.time;
+              session.time = body.archived ? { ...time, archived: 3 } : time;
             }
             res.writeHead(204);
             res.end();
@@ -386,6 +424,39 @@ export async function startFakeOpencode(
           state.sessions = state.sessions.filter((s) => !gone.has(s.id));
           res.writeHead(204);
           res.end();
+          return;
+        }
+        const savedRule = url.pathname.match(
+          /^\/api\/permission\/saved\/([^/]+)$/u
+        );
+        if (savedRule && req.method === "DELETE") {
+          const ruleId = decodeURIComponent(savedRule[1]);
+          state.saved = (state.saved ?? []).filter((r) => r.id !== ruleId);
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+        if (savedRule && req.method === "PATCH") {
+          // opencode 2.0.x has no such route.
+          if (!/^2\.(?:[1-9]|\d{2,})\./u.test(state.version)) {
+            res.writeHead(404);
+            res.end();
+            return;
+          }
+          let raw = "";
+          req.on("data", (c: Buffer) => (raw += c.toString("utf-8")));
+          req.on("end", () => {
+            const rule = state.saved?.find(
+              (r) => r.id === decodeURIComponent(savedRule[1])
+            );
+            if (!rule) {
+              return fail(404, "PermissionSavedNotFoundError");
+            }
+            Object.assign(rule, JSON.parse(raw), {
+              time: { ...rule.time, updated: rule.time.updated + 1 },
+            });
+            json({ data: rule });
+          });
           return;
         }
         const shell = url.pathname.match(/^\/api\/shell\/([^/]+)$/u);

@@ -126,10 +126,18 @@ export class Chat {
     return { chat: listed ?? view };
   }
 
-  /** Hides a chat from every list; its session keeps running. */
+  /** Hides a chat from every list, and archives its session in opencode too; the session keeps running. */
   archive(id: ProjectId, chatId: string): void {
-    this.require(id, chatId);
+    const chat = this.require(id, chatId);
     this.deps.chats.archive(chatId, USER);
+    if (chat.sessionId && !chat.sessionRemoved) {
+      void this.envs.archiveSync.archive(chat.envId ?? id, [
+        {
+          sessionId: chat.sessionId,
+          ...(chat.directory ? { directory: chat.directory } : {}),
+        },
+      ]);
+    }
   }
 
   /** A brief for Make task, drafted by the chat's own session from its context; its transcript gains nothing. */

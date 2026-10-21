@@ -25,6 +25,8 @@ export interface RawSession {
   id: string;
   title?: string;
   parentID?: string;
+  /** opencode's project: one per repository, shared by its worktrees. */
+  projectID?: string;
   time: { created: number; updated: number; archived?: number };
   location: { directory: string };
   metadata?: Record<string, unknown>;
@@ -161,6 +163,15 @@ export interface RawPermissionRequest {
   metadata?: Record<string, unknown>;
 }
 
+/** opencode's PermissionSaved.Info: an allow rule saved from an "always" answer. */
+export interface RawSavedPermission {
+  id: string;
+  projectID: string;
+  action: string;
+  resource: string;
+  time: { created: number; updated: number };
+}
+
 export interface RawForm {
   id: string;
   sessionID: string;
@@ -220,9 +231,11 @@ export class OpencodeHttpError extends Error {
   }
 }
 
-// opencode 2.0.22 answers 404 PermissionNotFoundError/FormNotFoundError and 409 FormAlreadySettledError.
+// opencode 2.0.22 answers 404 PermissionNotFoundError/FormNotFoundError and 409 FormAlreadySettledError; 2.1.0
+// answers 404 PermissionSavedNotFoundError for a saved rule.
 const GONE_TAGS = new Set([
   "PermissionNotFoundError",
+  "PermissionSavedNotFoundError",
   "FormNotFoundError",
   "FormAlreadySettledError",
 ]);
@@ -306,6 +319,9 @@ const REQUEST_TIMEOUT_MS = 5000;
 const UPLOAD_TIMEOUT_MS = 60_000;
 const DIFF_TIMEOUT_MS = 30_000;
 const GENERATE_TIMEOUT_MS = 60_000;
+/** `allSessions` reads this many per request and stops after `ALL_SESSIONS_CAP`. */
+const SESSION_PAGE_SIZE = 200;
+export const ALL_SESSIONS_CAP = 2000;
 
 const timeoutOf = (attachments: PromptAttachments): number =>
   attachments.files?.some((f) => f.uri.startsWith("data:"))
@@ -751,6 +767,23 @@ export class OpencodeClient {
     );
   }
 
+  /**
+   * Archives or unarchives a session (opencode 2.1+: stamps or clears `time.archived`). 2.0.x answers 204 too but
+   * ignores it, so callers check the version first.
+   */
+  setArchived(
+    id: string,
+    archived: boolean,
+    directory?: string
+  ): Promise<void> {
+    return this.send(
+      "PATCH",
+      `/api/session/${encodeURIComponent(id)}`,
+      { archived },
+      directory
+    );
+  }
+
   /** Deletes a session; opencode deletes its child (subagent) sessions with it. */
   deleteSession(id: string, directory?: string): Promise<void> {
     return this.send(
@@ -765,9 +798,37 @@ export class OpencodeClient {
     return this.get("/api/info");
   }
 
+  /** The newest page of sessions only (opencode's default is 50); see `allSessions` for every one. */
   async sessions(): Promise<RawSession[]> {
     const result8 = await this.get<{ data: RawSession[] }>("/api/session");
     return result8.data;
+  }
+
+  /**
+   * Every session, newest first, following the list cursor up to `cap`; `onCapped` runs when it stops there. The
+   * cursor carries the list's filters, so later pages pass only it. opencode 2.1 still gives a `next` on the last
+   * page, and the page after it is empty.
+   */
+  async allSessions(
+    opts: { cap?: number; onCapped?: (cap: number) => void } = {}
+  ): Promise<RawSession[]> {
+    const cap = opts.cap ?? ALL_SESSIONS_CAP;
+    const all: RawSession[] = [];
+    let path = `/api/session?limit=${SESSION_PAGE_SIZE}`;
+    while (all.length < cap) {
+      const page = await this.get<{
+        data: RawSession[];
+        cursor?: { next?: string | null };
+      }>(path);
+      all.push(...page.data);
+      const next = page.cursor?.next;
+      if (page.data.length === 0 || !next) {
+        return all.slice(0, cap);
+      }
+      path = `/api/session?cursor=${encodeURIComponent(next)}`;
+    }
+    opts.onCapped?.(cap);
+    return all.slice(0, cap);
   }
 
   /** Direct child sessions, filtered before opencode applies the session page limit. */
@@ -817,6 +878,41 @@ export class OpencodeClient {
       directory
     );
     return result10.data;
+  }
+
+  /** opencode's projects; a bare array, not the `{ data }` envelope. */
+  projects(): Promise<{ id: string }[]> {
+    return this.get("/api/project");
+  }
+
+  /** The rules saved from "always" answers, of one opencode project or of all of them. */
+  async savedPermissions(projectID?: string): Promise<RawSavedPermission[]> {
+    const query = projectID ? `?${new URLSearchParams({ projectID })}` : "";
+    const result = await this.get<{ data: RawSavedPermission[] }>(
+      `/api/permission/saved${query}`
+    );
+    return result.data;
+  }
+
+  /** Changes a saved rule (opencode 2.1+; 2.0.x has no such route and answers a bare 404). */
+  async updateSavedPermission(
+    id: string,
+    patch: { action?: string; resource?: string }
+  ): Promise<RawSavedPermission> {
+    const res = await this.request(
+      "PATCH",
+      `/api/permission/saved/${encodeURIComponent(id)}`,
+      patch
+    );
+    return ((await res.json()) as { data: RawSavedPermission }).data;
+  }
+
+  /** Removes a saved rule, so opencode asks again; a missing one answers 204 too. */
+  deleteSavedPermission(id: string): Promise<void> {
+    return this.send(
+      "DELETE",
+      `/api/permission/saved/${encodeURIComponent(id)}`
+    );
   }
 
   async forms(directory: string): Promise<RawForm[]> {

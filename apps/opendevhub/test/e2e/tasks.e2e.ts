@@ -200,18 +200,20 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           [undefined, true],
         ]);
 
-        // A session made in opencode directly becomes a manual task on the next reconcile.
+        // A session made in opencode directly becomes a chat on the next reconcile, not a task.
         const stray = await hub.environments
           .opencodeClient(project.id)
           .createSession(v.directory!, { title: "made in opencode" });
         hub.environments.reconcile(project.id);
         await vi.waitFor(
           () =>
-            expect(dbs.tasks.bySession(stray.id)?.task).toMatchObject({
-              kind: "manual",
+            expect(dbs.chats.bySession(stray.id)).toMatchObject({
+              origin: "opencode",
+              title: "made in opencode",
             }),
           { timeout: 20_000, interval: 500 }
         );
+        expect(dbs.tasks.bySession(stray.id)).toBeUndefined();
       } finally {
         await hub.environments.stop(project.id).catch(() => undefined);
         await hub.environments.shutdown();

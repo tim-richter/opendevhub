@@ -63,6 +63,7 @@ import {
   VOLUME_LABEL,
 } from "../opencode/runtime";
 import type { EnvRecord } from "../projects/state";
+import { ArchiveSync } from "../sessions/archive-sync";
 import { reconcileSessions } from "../sessions/reconcile";
 import type { Presence } from "../sessions/reconcile";
 import { ApprovalRequiredError, NotApprovedError } from "./approvals";
@@ -200,8 +201,18 @@ export class Environments {
   >();
   private readonly unwatchListeners = new Set<(id: EnvId) => void>();
   private readonly deps: HubDeps;
+  /** Mirrors opendevhub's archived conversations into each environment's opencode. */
+  readonly archiveSync: ArchiveSync;
   constructor(deps: HubDeps) {
     this.deps = deps;
+    this.archiveSync = new ArchiveSync({
+      chats: deps.chats,
+      clientOf: (envId) => this.opencodeClient(envId),
+      log: (envId, line) =>
+        this.log(this.envOf(envId)?.project.id ?? envId, line, envId),
+      store: deps.store,
+      tasks: deps.tasks,
+    });
     const { approvals } = deps;
     if (approvals) {
       // A pick, a dismissal or a removed chat ends a checkout's wait for approval at once.
@@ -2278,8 +2289,10 @@ export class Environments {
         ]);
       },
       onRawSessions: (sessions) => {
+        void this.archiveSync.catchUp(env.id, sessions);
         // Before usage, which attributes spend to the tasks that own sessions.
         void reconcileSessions(this.deps, {
+          keptArchived: (id) => this.archiveSync.expectsArchived(id),
           rowsOf: (directory) => {
             const row = this.deps.checkouts
               .worktreesOf(env.project.id)
@@ -2308,7 +2321,10 @@ export class Environments {
           lookup: (id) =>
             client.session(id).then(
               (s): Presence =>
-                s.time.archived === undefined ? "alive" : "gone",
+                s.time.archived === undefined ||
+                this.archiveSync.expectsArchived(s.id)
+                  ? "alive"
+                  : "gone",
               (error: unknown): Presence => (isGone(error) ? "gone" : "unknown")
             ),
           projectId: env.project.id,

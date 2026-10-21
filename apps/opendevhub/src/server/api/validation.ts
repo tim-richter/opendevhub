@@ -279,6 +279,14 @@ export const bodies = {
   }),
   todo: z.object({ text: todoText }),
   todoUpdate: z.object({ text: todoText.optional(), done: flag }),
+  savedPermission: z
+    .object({
+      action: z.string().trim().min(1).max(200).optional(),
+      resource: z.string().trim().min(1).max(2000).optional(),
+    })
+    .refine((b) => b.action !== undefined || b.resource !== undefined, {
+      message: "give an action or a resource",
+    }),
   projectPorts: z.object({
     ports: z.array(z.number().int().min(1).max(65_535)).max(100),
     scope,

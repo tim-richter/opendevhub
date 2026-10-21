@@ -214,7 +214,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)("e2e: cleanup", () => {
             store.runtime(project.id).password!
           )
         );
-      const orphaned = await hub.sessions.startSession(
+      const { sessionId: orphaned } = await hub.sessions.startSession(
         project.id,
         wip.path,
         "wip notes"

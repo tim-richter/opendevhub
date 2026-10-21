@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import { expect, userEvent, within } from "storybook/test";
 
 import preview from "../../../../.storybook/preview";
 import { App } from "../../app";
@@ -73,7 +74,7 @@ export const RuntimeOwnContainer = meta.story({
   parameters: { route: "/p/acme-web/w/dark-mode/runtime" },
 });
 
-/** A stopped container: Start instead of Stop, and opencode's log says why it can't be read. */
+/** A stopped container: Start instead of Stop, opencode's log says why it can't be read, and Saved permissions asks to start it. */
 export const RuntimeStopped = meta.story({
   beforeEach: mockApi(
     {},
@@ -90,6 +91,45 @@ export const RuntimeStopped = meta.story({
     )
   ),
   parameters: { route: "/p/legacy-cms/main/runtime" },
+});
+
+/** Saved permissions with none saved yet. */
+export const SavedPermissionsEmpty = meta.story({
+  beforeEach: mockApi({ savedPermissions: { canEdit: true, rules: [] } }),
+  parameters: { route: "/p/acme-web/main/runtime" },
+});
+
+/** Editing a saved rule inline: a pattern that allows everything asks first. */
+export const SavedPermissionsEdit = meta.story({
+  parameters: { route: "/p/acme-web/main/runtime" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const [edit] = await canvas.findAllByRole("button", { name: "Edit" });
+    await userEvent.click(edit);
+    const pattern = await canvas.findByRole("textbox", { name: "Pattern" });
+    await userEvent.clear(pattern);
+    await userEvent.type(pattern, "pnpm test:unit *");
+    await expect(pattern).toHaveValue("pnpm test:unit *");
+  },
+});
+
+/** On opencode 2.0.x rules can only be removed. */
+export const SavedPermissionsOldOpencode = meta.story({
+  beforeEach: mockApi({
+    savedPermissions: {
+      canEdit: false,
+      rules: [
+        {
+          action: "bash",
+          createdAt: Date.now() - 3_600_000,
+          id: "per_old",
+          resource: "pnpm *",
+          updatedAt: Date.now() - 3_600_000,
+        },
+      ],
+    },
+  }),
+  parameters: { route: "/p/acme-web/main/runtime" },
 });
 
 /** A worktree that runs in its own container. */

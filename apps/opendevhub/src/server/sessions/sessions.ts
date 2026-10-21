@@ -695,15 +695,16 @@ export class Sessions {
         ...toModelsInfo(models, def, agents),
         ...(spec ? { spec } : {}),
       }));
+    // opencode always has its built-in agents, so none means it isn't ready yet, even when models already answer.
     const isEmpty = (v: ModelsInfo) =>
-      v.models.length === 0 && v.agents.length === 0;
+      v.models.length === 0 || v.agents.length === 0;
     const delay =
       this.deps.delay ??
       ((ms: number) =>
         new Promise<void>((resolve) => {
           setTimeout(resolve, ms);
         }));
-    // A freshly started opencode answers these routes empty at first, so an empty answer gets one retry.
+    // A freshly started opencode answers these routes empty at first (agents the longest), so an incomplete answer gets one retry and isn't cached.
     const value = fetchOnce().then(async (first) => {
       if (!isEmpty(first)) {
         return first;
@@ -963,6 +964,9 @@ export class Sessions {
         .interrupt(sessionId, session.directory);
     }
     this.deps.tasks.archiveSession(sessionId);
+    void this.envs.archiveSync.archive(found.variant.envId ?? id, [
+      { sessionId, directory: found.variant.directory },
+    ]);
   }
 
   latestSession(id: ProjectId, directory: string): SessionSummary | undefined {

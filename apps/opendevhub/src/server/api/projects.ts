@@ -351,6 +351,27 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           );
         })
     )
+    .get("/api/projects/:id/envs/:env/permissions/saved", (c) =>
+      json(c, (id) => hub.permissions.list(id, param(c, "env")))
+    )
+    .patch(
+      "/api/projects/:id/envs/:env/permissions/saved/:rule",
+      validateJson(bodies.savedPermission),
+      (c) =>
+        json(c, (id) =>
+          hub.permissions.update(
+            id,
+            param(c, "env"),
+            param(c, "rule"),
+            c.req.valid("json")
+          )
+        )
+    )
+    .delete("/api/projects/:id/envs/:env/permissions/saved/:rule", (c) =>
+      ok(c, (id) =>
+        hub.permissions.remove(id, param(c, "env"), param(c, "rule"))
+      )
+    )
     .post("/api/projects/:id/envs/:env/remove", (c) =>
       ok(c, (id) => hub.environments.removeEnv(id, c.req.param("env") ?? ""))
     )

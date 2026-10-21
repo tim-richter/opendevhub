@@ -711,6 +711,15 @@ describe("tasks", () => {
     expect(delay).toHaveBeenCalledWith(1500);
   });
 
+  it("retries when models answer but agents are still empty, as opencode does on its first call", async () => {
+    const { hub, client, delay } = await started();
+    client.agents.mockResolvedValueOnce([]);
+    const info = await hub.sessions.models(project.id);
+    expect(info.agents).toStrictEqual([{ id: "build", name: "Build" }]);
+    expect(client.agents).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledWith(1500);
+  });
+
   it("never caches a list that is still empty after the retry", async () => {
     const { hub, client } = await started();
     client.models.mockResolvedValue([]);
@@ -1436,6 +1445,75 @@ describe("starting tasks in the background", () => {
     expect(() =>
       s.hub.tasks.archiveTask(project.id, "tsk_01JA0000000000000000000009")
     ).toThrow(NotFoundError);
+  });
+
+  it("archives every conversation of the task in opencode 2.1, and restores only the open ones of kept variants", async () => {
+    const s = await started();
+    s.store.updateRuntime(project.id, { opencodeVersion: "2.1.0" });
+    const task = "tsk_01JA0000000000000000000042";
+    s.tasks.createTask({
+      createdAt: 1,
+      id: task,
+      projectId: project.id,
+      prompt: "Fix",
+      title: "Fix",
+      variants: [{}, {}],
+    });
+    const attach = (n: number, sessionId: string) =>
+      s.tasks.attachSession(
+        task,
+        n,
+        { directory: "/workspaces/demo", envId: project.id, sessionId },
+        SYSTEM
+      );
+    attach(1, "ses_closed");
+    attach(1, "ses_open");
+    attach(2, "ses_discarded");
+    s.tasks.archiveSession("ses_closed");
+    s.tasks.pick(task, 1);
+    const sent = () =>
+      s.client.setArchived.mock.calls
+        .map(([id, archived]) => `${archived ? "archive" : "unarchive"} ${id}`)
+        .toSorted();
+    s.hub.tasks.archiveTask(project.id, task);
+    await vi.waitFor(() =>
+      expect(sent()).toStrictEqual([
+        "archive ses_closed",
+        "archive ses_discarded",
+        "archive ses_open",
+      ])
+    );
+    s.client.setArchived.mockClear();
+    s.hub.tasks.restoreTask(project.id, task);
+    await vi.waitFor(() =>
+      expect(sent()).toStrictEqual(["unarchive ses_open"])
+    );
+  });
+
+  it("archives a chat's session in opencode 2.1, and sends nothing on 2.0.x", async () => {
+    const s = await started();
+    const chat = (sessionId: string) =>
+      s.chats.insert({
+        createdAt: 1,
+        directory: "/workspaces/demo",
+        envId: project.id,
+        origin: "hub",
+        projectId: project.id,
+        sessionId,
+        step: "session",
+        title: sessionId,
+      }).id;
+    s.hub.chat.archive(project.id, chat("ses_old"));
+    s.store.updateRuntime(project.id, { opencodeVersion: "2.1.0" });
+    s.hub.chat.archive(project.id, chat("ses_new_chat"));
+    await vi.waitFor(() =>
+      expect(s.client.setArchived).toHaveBeenCalledWith(
+        "ses_new_chat",
+        true,
+        "/workspaces/demo"
+      )
+    );
+    expect(s.client.setArchived).toHaveBeenCalledOnce();
   });
 
   it("restores and deletes only archived tasks in their own project", async () => {

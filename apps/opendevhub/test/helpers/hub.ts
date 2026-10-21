@@ -685,6 +685,11 @@ export function setup(
       async (_sid: string, _agent: string, _dir?: string) => {}
     ),
     sessions: vi.fn(async (): Promise<RawSession[]> => []),
+    /** Defaults to whatever `sessions` answers, so a test sets up one list for both. */
+    allSessions: vi.fn(
+      async (_opts?: { cap?: number; onCapped?: (cap: number) => void }) =>
+        client.sessions()
+    ),
     childSessions: vi.fn(
       async (_parentId: string): Promise<RawSession[]> => []
     ),
@@ -693,6 +698,9 @@ export function setup(
     ),
     active: vi.fn(async () => new Set<string>()),
     deleteSession: vi.fn(async (_id: string, _dir?: string) => {}),
+    setArchived: vi.fn(
+      async (_id: string, _archived: boolean, _dir?: string) => {}
+    ),
     killShell: vi.fn(async (_id: string, _dir?: string) => {}),
   };
   const publisher = {

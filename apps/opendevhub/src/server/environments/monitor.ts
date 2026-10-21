@@ -29,7 +29,8 @@ export interface MonitorOptions {
 
 const RELEVANT_EVENT = /^(?<g1>session|permission|form|shell)\./u;
 const FAILURES_BEFORE_UNHEALTHY = 3;
-const MAX_SESSION_LOOKUPS = 20;
+/** Single session lookups one poll (or one cleanup check) may make. */
+export const MAX_SESSION_LOOKUPS = 20;
 const MAX_DIRECTORIES = 16;
 const MAX_CONTEXT_LOOKUPS = 20;
 /** The newest assistant message with usage is nearly always among a session's last few (a streaming one has none yet). */

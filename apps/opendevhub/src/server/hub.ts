@@ -4,6 +4,7 @@ import { Checkouts } from "./git/checkouts";
 import { CleanupTargets } from "./git/cleanup-targets";
 import { ReviewActions } from "./git/review-actions";
 import { Chat } from "./sessions/chat";
+import { SavedPermissions } from "./sessions/saved-permissions";
 import { Sessions } from "./sessions/sessions";
 import { CheckoutSetup } from "./tasks/checkout-setup";
 import { Tasks } from "./tasks/tasks";
@@ -17,6 +18,7 @@ export interface Hub {
   checkouts: Checkouts;
   reviews: ReviewActions;
   cleanupTargets: CleanupTargets;
+  permissions: SavedPermissions;
 }
 
 export const createHub = (deps: HubDeps): Hub => {
@@ -31,6 +33,7 @@ export const createHub = (deps: HubDeps): Hub => {
     checkouts,
     cleanupTargets,
     environments,
+    permissions: new SavedPermissions(deps, environments),
     reviews: new ReviewActions(deps, environments, sessions, checkouts),
     sessions,
     tasks,

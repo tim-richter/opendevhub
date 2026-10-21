@@ -44,6 +44,7 @@ import type {
   DashboardSnapshot,
   EnvironmentView,
   EnvLogs,
+  SavedPermissionsView,
   ModelsInfo,
   NodeView,
   ProjectTeamView,
@@ -1772,6 +1773,37 @@ export const logLines: string[] = [
   "[ports] Forwarded 5173 -> 45173 (web)",
   "[ports] 9229: port in use",
 ];
+
+/** Rules saved from "always" answers in an environment's opencode, one of them edited since. */
+export const savedPermissions = (): SavedPermissionsView => {
+  const at = (minutesAgo: number) => Date.now() - minutesAgo * 60_000;
+  return {
+    canEdit: true,
+    rules: [
+      {
+        action: "bash",
+        createdAt: at(3 * 24 * 60),
+        id: "per_s01",
+        resource: "pnpm test *",
+        updatedAt: at(3 * 24 * 60),
+      },
+      {
+        action: "edit",
+        createdAt: at(26 * 60),
+        id: "per_s02",
+        resource: "src/**",
+        updatedAt: at(26 * 60),
+      },
+      {
+        action: "bash",
+        createdAt: at(5 * 24 * 60),
+        id: "per_s03",
+        resource: "git push *",
+        updatedAt: at(40),
+      },
+    ],
+  };
+};
 
 /** One environment's log by source, at ten-second steps from a fixed time; the container's own output is empty. */
 export const envLogs = (source: string): EnvLogs => {

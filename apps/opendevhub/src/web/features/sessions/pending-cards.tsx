@@ -25,6 +25,8 @@ import type { ReplyOutcome } from "../../api";
 import { Choice } from "../../components/choice";
 import { diffFont } from "../../components/page";
 import { sessionHref } from "../../derive";
+import { Link } from "../../routing";
+import { savedPermissionsPath } from "../checkouts/checkouts";
 import { PatchView } from "../review/lazy-patch-view";
 import { ensurePatchHeader } from "../review/review";
 import { CARD_SHORTCUTS, canTakeFocus, cardKeyCounts } from "./card-keys";
@@ -180,6 +182,7 @@ export const PendingStack = (props: {
           key={current.item.id}
           projectId={view.project.id}
           sessionTitle={session.title}
+          savedHref={savedPermissionsPath(view, session.directory)}
           permission={current.item}
           takeFocus={takeFocus}
           onDone={done}
@@ -201,6 +204,8 @@ export const PendingStack = (props: {
 const PermissionCard = (props: {
   projectId: string;
   sessionTitle: string;
+  /** Where the environment's saved permissions are managed. */
+  savedHref?: string;
   permission: PendingPermission;
   takeFocus: () => boolean;
   onDone: () => void;
@@ -328,6 +333,21 @@ const PermissionCard = (props: {
           >
             Reject… <ShortcutKeys id="cardReject" />
           </Button>
+          <p className="text-muted-foreground w-full text-xs">
+            &ldquo;Always allow&rdquo; saves a rule you can review or remove
+            later in{" "}
+            {props.savedHref ? (
+              <Link
+                to={props.savedHref}
+                className="underline underline-offset-2"
+              >
+                Saved permissions
+              </Link>
+            ) : (
+              "the container's Saved permissions"
+            )}
+            .
+          </p>
         </div>
       )}
       {error && (

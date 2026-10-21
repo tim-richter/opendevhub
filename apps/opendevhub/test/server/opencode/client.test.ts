@@ -56,6 +56,30 @@ describe(OpencodeClient, () => {
     ).toStrictEqual(["ses_agent"]);
   });
 
+  it("follows the list cursor for every session, up to the cap", async () => {
+    fake.state.sessions = Array.from({ length: 450 }, (_, i) =>
+      rawSession(`ses_${i}`)
+    );
+    fake.state.listLimit = 50;
+    expect(await client.sessions()).toHaveLength(50);
+    const all = await client.allSessions();
+    expect(all.map((s) => s.id)).toStrictEqual(
+      fake.state.sessions.map((s) => s.id)
+    );
+    const lists = fake.requests.filter((r) =>
+      r.startsWith("GET /api/session?")
+    );
+    expect(lists[0]).toBe("GET /api/session?limit=200");
+    expect(
+      lists.slice(1).every((r) => /^GET \/api\/session\?cursor=/u.test(r))
+    ).toBe(true);
+    const capped: number[] = [];
+    expect(
+      await client.allSessions({ cap: 300, onCapped: (n) => capped.push(n) })
+    ).toHaveLength(300);
+    expect(capped).toStrictEqual([300]);
+  });
+
   it("lists a directory's running shells and kills one there", async () => {
     fake.state.shells = {
       "/w/other": [

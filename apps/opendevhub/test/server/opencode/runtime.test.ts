@@ -20,6 +20,7 @@ import { OpencodeClient } from "../../../src/server/opencode/client";
 import {
   LINK_STATE,
   OpencodeRuntime,
+  atLeast,
   parseBinaryPath,
   parseOpencodeVersion,
 } from "../../../src/server/opencode/runtime";
@@ -83,6 +84,22 @@ describe(parseOpencodeVersion, () => {
     ["garbage", undefined],
   ])("%s -> %s", (input, expected) =>
     expect(parseOpencodeVersion(input)).toBe(expected)
+  );
+});
+
+describe(atLeast, () => {
+  it.each([
+    ["2.1.0", true],
+    ["2.1.2", true],
+    ["2.10.0", true],
+    ["3.0.0", true],
+    ["2.0.32", false],
+    ["1.18.35", false],
+    ["opencode v2.1.0", true],
+    [undefined, false],
+    ["", false],
+  ])("%s >= 2.1.0 is %s", (version, expected) =>
+    expect(atLeast(version, "2.1.0")).toBe(expected)
   );
 });
 

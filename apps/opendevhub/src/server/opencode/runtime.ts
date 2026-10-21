@@ -99,6 +99,23 @@ export const parseBinaryPath = (output: string): string | undefined =>
 export const parseOpencodeVersion = (output: string): string | undefined =>
   output.match(/(?<g1>\d+)\.(?<g2>\d+)\.(?<g3>\d+)/u)?.[0];
 
+/** Whether `version` (as `parseOpencodeVersion` reads it) is `min` or later; false when it can't be read. */
+export const atLeast = (version: string | undefined, min: string): boolean => {
+  const have = version ? parseOpencodeVersion(version) : undefined;
+  const want = parseOpencodeVersion(min);
+  if (!(have && want)) {
+    return false;
+  }
+  const a = have.split(".").map(Number);
+  const b = want.split(".").map(Number);
+  for (const [i, n] of a.entries()) {
+    if (n !== b[i]) {
+      return n > b[i];
+    }
+  }
+  return true;
+};
+
 const shellQuote = (value: string): string =>
   `'${value.replaceAll("'", `'\\''`)}'`;
 

@@ -43,6 +43,7 @@ import type { OcrSettingsStore } from "./ocr/settings";
 import type { OnboardingPort } from "./projects/onboarding";
 import type { StateStore } from "./projects/state";
 import type { Chat } from "./sessions/chat";
+import type { SavedPermissions } from "./sessions/saved-permissions";
 import type { Sessions } from "./sessions/sessions";
 import type { UsageStore } from "./sessions/usage";
 import type { Specs } from "./specs/specs";
@@ -129,6 +130,7 @@ export interface DashboardHub {
     | "editDraft"
     | "startDraft"
   >;
+  permissions: Pick<SavedPermissions, "list" | "update" | "remove">;
 }
 
 export type PushPort = Pick<

@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SYSTEM } from "../../../src/server/db/events";
 import type { TaskStore } from "../../../src/server/db/tasks";
 import { BusyError } from "../../../src/server/errors";
-import { rawSession } from "../../helpers/fake-opencode";
+import {
+  OpencodeClient,
+  OpencodeHttpError,
+} from "../../../src/server/opencode/client";
+import { rawSession, startFakeOpencode } from "../../helpers/fake-opencode";
+import type { FakeOpencode } from "../../helpers/fake-opencode";
 import { project, running, feat, setup, withEnv } from "../../helpers/hub";
 import { worktreeRow } from "../../helpers/stores";
 
@@ -331,15 +336,18 @@ describe("cleanup", () => {
 
   it("deletes an archived record's conversation, and counts one already gone as removed", async () => {
     const { hub, client } = await running();
-    client.sessions.mockResolvedValue([discarded("ses_a")]);
     await expect(
       hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
     ).resolves.toStrictEqual({ outcome: "removed" });
+    expect(client.session).toHaveBeenCalledWith("ses_a");
+    expect(client.sessions).not.toHaveBeenCalled();
     expect(client.deleteSession).toHaveBeenCalledWith(
       "ses_a",
       "/workspaces/demo"
     );
-    client.sessions.mockResolvedValue([]);
+    client.session.mockRejectedValue(
+      new OpencodeHttpError(404, "/api/session/ses_a", "SessionNotFoundError")
+    );
     await expect(
       hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
     ).resolves.toStrictEqual({ outcome: "removed" });
@@ -351,10 +359,17 @@ describe("cleanup", () => {
 
   it("keeps a conversation that is still running, or in a stopped container", async () => {
     const { hub, client, store } = await running();
-    client.sessions.mockResolvedValue([
+    const known = [
       discarded("ses_a"),
       rawSession("ses_child", { parentID: "ses_a" }),
-    ]);
+    ];
+    client.session.mockImplementation(async (sid: string) => {
+      const found = known.find((s) => s.id === sid);
+      if (!found) {
+        throw new OpencodeHttpError(404, `/api/session/${sid}`);
+      }
+      return found;
+    });
     client.active.mockResolvedValue(new Set(["ses_child"]));
     await expect(
       hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_a")
@@ -386,5 +401,106 @@ describe("cleanup", () => {
     await vi.waitFor(() => expect(git.fetchPrune).toHaveBeenCalled());
     release();
     await first;
+  });
+});
+
+describe("cleanup against an opencode with more sessions than one page", () => {
+  let fake: FakeOpencode | undefined;
+  afterEach(async () => {
+    await fake?.close();
+    fake = undefined;
+  });
+
+  /** A running project whose opencode lists 120 sessions, 50 per page by default, `ses_0` newest. */
+  async function crowded() {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    fake = await startFakeOpencode("pw", {
+      listLimit: 50,
+      sessions: Array.from({ length: 120 }, (_, i) =>
+        rawSession(`ses_${i}`, {
+          time: { created: 1, updated: Date.now() - i * 60_000 },
+        })
+      ),
+    });
+    const real = new OpencodeClient({ baseUrl: fake.baseUrl, password: "pw" });
+    s.clientFor.mockImplementation(() => real);
+    return { ...s, fake };
+  }
+
+  it("deletes an old conversation found by id, rather than reporting it removed", async () => {
+    const { hub, fake: oc } = await crowded();
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_100")
+    ).resolves.toStrictEqual({ outcome: "removed" });
+    expect(oc.state.deleted).toStrictEqual(["ses_100"]);
+  });
+
+  it("reports a conversation opencode answers 404 for as removed, without deleting", async () => {
+    const { hub, fake: oc } = await crowded();
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_none")
+    ).resolves.toStrictEqual({ outcome: "removed" });
+    expect(oc.state.deleted).toStrictEqual([]);
+  });
+
+  it("skips a conversation whose lookup fails, with the error", async () => {
+    const { hub, client, clientFor } = await crowded();
+    clientFor.mockImplementation(() => client as never);
+    client.session.mockRejectedValue(
+      new Error(
+        "opencode did not respond to GET /api/session/ses_100 within 5 s"
+      )
+    );
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_100")
+    ).resolves.toStrictEqual({
+      message:
+        "could not check its conversation: opencode did not respond to GET /api/session/ses_100 within 5 s",
+      outcome: "skipped",
+    });
+    expect(client.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("skips an old conversation whose subagent is running", async () => {
+    const { hub, fake: oc } = await crowded();
+    oc.state.sessions.unshift(rawSession("ses_agent", { parentID: "ses_100" }));
+    oc.state.active = ["ses_agent"];
+    await expect(
+      hub.cleanupTargets.cleanupConversation(project.id, undefined, "ses_100")
+    ).resolves.toStrictEqual({
+      message: "its conversation is still running",
+      outcome: "skipped",
+    });
+    expect(oc.state.deleted).toStrictEqual([]);
+  });
+
+  it("scans every page for stale sessions", async () => {
+    const { hub, fake: oc, tasks } = await crowded();
+    tasks.createTask({
+      createdAt: 1,
+      id: "tsk_1",
+      projectId: project.id,
+      prompt: "Fix",
+      title: "Fix",
+      variants: [{}],
+    });
+    tasks.attachSession(
+      "tsk_1",
+      1,
+      {
+        directory: "/workspaces/demo",
+        envId: project.id,
+        sessionId: "ses_110",
+      },
+      SYSTEM
+    );
+    tasks.pick("tsk_1", 0);
+    const { items } = await hub.cleanupTargets.cleanupSessionScan(project.id);
+    expect(items.map((i) => i.sessionId)).toContain("ses_110");
+    expect(
+      oc.requests.filter((r) => r.startsWith("GET /api/session?")).length
+    ).toBeGreaterThan(1);
   });
 });
