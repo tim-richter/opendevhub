@@ -351,7 +351,7 @@ const TicketList = (props: {
           title={props.title}
           hint={`${startAt + 1}–${startAt + data.tickets.length} of ${data.total} tickets`}
         >
-          <div className="text-muted-foreground bg-muted/30 hidden grid-cols-[minmax(0,1fr)_9rem_9rem_6.5rem] gap-4 border-b px-5 py-2 text-[11px] font-semibold tracking-wider uppercase lg:grid">
+          <div className="text-muted-foreground bg-muted/30 hidden grid-cols-[minmax(0,1fr)_9rem_9rem_6.5rem] gap-4 border-b px-5 py-2 text-[0.6875rem] font-semibold tracking-wider uppercase lg:grid">
             <span>Issue</span>
             <span>Status</span>
             <span>Assignee</span>

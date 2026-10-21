@@ -17,7 +17,7 @@ const StepLabel = ({ step, n }: { step: TaskStep; n: number }) => (
   <>
     <span
       className={cn(
-        "grid size-5 shrink-0 place-items-center rounded-full border text-[11px] font-semibold tabular-nums",
+        "grid size-5 shrink-0 place-items-center rounded-full border text-[0.6875rem] font-semibold tabular-nums",
         step.state === "done" && "border-ok bg-ok/15 text-ok",
         step.state === "current" &&
           "border-foreground bg-foreground text-background",

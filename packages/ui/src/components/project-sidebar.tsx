@@ -228,7 +228,7 @@ const SidebarEntries = ({
                     }
                     aria-current={entry.active ? "page" : undefined}
                     className={cn(
-                      "text-sidebar-foreground hover:bg-sidebar-accent focus-visible:ring-sidebar-ring flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-[13px] outline-none focus-visible:ring-2",
+                      "text-sidebar-foreground hover:bg-sidebar-accent focus-visible:ring-sidebar-ring flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none focus-visible:ring-2",
                       entry.active && "bg-sidebar-accent"
                     )}
                   >
@@ -319,7 +319,7 @@ const ProjectSidebar = ({
                     >
                       <Icon aria-hidden="true" className="size-4" />
                       {Boolean(link.count) && (
-                        <span className="bg-attention text-attention-foreground absolute -top-1 -right-1 flex min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-semibold">
+                        <span className="bg-attention text-attention-foreground absolute -top-1 -right-1 flex min-w-5 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold">
                           {link.count}
                         </span>
                       )}
@@ -350,7 +350,7 @@ const ProjectSidebar = ({
                       aria-expanded={isActive && Boolean(projectDetails)}
                       onClick={() => onSelectProject(project.id)}
                       className={cn(
-                        "bg-sidebar-accent text-sidebar-accent-foreground focus-visible:ring-sidebar-ring relative flex size-10 items-center justify-center rounded-lg text-[13px] font-semibold outline-none focus-visible:ring-2",
+                        "bg-sidebar-accent text-sidebar-accent-foreground focus-visible:ring-sidebar-ring relative flex size-10 items-center justify-center rounded-lg text-xs font-semibold outline-none focus-visible:ring-2",
                         isActive &&
                           "bg-sidebar-primary text-sidebar-primary-foreground",
                         !isActive &&
@@ -366,7 +366,7 @@ const ProjectSidebar = ({
                       {hasNotifications && (
                         <span
                           aria-hidden="true"
-                          className="bg-attention text-attention-foreground absolute -top-1 -right-1 flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold"
+                          className="bg-attention text-attention-foreground absolute -top-1 -right-1 flex min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold"
                         >
                           {project.count}
                         </span>
@@ -461,7 +461,7 @@ const ProjectSidebar = ({
                           projectDetails.activePage === id ? "page" : undefined
                         }
                         className={cn(
-                          "text-sidebar-foreground hover:bg-sidebar-accent focus-visible:ring-sidebar-ring flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] outline-none focus-visible:ring-2",
+                          "text-sidebar-foreground hover:bg-sidebar-accent focus-visible:ring-sidebar-ring flex items-center gap-3 rounded-lg px-3 py-2 text-sm outline-none focus-visible:ring-2",
                           projectDetails.activePage === id &&
                             "bg-sidebar-accent font-medium"
                         )}

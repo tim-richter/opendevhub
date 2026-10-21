@@ -127,6 +127,14 @@
   }
 }
 
+/* The UI is dense, mostly text-sm and text-xs, so those two sit a step above Tailwind's defaults. */
+@theme {
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: calc(1.125 / 0.8125);
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: calc(1.375 / 0.9375);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -195,6 +203,11 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  /* An 18px root scales every rem-based size with it (text, spacing, icons, rows), so the app reads at a
+     comfortable size without browser zoom. Relative, so it still honours the browser's default font size. */
+  html {
+    font-size: 112.5%;
   }
   html,
   body,

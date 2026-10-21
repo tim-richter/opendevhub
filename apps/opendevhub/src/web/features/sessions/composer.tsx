@@ -786,7 +786,7 @@ export const Composer = (props: {
                               {s.label}
                             </span>
                             {s.note && (
-                              <span className="text-muted-foreground bg-muted rounded px-1 text-[10px] uppercase">
+                              <span className="text-muted-foreground bg-muted rounded px-1 text-[0.625rem] uppercase">
                                 {s.note}
                               </span>
                             )}
