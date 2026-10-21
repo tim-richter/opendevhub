@@ -688,6 +688,11 @@ export interface SpecChange {
 export interface SpecView {
   changes: SpecChangeSummary[];
   change?: SpecChange;
+  /**
+   * The checkout has no recorded base (the main checkout), so its new changes can't be told from the rest: none is
+   * shown until one is picked from all of them.
+   */
+  baseUnknown?: true;
   /** Why the view can't be read, e.g. a stopped container or no CLI. */
   unavailable?: string;
 }

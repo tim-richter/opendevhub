@@ -241,7 +241,10 @@ export const parseArchive = (
   };
 };
 
-/** The change a view shows: the asked one, the only new one, else the most recently modified (new ones first). */
+/**
+ * The change a view shows: the asked one, else the most recently modified new one. Without a known base no change
+ * is new, and guessing would show an unrelated one, so only the asked one shows.
+ */
 export const pickChange = (
   changes: SpecChangeSummary[],
   wanted: string | undefined,
@@ -250,7 +253,7 @@ export const pickChange = (
   if (wanted && changes.some((c) => c.name === wanted)) {
     return wanted;
   }
-  const candidates = baseKnown ? changes.filter((c) => c.isNew) : changes;
+  const candidates = baseKnown ? changes.filter((c) => c.isNew) : [];
   return candidates.toSorted((a, b) =>
     (b.lastModified ?? "").localeCompare(a.lastModified ?? "")
   )[0]?.name;
@@ -306,11 +309,19 @@ export class Specs {
     this.deps = deps;
   }
 
-  /** The sessions of spec-first variants working in `directory`. */
-  private specSessions(projectId: ProjectId, directory: string): SpecSession[] {
+  /** The sessions of spec-first variants working in `directory`, or just `sessionId` when given. */
+  private specSessions(
+    projectId: ProjectId,
+    directory: string,
+    sessionId?: string
+  ): SpecSession[] {
     return this.deps
       .sessions(projectId)
-      .filter((s) => s.directory === directory)
+      .filter(
+        (s) =>
+          s.directory === directory &&
+          (sessionId === undefined || s.id === sessionId)
+      )
       .flatMap((session) => {
         const found = this.deps.tasks.bySession(session.id);
         return found?.variant.spec &&
@@ -321,10 +332,16 @@ export class Specs {
       });
   }
 
+  /**
+   * The checkout's changes and the one shown. Given `sessionId`, only that variant's recorded change counts and only
+   * it records picks, so tasks sharing a checkout don't show each other's change. An asked `change` is recorded on
+   * the variants still proposing, so the choice sticks among several new changes.
+   */
   async view(
     projectId: ProjectId,
     directory: string,
-    change?: string
+    change?: string,
+    sessionId?: string
   ): Promise<SpecView> {
     if (change !== undefined && !CHANGE_NAME.test(change)) {
       throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
@@ -340,7 +357,7 @@ export class Specs {
     if (target.unavailable) {
       return { changes: [], unavailable: target.unavailable };
     }
-    const tasks = this.specSessions(projectId, directory);
+    const tasks = this.specSessions(projectId, directory, sessionId);
     const spec = tasks.find((t) => t.variant.spec?.change)?.variant.spec;
     const wanted = change ?? spec?.change;
     // An archived change has left `openspec list`, so the CLI can't report on it.
@@ -364,24 +381,38 @@ export class Specs {
     }
     const base = baseChanges(sections.get("base"));
     const changes = parseChangeList(listJson, base);
+    const scope = base === undefined ? { baseUnknown: true as const } : {};
     if (wanted && !changes.some((c) => c.name === wanted)) {
       const folder = await archiveFolder(host, wanted, spec?.archived);
       if (folder) {
-        return { changes, change: await archivedChange(host, wanted, folder) };
+        return {
+          changes,
+          ...scope,
+          change: await archivedChange(host, wanted, folder),
+        };
       }
     }
     const picked = pickChange(changes, wanted, base !== undefined);
     if (!picked) {
-      return { changes };
+      return { changes, ...scope };
     }
     if (picked !== wanted) {
       sections = await this.run(target, directory, { change: picked });
     }
     const fresh = changes.filter((c) => c.isNew);
-    if (fresh.length === 1 && fresh[0].name === picked) {
+    if (picked === change) {
+      this.record(
+        tasks.filter((t) => t.variant.spec?.phase === "propose"),
+        picked
+      );
+    } else if (fresh.length === 1 && fresh[0].name === picked) {
       this.record(tasks, picked);
     }
-    return { changes, change: await this.change(host, picked, sections) };
+    return {
+      changes,
+      ...scope,
+      change: await this.change(host, picked, sections),
+    };
   }
 
   /**
@@ -392,7 +423,8 @@ export class Specs {
     projectId: ProjectId,
     directory: string,
     change: string,
-    feedback: string
+    feedback: string,
+    sessionId?: string
   ): Promise<void> {
     if (!feedback.trim()) {
       throw new InvalidRequestError("the feedback is empty");
@@ -401,6 +433,7 @@ export class Specs {
       projectId,
       directory,
       change,
+      sessionId,
       {
         busy: "the agent is still busy; send the comments when its turn ends",
         command: UPDATE_COMMAND,
@@ -427,10 +460,17 @@ export class Specs {
     directory: string,
     change: string,
     force = false,
-    newConversation = true
+    newConversation = true,
+    sessionId?: string
   ): Promise<void> {
     const { session, task, variant, envId, client, target } =
-      await this.proposed(projectId, directory, change, APPROVE_REFUSALS);
+      await this.proposed(
+        projectId,
+        directory,
+        change,
+        sessionId,
+        APPROVE_REFUSALS
+      );
     await this.ready(target, directory, change, force);
 
     const write = (phase: SpecPhase) =>
@@ -465,7 +505,8 @@ export class Specs {
     directory: string,
     change: string,
     variants: unknown[],
-    force = false
+    force = false,
+    sessionId?: string
   ): Promise<{ task: string }> {
     const {
       session,
@@ -473,7 +514,13 @@ export class Specs {
       variant,
       envId,
       target,
-    } = await this.proposed(projectId, directory, change, APPROVE_REFUSALS);
+    } = await this.proposed(
+      projectId,
+      directory,
+      change,
+      sessionId,
+      APPROVE_REFUSALS
+    );
     if (target.isMain) {
       throw new InvalidRequestError(
         "the spec is in the main checkout; implement it here, or propose it in a new worktree to compare models"
@@ -559,16 +606,23 @@ export class Specs {
   async archive(
     projectId: ProjectId,
     directory: string,
-    change: string
+    change: string,
+    sessionId?: string
   ): Promise<void> {
-    const { task, variant, target } = this.task(projectId, directory, change, {
-      busy: "the agent is still busy; archive the change when its turn ends",
-      phase: (current) =>
-        current === "archived"
-          ? "the change is already archived"
-          : "approve the spec and implement it before archiving it",
-      wants: "implement",
-    });
+    const { task, variant, target } = this.task(
+      projectId,
+      directory,
+      change,
+      sessionId,
+      {
+        busy: "the agent is still busy; archive the change when its turn ends",
+        phase: (current) =>
+          current === "archived"
+            ? "the change is already archived"
+            : "approve the spec and implement it before archiving it",
+        wants: "implement",
+      }
+    );
     const summary = listedChanges(
       await this.run(target, directory, { list: true })
     ).find((c) => c.name === change);
@@ -602,9 +656,10 @@ export class Specs {
     projectId: ProjectId,
     directory: string,
     change: string,
+    sessionId: string | undefined,
     refuse: { phase: string; busy: string; command: string }
   ) {
-    const found = this.task(projectId, directory, change, {
+    const found = this.task(projectId, directory, change, sessionId, {
       busy: refuse.busy,
       phase: () => refuse.phase,
       wants: "propose",
@@ -618,11 +673,15 @@ export class Specs {
     return found;
   }
 
-  /** The checkout's spec-first task, while it's in the `wants` phase and its agent is idle. */
+  /**
+   * The checkout's spec-first task (`sessionId`'s when given, so tasks sharing a checkout act on their own), while
+   * it's in the `wants` phase and its agent is idle.
+   */
   private task(
     projectId: ProjectId,
     directory: string,
     change: string,
+    sessionId: string | undefined,
     refuse: {
       wants: SpecPhase;
       phase: (current: SpecPhase | undefined) => string;
@@ -633,7 +692,7 @@ export class Specs {
       throw new InvalidRequestError(`not an OpenSpec change name: ${change}`);
     }
     const target = this.deps.target(projectId, directory);
-    const [found] = this.specSessions(projectId, directory);
+    const [found] = this.specSessions(projectId, directory, sessionId);
     if (!found) {
       throw new InvalidRequestError(`no spec-first task works in ${directory}`);
     }

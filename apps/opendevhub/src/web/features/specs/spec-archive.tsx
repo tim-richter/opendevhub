@@ -14,6 +14,8 @@ import { specKey } from "./spec-queries";
 export const ArchiveSpec = (props: {
   projectId: string;
   directory: string;
+  /** The spec-first variant's session the action is for. */
+  sessionId?: string;
   change: string;
   busy: boolean;
 }) => {
@@ -24,6 +26,7 @@ export const ArchiveSpec = (props: {
       archiveSpec(props.projectId, {
         change: props.change,
         directory: props.directory,
+        session: props.sessionId,
       }),
     onMutate: () => setNotice(undefined),
     onSuccess: async () => {

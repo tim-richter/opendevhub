@@ -51,6 +51,8 @@ export const TaskProgress = (props: {
 export const ApproveSpec = (props: {
   projectId: string;
   directory: string;
+  /** The spec-first variant's session the action is for. */
+  sessionId?: string;
   change: SpecChange;
   busy: boolean;
   /** Files changed outside `openspec/`; undefined while the checkout's changes load. */
@@ -70,6 +72,7 @@ export const ApproveSpec = (props: {
         directory: props.directory,
         force,
         newConversation,
+        session: props.sessionId,
       }),
     onMutate: () => setNotice(undefined),
     onSuccess: async () => {
@@ -150,6 +153,7 @@ export const ApproveSpec = (props: {
         <ImplementWithModels
           projectId={props.projectId}
           directory={props.directory}
+          sessionId={props.sessionId}
           change={change}
           code={code}
           onClose={() => setComparing(false)}

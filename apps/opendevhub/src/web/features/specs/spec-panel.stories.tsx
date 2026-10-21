@@ -259,6 +259,14 @@ export const NoChangeYet = meta.story({
   beforeEach: spec({ changes: specView.changes.filter((c) => !c.isNew) }),
 });
 
+/** The main checkout has no base to tell the task's change from the others, so you pick it from all of them. */
+export const MainCheckout = meta.story({
+  beforeEach: spec({
+    baseUnknown: true,
+    changes: specView.changes.map((c) => ({ ...c, isNew: false })),
+  }),
+});
+
 /** The worktree's container is stopped. */
 export const Unavailable = meta.story({
   beforeEach: spec({

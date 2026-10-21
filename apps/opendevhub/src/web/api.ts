@@ -1147,14 +1147,18 @@ export const fetchChecks = (
 export const fetchSpec = (
   projectId: string,
   directory: string,
-  change?: string,
+  opts: { change?: string; session?: string } = {},
   signal?: AbortSignal
 ) =>
   read(
     project.spec.$get(
       {
         param: projectParam(projectId),
-        query: { directory, ...(change ? { change } : {}) },
+        query: {
+          directory,
+          ...(opts.change ? { change: opts.change } : {}),
+          ...(opts.session ? { session: opts.session } : {}),
+        },
       },
       { init: { signal } }
     ),
@@ -1164,7 +1168,12 @@ export const fetchSpec = (
 /** Sends review feedback on a change to the checkout's spec-first task, which runs `/opsx-update`. */
 export const reviseSpec = async (
   projectId: string,
-  body: { directory: string; change: string; feedback: string }
+  body: {
+    directory: string;
+    change: string;
+    feedback: string;
+    session?: string;
+  }
 ) => {
   await complete(
     project.spec.revise.$post({ param: projectParam(projectId), json: body }),
@@ -1180,6 +1189,7 @@ export const approveSpec = async (
     change: string;
     force?: boolean;
     newConversation?: boolean;
+    session?: string;
   }
 ) => {
   await complete(
@@ -1196,6 +1206,7 @@ export const implementSpec = (
     change: string;
     variants: TaskVariantSpec[];
     force?: boolean;
+    session?: string;
   }
 ) =>
   read(
@@ -1209,7 +1220,7 @@ export const implementSpec = (
 /** Archives the checkout's implemented change with `openspec archive`, updating its main specs. */
 export const archiveSpec = async (
   projectId: string,
-  body: { directory: string; change: string }
+  body: { directory: string; change: string; session?: string }
 ) => {
   await complete(
     project.spec.archive.$post({ param: projectParam(projectId), json: body }),

@@ -118,33 +118,34 @@ const make = (opts: {
       path: "/src/p",
     },
   ]);
-  for (const s of opts.sessions ?? []) {
+  for (const [i, s] of (opts.sessions ?? []).entries()) {
     if (!s.spec) {
       continue;
     }
+    const id = `tsk_${i + 1}`;
     tasks.createTask({
       createdAt: 1,
-      id: "tsk_1",
+      id,
       projectId: "p",
       prompt: "Login",
       spec: { phase: "propose" },
       title: s.title,
       variants: [{}],
     });
-    tasks.setSpec("tsk_1", 1, s.spec);
+    tasks.setSpec(id, 1, s.spec);
     if (s.envId && s.envId !== "p") {
       taskEnvironment(dbs, "p", s.envId, s.directory);
     }
     tasks.attachSession(
-      "tsk_1",
+      id,
       1,
       { directory: s.directory, envId: s.envId ?? "p", sessionId: s.id },
       SYSTEM
     );
   }
   const setSpec = vi.spyOn(tasks, "setSpec");
-  /** What the store records for the variant. */
-  const specOf = () => tasks.get("tsk_1")?.variants[0].spec;
+  /** What the store records for the variant of the task, tsk_1 unless the nth session's. */
+  const specOf = (id = "tsk_1") => tasks.get(id)?.variants[0].spec;
   const exec = vi.fn(async (_target: unknown, _argv: string[]) =>
     ok(opts.outputs.shift() ?? "")
   );
@@ -268,10 +269,11 @@ describe(pickChange, () => {
       totalTasks: 0,
     },
   ];
-  it("prefers the asked change, then the newest new one", () => {
+  it("prefers the asked change, then the newest new one, and doesn't guess without a base", () => {
     expect(pickChange(changes, "a", true)).toBe("a");
     expect(pickChange(changes, "gone", true)).toBe("b");
-    expect(pickChange(changes, undefined, false)).toBe("old");
+    expect(pickChange(changes, undefined, false)).toBeUndefined();
+    expect(pickChange(changes, "old", false)).toBe("old");
     expect(pickChange([changes[0]], undefined, true)).toBeUndefined();
   });
 });
@@ -341,18 +343,94 @@ describe(Specs, () => {
     expect(setSpec).not.toHaveBeenCalled();
   });
 
-  it("lists every change in the main checkout, showing the newest", async () => {
-    const { specs, exec } = make({
+  it("records an asked change among several new ones, so it stays shown", async () => {
+    const { specs, specOf } = make({
       outputs: [
-        section("list", list("add-login", "other")),
-        section("status", STATUS) + section("validate", VALID),
+        section("base", "") +
+          section("list", list("add-login", "add-logout")) +
+          section("status", STATUS) +
+          section("validate", VALID),
+        section("base", "") +
+          section("list", list("add-login", "add-logout")) +
+          section("status", STATUS) +
+          section("validate", VALID),
+      ],
+      sessions: [taskSession({ phase: "propose" })],
+    });
+    expect(
+      (await specs.view("p", "/workspaces/wt", "add-login", "ses_1")).change
+        ?.name
+    ).toBe("add-login");
+    expect(specOf()).toStrictEqual({ change: "add-login", phase: "propose" });
+    // Without asking, the recorded change wins over the newer add-logout.
+    expect((await specs.view("p", "/workspaces/wt")).change?.name).toBe(
+      "add-login"
+    );
+  });
+
+  it("doesn't record an asked change once the spec is approved", async () => {
+    const { specs, setSpec } = make({
+      outputs: [
+        section("base", "") +
+          section("list", list("add-login", "add-logout")) +
+          section("status", STATUS) +
+          section("validate", VALID),
+      ],
+      sessions: [taskSession({ change: "add-logout", phase: "implement" })],
+    });
+    await specs.view("p", "/workspaces/wt", "add-login", "ses_1");
+    expect(setSpec).not.toHaveBeenCalled();
+  });
+
+  it("shows each session its own change when tasks share a checkout", async () => {
+    const shared = () =>
+      section("list", list("add-login", "add-logout")) +
+      section("status", STATUS) +
+      section("validate", VALID);
+    const { specs, specOf } = make({
+      outputs: [shared(), shared()],
+      sessions: [
+        taskSession({ change: "add-login", phase: "propose" }),
+        {
+          ...taskSession({ change: "add-logout", phase: "propose" }),
+          id: "ses_2",
+        },
       ],
       target: target({ isMain: true }),
     });
-    const view = await specs.view("p", "/workspaces/wt");
+    expect(
+      (await specs.view("p", "/workspaces/wt", undefined, "ses_2")).change?.name
+    ).toBe("add-logout");
+    expect(
+      (await specs.view("p", "/workspaces/wt", undefined, "ses_1")).change?.name
+    ).toBe("add-login");
+    expect(specOf("tsk_2")?.change).toBe("add-logout");
+  });
+
+  it("lists every change in the main checkout, showing none until one is picked", async () => {
+    const { specs, exec, specOf } = make({
+      outputs: [
+        section("list", list("add-login", "other")),
+        section("list", list("add-login", "other")) +
+          section("status", STATUS) +
+          section("validate", VALID),
+      ],
+      sessions: [taskSession({ phase: "propose" })],
+      target: target({ isMain: true }),
+    });
+    const view = await specs.view("p", "/workspaces/wt", undefined, "ses_1");
     expect(view.changes.every((c) => !c.isNew)).toBe(true);
-    expect(view.change?.name).toBe("other");
+    expect(view.baseUnknown).toBe(true);
+    expect(view.change).toBeUndefined();
     expect(exec.mock.calls[0][1][6]).toBe("");
+    const picked = await specs.view(
+      "p",
+      "/workspaces/wt",
+      "add-login",
+      "ses_1"
+    );
+    expect(picked.change?.name).toBe("add-login");
+    expect(specOf()?.change).toBe("add-login");
   });
 
   it("shows no change while the task hasn't proposed one", async () => {
@@ -538,6 +616,38 @@ describe("Specs.approve", () => {
       client.command.mock.invocationCallOrder[0]
     );
     expect(reconcile).toHaveBeenCalledWith("p");
+  });
+
+  it("approves the asked session's task when tasks share a checkout", async () => {
+    const { client, specs, specOf } = make({
+      outputs: [report(READY, VALID)],
+      sessions: [
+        taskSession({ change: "add-logout", phase: "propose" }),
+        {
+          ...taskSession({ change: "add-login", phase: "propose" }),
+          id: "ses_2",
+        },
+      ],
+    });
+    await specs.approve(
+      "p",
+      "/workspaces/wt",
+      "add-login",
+      false,
+      false,
+      "ses_2"
+    );
+    expect(specOf("tsk_2")).toStrictEqual({
+      change: "add-login",
+      phase: "implement",
+    });
+    expect(specOf("tsk_1")?.phase).toBe("propose");
+    expect(client.command).toHaveBeenCalledWith(
+      "ses_2",
+      "opsx-apply",
+      "add-login",
+      "/workspaces/wt"
+    );
   });
 
   it("refuses an unfinished or unknown change, and an invalid one unless forced", async () => {

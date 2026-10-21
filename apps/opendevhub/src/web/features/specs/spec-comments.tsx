@@ -174,6 +174,8 @@ export const AnchorComments = (props: {
 export const SendComments = (props: {
   projectId: string;
   directory: string;
+  /** The spec-first variant's session the action is for. */
+  sessionId?: string;
   change: string;
   comments: SpecComments;
   /** Why sending has to wait, e.g. while the agent is working. */
@@ -188,6 +190,7 @@ export const SendComments = (props: {
         change: props.change,
         directory: props.directory,
         feedback: composeSpecFeedback(props.change, drafts),
+        session: props.sessionId,
       }),
     onMutate: () => setNotice(undefined),
     onSuccess: (_, drafts) => {

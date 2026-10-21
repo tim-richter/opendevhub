@@ -424,7 +424,9 @@ export const TaskCompare = () => {
   const specs = byDirectory(
     specDirectories,
     useQueries({
-      queries: specDirectories.map((d) => specQuery(view.project.id, d)),
+      queries: specVariants.map((s) =>
+        specQuery(view.project.id, s.directory, s.id)
+      ),
     })
   );
   const checks = byDirectory(

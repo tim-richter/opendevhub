@@ -425,15 +425,24 @@ export const bodies = {
   }),
   runChecks: directory.extend({ names: strings, approve: strings }),
   cancelCheck: directory.extend({ name: z.string().optional() }),
-  reviseSpec: directory.extend({ change: z.string(), feedback: z.string() }),
+  reviseSpec: directory.extend({
+    change: z.string(),
+    feedback: z.string(),
+    session: z.string().optional(),
+  }),
   approveSpec: directory.extend({
     newConversation: z.boolean().optional(),
     change: z.string(),
     force: z.boolean().optional(),
+    session: z.string().optional(),
   }),
-  archiveSpec: directory.extend({ change: z.string() }),
+  archiveSpec: directory.extend({
+    change: z.string(),
+    session: z.string().optional(),
+  }),
   implementSpec: directory.extend({
     change: z.string(),
+    session: z.string().optional(),
     variants,
     force: z.boolean().optional(),
   }),
@@ -501,7 +510,7 @@ export const queries = {
   }),
   forgejoImage: z.object({ side: z.enum(["old", "new"]), file: z.string() }),
   publish: directory.extend({ remote: text }),
-  spec: directory.extend({ change: text }),
+  spec: directory.extend({ change: text, session: text }),
   activity: z.object({
     project: z.string().max(200).optional(),
     task: z.string().max(200).optional(),

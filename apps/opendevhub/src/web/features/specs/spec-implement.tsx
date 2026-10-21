@@ -29,6 +29,8 @@ import { approveWarnings } from "./specs";
 export const ImplementWithModels = (props: {
   projectId: string;
   directory: string;
+  /** The spec-first variant's session the action is for. */
+  sessionId?: string;
   change: SpecChange;
   /** Files changed outside `openspec/`, which stay uncommitted in the spec's checkout. */
   code: string[];
@@ -51,6 +53,7 @@ export const ImplementWithModels = (props: {
         change: change.name,
         directory: props.directory,
         force: !change.validation.valid,
+        session: props.sessionId,
         variants,
       }),
     onSuccess: async ({ task }) => {

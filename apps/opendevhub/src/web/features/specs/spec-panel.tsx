@@ -22,8 +22,10 @@ import type {
   SpecArtifact,
   SpecChange,
   SpecPhase,
+  SpecView,
   TaskView,
 } from "../../../shared/types";
+import { Choice } from "../../components/choice";
 import { MarkdownBody } from "../../components/markdown-body";
 import type { MarkdownBlock } from "../../components/markdown-body";
 import { muted, Section, Segmented } from "../../components/page";
@@ -155,12 +157,14 @@ const ChangeBody = ({
   change,
   projectId,
   directory,
+  sessionId,
   review,
   archive,
 }: {
   change: SpecChange;
   projectId: string;
   directory: string;
+  sessionId?: string;
   /**
    * Present while the spec is proposed: whether the agent is working, code it changed outside `openspec/`, and
    * whether the checkout is a worktree of its own.
@@ -249,6 +253,7 @@ const ChangeBody = ({
         <SendComments
           projectId={projectId}
           directory={directory}
+          sessionId={sessionId}
           change={change.name}
           comments={drafts}
           blocked={
@@ -262,6 +267,7 @@ const ChangeBody = ({
         <ApproveSpec
           projectId={projectId}
           directory={directory}
+          sessionId={sessionId}
           change={change}
           busy={review.busy}
           code={review.code}
@@ -272,6 +278,7 @@ const ChangeBody = ({
         <ArchiveSpec
           projectId={projectId}
           directory={directory}
+          sessionId={sessionId}
           change={change.name}
           busy={archive.busy}
         />
@@ -280,10 +287,58 @@ const ChangeBody = ({
   );
 };
 
+/** Without a base any change may be the task's, so every one is offered. */
+const canPickAny = (view: SpecView): boolean =>
+  view.baseUnknown === true && view.changes.length > 0;
+
+/**
+ * The shown change's name, or a choice: of every change without a base (a dropdown, since the repository can hold
+ * many), else of the new ones when there are several.
+ */
+const ChangeName = ({
+  view,
+  onPick,
+}: {
+  view: SpecView;
+  onPick: (change: string) => void;
+}) => {
+  const { change } = view;
+  if (canPickAny(view)) {
+    return (
+      <Choice
+        label="Change"
+        value={change?.name ?? ""}
+        options={[
+          ...(change ? [] : [{ label: "Pick a change", value: "" }]),
+          ...view.changes.map((c) => ({ label: c.name, value: c.name })),
+        ]}
+        onChange={(name) => name && onPick(name)}
+        className="font-mono"
+      />
+    );
+  }
+  const fresh = view.changes.filter((c) => c.isNew);
+  if (change && fresh.length > 1) {
+    return (
+      <Segmented
+        label="Change"
+        value={change.name}
+        options={fresh.map((c) => ({ id: c.name, label: c.name }))}
+        onChange={onPick}
+      />
+    );
+  }
+  return (
+    <strong className="font-mono">{change?.name ?? "No change yet"}</strong>
+  );
+};
+
 /** One checkout's change: its name (or a choice of the new ones), phase, artifact chain and contents. */
 export const SpecPanel = (props: {
   projectId: string;
   directory: string;
+  /** The variant's session: its recorded change is the one shown, and a picked change is recorded for it. */
+  sessionId?: string;
   phase: SpecPhase;
   /** The task's agent is working, so comments and approval wait for its turn to end. */
   busy?: boolean;
@@ -298,7 +353,7 @@ export const SpecPanel = (props: {
   const [picked, setPicked] = useState<string>();
   const implementing = props.phase === "implement" && props.busy === true;
   const query = useQuery({
-    ...specQuery(props.projectId, props.directory, picked),
+    ...specQuery(props.projectId, props.directory, props.sessionId, picked),
     // Tasks get ticked off during the agent's turn; follow them while it implements.
     refetchInterval: implementing ? PROGRESS_POLL_MS : false,
   });
@@ -327,23 +382,11 @@ export const SpecPanel = (props: {
   // Implemented in another task's worktrees, this checkout's tasks stay unticked.
   const progress =
     phase === "implement" && !implementedIn ? taskProgress(view) : undefined;
-  const fresh = view.changes.filter((c) => c.isNew);
-  const choices = fresh.length > 1 ? fresh : [];
+  const pickAny = canPickAny(view);
   return (
     <div className="flex flex-col">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 text-sm">
-        {choices.length > 0 && change ? (
-          <Segmented
-            label="Change"
-            value={change.name}
-            options={choices.map((c) => ({ id: c.name, label: c.name }))}
-            onChange={setPicked}
-          />
-        ) : (
-          <strong className="font-mono">
-            {change?.name ?? "No change yet"}
-          </strong>
-        )}
+        <ChangeName view={view} onPick={setPicked} />
         <Badge variant="secondary">{PHASE_LABEL[phase]}</Badge>
         {progress && <TaskProgress {...progress} />}
         {implementedIn && phase === "implement" && (
@@ -380,6 +423,7 @@ export const SpecPanel = (props: {
           change={change}
           projectId={props.projectId}
           directory={props.directory}
+          sessionId={props.sessionId}
           review={
             phase === "propose"
               ? {
@@ -400,7 +444,9 @@ export const SpecPanel = (props: {
         />
       ) : (
         <p className={cn(muted, "px-4 py-3")}>
-          The agent hasn&apos;t proposed a change in this checkout yet.
+          {pickAny
+            ? "Pick the change this task proposes. The checkout has no base branch to tell its new changes from the others."
+            : "The agent hasn't proposed a change in this checkout yet."}
         </p>
       )}
     </div>
@@ -460,6 +506,7 @@ export const SpecSection = (props: {
         key={shown.directory}
         projectId={props.projectId}
         directory={shown.directory}
+        sessionId={shown.id}
         phase={phase}
         busy={shown.status !== "idle"}
         checkout={props.reviews?.[shown.directory]}

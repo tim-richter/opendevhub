@@ -906,7 +906,8 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           await deps.specs.view(
             c.req.param("id"),
             c.req.valid("query").directory ?? "",
-            c.req.valid("query").change || undefined
+            c.req.valid("query").change || undefined,
+            c.req.valid("query").session || undefined
           ),
           200
         );
@@ -930,7 +931,8 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
             id,
             str(b.directory) ?? "",
             b.change,
-            b.feedback
+            b.feedback,
+            b.session
           );
         })
     )
@@ -948,7 +950,8 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
             str(b.directory) ?? "",
             b.change,
             b.force ?? false,
-            b.newConversation ?? true
+            b.newConversation ?? true,
+            b.session
           );
         })
     )
@@ -966,7 +969,8 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
             str(b.directory) ?? "",
             b.change,
             b.variants,
-            b.force ?? false
+            b.force ?? false,
+            b.session
           );
         })
     )
@@ -979,7 +983,12 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
             throw new UnavailableError("the spec view isn't set up");
           }
           const b = c.req.valid("json");
-          return deps.specs.archive(id, str(b.directory) ?? "", b.change);
+          return deps.specs.archive(
+            id,
+            str(b.directory) ?? "",
+            b.change,
+            b.session
+          );
         })
     )
     .get("/api/projects/:id/logs", (c) =>
