@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change chat-tab. Update Purpose after archive.
+The Chat page: the sidebar's Chat entry, the start composer at `/chat` with its project and checkout pickers, the first message that starts a chat, and the full-width chat view at `/chat/:project/:chat`. It is the quick path to an agent conversation, with no dialog and no task.
 
 ## Requirements
 
