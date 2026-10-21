@@ -8,12 +8,17 @@ How opendevhub records the Jira tickets tasks are started from: rows keyed by in
 
 ### Requirement: Ticket records
 
-The system SHALL keep a ticket row for every Jira ticket a task is started from, keyed by its instance URL and key, with its web URL. The system SHALL refresh the title and status whenever the Jira integration fetches the ticket.
+The system SHALL keep a ticket row for every Jira ticket a task is linked to, keyed by its instance URL and key, with its web URL. A task is linked to a ticket when it is started or drafted from the ticket, or when the ticket is chosen in Make task. The system SHALL refresh the title and status whenever the Jira integration fetches the ticket.
 
 #### Scenario: Task from a ticket
 
 - **WHEN** the user starts a task from ticket `APP-42`
 - **THEN** a ticket row for that instance and `APP-42` exists and the task references it
+
+#### Scenario: Task made from a chat with a ticket
+
+- **WHEN** the user makes a task from a chat and chooses ticket `APP-42`
+- **THEN** a ticket row for `APP-42` exists and the new task references it
 
 #### Scenario: Ticket status refreshed
 
@@ -22,17 +27,22 @@ The system SHALL keep a ticket row for every Jira ticket a task is started from,
 
 #### Scenario: Snapshot kept on the task
 
-- **WHEN** the ticket's title changes in Jira after the task started
-- **THEN** the task keeps the Jira snapshot it was started with, and the ticket row has the new title
+- **WHEN** the ticket's title changes in Jira after the task was linked
+- **THEN** the task keeps the Jira snapshot it was linked with, and the ticket row has the new title
 
 ### Requirement: Lookups from a ticket
 
-The system SHALL return, for a ticket: the tasks started from it (archived ones included), and the pull requests linked with role `head` to those tasks' variants' branches.
+The system SHALL return, for a ticket: the tasks linked to it (drafts and archived ones included), and the pull requests linked with role `head` to those tasks' variants' branches.
 
 #### Scenario: Ticket with a published task
 
 - **WHEN** the client looks up `APP-42`, whose task's variant 1 was published as a pull request
 - **THEN** the result has that task and that pull request
+
+#### Scenario: Ticket with a draft
+
+- **WHEN** the client looks up `APP-42`, which has a draft task
+- **THEN** the result has the draft
 
 #### Scenario: Ticket with no tasks
 
@@ -64,7 +74,7 @@ Each task in the snapshot that was started from a ticket SHALL include the ticke
 
 ### Requirement: Ticket links are recorded as events
 
-The system SHALL append a `ticket.linked` event when a task is started from a ticket, in the same transaction as the link, with the task's id. Refreshing a ticket's title or status SHALL NOT be recorded as an event.
+The system SHALL append a `ticket.linked` event when a task is linked to a ticket, in the same transaction as the link, with the task's id. Refreshing a ticket's title or status SHALL NOT be recorded as an event.
 
 #### Scenario: Task from a ticket
 

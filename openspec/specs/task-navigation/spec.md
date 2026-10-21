@@ -8,26 +8,50 @@ How opendevhub organises navigation around tasks: the task page and its tabs, th
 
 ### Requirement: Task page tabs
 
-The task page at `/p/:project/t/:task` SHALL be where the user works on a task. It SHALL have the tabs Conversation (the default, at the task's path), Changes (`/changes`), Terminal (`/terminal`) and Runtime (`/runtime`). It SHALL also have Spec (`/spec`) for a spec-first task and Compare (`/compare`) for a task with two or more variants that were not discarded. Every tab except Compare SHALL show the selected variant's worktree or session. The task's header (title, state, ticket, pull requests, cost, Archive, Activity) SHALL stay visible above the tabs.
+The task page at `/p/:project/t/:task` SHALL be where the user works on a task. It SHALL have these tabs:
+
+- Conversation (the default, at the task's path)
+- Changes (`/changes`), labelled with the number of changed files: a simple diff, while the full review is the task's Review page (`/review`)
+- Terminal (`/terminal`)
+- Runtime (`/runtime`)
+- Spec (`/spec`), for a spec-first task
+- Checks (`/checks`), listed only below 768px wide; it holds the status rail's content
+
+Compare (`/compare`) SHALL be a view of a task with two or more active variants, opened from the header's Compare variants button rather than from the tab bar. Every tab, Compare excepted, SHALL show the selected variant's worktree or session. Conversations SHALL be listed in the sidebar, not in the tab bar. The task's header (breadcrumb, title, attention pill, actions) SHALL stay visible above the tabs.
 
 #### Scenario: Single-variant task
 
 - **WHEN** the user opens a task with one variant
-- **THEN** the page shows the tabs Conversation, Changes, Terminal and Runtime, with no Compare tab and no variant switcher
+- **THEN** the page shows the tabs Conversation, Changes, Terminal and Runtime, with no Compare variants button and no variant cards
 
 #### Scenario: Changes of the task
 
 - **WHEN** the user opens the Changes tab of a task whose variant works in worktree `add-login-v1`
-- **THEN** the tab shows the review of `add-login-v1` (changed files, diffs, publishing), as the worktree's Review tab did
+- **THEN** the tab lists the files `add-login-v1` changed, shows one file's diff once the user picks it, and links to the task's Review page for publishing
 
 #### Scenario: Spec-first task
 
 - **WHEN** the user opens a task that started with `opsx-propose`
 - **THEN** a Spec tab shows the variant's OpenSpec change
 
+#### Scenario: Opening Compare
+
+- **WHEN** the user clicks Compare variants on a two-variant task
+- **THEN** the browser opens `/p/:project/t/:task/compare`, and the tab bar has no Compare tab
+
+#### Scenario: Checks tab off phones
+
+- **WHEN** the user opens `/p/x/t/abc/checks` in a 1280px window
+- **THEN** the page shows the checks view, though the tab bar lists no Checks tab
+
 ### Requirement: Variant switcher
 
-When a task has two or more variants, the task page SHALL show a variant switcher above the tabs, naming each variant by number and model. The selected variant SHALL be held in the `v` search parameter. Without `v`, the page SHALL select the picked variant, or else the first variant that was not discarded. Switching variants SHALL keep the current tab. A task with one variant SHALL NOT show the switcher.
+When a task has two or more active variants, which are variants not discarded, the task page SHALL let the user switch between them:
+
+- as variant cards in the sidebar, from 768px wide
+- as a segmented control below 768px
+
+Each SHALL name the variant by number and model. The selected variant SHALL be held in the `v` search parameter. Without `v`, the page SHALL select the picked variant, or else the first variant that was not discarded. Switching variants SHALL keep the current tab and clear `thread`. A task with fewer than two active variants SHALL NOT show the switcher.
 
 #### Scenario: Switching variants on Changes
 
@@ -39,38 +63,58 @@ When a task has two or more variants, the task page SHALL show a variant switche
 - **WHEN** the user opens a three-variant task where variant 3 was picked, without `v`
 - **THEN** variant 3 is selected
 
+#### Scenario: Picked task
+
+- **WHEN** a task had two variants and variant 1 was picked, discarding variant 2
+- **THEN** the page shows no switcher
+
 ### Requirement: Conversation tab
 
-The Conversation tab SHALL show the selected variant's session: its pending permission and question cards, its turns with their changes, its subagents, and its usage. Besides the Chat view, which shows the same conversation full-width, it SHALL be the only place in the UI that shows a single session in full. When other top-level sessions have run in the same directory, the tab SHALL list them as threads, with the variant's own session first. The selected thread SHALL be held in the `thread` search parameter. Each thread that belongs to another task SHALL link to that task. The UI SHALL call sessions "conversations", not "sessions".
+The Conversation tab SHALL show the selected variant's session laid out as the conversation transcript: the transcript, its pending permission and question cards, the composer pinned to the bottom, the usage button, and the side panel rail with its turns and their changes, and its subagents. It SHALL use the same conversation view as a chat. When other top-level sessions have run in the same directory, the tab SHALL list them as threads, with the variant's own session first. The selected thread SHALL be held in the `thread` search parameter. Each thread that is a chat SHALL link to its chat view, and each that belongs to another task SHALL link to that task. The UI SHALL call sessions "conversations" or "chats", not "sessions".
 
 #### Scenario: Answering a permission
 
 - **WHEN** the variant's session waits for permission to run a command
-- **THEN** the Conversation tab shows the permission card and the user can answer it there
+- **THEN** the Conversation tab shows the permission card above the composer and the user can answer it there
 
-#### Scenario: Several conversations in one worktree
+#### Scenario: A chat in a task's worktree
 
-- **WHEN** a manual session was also started in a task variant's worktree
-- **THEN** the Conversation tab lists two threads, the variant's session first, and selecting the second shows it with a link to its own task
+- **WHEN** a chat was also started in a task variant's worktree
+- **THEN** the Conversation tab lists two threads, the variant's session first, and selecting the second shows it with a link to its chat view
 
 #### Scenario: Removed session
 
 - **WHEN** the selected variant's session is gone from opencode
 - **THEN** the Conversation tab says the conversation was removed, and the other tabs still work while the worktree exists
 
+#### Scenario: Task made from a chat
+
+- **WHEN** a task adopted a chat and the user opens its Conversation tab
+- **THEN** the tab shows the chat's full history, turns and pending cards
+
 #### Scenario: Same conversation in Chat
 
-- **WHEN** a task was started from Chat and the user opens its Conversation tab
-- **THEN** the tab shows the same turns and pending cards as its chat view
+- **WHEN** the user opens a chat's view and then a task variant's Conversation tab
+- **THEN** both show their conversation the same way: the transcript, the pending cards and the side panels
+
+#### Scenario: Turn changes from the side panel
+
+- **WHEN** the user opens the Turns panel on the Conversation tab and expands the newest turn
+- **THEN** the panel shows the files that turn changed, as the turn list did before
 
 ### Requirement: Tasks page
 
-The global Tasks page at `/tasks` SHALL list the tasks of all projects that are not archived, grouped by project. It SHALL be filterable by state and by what needs the user, and SHALL replace the Sessions page. Each entry SHALL link to its task page. A manual task whose session was found in opencode rather than started by opendevhub SHALL be labelled "started in opencode".
+The global Tasks page at `/tasks` SHALL list the tasks of all projects that are not archived, grouped by project, with drafts in their own group. It SHALL be filterable by state and by what needs the user, and SHALL replace the Sessions page. Each entry SHALL link to its task page. Chats SHALL NOT be listed on it.
 
 #### Scenario: Tasks needing the user
 
 - **WHEN** the user opens `/tasks` filtered to what needs them
 - **THEN** it lists the tasks whose sessions wait on a permission or question, each linking to its task's Conversation tab
+
+#### Scenario: Chats are not tasks
+
+- **WHEN** the user has three chats and one task in project `app`
+- **THEN** `/tasks` lists only the task
 
 #### Scenario: Old sessions link
 
@@ -79,7 +123,7 @@ The global Tasks page at `/tasks` SHALL list the tasks of all projects that are 
 
 ### Requirement: Tasks start inside a project
 
-The New task dialog SHALL always be opened for one project and SHALL NOT offer a project picker. The dashboard SHALL NOT have a New task button. The `n` shortcut and the command palette's New task command SHALL be available only on project pages (the project, its tasks and its worktrees), and SHALL open the dialog for that project. An entry point outside a project that starts a task (for example from a Jira ticket) SHALL make the user choose the project first, then open the dialog for it. The Chat page SHALL be the one exception: it starts a task from its own composer, with a project picker, and does not open the New task dialog.
+The New task dialog SHALL always be opened for one project and SHALL NOT offer a project picker. The dashboard SHALL NOT have a New task button. The `n` shortcut and the command palette's New task command SHALL be available only on project pages (the project, its tasks and its worktrees), and SHALL open the dialog for that project. An entry point outside a project that starts or drafts a task (for example from a Jira ticket) SHALL make the user choose the project first. A chat in a project SHALL make a task only through Make task.
 
 #### Scenario: Shortcut on the dashboard
 
@@ -96,55 +140,65 @@ The New task dialog SHALL always be opened for one project and SHALL NOT offer a
 - **WHEN** the user clicks Start task on ticket `APP-42` and chooses project `app`
 - **THEN** the New task dialog opens for `app` with the ticket filled in
 
-#### Scenario: Start from Chat
+#### Scenario: Chat does not start a task
 
 - **WHEN** the user picks project `app` on the Chat page and sends a message
-- **THEN** a task starts in `app` without the New task dialog opening
+- **THEN** a chat starts in `app` and no task is created
 
 ### Requirement: Secondary worktree pages
 
-The main checkout and every worktree not created by a task variant SHALL keep a standalone page at `/p/:project/main` or `/p/:project/w/:worktree`, with the tabs Tasks, Changes, Terminal and Runtime. The Tasks tab SHALL list the tasks whose sessions run in that checkout, each linking to its task page, and SHALL offer to start a new conversation there. A new conversation SHALL create a manual task and open its task page. The project page's Worktrees section SHALL list only these checkouts.
+The main checkout and every worktree not created by a task variant SHALL keep a standalone page at `/p/:project/main` or `/p/:project/w/:worktree`, with the tabs Conversations, Changes, Terminal and Runtime. The Conversations tab SHALL list the chats and the tasks whose sessions run in that checkout, each linking to its chat view or task page, and SHALL offer to start a new chat there. A new chat SHALL open its chat view. The project page's Worktrees section SHALL list only these checkouts.
 
 #### Scenario: Pull request checkout
 
 - **WHEN** the user opens a worktree that checked out pull request #38
-- **THEN** its page shows Tasks, Changes, Terminal and Runtime, and its Tasks tab lists the tasks of the sessions run there
+- **THEN** its page shows Conversations, Changes, Terminal and Runtime, and its Conversations tab lists the chats and tasks run there
 
-#### Scenario: New conversation in the main checkout
+#### Scenario: New chat in the main checkout
 
-- **WHEN** the user starts a new conversation on the main checkout's page
-- **THEN** a manual task is created for it and the browser opens that task's Conversation tab
+- **WHEN** the user starts a new chat on the main checkout's page
+- **THEN** a chat is created and the browser opens its chat view, with no task created
 
 ### Requirement: Old URLs redirect to tasks
 
 The system SHALL redirect, replacing the history entry:
 
 - a worktree page created by a task variant (`/p/:project/w/:worktree` and its tabs) to that task with the variant selected, mapping `review` to `changes` and keeping `terminal` and `runtime`;
-- a session page (`/p/:project/{main|w/:worktree}/s/:session`) to the session's task with its variant selected, and with the session as the `thread` when it is not the variant's own session;
+- a session page (`/p/:project/{main|w/:worktree}/s/:session`) to the session's task with its variant selected when a variant owns it, with the session as the `thread` when it is not the variant's own session, and otherwise to the session's chat view;
 - `/sessions` to `/tasks`.
 
-A session whose task cannot be found yet SHALL redirect to its checkout's page.
+A session that is neither a variant's nor a known chat yet SHALL redirect to its checkout's page.
 
 #### Scenario: Old review link
 
 - **WHEN** the user opens `/p/x/w/add-login-v2/review`, a worktree variant 2 of task `abc` created
 - **THEN** they land on `/p/x/t/abc/changes?v=2`
 
-#### Scenario: Old session link
+#### Scenario: Old session link of a task
 
 - **WHEN** the user opens `/p/x/w/add-login-v1/s/ses_1`, the session of variant 1 of task `abc`
 - **THEN** they land on `/p/x/t/abc?v=1`
 
+#### Scenario: Old session link of a chat
+
+- **WHEN** the user opens `/p/x/main/s/ses_9`, a chat's session
+- **THEN** they land on `/chat/x/c_9`
+
 ### Requirement: Project page lists tasks, not sessions
 
-The project page SHALL show the sections Needs you, Tasks, Ended tasks and Worktrees. It SHALL NOT have a section for sessions without a task. Needs you SHALL list tasks, each linking to its Conversation tab. Notifications and links built by the server (provenance session steps, notices) SHALL point at the session's task.
+The project page SHALL show the sections Needs you, Drafts, Tasks, Ended tasks, Chats and Worktrees. Needs you SHALL list the tasks and chats waiting on the user, each linking to its Conversation tab or chat view. Chats SHALL list the project's recent chats, each linking to its chat view. Notifications and links built by the server (provenance session steps, notices) SHALL point at the session's task when a variant owns it, and at its chat view otherwise.
 
-#### Scenario: Manual session on the project page
+#### Scenario: Session started in opencode
 
 - **WHEN** a session was started in opencode in the main checkout
-- **THEN** the project page lists its manual task under Tasks, labelled "started in opencode", and has no "Other sessions" section
+- **THEN** the project page lists it under Chats, and not under Tasks
 
-#### Scenario: Notification click
+#### Scenario: Notification for a chat
 
-- **WHEN** the user clicks a notification that a session needs permission
-- **THEN** the browser opens that session's task on its Conversation tab
+- **WHEN** the user clicks a notification that a chat's session needs permission
+- **THEN** the browser opens that chat's view
+
+#### Scenario: Notification for a task
+
+- **WHEN** the user clicks a notification that a task variant's session needs permission
+- **THEN** the browser opens that task on its Conversation tab

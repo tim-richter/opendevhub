@@ -49,7 +49,7 @@ The task page SHALL show, across its header and tabs:
 - on Spec: the spec chain, linking to the proposing and implementing tasks;
 - the task's activity, from its header's Activity button.
 
-For a manual task, it SHALL show the same page with its single variant, no variant switcher and no Compare tab.
+For a task with one variant, it SHALL show the same page with no variant switcher and no Compare tab. For a draft, it SHALL show the brief, links and plan instead of the tabs.
 
 #### Scenario: Multi-variant task
 
@@ -61,24 +61,29 @@ For a manual task, it SHALL show the same page with its single variant, no varia
 - **WHEN** the user opens the Spec tab of a task that implements a change another task proposed
 - **THEN** the tab links to the proposing task
 
-#### Scenario: Manual task
+#### Scenario: Task made from a chat
 
-- **WHEN** the user opens a manual task
+- **WHEN** the user opens a task made from a chat, with no extra variants
 - **THEN** the page shows its single conversation, changes, terminal and runtime, without a variant switcher or Compare tab
 
 ### Requirement: Created-by chips
 
-The task, worktree, branch and environment lists SHALL show what created each entry: the task and variant, a manual action, a pull request checkout, or "created outside opendevhub". Each SHALL link to its origin. A manual task adopted from opencode SHALL read "started in opencode".
+The task, chat, worktree, branch and environment lists SHALL show what created each entry: the task and variant, a chat, a manual action, a pull request checkout, or "created outside opendevhub". Each SHALL link to its origin. A chat adopted from opencode SHALL read "started in opencode". A task made from a chat SHALL read "from chat".
 
 #### Scenario: Worktree list
 
 - **WHEN** the checkouts list shows a worktree made by variant 1 of task "Add login"
 - **THEN** its chip reads "Add login · variant 1" and links to the task page
 
-#### Scenario: Adopted task in the task list
+#### Scenario: Chat from opencode
 
-- **WHEN** the Tasks list shows a manual task whose session was created in opencode
+- **WHEN** the chats list shows a chat whose session was created in opencode
 - **THEN** its chip reads "started in opencode"
+
+#### Scenario: Worktree made for a chat
+
+- **WHEN** the checkouts list shows a worktree created from the Chat page
+- **THEN** its chip names the chat and links to its chat view
 
 ### Requirement: Activity views
 
