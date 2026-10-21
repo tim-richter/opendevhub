@@ -42,6 +42,12 @@ The "still running" check walks `parentID` from each id in `client.active()` wit
 
 `client.allSessions({ cap = 2000 })` requests `/api/session?limit=200`, then `?cursor=<next>` until `next` is missing or the cap is reached. A cursor carries its filters, so later pages pass only `cursor`. `staleSessionsIn()` switches to it.
 
+**Verified on 2.1.0 (and 2.0.32):**
+
+- `cursor.next` is opaque base64url JSON holding the anchor and the list's filters, e.g. `{"archived":"false","anchor":{"id":…,"time":…,"direction":"next"}}`. `?cursor=<next>` alone continues the filtered list.
+- The last non-empty page still returns a `next`. The page after it is `{ data: [], cursor: { next: null } }`, so the loop stops on an empty page or a missing `next`.
+- `limit=200` is accepted, and the unfiltered list includes archived sessions.
+
 `sessions()` stays one page for the monitor, its hot path on every event. `detail.ts` also stays as it is: it builds subagent trees from `childSessions()`, which filters before the page limit.
 
 ### 3. Archive sync is fire-and-forget, plus a catch-up pass
@@ -52,7 +58,16 @@ Sessions of an archived task are those of all its variants, from `tasks` (`task_
 
 **Catch-up:** after each poll, the monitor calls `ArchiveSync.catchUp(rawSessions)`. For each listed session that opendevhub expects archived (archived chat, archived task, closed conversation) but whose `time.archived` is missing, it archives the session in opencode. A `Set` of ids tried during this run keeps a failing session from being retried on every poll. Catch-up only sees sessions on the polled page, which is enough: missed archives are almost always of recent sessions, and older ones are caught when they next get activity.
 
+**Verified on 2.1.0:**
+
+- `PATCH /api/session/:id { archived: true }` answers 204 and stamps `time.archived`, which `GET /api/session/:id` and the list return.
+- `{ archived: false }` answers 204 and clears it.
+- A missing session answers 404 `SessionNotFoundError`.
+- 2.0.32 answers the same PATCH with 204 but ignores `archived`. The version gate is the only way to tell, so it is required, not an optimisation.
+
 - **Why only archive, never unarchive, in catch-up:** if opendevhub unarchived anything opencode lists as archived, it would fight users who archive in opencode's TUI. Unarchiving happens only on an explicit restore.
+
+**Reconcile keeps sessions opendevhub archived.** `reconcileSessions` used to count every session opencode lists as archived as gone, and marked it removed. Once opendevhub archives its own conversations in opencode, that would mark an archived chat's session removed on the next poll, and cleanup skips removed sessions, so the conversation would never be deleted. A session that `ArchiveSync.expectsArchived()` is true for now counts as present, both in the listing and in single lookups. A session archived in opencode that opendevhub hasn't archived is still treated as gone, as before.
 
 ### 4. Version gate
 
@@ -70,11 +85,20 @@ New `OpencodeClient` methods:
 
 2.1 has no "current project" endpoint, but every `Session.Info` carries `projectID`. The environment's project id is the `projectID` of its sessions whose `location.directory` is the workspace or one of its worktrees. opencode keys projects by repository, so worktrees share it. Add `projectID?` to `RawSession`. With no session yet, the section shows rules for every `projectID` that `/api/project` lists. Each opencode database belongs to one environment, so that's rarely more than one project.
 
+**Verified on 2.1.0 (and 2.0.32):**
+
+- Sessions in the workspace and in a `git worktree` of it carry the same `projectID`.
+- `/api/project` answers a bare array of `{ id, canonical, vcs, … }`, not a `{ data }` envelope.
+- `GET /api/permission/saved` without `projectID` lists every rule.
+- `DELETE` of a missing rule answers 204 on both versions.
+- `PATCH` of a missing rule answers 404 `PermissionSavedNotFoundError` on 2.1.0. On 2.0.32 the route doesn't exist and answers a bare 404, which would look like "gone", so the edit gate has to run before sending.
+- `PATCH` answers 200 `{ data: <rule> }`. It accepts an empty `resource`, so the hub's validation is the only guard against that.
+
 Routes, under the existing projects router:
 
-- `GET /api/projects/:id/environments/:env/permissions/saved`
-- `PATCH /api/projects/:id/environments/:env/permissions/saved/:rule`
-- `DELETE /api/projects/:id/environments/:env/permissions/saved/:rule`
+- `GET /api/projects/:id/envs/:env/permissions/saved`
+- `PATCH /api/projects/:id/envs/:env/permissions/saved/:rule`
+- `DELETE /api/projects/:id/envs/:env/permissions/saved/:rule`
 
 PATCH answers 409 below opencode 2.1. The view includes `canEdit` from the version gate.
 
