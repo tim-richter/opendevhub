@@ -22,6 +22,7 @@ import type { TaskTab } from "../../../shared/urls";
 import { archiveTaskConversation, startTaskConversation } from "../../api";
 import { Segmented } from "../../components/page";
 import { StatusDot, TONE_TEXT } from "../../components/status";
+import { Tip } from "../../components/tip";
 import type { Tone } from "../../derive";
 import { Link, useNavigate, useSearchParams } from "../../routing";
 import { resultOf } from "../checks/checks";
@@ -217,10 +218,13 @@ const SESSION_TONE: Record<SessionSummary["status"], Tone> = {
   running: "running",
 };
 
+/** Rows already show the title, so its tooltip waits until the pointer rests on it. */
+const TITLE_TIP_DELAY = 600;
+
 const threadLabel = (s: SessionSummary, i: number, count: number) =>
   s.title || (count === 1 ? "Conversation" : `Conversation ${i + 1}`);
 
-/** The selected variant's conversations, the variant's own first; then New conversation. */
+/** The selected variant's conversations, the variant's own first, with New conversation in the heading. */
 const VariantConversations = (props: {
   view: ProjectView;
   task: TaskView;
@@ -236,9 +240,23 @@ const VariantConversations = (props: {
   ];
   return (
     <section className="flex min-w-0 flex-col gap-1">
-      <h3 className="text-muted-foreground px-1 text-xs font-semibold tracking-wider uppercase">
-        {shows ? `Conversations in V${props.variant.n}` : "Conversations"}
-      </h3>
+      <div className="flex min-w-0 items-center justify-between gap-2 pl-1">
+        <h3 className="text-muted-foreground truncate text-xs font-semibold tracking-wider uppercase">
+          {shows ? `Conversations in V${props.variant.n}` : "Conversations"}
+        </h3>
+        <Tip label="New conversation">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground size-7 shrink-0"
+            aria-label="New conversation"
+            disabled={!c.canStart || c.start.isPending}
+            onClick={() => c.start.mutate()}
+          >
+            <PlusIcon className="size-4" />
+          </Button>
+        </Tip>
+      </div>
       <ul className="flex flex-col">
         {ordered.map((s) => {
           const label = threadLabel(s, c.threads.indexOf(s), c.threads.length);
@@ -252,23 +270,22 @@ const VariantConversations = (props: {
                 active ? "bg-accent" : "hover:bg-accent/50"
               )}
             >
-              <Link
-                to={c.path(s.id)}
-                aria-current={active ? "page" : undefined}
-                onClick={props.onNavigate}
-                className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm"
-              >
-                <StatusDot tone={SESSION_TONE[s.status]} />
-                <span className="truncate" title={label}>
-                  {label}
-                </span>
-              </Link>
+              <Tip label={label} side="bottom" delay={TITLE_TIP_DELAY}>
+                <Link
+                  to={c.path(s.id)}
+                  aria-current={active ? "page" : undefined}
+                  onClick={props.onNavigate}
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm"
+                >
+                  <StatusDot tone={SESSION_TONE[s.status]} />
+                  <span className="truncate">{label}</span>
+                </Link>
+              </Tip>
               <Button
                 variant="ghost"
                 size="icon"
                 className="text-muted-foreground size-7 shrink-0 opacity-60 group-hover:opacity-100"
                 aria-label={`Close ${label}`}
-                title={`Close ${label}`}
                 disabled={c.close.isPending}
                 onClick={() => c.close.mutate(s.id)}
               >
@@ -278,19 +295,6 @@ const VariantConversations = (props: {
           );
         })}
       </ul>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-muted-foreground h-auto flex-wrap justify-start gap-x-1.5 py-1.5 text-left whitespace-normal"
-        disabled={!c.canStart || c.start.isPending}
-        onClick={() => c.start.mutate()}
-        title="Start a conversation with fresh context in this checkout"
-      >
-        <PlusIcon /> New conversation
-        <span className="text-muted-foreground/70 text-xs">
-          · fresh context
-        </span>
-      </Button>
       {c.error && <p className="text-destructive px-1 text-xs">{c.error}</p>}
     </section>
   );
@@ -391,17 +395,18 @@ const SidebarIcons = (props: {
           );
         })}
       <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-10"
-            aria-label="Conversations"
-            title="Conversations"
-          >
-            <MessagesSquareIcon />
-          </Button>
-        </PopoverTrigger>
+        <Tip label="Conversations" side="right">
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-10"
+              aria-label="Conversations"
+            >
+              <MessagesSquareIcon />
+            </Button>
+          </PopoverTrigger>
+        </Tip>
         <PopoverContent side="right" align="start" className="w-64 p-2">
           <VariantConversations
             view={view}
@@ -411,17 +416,18 @@ const SidebarIcons = (props: {
           />
         </PopoverContent>
       </Popover>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-10"
-        aria-label="New conversation"
-        title="New conversation · fresh context"
-        disabled={!c.canStart || c.start.isPending}
-        onClick={() => c.start.mutate()}
-      >
-        <PlusIcon />
-      </Button>
+      <Tip label="New conversation" side="right">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-10"
+          aria-label="New conversation"
+          disabled={!c.canStart || c.start.isPending}
+          onClick={() => c.start.mutate()}
+        >
+          <PlusIcon />
+        </Button>
+      </Tip>
     </nav>
   );
 };
