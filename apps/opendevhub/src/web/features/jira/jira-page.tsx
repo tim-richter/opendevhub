@@ -72,6 +72,7 @@ import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { PullRequestBadge } from "../forgejo/pull-request-badge";
 import { SettingsLink } from "../settings/settings-link";
 import { taskPath } from "../tasks/tasks";
+import { Assignee, EpicBadge } from "./ticket-labels";
 import { useJiraQuery, useTicketLinks } from "./use-jira";
 
 /** Shows cached data while it refreshes; "loading" only until the first result arrives. */
@@ -275,9 +276,6 @@ const pageParams = (
 const ticketPath = (ticket: JiraTicketSummary, params: URLSearchParams) =>
   `/jira/${encodeURIComponent(ticket.key)}${params.size ? `?${params}` : ""}`;
 
-const ticketMeta = (ticket: JiraTicketSummary) =>
-  `${ticket.key} · ${ticket.type}${ticket.priority ? ` · ${ticket.priority}` : ""}${ticket.assignee ? ` · ${ticket.assignee}` : ""}`;
-
 const ticketStatusTone = (ticket: JiraTicketSummary) => {
   if (ticket.statusCategory === "done") {
     return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
@@ -385,6 +383,7 @@ const TicketList = (props: {
                       <p className="group-hover:text-foreground leading-snug font-medium break-words">
                         {ticket.title}
                       </p>
+                      {ticket.epic && <EpicBadge epic={ticket.epic} />}
                     </div>
                   </div>
                   <div className="flex items-center gap-3 pl-11 lg:pl-0">
@@ -393,13 +392,12 @@ const TicketList = (props: {
                     >
                       {ticket.status}
                     </span>
-                    <span className="text-muted-foreground text-xs lg:hidden">
-                      {ticket.assignee ?? "Unassigned"}
-                    </span>
+                    <Assignee name={ticket.assignee} className="lg:hidden" />
                   </div>
-                  <span className="text-muted-foreground hidden truncate text-sm lg:block">
-                    {ticket.assignee ?? "Unassigned"}
-                  </span>
+                  <Assignee
+                    name={ticket.assignee}
+                    className="hidden lg:inline-flex"
+                  />
                   <span className="text-muted-foreground hidden text-xs lg:block">
                     <When at={ticket.updatedAt} />
                   </span>
@@ -458,13 +456,25 @@ const KanbanCard = (props: {
   return (
     <li>
       <Link
-        className="bg-card hover:bg-muted/50 focus-visible:outline-ring flex flex-col gap-1 rounded-lg border px-3 py-2 shadow-xs transition-colors focus-visible:outline-2"
+        className="bg-card hover:bg-muted/50 focus-visible:outline-ring flex flex-col gap-2 rounded-lg border px-3 py-2.5 shadow-xs transition-colors focus-visible:outline-2"
         to={ticketPath(ticket, props.params)}
       >
-        <span className="text-sm font-medium break-words">{ticket.title}</span>
-        <span className="text-muted-foreground text-xs">
-          {ticketMeta(ticket)}
+        <span className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-xs">
+          <span className="font-mono font-medium">{ticket.key}</span>
+          <span aria-hidden>·</span>
+          <span>{ticket.type}</span>
+          {ticket.priority && (
+            <>
+              <span aria-hidden>·</span>
+              <span>{ticket.priority}</span>
+            </>
+          )}
         </span>
+        <span className="text-sm leading-snug font-medium break-words">
+          {ticket.title}
+        </span>
+        {ticket.epic && <EpicBadge epic={ticket.epic} className="self-start" />}
+        <Assignee name={ticket.assignee} className="border-t pt-2" />
       </Link>
     </li>
   );
@@ -1007,10 +1017,18 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
               <dl className="space-y-4 text-sm">
                 <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">Assignee</dt>
-                  <dd className="min-w-0 break-words">
-                    {data.assignee ?? "Unassigned"}
+                  <dd className="min-w-0">
+                    <Assignee name={data.assignee} className="text-sm" />
                   </dd>
                 </div>
+                {data.epic && (
+                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+                    <dt className="text-muted-foreground">Epic</dt>
+                    <dd className="min-w-0">
+                      <EpicBadge epic={data.epic} />
+                    </dd>
+                  </div>
+                )}
                 <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">Reporter</dt>
                   <dd className="min-w-0 break-words">

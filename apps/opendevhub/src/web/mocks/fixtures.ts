@@ -1714,12 +1714,18 @@ const ticket = (
   ...extra,
 });
 
+const securityEpic = { color: 9, key: "ACME-50", name: "Milestone 5" };
+
 export const jiraTickets: JiraTicketSummary[] = [
   ticket("ACME-118", "Login endpoint needs burst protection", {
+    epic: securityEpic,
     priority: "High",
     type: "Bug",
   }),
-  ticket("ACME-121", "Dark mode for the settings page"),
+  ticket("ACME-121", "Dark mode for the settings page", {
+    assignee: "Priya Natarajan",
+    epic: { color: 4, key: "ACME-60", name: "Settings refresh" },
+  }),
   ticket("ACME-97", "Full-text search in docs", {
     status: "To Do",
     statusCategory: "new",
@@ -1727,6 +1733,8 @@ export const jiraTickets: JiraTicketSummary[] = [
     assignee: undefined,
   }),
   ticket("ACME-90", "Rotate the staging TLS certificates", {
+    assignee: "Jonas Weber",
+    epic: securityEpic,
     status: "In Review",
     statusId: "10001",
   }),
@@ -1736,6 +1744,8 @@ export const jiraTickets: JiraTicketSummary[] = [
     statusId: "10002",
   }),
   ticket("BILL-31", "JPY invoices are off by one yen", {
+    // An epic without a colour falls back to one derived from its key.
+    epic: { key: "BILL-2", name: "Multi-currency invoicing" },
     priority: "Highest",
     type: "Bug",
   }),

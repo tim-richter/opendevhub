@@ -7,6 +7,16 @@ export type {
 export const JIRA_STATUS_CATEGORIES = ["new", "indeterminate", "done"] as const;
 export type JiraStatusCategory = (typeof JIRA_STATUS_CATEGORIES)[number];
 
+/** The number of Jira's epic colours, `ghx-label-1` to `ghx-label-14`. */
+export const JIRA_EPIC_COLORS = 14;
+
+/** The epic a ticket belongs to; `color` is Jira's epic colour, 1 to {@link JIRA_EPIC_COLORS}, when it has one. */
+export interface JiraEpic {
+  key: string;
+  name: string;
+  color?: number;
+}
+
 export interface JiraTicketSummary {
   key: string;
   title: string;
@@ -17,6 +27,7 @@ export interface JiraTicketSummary {
   type: string;
   priority?: string;
   assignee?: string;
+  epic?: JiraEpic;
   updatedAt: string;
 }
 

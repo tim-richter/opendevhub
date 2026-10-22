@@ -44,6 +44,13 @@ const issue = (key = "APP-1", fields: Record<string, unknown> = {}) => ({
     ...fields,
   },
 });
+/** Answers Jira's field list itself, so `fetcher` sees only the requests a test is about. */
+const withFields =
+  (fetcher: typeof fetch, fields: unknown[] = []): typeof fetch =>
+  (input, init) =>
+    new URL(String(input)).pathname.endsWith("/rest/api/2/field")
+      ? Promise.resolve(response(fields))
+      : fetcher(input, init);
 const page = (issues = [issue()], total = issues.length, startAt = 0) => ({
   issues,
   total,
@@ -136,7 +143,7 @@ describe("protected Jira settings", () => {
 
   it("does not access the credential store or network when disabled, and reports missing credentials", async () => {
     const fetcher = vi.fn();
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     await expect(jira.tickets()).rejects.toMatchObject({ status: 412 });
     await settings.save(configured);
     await settings.save({ enabled: false, url: configured.url });
@@ -159,7 +166,7 @@ describe("Jira Server/Data Center API", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(response(page([issue()], 2)))
       .mockResolvedValueOnce(response(page([issue("APP-2")], 2, 1)));
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     const first = await jira.tickets();
     expect(first).toMatchObject({
       total: 2,
@@ -199,7 +206,7 @@ describe("Jira Server/Data Center API", () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockImplementation(async () => response(page([])));
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     await jira.tickets({ search: " app-123 ", scope: "board", board: 7 });
     expect(
       new URL(String(fetcher.mock.calls[0][0])).searchParams.get("jql")
@@ -223,7 +230,7 @@ describe("Jira Server/Data Center API", () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockImplementation(async () => response(page([])));
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     const call = (index: number) =>
       new URL(String(fetcher.mock.calls[index][0]));
     await jira.tickets({
@@ -278,7 +285,7 @@ describe("Jira Server/Data Center API", () => {
   it("refuses JQL with control characters or over the length limit", async () => {
     await settings.save(configured);
     const fetcher = vi.fn<typeof fetch>();
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     await expect(jira.tickets({ jql: "a\u0000b" })).rejects.toThrow(
       "Invalid Jira search"
     );
@@ -322,7 +329,9 @@ describe("Jira Server/Data Center API", () => {
         { key: "bad key", name: "x" },
       ]);
     });
-    await expect(new Jira(settings, fetcher).catalog()).resolves.toStrictEqual({
+    await expect(
+      new Jira(settings, withFields(fetcher)).catalog()
+    ).resolves.toStrictEqual({
       boards: [
         { id: 1, name: "Sprint board", type: "scrum", project: "APP" },
         { id: 2, name: "Kanban", type: "kanban" },
@@ -374,7 +383,7 @@ describe("Jira Server/Data Center API", () => {
             ])
           )
     );
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     const { tickets } = await jira.tickets();
     expect(tickets[0]).toMatchObject({
       statusCategory: "indeterminate",
@@ -411,7 +420,7 @@ describe("Jira Server/Data Center API", () => {
           })
         )
       );
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     await expect(jira.ticket("app-1")).resolves.toMatchObject({
       key: "APP-1",
       project: "App",
@@ -431,10 +440,118 @@ describe("Jira Server/Data Center API", () => {
     });
   });
 
+  it("shows each ticket's epic by name and colour from Jira Software's epic fields", async () => {
+    await settings.save(configured);
+    const fields = [
+      { id: "summary", schema: { system: "summary" } },
+      {
+        id: "customfield_10100",
+        schema: { custom: "com.pyxis.greenhopper.jira:gh-epic-link" },
+      },
+      {
+        id: "customfield_10102",
+        schema: { custom: "com.pyxis.greenhopper.jira:gh-epic-label" },
+      },
+      {
+        id: "customfield_10104",
+        schema: { custom: "com.pyxis.greenhopper.jira:gh-epic-color" },
+      },
+    ];
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        response(
+          page([
+            issue("APP-1", { customfield_10100: "APP-9" }),
+            issue("APP-2", { customfield_10100: "APP-9" }),
+            issue("APP-3", { customfield_10100: "OPS-4" }),
+            issue("APP-4", { customfield_10100: "not a key" }),
+            issue("APP-5"),
+          ])
+        )
+      )
+      .mockResolvedValueOnce(
+        response({
+          issues: [
+            {
+              key: "APP-9",
+              fields: {
+                summary: "Login overhaul",
+                customfield_10102: "Milestone 5",
+                customfield_10104: "ghx-label-9",
+              },
+            },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        response(issue("APP-1", { customfield_10100: "OPS-4" }))
+      )
+      .mockResolvedValueOnce(
+        response({
+          issues: [
+            {
+              key: "OPS-4",
+              fields: { summary: "Infra", customfield_10104: "ghx-label-99" },
+            },
+          ],
+        })
+      );
+    const lookups = vi.fn(withFields(fetcher, fields));
+    const jira = new Jira(settings, lookups);
+    const { tickets } = await jira.tickets();
+    expect(tickets.map((t) => t.epic)).toStrictEqual([
+      { key: "APP-9", name: "Milestone 5", color: 9 },
+      { key: "APP-9", name: "Milestone 5", color: 9 },
+      // Jira did not return this epic, so it keeps its key.
+      { key: "OPS-4", name: "OPS-4" },
+      undefined,
+      undefined,
+    ]);
+    const [list, epics] = fetcher.mock.calls.map(
+      ([url]) => new URL(String(url))
+    );
+    expect(list.searchParams.get("fields")).toContain(",customfield_10100");
+    expect(epics.pathname).toBe("/jira/rest/api/2/search");
+    expect(Object.fromEntries(epics.searchParams)).toMatchObject({
+      fields: "summary,customfield_10102,customfield_10104",
+      jql: "key in (APP-9, OPS-4)",
+      validateQuery: "false",
+    });
+    await expect(jira.ticket("APP-1")).resolves.toMatchObject({
+      epic: { key: "OPS-4", name: "Infra" },
+    });
+    expect(String(fetcher.mock.calls[2][0])).toContain(",customfield_10100");
+    // The field ids are looked up once per instance.
+    expect(lookups).toHaveBeenCalledTimes(5);
+  });
+
+  it("lists tickets without epics when Jira has no epic fields or will not list them", async () => {
+    await settings.save(configured);
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() =>
+        Promise.resolve(response(page([issue("APP-1")])))
+      );
+    for (const lookup of [
+      withFields(fetcher),
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith("/rest/api/2/field")
+          ? Promise.resolve(new Response("", { status: 403 }))
+          : fetcher(input, init),
+    ]) {
+      const { tickets } = await new Jira(settings, lookup).tickets();
+      expect(tickets[0]).not.toHaveProperty("epic");
+    }
+    expect(
+      new URL(String(fetcher.mock.calls[0][0])).searchParams.get("fields")
+    ).toBe("summary,status,issuetype,priority,assignee,updated");
+  });
+
   it("rejects invalid keys, searches and offsets before sending any credentials", async () => {
     await settings.save(configured);
     const fetcher = vi.fn();
-    const jira = new Jira(settings, fetcher);
+    const jira = new Jira(settings, withFields(fetcher));
     for (const key of ["..", "APP-1?x=y", "APP/1", "APP-0"]) {
       await expect(jira.ticket(key)).rejects.toMatchObject({ status: 400 });
     }
@@ -496,34 +613,42 @@ describe("Jira Server/Data Center API", () => {
       await expect(
         new Jira(
           settings,
-          vi.fn<typeof fetch>().mockResolvedValue(response(value))
+          withFields(vi.fn<typeof fetch>().mockResolvedValue(response(value)))
         ).tickets()
       ).rejects.toMatchObject({ status: 502 });
     }
     await expect(
       new Jira(
         settings,
-        vi
-          .fn<typeof fetch>()
-          .mockResolvedValue(new Response("<html>secret</html>"))
+        withFields(
+          vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response("<html>secret</html>"))
+        )
       ).tickets()
     ).rejects.toThrow("invalid API response");
     await expect(
       new Jira(
         settings,
-        vi
-          .fn<typeof fetch>()
-          .mockResolvedValue(
-            response(issue("APP-1", { description: { content: [] } }))
-          )
+        withFields(
+          vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(
+              response(issue("APP-1", { description: { content: [] } }))
+            )
+        )
       ).ticket("APP-1")
     ).rejects.toThrow("invalid ticket details");
     await expect(
       new Jira(
         settings,
-        vi
-          .fn<typeof fetch>()
-          .mockResolvedValue(new Response(new Uint8Array(20 * 1024 * 1024 + 1)))
+        withFields(
+          vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(
+              new Response(new Uint8Array(20 * 1024 * 1024 + 1))
+            )
+        )
       ).tickets()
     ).rejects.toThrow("20 MiB");
   });
