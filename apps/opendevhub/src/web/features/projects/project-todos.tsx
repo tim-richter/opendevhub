@@ -154,7 +154,7 @@ export const ProjectTodos = () => {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <>
       <PageHeader title="To-do" description={view.project.name} />
       <form onSubmit={submit} className="flex gap-2">
         <Input
@@ -195,6 +195,6 @@ export const ProjectTodos = () => {
           <ul className="divide-y">{done.map(row)}</ul>
         </Section>
       )}
-    </div>
+    </>
   );
 };

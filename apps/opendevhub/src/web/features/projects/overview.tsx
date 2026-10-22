@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { taskHref } from "../../../shared/urls";
-import { Empty, muted, Page } from "../../components/page";
+import { Empty, muted, Page, PageHeader } from "../../components/page";
 import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { allSessions, needsAttention } from "../../derive";
@@ -108,34 +108,27 @@ export const Overview = () => {
   const activeCount = attention.length + workingCount;
 
   return (
-    <Page className="mx-auto w-full max-w-5xl gap-8">
-      <header className="flex flex-wrap items-end justify-between gap-5 border-b pb-6">
-        <div className="min-w-0 space-y-2">
-          <p className="text-muted-foreground text-xs font-semibold tracking-[0.16em] uppercase">
-            Live workspace
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-            Dashboard
-          </h1>
-          <p className="text-muted-foreground max-w-xl text-sm text-pretty sm:text-base">
-            The tasks and conversations that are working or waiting for you.
-          </p>
-        </div>
-        {snapshot.projects.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link to="/tasks">
-                All tasks <ArrowRightIcon />
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link to="/chats">
-                All chats <ArrowRightIcon />
-              </Link>
-            </Button>
-          </div>
-        )}
-      </header>
+    <Page className="gap-8">
+      <PageHeader
+        title="Dashboard"
+        description="The tasks and conversations that are working or waiting for you."
+        actions={
+          snapshot.projects.length > 0 && (
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/tasks">
+                  All tasks <ArrowRightIcon />
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/chats">
+                  All chats <ArrowRightIcon />
+                </Link>
+              </Button>
+            </>
+          )
+        }
+      />
 
       {snapshot.projects.length === 0 ? (
         <Empty title="Add your first project">

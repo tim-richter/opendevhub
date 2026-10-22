@@ -16,14 +16,12 @@ import { GitBranchIcon, ListTodoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
-
 import type {
   ComposerSendRequest,
   DashboardSnapshot,
 } from "../../../shared/types";
 import { startChat } from "../../api";
-import { Empty, fillViewport, muted } from "../../components/page";
+import { Empty, muted } from "../../components/page";
 import { useDash } from "../../dashboard-context";
 import { useNavigate, useSearchParams } from "../../routing";
 import { useCurrentProject } from "../../shell/current-project";
@@ -224,11 +222,11 @@ export const ChatColumn = (props: {
   <div
     className={
       props.centred === false
-        ? // A chat fills the viewport, so its composer sits at the bottom.
-          cn("flex w-full flex-col gap-4", fillViewport)
-        : // Fills the viewport below the shell's top padding, eating into its larger bottom padding so the
-          // space above and below matches and the content sits in the true middle.
-          "mx-auto -mb-8 flex min-h-[calc(100svh-5.25rem)] w-full max-w-3xl flex-col justify-center gap-8 md:-mb-10 md:min-h-[calc(100svh-3rem)]"
+        ? // A chat fills its workspace, so its composer sits at the bottom.
+          "flex min-h-0 w-full flex-1 flex-col gap-4"
+        : // Centred in its workspace, the one page that isn't anchored to the left; the bottom padding matches the
+          // shell's top padding, so the content sits in the true middle.
+          "mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-8 pb-4 md:pb-6"
     }
   >
     {props.children}

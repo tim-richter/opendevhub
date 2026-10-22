@@ -3,15 +3,48 @@ import { Card } from "@opendevhub/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@opendevhub/ui/tabs";
 import type { InfoIcon } from "lucide-react";
 import { CircleAlertIcon, TriangleAlertIcon } from "lucide-react";
+import { createContext, useContext } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
 import { Link, useIsActive } from "../routing";
 
-export const Page = ({ className, ...props }: ComponentProps<"div">) => (
-  <div className={cn("flex flex-col gap-6", className)} {...props} />
-);
+/**
+ * How the shell lays a page out: `index` uses the full content width, `document` caps the body below the header,
+ * and `workspace` fills the viewport so a composer or terminal can sit at the bottom.
+ */
+export type PageLayout = "index" | "document" | "workspace";
+
+declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    /** The page's layout; a route without one inherits its parent's, and `index` applies when none declares one. */
+    layout?: PageLayout;
+  }
+}
+
+const PageLayoutContext = createContext<PageLayout>("index");
+
+export const PageLayoutProvider = PageLayoutContext;
+
+export const usePageLayout = () => useContext(PageLayoutContext);
+
+/** Holds a page's header and body; on a `document` page every child but the header is capped. */
+export const Page = ({ className, ...props }: ComponentProps<"div">) => {
+  const layout = usePageLayout();
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-6",
+        layout === "document" &&
+          "[&>:not([data-slot=page-header])]:w-full [&>:not([data-slot=page-header])]:max-w-3xl",
+        layout === "workspace" && "min-h-0 flex-1",
+        className
+      )}
+      {...props}
+    />
+  );
+};
 
 export const PageHeader = (props: {
   title: ReactNode;
@@ -20,6 +53,7 @@ export const PageHeader = (props: {
   className?: string;
 }) => (
   <header
+    data-slot="page-header"
     className={cn(
       "flex flex-wrap items-start justify-between gap-4",
       props.className
@@ -183,13 +217,6 @@ export const Note = (props: {
 };
 
 export const muted = "text-sm text-muted-foreground";
-
-/**
- * Fills the viewport below the shell's top padding, eating into its larger bottom padding; for a page whose bottom
- * is pinned, such as a conversation's composer.
- */
-export const fillViewport =
-  "-mb-8 h-[calc(100svh-5.25rem)] md:-mb-10 md:h-[calc(100svh-3rem)]";
 
 /** Hands @pierre/diffs (which renders in shadow DOM) the dashboard's monospace font. */
 export const diffFont =

@@ -9,6 +9,7 @@ import type { AnyRoute, RouterHistory } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
+import type { PageLayout } from "./components/page";
 import { ChatStart } from "./features/chat/chat-start";
 import { ChatView } from "./features/chat/chat-view";
 import { ChatsPage } from "./features/chat/chats-page";
@@ -73,8 +74,13 @@ const shellRoute = createRoute({
   id: "shell",
 });
 
-const page = (path: string, component: () => ReactNode) =>
-  createRoute({ component, getParentRoute: () => shellRoute, path });
+const page = (path: string, component: () => ReactNode, layout?: PageLayout) =>
+  createRoute({
+    component,
+    getParentRoute: () => shellRoute,
+    path,
+    staticData: { layout },
+  });
 
 const projectRoute = createRoute({
   component: ProjectLayout,
@@ -125,12 +131,18 @@ const taskRoute = () => {
     getParentRoute: () => projectRoute,
     path: "t/$task",
   });
-  const tab = (path: string, component: () => ReactNode) =>
-    createRoute({ component, getParentRoute: () => route, path });
+  // Conversation and Terminal fill the viewport, so the composer or terminal sits at the bottom.
+  const tab = (path: string, component: () => ReactNode, layout?: PageLayout) =>
+    createRoute({
+      component,
+      getParentRoute: () => route,
+      path,
+      staticData: { layout },
+    });
   return route.addChildren([
-    tab("/", TaskConversation),
+    tab("/", TaskConversation, "workspace"),
     tab("changes", TaskChanges),
-    tab("terminal", TaskTerminal),
+    tab("terminal", TaskTerminal, "workspace"),
     tab("runtime", TaskRuntime),
     tab("spec", TaskSpec),
     tab("checks", TaskChecks),
@@ -169,8 +181,8 @@ const legacyRoute = (path: string, tab: Parameters<typeof legacyPath>[1]) =>
 const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([
     page("/", Overview),
-    page("chat", ChatStart),
-    page("chat/$projectId/$chat", ChatView),
+    page("chat", ChatStart, "workspace"),
+    page("chat/$projectId/$chat", ChatView, "workspace"),
     page("chats", ChatsPage),
     page("tasks", TasksPage),
     // The Sessions page became Tasks; its status filter carries over.

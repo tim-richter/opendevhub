@@ -13,7 +13,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@opendevhub/ui/tooltip";
-import { Outlet, useLocation } from "@tanstack/react-router";
+import { Outlet, useLocation, useMatches } from "@tanstack/react-router";
 import {
   BellIcon,
   CheckIcon,
@@ -53,6 +53,8 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { ProjectView } from "../../shared/types";
+import { PageLayoutProvider } from "../components/page";
+import type { PageLayout } from "../components/page";
 import { Count, StatusDot, TONE_LABEL } from "../components/status";
 import { Tip } from "../components/tip";
 import { useDash } from "../dashboard-context";
@@ -484,6 +486,14 @@ const Banners = () => {
   return <div className="flex flex-col gap-2 px-4 pt-4 md:px-8">{banners}</div>;
 };
 
+/** The layout the deepest matched route declares, or `index` when none does. */
+const useMatchedLayout = (): PageLayout =>
+  useMatches({
+    select: (matches) =>
+      matches.findLast((m) => m.staticData.layout)?.staticData.layout ??
+      "index",
+  });
+
 export const Shell = () => {
   const { snapshot, connected, newTask, newTaskFor, addProjectOpen } =
     useDash();
@@ -491,6 +501,8 @@ export const Shell = () => {
   const location = useLocation();
   const [params] = useSearchParams();
   const settingsOpen = params.has(SETTINGS_PARAM);
+  const layout = useMatchedLayout();
+  const workspace = layout === "workspace";
 
   useShortcut("palette", () => setPalette((p) => !p));
   // `n` opens New task for the project whose page is open; none elsewhere, since tasks start in a project.
@@ -531,11 +543,22 @@ export const Shell = () => {
         </div>
         <DesktopSidebar />
         <RightSidebarHost>
-          <SidebarInset className="min-w-0">
+          {/* A workspace page gets a fixed height, so it can pin its bottom to the window's and scroll inside. */}
+          <SidebarInset className={cn("min-w-0", workspace && "h-svh")}>
             <MobileBar onSearch={() => setPalette(true)} />
             <Banners />
-            <div className="px-4 pt-4 pb-12 md:px-8 md:pt-6 md:pb-16">
-              <Outlet />
+            <div
+              data-layout={layout}
+              className={cn(
+                "px-4 pt-4 md:px-8 md:pt-6",
+                workspace
+                  ? "flex min-h-0 flex-1 flex-col overflow-y-auto"
+                  : "pb-12 md:pb-16"
+              )}
+            >
+              <PageLayoutProvider value={layout}>
+                <Outlet />
+              </PageLayoutProvider>
             </div>
           </SidebarInset>
         </RightSidebarHost>

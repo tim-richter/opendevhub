@@ -38,7 +38,6 @@ import { EnvBadge } from "../../components/env-badge";
 import {
   Chip,
   Empty,
-  fillViewport,
   muted,
   Section,
   TabBar,
@@ -167,9 +166,6 @@ const VariantPulls = (props: { task: TaskView; n: number | undefined }) => {
   );
 };
 
-/** Tabs that fill the viewport, so the composer or terminal sits at the bottom. */
-const FILL_TABS: ReadonlySet<TaskTab> = new Set(["conversation", "terminal"]);
-
 type BarTab = Exclude<TaskTab, "compare">;
 
 const TAB_LABEL: Record<
@@ -291,12 +287,8 @@ export const ProjectTask = () => {
 
   return (
     <TaskPageCtx value={{ sessions, task: record, variant, view }}>
-      <div
-        className={cn(
-          "flex flex-col gap-3",
-          FILL_TABS.has(current) && !setup && fillViewport
-        )}
-      >
+      {/* Fills a workspace tab's height, so the composer or terminal sits at the bottom. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         {header}
         <TaskStepper
           view={view}

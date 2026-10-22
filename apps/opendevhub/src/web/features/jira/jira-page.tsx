@@ -601,9 +601,7 @@ export const JiraPage = () => {
   ];
   const where = `${viewPhrase(query, catalog.data)}${jql ? " narrowed by JQL" : ""}`;
   return (
-    <Page
-      className={`mx-auto w-full gap-6 ${layout === "board" ? "" : "max-w-7xl"}`}
-    >
+    <Page className="gap-6">
       <PageHeader
         title="Jira tickets"
         description={search ? `${where} matching “${search}”.` : `${where}.`}
@@ -859,7 +857,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
     statusTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   }
   return (
-    <Page className="mx-auto w-full max-w-6xl gap-7">
+    <Page className="gap-7">
       <Link
         to={`/jira${params.size ? `?${params}` : ""}`}
         className="text-muted-foreground hover:text-foreground focus-visible:outline-ring inline-flex w-fit items-center gap-1.5 rounded-sm text-sm transition-colors focus-visible:outline-2"
