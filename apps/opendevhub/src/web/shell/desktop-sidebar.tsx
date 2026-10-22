@@ -30,6 +30,10 @@ import {
   projectTicketsHref,
   useProjectLinks,
 } from "../features/projects/links-settings";
+import {
+  projectTodosHref,
+  useOpenTodoCount,
+} from "../features/projects/project-todos";
 import { useSettingsHref } from "../features/settings/settings-link";
 import { useNavigate, useSearchParams } from "../routing";
 import { useCurrentProject } from "./current-project";
@@ -76,6 +80,16 @@ const globalPageOf = (pathname: string) => {
   return undefined;
 };
 
+const projectPageOf = (pathname: string, projectId: string) => {
+  if (pathname === `/p/${encodeURIComponent(projectId)}`) {
+    return "overview";
+  }
+  if (pathname === projectTodosHref(projectId)) {
+    return "todos";
+  }
+  return undefined;
+};
+
 export const DesktopSidebar = () => {
   const {
     snapshot,
@@ -98,6 +112,7 @@ export const DesktopSidebar = () => {
       (projectView) => projectView.project.id === selectedProjectId
     ) ?? view;
   const links = useProjectLinks(selectedView?.project.id).data;
+  const openTodos = useOpenTodoCount(selectedView?.project.id);
   const { pathname } = useLocation();
 
   useEffect(() => {
@@ -138,6 +153,10 @@ export const DesktopSidebar = () => {
           overview: {
             href: `/p/${encodeURIComponent(selectedView.project.id)}`,
           },
+          todos: {
+            href: projectTodosHref(selectedView.project.id),
+            count: openTodos,
+          },
           pullRequests: {
             href: repository ? projectPullsHref(repository) : "/forgejo",
           },
@@ -145,10 +164,7 @@ export const DesktopSidebar = () => {
             href: links && ticketsLinked ? projectTicketsHref(links) : "/jira",
           },
         },
-        activePage:
-          pathname === `/p/${encodeURIComponent(selectedView.project.id)}`
-            ? "overview"
-            : undefined,
+        activePage: projectPageOf(pathname, selectedView.project.id),
         tasks: projectTasks(selectedView)
           .filter(
             (task) => task.state === "starting" || task.state === "running"

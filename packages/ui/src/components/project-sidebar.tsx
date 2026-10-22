@@ -4,6 +4,7 @@ import {
   Folder,
   GitPullRequest,
   Inbox,
+  ListTodo,
   MessageSquare,
   Plus,
   SquareCheckBig,
@@ -28,7 +29,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 type GlobalPage = "inbox" | "tasks" | "chats" | "pullRequests" | "tickets";
-type ProjectPage = "overview" | "pullRequests" | "tickets";
+type ProjectPage = "overview" | "todos" | "pullRequests" | "tickets";
 type Activity = "attention" | "running" | "healthy" | "idle";
 
 interface SidebarGlobalLink {
@@ -123,6 +124,7 @@ const globalPages = [
 
 const projectPages = [
   { id: "overview", label: "Overview", icon: Folder },
+  { id: "todos", label: "To-do", icon: ListTodo },
   { id: "pullRequests", label: "Pull requests", icon: GitPullRequest },
   { id: "tickets", label: "Tickets", icon: Ticket },
 ] as const;

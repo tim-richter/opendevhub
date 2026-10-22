@@ -21,6 +21,13 @@ export const WORKTREES_UNAVAILABLE =
 /** A chat's own page: its conversation full-width. */
 export const chatPath = chatHref;
 
+/** The search param that carries a message for Chat's start page to put in its composer. */
+export const CHAT_PROMPT_PARAM = "prompt";
+
+/** Chat's start page, with `prompt` in the composer ready to send. */
+export const chatStartHref = (prompt: string) =>
+  `/chat?${new URLSearchParams({ [CHAT_PROMPT_PARAM]: prompt })}`;
+
 /** How many of the project's chats the sidebar lists before "Show all". */
 export const SIDEBAR_CHATS = 20;
 

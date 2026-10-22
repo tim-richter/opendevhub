@@ -38,6 +38,7 @@ const projectDetails = {
   statusActivity: "running" as const,
   pages: {
     overview: { href: "#overview" },
+    todos: { href: "#todos", count: 2 },
     pullRequests: { href: "#project-pull-requests", count: 2 },
     tickets: { href: "#project-tickets" },
   },

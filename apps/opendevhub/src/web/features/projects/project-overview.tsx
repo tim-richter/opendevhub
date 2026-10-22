@@ -69,7 +69,6 @@ import { projectUsage } from "../usage/usage";
 import { AllContainersMenu, projectFlags } from "./project-actions";
 import { useProjectView } from "./project-layout";
 import { ProjectSettingsButton } from "./project-settings-dialog";
-import { TodoButton } from "./todo-button";
 
 /** How many chats the project page lists; the rest are on the chats page. */
 const PROJECT_CHATS = 8;
@@ -160,7 +159,6 @@ export const ProjectOverview = () => {
             >
               <PlusIcon /> New task
             </Button>
-            <TodoButton projectId={project.id} subject={project.name} />
             <OpenInMenu
               view={view}
               directory={workspaceFolderOf(view)}

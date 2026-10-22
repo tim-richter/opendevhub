@@ -26,6 +26,7 @@ import { JiraPage, JiraTicketPage } from "./features/jira/jira-page";
 import { Overview } from "./features/projects/overview";
 import { ProjectLayout } from "./features/projects/project-layout";
 import { ProjectOverview } from "./features/projects/project-overview";
+import { ProjectTodos } from "./features/projects/project-todos";
 import { ProjectReview } from "./features/review/project-review";
 import {
   ProjectTask,
@@ -214,6 +215,11 @@ const routeTree = rootRoute.addChildren([
         component: ProjectOverview,
         getParentRoute: () => projectRoute,
         path: "/",
+      }),
+      createRoute({
+        component: ProjectTodos,
+        getParentRoute: () => projectRoute,
+        path: "todos",
       }),
       taskRoute(),
       taskReviewRoute(),

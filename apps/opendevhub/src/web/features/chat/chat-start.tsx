@@ -25,11 +25,12 @@ import type {
 import { startChat } from "../../api";
 import { Empty, fillViewport, muted } from "../../components/page";
 import { useDash } from "../../dashboard-context";
-import { useNavigate } from "../../routing";
+import { useNavigate, useSearchParams } from "../../routing";
 import { useCurrentProject } from "../../shell/current-project";
 import { Logo } from "../../shell/logo";
 import { Composer } from "../sessions/composer";
 import {
+  CHAT_PROMPT_PARAM,
   WORKTREES_UNAVAILABLE,
   canCreateWorktree,
   chatPath,
@@ -57,14 +58,22 @@ const lists = (snapshot: DashboardSnapshot | undefined, w: Waiting) =>
 /**
  * Chat's start page: the composer centred on an empty page, with the project and the checkout it starts in.
  * The first message starts a chat there, and the page moves on to that chat's view; Start as task hands the
- * message to the New task dialog instead.
+ * message to the New task dialog instead. A `prompt` search param prefills the composer.
  */
 export const ChatStart = () => {
   const { snapshot, openAddProject, newTask } = useDash();
   const navigate = useNavigate();
   const { view } = useCurrentProject();
+  const [params] = useSearchParams();
+  // A to-do (or other page) can hand over a first message; the composer starts with it.
+  const prompt = params.get(CHAT_PROMPT_PARAM) ?? undefined;
   const [choice, setChoice] = useState<string>();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(prompt ?? "");
+  const [shownPrompt, setShownPrompt] = useState(prompt);
+  if (prompt !== shownPrompt) {
+    setShownPrompt(prompt);
+    setText(prompt ?? "");
+  }
   const waiting = useRef<Waiting>(undefined);
   const latest = useRef(snapshot);
 
@@ -139,6 +148,8 @@ export const ChatStart = () => {
         What shall we build?
       </h1>
       <Composer
+        key={prompt}
+        initialText={prompt}
         view={view}
         directory={directory}
         checkoutLabel={label}

@@ -21,6 +21,7 @@ import {
   FolderGit2Icon,
   GitPullRequestIcon,
   LayoutGridIcon,
+  ListTodoIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -72,6 +73,10 @@ import {
   projectTicketsHref,
   useProjectLinks,
 } from "../features/projects/links-settings";
+import {
+  projectTodosHref,
+  useOpenTodoCount,
+} from "../features/projects/project-todos";
 import { SettingsDialog } from "../features/settings/settings-dialog";
 import {
   SETTINGS_PARAM,
@@ -290,17 +295,25 @@ const FooterButton = (props: {
   </Tooltip>
 );
 
-/** The current project's pages: its overview, and its pull requests and tickets when Forgejo or Jira is on. */
+/** The current project's pages: its overview and to-do list, and its pull requests and tickets when Forgejo or Jira is on. */
 const ProjectNav = ({ view }: { view: ProjectView }) => {
   const { forgejo, jira } = useDash();
   const location = useLocation();
   const links = useProjectLinks(view.project.id).data;
   const repository = links?.forgejoRepository;
   const ticketsLinked = !!(links?.jiraBoard || links?.jiraJql);
+  const openTodos = useOpenTodoCount(view.project.id);
+  const todosHref = projectTodosHref(view.project.id);
   return (
     <>
-      <NavItem to={`/p/${encodeURIComponent(view.project.id)}`}>
+      <NavItem
+        to={`/p/${encodeURIComponent(view.project.id)}`}
+        active={location.pathname === todosHref ? false : undefined}
+      >
         <FolderGit2Icon /> Overview
+      </NavItem>
+      <NavItem to={todosHref} badge={openTodos > 0 ? openTodos : undefined}>
+        <ListTodoIcon /> To-do
       </NavItem>
       {forgejo?.enabled && (
         <NavItem
