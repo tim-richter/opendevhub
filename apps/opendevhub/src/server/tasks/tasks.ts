@@ -5,6 +5,7 @@ import type {
   PickResult,
   Project,
   ProjectId,
+  SpecStart,
   TaskPlan,
   TaskRequest,
   TaskResult,
@@ -25,7 +26,7 @@ import type { OpencodeClient } from "../opencode/client";
 import { TASK_ID, newTaskId } from "../projects/ids";
 import { CheckoutSetup, NO_WORKTREE_MOUNT } from "./checkout-setup";
 import type { FirstTurn, SetupSink } from "./checkout-setup";
-import { APPLY_COMMAND, PROPOSE_COMMAND } from "./openspec";
+import { APPLY_COMMAND, EXPLORE_COMMAND, PROPOSE_COMMAND } from "./openspec";
 import { TITLE_LIMIT, parseJiraTaskSource, parseTaskRequest } from "./request";
 
 /** A checked request to start variants, with what setting them up needs. */
@@ -47,16 +48,26 @@ const planOf = (req: TaskRequest): TaskPlan => ({
   ...(req.base ? { base: req.base } : {}),
   ...(req.environment ? { environment: req.environment } : {}),
   ...(req.node ? { node: req.node } : {}),
-  ...(req.spec ? { spec: true } : {}),
+  ...(req.spec ? { spec: specStartOf(req.spec) } : {}),
 });
 
-/** What a variant's session starts with: the prompt, the composer's message, `opsx-propose <prompt>`, or `opsx-apply <change>`. */
+/** How a draft records a spec-first start; implementing is never drafted, so it reads as proposing. */
+const specStartOf = (spec: TaskStartSpec): SpecStart =>
+  spec.phase === "propose" && spec.explore ? "explore" : "propose";
+
+/**
+ * What a variant's session starts with: the prompt, the composer's message, `opsx-propose <prompt>`,
+ * `opsx-explore <prompt>`, or `opsx-apply <change>`.
+ */
 const firstTurn = (req: TaskRequest): FirstTurn => {
   if (req.spec?.phase === "implement") {
     return { command: APPLY_COMMAND, text: req.spec.change };
   }
   if (req.spec) {
-    return { command: PROPOSE_COMMAND, text: req.prompt };
+    return {
+      command: req.spec.explore ? EXPLORE_COMMAND : PROPOSE_COMMAND,
+      text: req.prompt,
+    };
   }
   return req.message ? { message: req.message } : { text: req.prompt };
 };

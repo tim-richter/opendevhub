@@ -650,7 +650,12 @@ export interface SpecWorkflow {
   missing: string[];
   /** Whether the container has the `openspec` CLI; absent when that could not be checked. */
   cli?: boolean;
+  /** Set when opencode has `opsx-explore`, so a spec-first task can start by exploring. */
+  explore?: true;
 }
+
+/** How a spec-first task starts: `opsx-propose`, or `opsx-explore` to think it through with the agent first. */
+export type SpecStart = "propose" | "explore";
 
 /** Where a spec-first task is: proposing (no code yet), implementing the approved change, or archived. */
 export type SpecPhase = "propose" | "implement" | "archived";
@@ -738,7 +743,8 @@ export interface TaskRequest {
   /** The node isolated variants run on; absent for this machine. */
   node?: NodeId;
   /**
-   * Propose: start with OpenSpec's `opsx-propose`, the prompt being what to propose. Implement: start with
+   * Propose: start with OpenSpec's `opsx-propose`, the prompt being what to propose, or with `opsx-explore` when
+   * `explore` is set, proposing once the user and agent have thought it through. Implement: start with
    * `opsx-apply <change>`, for a change another task proposed and committed on the base.
    */
   spec?: TaskStartSpec;
@@ -751,12 +757,15 @@ export interface TaskRequest {
 }
 
 export type TaskStartSpec =
-  | { phase: "propose" }
+  | { phase: "propose"; explore?: true }
   | { phase: "implement"; change: string; proposedIn: string };
 
-/** `POST …/tasks`: spec-first tasks start by proposing; implementing one needs the spec approved first. */
+/**
+ * `POST …/tasks`: spec-first tasks start by proposing or exploring (`true` is `propose`); implementing one needs the
+ * spec approved first.
+ */
 export type NewTaskBody = Omit<TaskRequest, "spec" | "message"> & {
-  spec?: true;
+  spec?: SpecStart | true;
 };
 
 export interface TaskVariantResult {
@@ -1068,8 +1077,8 @@ export interface TaskPlan {
   base?: string;
   environment?: Isolation;
   node?: NodeId;
-  /** Start by proposing an OpenSpec change. */
-  spec?: boolean;
+  /** Start spec-first: `explore`, or `propose` (`true` in drafts saved before exploring could be chosen). */
+  spec?: SpecStart | boolean;
 }
 
 /** A spec-first variant's place in the OpenSpec workflow. */

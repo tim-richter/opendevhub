@@ -91,10 +91,16 @@ describe(parseTaskRequest, () => {
     });
   });
 
-  it("reads spec-first, which must be a boolean: implementing needs an approved spec", () => {
+  it("reads spec-first, proposing or exploring: implementing needs an approved spec", () => {
     expect(parseTaskRequest({ prompt: "x", spec: true }).spec).toStrictEqual({
       phase: "propose",
     });
+    expect(
+      parseTaskRequest({ prompt: "x", spec: "propose" }).spec
+    ).toStrictEqual({ phase: "propose" });
+    expect(
+      parseTaskRequest({ prompt: "x", spec: "explore" }).spec
+    ).toStrictEqual({ explore: true, phase: "propose" });
     expect(() =>
       parseTaskRequest({
         prompt: "x",

@@ -360,7 +360,7 @@ export const bodies = {
     base: text,
     environment: z.enum(["shared", "isolated"]).optional(),
     node: text,
-    spec: flag,
+    spec: z.union([z.boolean(), z.enum(["propose", "explore"])]).optional(),
     jira: z
       .object({
         key: z.string(),

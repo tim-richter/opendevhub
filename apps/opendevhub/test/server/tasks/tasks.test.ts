@@ -668,6 +668,32 @@ describe("tasks", () => {
     expect(client.models).toHaveBeenCalledTimes(2);
   });
 
+  it("starts a spec-first task by exploring with opsx-explore, and keeps the choice in a draft", async () => {
+    const { hub, client, tasks } = await started();
+    client.commands.mockResolvedValue([{ name: "opsx-explore" }]);
+    const result = await hub.tasks.createTask(project.id, {
+      prompt: "Add dark mode",
+      spec: "explore",
+    });
+    expect(client.command.mock.calls).toStrictEqual([
+      [
+        result.variants[0].sessionId,
+        "opsx-explore",
+        "Add dark mode",
+        result.variants[0].directory,
+        { timeoutMs: FIRST_TURN_TIMEOUT_MS },
+      ],
+    ]);
+    expect(tasks.get(result.task)?.variants[0].spec).toStrictEqual({
+      phase: "propose",
+    });
+    const drafted = await hub.tasks.createDraft(project.id, {
+      prompt: "Later",
+      spec: "explore",
+    });
+    expect(tasks.get(drafted.task)?.plan?.spec).toBe("explore");
+  });
+
   it("offers OpenSpec's workflow when opencode has opsx commands, with whether the container has the CLI", async () => {
     const { hub, client, containers } = await started();
     client.commands.mockResolvedValue(
@@ -682,6 +708,7 @@ describe("tasks", () => {
     const info = await hub.sessions.models(project.id);
     expect(info.spec).toStrictEqual({
       missing: ["opsx-update", "opsx-archive"],
+      explore: true,
       cli: false,
     });
     expect(client.commands).toHaveBeenCalledWith("/workspaces/demo");

@@ -9,6 +9,7 @@ import type {
   ModelRef,
   ModelsInfo,
   TaskRequest,
+  TaskStartSpec,
   TaskVariantSpec,
 } from "../../shared/types";
 import { InvalidRequestError, validateBranch } from "../git/worktrees";
@@ -224,10 +225,7 @@ export const parseTaskRequest = (
     );
   }
   const variants = raw.map((v, i) => parseVariant(v, i + 1));
-  if (body.spec !== undefined && typeof body.spec !== "boolean") {
-    throw new InvalidRequestError("spec must be true or false");
-  }
-  const spec = body.spec === true ? { phase: "propose" as const } : undefined;
+  const spec = parseSpecStart(body.spec);
   const message =
     body.message === undefined ? undefined : parseFirstMessage(body.message);
   if (message && spec) {
@@ -317,3 +315,19 @@ export const toModelsInfo = (
       ...(a.description ? { description: a.description } : {}),
     })),
 });
+
+/** A new task's `spec`: `true` or `propose` proposes first, `explore` explores first. */
+const parseSpecStart = (raw: unknown): TaskStartSpec | undefined => {
+  if (raw === undefined || raw === false) {
+    return undefined;
+  }
+  if (raw === true || raw === "propose") {
+    return { phase: "propose" };
+  }
+  if (raw === "explore") {
+    return { explore: true, phase: "propose" };
+  }
+  throw new InvalidRequestError(
+    'spec must be "propose", "explore", true or false'
+  );
+};

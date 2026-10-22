@@ -63,8 +63,22 @@ export const ModelsUnavailable = meta.story({
   ),
 });
 
-/** The environment has OpenSpec's opsx commands and CLI, so a task can start spec first. */
+/** The environment has OpenSpec's opsx commands and CLI, so a task can start spec first by exploring or proposing. */
 export const SpecFirst = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi(
+    {},
+    http.get("/api/projects/:id/models", () =>
+      HttpResponse.json({
+        ...models,
+        spec: { cli: true, explore: true, missing: [] },
+      })
+    )
+  ),
+});
+
+/** OpenSpec is set up without `opsx-explore`, so a spec-first task can only start by proposing. */
+export const SpecWithoutExplore = meta.story({
   args: { projectId: "acme-web" },
   beforeEach: mockApi(
     {},

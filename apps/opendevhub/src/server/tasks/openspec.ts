@@ -3,6 +3,8 @@ import type { RawCommand } from "../opencode/client";
 
 /** The command a spec-first task starts with. */
 export const PROPOSE_COMMAND = "opsx-propose";
+/** The command a spec-first task can start with instead, to think the change through before proposing it. */
+export const EXPLORE_COMMAND = "opsx-explore";
 /** The command that revises a proposed change with review feedback. */
 export const UPDATE_COMMAND = "opsx-update";
 /** The command that implements an approved change's tasks. */
@@ -34,5 +36,8 @@ export const specWorkflow = (
   if (![...names].some((n) => OPSX.test(n))) {
     return undefined;
   }
-  return { missing: SPEC_COMMANDS.filter((n) => !names.has(n)) };
+  return {
+    missing: SPEC_COMMANDS.filter((n) => !names.has(n)),
+    ...(names.has(EXPLORE_COMMAND) ? { explore: true } : {}),
+  };
 };

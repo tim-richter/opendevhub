@@ -15,7 +15,10 @@ describe(specWorkflow, () => {
         { name: "opsx-apply" },
         { name: "opsx-explore" },
       ])
-    ).toStrictEqual({ missing: ["opsx-update", "opsx-archive"] });
+    ).toStrictEqual({
+      explore: true,
+      missing: ["opsx-update", "opsx-archive"],
+    });
     expect(
       specWorkflow(
         ["opsx-propose", "opsx-update", "opsx-apply", "opsx-archive"].map(

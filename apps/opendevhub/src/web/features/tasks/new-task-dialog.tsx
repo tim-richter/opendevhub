@@ -1,6 +1,5 @@
 import { Alert, AlertDescription } from "@opendevhub/ui/alert";
 import { Button } from "@opendevhub/ui/button";
-import { Checkbox } from "@opendevhub/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,6 +21,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BoxesIcon,
   ChevronRightIcon,
+  CodeIcon,
+  CompassIcon,
+  FileTextIcon,
   GitBranchIcon,
   PlayIcon,
 } from "lucide-react";
@@ -34,6 +36,9 @@ import type {
   Isolation,
   ModelsInfo,
   NewTaskBody,
+  SpecStart,
+  SpecWorkflow,
+  TaskPlan,
   TaskVariantSpec,
   TaskWhere,
 } from "../../../shared/types";
@@ -56,6 +61,12 @@ import { EMPTY_ROW, rowsToVariants, VariantRows } from "./variant-rows";
 import type { VariantRow } from "./variant-rows";
 
 const NO_MODELS: ModelsInfo = { agents: [], models: [] };
+
+/** How a task starts: on the prompt, or spec-first by exploring or proposing. */
+type TaskStart = "code" | SpecStart;
+
+const CHOICE_CARD =
+  "border-border has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-background flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm shadow-xs has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-50";
 
 export const NewTaskDialog = () => {
   const { snapshot, newTaskFor, closeNewTask } = useDash();
@@ -106,7 +117,7 @@ const TaskForm = ({
       ? plan.variants.map(variantToRow)
       : [EMPTY_ROW]
   );
-  const [specFirst, setSpecFirst] = useState(plan?.spec === true);
+  const [start, setStart] = useState<TaskStart>(() => startOf(plan?.spec));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -173,7 +184,11 @@ const TaskForm = ({
 
   const variants = rowsToVariants(shownRows, models);
   const specBlocked = models?.spec ? specUnavailable(models.spec) : undefined;
-  const spec = specFirst && !!models?.spec && !specBlocked;
+  const exploreBlocked =
+    models?.spec && !models.spec.explore
+      ? "opencode lacks opsx-explore; run `openspec update` in the repository."
+      : undefined;
+  const spec = specStartFor(start, models?.spec, specBlocked);
   const shownTitle = title.trim() || deriveTitle(prompt);
   const preview =
     effectiveWhere === "worktree" && shownTitle
@@ -199,7 +214,7 @@ const TaskForm = ({
       ...(remote ? { node } : {}),
       ...(worktree && branch.trim() ? { branch: branch.trim() } : {}),
       ...(worktree && base.trim() ? { base: base.trim() } : {}),
-      ...(spec ? { spec: true as const } : {}),
+      ...(spec ? { spec } : {}),
       variants,
     };
   };
@@ -314,29 +329,81 @@ const TaskForm = ({
               rows={6}
               className="min-h-28"
               value={prompt}
-              placeholder={
-                spec
-                  ? "What should the change propose?"
-                  : "What should the agent do?"
-              }
+              placeholder={promptPlaceholder(spec)}
               onChange={(e) => setPrompt(e.target.value)}
             />
           </div>
 
           {models?.spec && (
-            <div className="flex flex-col gap-1 text-sm">
-              <Label className="font-normal">
-                <Checkbox
-                  checked={spec}
-                  disabled={!!specBlocked}
-                  onCheckedChange={(c) => setSpecFirst(c === true)}
-                />{" "}
-                Spec first
-              </Label>
-              <span className="text-muted-foreground">
-                {specBlocked ??
-                  "The agent proposes an OpenSpec change (proposal, specs, design, tasks) before writing any code."}
+            <div className="grid gap-2">
+              <span className="text-sm font-medium" id="task-start-label">
+                Start with
               </span>
+              <RadioGroup
+                className="grid gap-2 sm:grid-cols-3"
+                value={spec ?? "code"}
+                onValueChange={(value) => setStart(value as TaskStart)}
+                aria-labelledby="task-start-label"
+              >
+                <Label className={`${CHOICE_CARD} sm:row-start-2`}>
+                  <RadioGroupItem value="code" />
+                  <span className="grid gap-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <CodeIcon className="size-4" /> Code
+                    </span>
+                    <span className="text-muted-foreground text-xs font-normal">
+                      The agent works on the prompt right away
+                    </span>
+                  </span>
+                </Label>
+                <span className="text-muted-foreground -mb-1 flex flex-col gap-1 pt-1 text-xs sm:col-span-2 sm:col-start-2 sm:row-start-1 sm:pt-0">
+                  <span id="task-spec-label">
+                    Spec first <span className="opacity-70">· OpenSpec</span>
+                  </span>
+                  <span className="border-border h-1.5 rounded-t-sm border-x border-t" />
+                </span>
+                <Label
+                  className={`${CHOICE_CARD} sm:row-start-2`}
+                  title={specBlocked ?? exploreBlocked}
+                >
+                  <RadioGroupItem
+                    value="explore"
+                    aria-describedby="task-spec-label"
+                    disabled={!!specBlocked || !!exploreBlocked}
+                  />
+                  <span className="grid gap-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <CompassIcon className="size-4" /> Explore
+                    </span>
+                    <span className="text-muted-foreground text-xs font-normal">
+                      Think it through together, then propose
+                    </span>
+                  </span>
+                </Label>
+                <Label
+                  className={`${CHOICE_CARD} sm:row-start-2`}
+                  title={specBlocked}
+                >
+                  <RadioGroupItem
+                    value="propose"
+                    aria-describedby="task-spec-label"
+                    disabled={!!specBlocked}
+                  />
+                  <span className="grid gap-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <FileTextIcon className="size-4" /> Propose
+                    </span>
+                    <span className="text-muted-foreground text-xs font-normal">
+                      Proposal, specs, design and tasks before any code
+                    </span>
+                  </span>
+                </Label>
+              </RadioGroup>
+              {(specBlocked ?? (start === "explore" && exploreBlocked)) && (
+                <p className="text-muted-foreground text-xs">
+                  {specBlocked ?? exploreBlocked}
+                </p>
+              )}
             </div>
           )}
 
@@ -636,6 +703,35 @@ const dialogTitle = (
     return "Start draft";
   }
   return key ? `New task from ${key}` : "New task";
+};
+
+/** How a draft starts; drafts saved before exploring could be chosen say `true` for proposing. */
+const startOf = (spec: TaskPlan["spec"]): TaskStart => {
+  if (spec === "explore") {
+    return "explore";
+  }
+  return spec === true || spec === "propose" ? "propose" : "code";
+};
+
+/** The spec-first start the task gets, when the environment can run it. */
+const specStartFor = (
+  start: TaskStart,
+  workflow: SpecWorkflow | undefined,
+  blocked: string | undefined
+): SpecStart | undefined => {
+  if (start === "code" || !workflow || blocked) {
+    return undefined;
+  }
+  return start === "explore" && !workflow.explore ? undefined : start;
+};
+
+const promptPlaceholder = (spec: SpecStart | undefined): string => {
+  if (spec === "explore") {
+    return "What should you and the agent think through?";
+  }
+  return spec === "propose"
+    ? "What should the change propose?"
+    : "What should the agent do?";
 };
 
 /** A draft's variant as the form holds it. */

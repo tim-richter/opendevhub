@@ -27,9 +27,18 @@ export const planLines = (plan: TaskPlan | undefined): string[] => {
   });
   return [
     `${where}${plan.base ? `, from ${plan.base}` : ""}.`,
-    ...(plan.spec ? ["Starts by proposing an OpenSpec change."] : []),
+    ...specLine(plan.spec),
     ...variants,
   ];
+};
+
+const specLine = (spec: TaskPlan["spec"]): string[] => {
+  if (spec === "explore") {
+    return [
+      "Starts by exploring with the agent, then proposes an OpenSpec change.",
+    ];
+  }
+  return spec ? ["Starts by proposing an OpenSpec change."] : [];
 };
 
 /**
