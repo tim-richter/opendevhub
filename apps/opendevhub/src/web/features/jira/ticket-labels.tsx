@@ -69,10 +69,10 @@ export const Assignee = (props: { name?: string; className?: string }) => {
         props.className
       )}
     >
-      <Avatar size="sm" className="size-5" aria-hidden>
+      <Avatar size="sm" aria-hidden>
         <AvatarFallback
           className={cn(
-            "text-[0.625rem] font-semibold",
+            "font-semibold tracking-tight group-data-[size=sm]/avatar:text-[0.625rem]",
             name
               ? cn("ring-1 ring-inset", tone(hashTone(name)))
               : "border-muted-foreground/40 border border-dashed bg-transparent"
