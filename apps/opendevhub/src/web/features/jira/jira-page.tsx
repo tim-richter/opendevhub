@@ -512,21 +512,22 @@ const TicketBoard = (props: {
         <NoTickets />
       )}
       {ready && (data.tickets.length > 0 || !!columns.data?.length) && (
-        <div className="flex gap-3 overflow-x-auto pb-2">
+        // A viewport-high board keeps its horizontal scrollbar in view; long columns scroll on their own.
+        <div className="flex h-[calc(100svh-6rem)] min-h-96 snap-x scroll-px-1 items-start gap-3 overflow-x-auto overscroll-x-contain pb-3">
           {jiraKanban(data.tickets, columns.data).map((column) => (
             <section
               key={column.name}
               aria-label={column.name}
-              className="bg-muted/40 flex w-72 shrink-0 flex-col gap-2 rounded-xl border p-2"
+              className="bg-muted/40 flex max-h-full w-72 shrink-0 snap-start flex-col gap-2 rounded-xl border p-2"
             >
-              <h2 className="flex items-baseline gap-2 px-1 text-sm font-semibold">
+              <h2 className="flex shrink-0 items-baseline gap-2 px-1 text-sm font-semibold">
                 {column.name}
                 <span className="text-muted-foreground font-normal">
                   {column.tickets.length}
                 </span>
               </h2>
               {column.tickets.length > 0 ? (
-                <ul className="flex flex-col gap-2">
+                <ul className="-m-0.5 flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-y-contain p-0.5">
                   {column.tickets.map((ticket) => (
                     <KanbanCard
                       key={ticket.key}
@@ -584,7 +585,9 @@ export const JiraPage = () => {
   ];
   const where = `${viewPhrase(query, catalog.data)}${jql ? " narrowed by JQL" : ""}`;
   return (
-    <Page className="mx-auto w-full max-w-7xl gap-6">
+    <Page
+      className={`mx-auto w-full gap-6 ${layout === "board" ? "" : "max-w-7xl"}`}
+    >
       <PageHeader
         title="Jira tickets"
         description={search ? `${where} matching “${search}”.` : `${where}.`}
