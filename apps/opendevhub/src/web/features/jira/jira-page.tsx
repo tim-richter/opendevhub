@@ -67,6 +67,7 @@ import { MarkdownBody } from "../../components/markdown-body";
 import { Empty, Note, Page, PageHeader, Section } from "../../components/page";
 import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
+import { useDragScroll } from "../../hooks/use-drag-scroll";
 import { Link, useSearchParams } from "../../routing";
 import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { PullRequestBadge } from "../forgejo/pull-request-badge";
@@ -498,6 +499,7 @@ const TicketBoard = (props: {
         ? Promise.resolve([])
         : fetchJiraBoardColumns(board, signal)
   );
+  const dragScroll = useDragScroll<HTMLDivElement>();
   const { data } = tickets;
   const ready = data && !columns.loading;
   return (
@@ -523,7 +525,11 @@ const TicketBoard = (props: {
       )}
       {ready && (data.tickets.length > 0 || !!columns.data?.length) && (
         // A viewport-high board keeps its horizontal scrollbar in view; long columns scroll on their own.
-        <div className="flex h-[calc(100svh-6rem)] min-h-96 snap-x scroll-px-1 items-start gap-3 overflow-x-auto overscroll-x-contain pb-3">
+        // Dragging with the mouse pans it, sideways across columns and up and down the column under the pointer.
+        <div
+          ref={dragScroll}
+          className="flex h-[calc(100svh-6rem)] min-h-96 cursor-grab snap-x scroll-px-1 items-start gap-3 overflow-x-auto overscroll-x-contain pb-3 data-dragging:cursor-grabbing data-dragging:select-none"
+        >
           {jiraKanban(data.tickets, columns.data).map((column) => (
             <section
               key={column.name}
