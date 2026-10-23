@@ -349,7 +349,9 @@ export const ReviewDiffs = (props: {
         </Card>
       ) : (
         !props.view.hideFiles && (
-          <Card className="sticky top-16 overflow-hidden py-0">{tree}</Card>
+          <Card className="sticky top-[calc(var(--review-bar-top,0px)+var(--review-bar-height,3rem)+1rem)] overflow-hidden py-0">
+            {tree}
+          </Card>
         )
       )}
       <div className="flex min-w-0 flex-col gap-3">

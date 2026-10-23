@@ -380,7 +380,9 @@ const PanelColumn = (props: {
       <div
         className={cn(
           "bg-background min-h-0 flex-1 overflow-y-auto",
-          (id === "changes" || id === "terminal" || id === "runtime") && "p-4"
+          (id === "changes" || id === "terminal" || id === "runtime") &&
+            // The review's sticky toolbar spans the padding and sits flush with the panel's top.
+            "p-4 [--review-bar-top:-1rem] [--review-gutter:1rem]"
         )}
       >
         {children}
@@ -409,7 +411,9 @@ const PanelSheet = (props: { panel: OpenPanel; onClose: () => void }) => {
         <div
           className={cn(
             "min-h-0 flex-1 overflow-y-auto",
-            (id === "changes" || id === "terminal" || id === "runtime") && "p-4"
+            (id === "changes" || id === "terminal" || id === "runtime") &&
+              // The review's sticky toolbar spans the padding and sits flush with the panel's top.
+              "p-4 [--review-bar-top:-1rem] [--review-gutter:1rem]"
           )}
         >
           {children}

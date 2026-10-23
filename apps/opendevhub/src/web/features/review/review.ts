@@ -668,32 +668,9 @@ export const fileVersions = (
   return { new: text(next, newEnd), old: text(old, oldEnd) };
 };
 
-/** The folder all `paths` share, as "a/b/" (or "" when none); the review's file tree shows it once, above the tree. */
-export const commonDirectory = (paths: string[]): string => {
-  if (paths.length === 0) {
-    return "";
-  }
-  let shared = paths[0].split("/").slice(0, -1);
-  for (const path of paths.slice(1)) {
-    const dirs = path.split("/").slice(0, -1);
-    let i = 0;
-    while (i < shared.length && i < dirs.length && shared[i] === dirs[i]) {
-      i += 1;
-    }
-    shared = shared.slice(0, i);
-  }
-  return shared.length ? `${shared.join("/")}/` : "";
-};
-
-/** The changed files' status, for the file tree's built-in git markers; paths are relative to the tree's `root`. */
-export const treeGitStatus = (
-  files: ReviewFile[],
-  root = ""
-): GitStatusEntry[] =>
-  files.map((f) => ({
-    path: f.file.slice(root.length),
-    status: f.status,
-  }));
+/** The changed files' status, for the file tree's built-in git markers. */
+export const treeGitStatus = (files: ReviewFile[]): GitStatusEntry[] =>
+  files.map((f) => ({ path: f.file, status: f.status }));
 
 /** "+3 −1" next to a file in the tree. */
 export const statsDecoration = (f: ReviewFile): FileTreeRowDecoration => {

@@ -9,7 +9,6 @@ import {
   anchorFromRange,
   annotationsFor,
   commentStops,
-  commonDirectory,
   ensurePatchHeader,
   fileVersions,
   isViewed,
@@ -729,28 +728,6 @@ describe(fileVersions, () => {
   });
 });
 
-describe(commonDirectory, () => {
-  it("is the folder every path shares, ending in a slash", () => {
-    expect(
-      commonDirectory([
-        "packages/ui/src/a.ts",
-        "packages/ui/src/deep/b.ts",
-        "packages/ui/test/c.ts",
-      ])
-    ).toBe("packages/ui/");
-  });
-
-  it("never swallows a file name", () => {
-    expect(commonDirectory(["packages/ui/src/a.ts"])).toBe("packages/ui/src/");
-    expect(commonDirectory(["src/ab.ts", "src/a.ts"])).toBe("src/");
-  });
-
-  it("is empty when the paths share no folder", () => {
-    expect(commonDirectory(["src/a.ts", "README.md"])).toBe("");
-    expect(commonDirectory([])).toBe("");
-  });
-});
-
 describe("@pierre/trees adapters", () => {
   const files = [
     {
@@ -781,13 +758,6 @@ describe("@pierre/trees adapters", () => {
       { path: "src/new.ts", status: "added" },
       { path: "old.txt", status: "deleted" },
       { path: "logo.png", status: "added" },
-    ]);
-  });
-
-  it("gives git status relative to the tree's root folder", () => {
-    expect(treeGitStatus(files.slice(0, 2), "src/")).toStrictEqual([
-      { path: "a.ts", status: "modified" },
-      { path: "new.ts", status: "added" },
     ]);
   });
 

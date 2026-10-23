@@ -381,6 +381,22 @@ const ReviewTarget = ({
   }, [checks.state]);
   const hasChecks =
     checks.state !== "none" || (checks.view?.errors.length ?? 0) > 0;
+  // The file tree sticks just below the toolbar, whose height changes as it wraps.
+  const toolbar = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const bar = toolbar.current;
+    if (!bar || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() =>
+      bar.parentElement?.style.setProperty(
+        "--review-bar-height",
+        `${bar.offsetHeight}px`
+      )
+    );
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
 
   const fetchHome = () =>
     run("Bringing home", async () => {
@@ -495,7 +511,10 @@ const ReviewTarget = ({
       {[...ticketSources].map(([id, source]) => (
         <JiraSourceCard key={id} source={source} />
       ))}
-      <div className="bg-background/95 sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 backdrop-blur max-md:top-[45px] md:-mx-8 md:px-8">
+      <div
+        ref={toolbar}
+        className="bg-background/95 sticky top-[var(--review-bar-top,0px)] z-20 -mx-[var(--review-gutter,1rem)] flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-[var(--review-gutter,1rem)] py-2 backdrop-blur max-md:top-[var(--review-bar-top,45px)] md:-mx-[var(--review-gutter,2rem)] md:px-[var(--review-gutter,2rem)]"
+      >
         <FilesToggle view={diffView} onChange={changeDiffView} />
         {!data && !error && <Skeleton className="h-5 w-48" />}
         {data && (

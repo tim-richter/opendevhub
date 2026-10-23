@@ -2,7 +2,7 @@ import { FileTree, useFileTree } from "@pierre/trees/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 import type { ReviewFile } from "../../../shared/types";
-import { commonDirectory, statsDecoration, treeGitStatus } from "./review";
+import { statsDecoration, treeGitStatus } from "./review";
 
 /**
  * The tree shows its "…" marker in a name once the name's measuring cell is taller than one line. At fractional
@@ -20,53 +20,46 @@ const CARD_FIT = `
 `;
 
 /**
- * The review's changed files as a `@pierre/trees` file tree, with git markers and line counts. The folder all files
- * share is shown once in the tree's header, and the tree holds paths relative to it: long folder chains don't fit a narrow row.
+ * The review's changed files as a `@pierre/trees` file tree, with git markers and line counts. Folder chains with a
+ * single child, the one all files share included, collapse into one row ("apps / ui").
  * Import it through `LazyChangedFilesTree` so the tree loads only with the Review tab.
  */
 export default function ChangedFilesTree(props: {
   files: ReviewFile[];
   onSelect: (file: string) => void;
 }) {
-  const root = commonDirectory(props.files.map((f) => f.file));
-  const relative = (fs: ReviewFile[]) =>
-    fs.map((f) => f.file.slice(root.length));
-  // The model is created once; its callbacks read the latest files, root and handler from refs.
+  // The model is created once; its callbacks read the latest files and handler from refs.
   const files = useRef(props.files);
-  const rootRef = useRef(root);
   const onSelect = useRef(props.onSelect);
   useLayoutEffect(() => {
     files.current = props.files;
-    rootRef.current = root;
     onSelect.current = props.onSelect;
-  }, [props.files, root, props.onSelect]);
+  }, [props.files, props.onSelect]);
 
   const { model } = useFileTree({
     density: "compact",
     flattenEmptyDirectories: true,
-    gitStatus: treeGitStatus(props.files, root),
+    gitStatus: treeGitStatus(props.files),
     initialExpansion: "open",
     onSelectionChange: (paths) => {
-      const path = paths.at(-1) && rootRef.current + paths.at(-1);
+      const path = paths.at(-1);
       if (path && files.current.some((f) => f.file === path)) {
         onSelect.current(path);
       }
     },
-    paths: relative(props.files),
+    paths: props.files.map((f) => f.file),
     renderRowDecoration: ({ item }) => {
       if (item.kind !== "file") {
         return null;
       }
-      const file = files.current.find(
-        (f) => f.file === rootRef.current + item.path
-      );
+      const file = files.current.find((f) => f.file === item.path);
       return file ? statsDecoration(file) : null;
     },
     unsafeCSS: TRUNCATE_FIX + CARD_FIT,
   });
 
   // Keep the tree in step when a refresh brings different files or statuses.
-  const pathsKey = relative(props.files).join("\n");
+  const pathsKey = props.files.map((f) => f.file).join("\n");
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {
@@ -76,23 +69,13 @@ export default function ChangedFilesTree(props: {
     model.resetPaths(pathsKey ? pathsKey.split("\n") : []);
   }, [model, pathsKey]);
   useEffect(
-    () => model.setGitStatus(treeGitStatus(props.files, root)),
-    [model, props.files, root]
+    () => model.setGitStatus(treeGitStatus(props.files)),
+    [model, props.files]
   );
 
   return (
     <FileTree
       model={model}
-      header={
-        root ? (
-          <p
-            className="text-muted-foreground border-b px-3 py-1.5 font-mono text-xs break-all"
-            title={root}
-          >
-            {root}
-          </p>
-        ) : undefined
-      }
       className="block h-[min(60vh,32rem)] [--trees-font-family-override:var(--font-sans)] [--trees-padding-inline-override:6px] [--trees-theme-focus-ring:var(--ring)] [--trees-theme-list-active-selection-bg:var(--accent)] [--trees-theme-list-active-selection-fg:var(--accent-foreground)] [--trees-theme-list-hover-bg:color-mix(in_oklab,var(--accent)_60%,transparent)]"
       aria-label="Changed files"
     />
