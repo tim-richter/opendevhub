@@ -8,7 +8,6 @@ import { Outlet, useChildMatches, useParams } from "@tanstack/react-router";
 import {
   ExternalLinkIcon,
   FileTextIcon,
-  GitCompareIcon,
   ListChecksIcon,
   LoaderCircleIcon,
   MessagesSquareIcon,
@@ -170,9 +169,8 @@ type BarTab = Exclude<TaskTab, "compare">;
 
 const TAB_LABEL: Record<
   BarTab,
-  { icon: typeof GitCompareIcon; label: string }
+  { icon: typeof ListChecksIcon; label: string }
 > = {
-  changes: { icon: GitCompareIcon, label: "Changes" },
   checks: { icon: ListChecksIcon, label: "Checks" },
   conversation: { icon: MessagesSquareIcon, label: "Conversation" },
   runtime: { icon: ServerIcon, label: "Runtime" },
@@ -180,31 +178,18 @@ const TAB_LABEL: Record<
   terminal: { icon: TerminalIcon, label: "Terminal" },
 };
 
-/** A tab's label, with the number of changed files on Changes and of failing checks on Checks. */
+/** A tab's label, with the number of failing checks on Checks. */
 const TabLabel = (props: { tab: BarTab }) => {
   const { view, variant } = useTaskPage();
   const status = useVariantStatus(view, variant);
   const { icon: Icon, label } = TAB_LABEL[props.tab];
-  let count: number | undefined;
-  if (props.tab === "changes") {
-    count = status.stats?.files;
-  } else if (props.tab === "checks" && status.failing > 0) {
-    count = status.failing;
-  }
+  const count =
+    props.tab === "checks" && status.failing > 0 ? status.failing : undefined;
   return (
     <>
       <Icon className="size-4" /> {label}
       {count !== undefined && (
-        <span
-          className={cn(
-            "text-xs tabular-nums",
-            props.tab === "checks"
-              ? "text-destructive"
-              : "text-muted-foreground"
-          )}
-        >
-          {count}
-        </span>
+        <span className="text-destructive text-xs tabular-nums">{count}</span>
       )}
     </>
   );
@@ -742,11 +727,11 @@ const Compare = (props: {
                           <Button asChild variant="outline" size="sm">
                             <Link
                               to={taskHref(view.project.id, task.id, {
-                                tab: "changes",
+                                tab: "review",
                                 v: n,
                               })}
                             >
-                              Changes
+                              Review
                             </Link>
                           </Button>
                         )}

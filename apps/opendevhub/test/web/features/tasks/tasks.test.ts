@@ -481,7 +481,7 @@ describe("task page", () => {
   });
 
   it("shows Compare for two or more live variants and Spec for spec-first tasks", () => {
-    const base = ["conversation", "changes", "terminal", "runtime"];
+    const base = ["conversation", "terminal", "runtime"];
     expect(taskTabs(task("t", [{}]))).toStrictEqual([...base, "checks"]);
     expect(taskTabs(task("t", [{}, { discarded: true }]))).toStrictEqual([
       ...base,

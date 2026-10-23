@@ -38,7 +38,6 @@ export const sessionLink = (projectBase: string, sessionId: string): string =>
 /** A tab of a task page; the Conversation tab is the task's own path. */
 export type TaskTab =
   | "conversation"
-  | "changes"
   | "terminal"
   | "runtime"
   | "spec"

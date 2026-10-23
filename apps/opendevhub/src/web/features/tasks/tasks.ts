@@ -550,7 +550,6 @@ export const hasSpec = (task: TaskView): boolean =>
 /** The tabs of a task page, in order. */
 export const taskTabs = (task: TaskView): TaskTab[] => [
   "conversation",
-  "changes",
   "terminal",
   "runtime",
   ...(hasSpec(task) ? (["spec"] as const) : []),

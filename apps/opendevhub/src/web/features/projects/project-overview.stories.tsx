@@ -47,16 +47,6 @@ export const Task = meta.story({
   parameters: { route: "/p/billing-api/t/tsk_round" },
 });
 
-/** A task's worktree changes: changed files, diffs, checks and the commit / publish actions. */
-export const TaskChanges = meta.story({
-  parameters: { route: "/p/acme-web/t/tsk_rate/changes" },
-});
-
-/** Variant 2's changes; switching variants keeps the tab. */
-export const TaskVariantChanges = meta.story({
-  parameters: { route: "/p/billing-api/t/tsk_round/changes?v=2" },
-});
-
 /** Two variants of one task side by side, in the Compare tab. */
 export const TaskCompare = meta.story({
   parameters: { route: "/p/billing-api/t/tsk_round/compare" },

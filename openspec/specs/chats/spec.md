@@ -102,7 +102,7 @@ The sidebar's Chat entry SHALL list the most recently active chats across all pr
 
 ### Requirement: Chat diff
 
-A chat view SHALL offer a Changes panel showing its checkout's changes: for a worktree, the branch's commits against its merge base with the base branch, plus uncommitted changes; for the main checkout, uncommitted changes. It SHALL use the same review view as a task's Changes tab, including publishing.
+A chat view SHALL offer a Changes panel showing its checkout's changes: for a worktree, the branch's commits against its merge base with the base branch, plus uncommitted changes; for the main checkout, uncommitted changes. It SHALL use the same review view as a task's Review page, including publishing.
 
 #### Scenario: Chat in a worktree
 

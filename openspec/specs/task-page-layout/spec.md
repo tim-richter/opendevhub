@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The task page's layout and what each region shows: the active variants, the header, the progress stepper, the variant and conversation sidebar, the Changes and Runtime tabs, the status rail, the composer's target and the phone layout.
+The task page's layout and what each region shows: the active variants, the header, the progress stepper, the variant and conversation sidebar, the Runtime tab, the status rail, the composer's target and the phone layout.
 
 ## Requirements
 
@@ -130,8 +130,8 @@ From 1024px it SHALL show in full.
 
 #### Scenario: Switching variant from the sidebar
 
-- **WHEN** the user is on `/p/x/t/abc/changes?v=1` and selects variant 2's card
-- **THEN** the URL becomes `/p/x/t/abc/changes?v=2`
+- **WHEN** the user is on `/p/x/t/abc/terminal?v=1` and selects variant 2's card
+- **THEN** the URL becomes `/p/x/t/abc/terminal?v=2`
 
 #### Scenario: Second conversation
 
@@ -147,40 +147,6 @@ From 1024px it SHALL show in full.
 
 - **WHEN** a two-variant task is viewed at 900px wide
 - **THEN** the sidebar shows V1 and V2 as icons with state dots, and the conversations open from a button
-
-### Requirement: Changes tab is a simple diff
-
-The Changes tab SHALL show the selected variant's changes in two steps:
-
-1. When the tab opens, it SHALL list only the changed files. Each row SHALL show the file's status (added, modified, deleted), its path, and its line additions and deletions.
-2. When the user selects a file, the tab SHALL show that file's diff and mark the file as selected. Only one diff SHALL be shown at a time.
-
-A file whose patch wasn't included in the list SHALL have its patch loaded when the user selects it. The selected file SHALL be held in the `file` search parameter. The tab SHALL have:
-
-- an "Uncommitted / vs <base>" toggle, the review's Working and Branch modes, with counts
-- a Review changes button, which opens the Review page
-
-The tab SHALL NOT offer publishing, merging, AI review, line comments or a Turn mode; those belong to the Review page. When the task works in the main checkout, the tab SHALL say that these are the main checkout's changes, shared with its other conversations.
-
-#### Scenario: Opening Changes
-
-- **WHEN** the user opens the Changes tab of a variant that changed seven files
-- **THEN** the tab lists the seven files and shows no diff
-
-#### Scenario: Picking a file
-
-- **WHEN** the user selects `forge/src/oauth.ts` in the list
-- **THEN** the tab shows that file's diff, the URL gains `file=forge/src/oauth.ts`, and selecting another file replaces the diff
-
-#### Scenario: Large file
-
-- **WHEN** the user selects a file marked large, whose patch wasn't sent with the list
-- **THEN** the tab loads and shows that file's patch
-
-#### Scenario: Uncommitted only
-
-- **WHEN** the user switches the toggle to Uncommitted
-- **THEN** the list shows only files with uncommitted changes, and the selection is cleared if its file isn't in it
 
 ### Requirement: Runtime tab controls
 

@@ -26,13 +26,13 @@ It SHALL NOT show the task's sidebar, tabs or status rail.
 
 #### Scenario: Opening review from the task
 
-- **WHEN** the user clicks Review changes on the Changes tab of `/p/x/t/abc/changes?v=2`
+- **WHEN** the user clicks Review changes in the status rail of `/p/x/t/abc?v=2`
 - **THEN** the browser opens `/p/x/t/abc/review?v=2`, showing variant 2's full review with publishing
 
 #### Scenario: Back to the task
 
 - **WHEN** the user clicks the back link on `/p/x/t/abc/review?v=2`
-- **THEN** the browser opens `/p/x/t/abc/changes?v=2`
+- **THEN** the browser opens `/p/x/t/abc?v=2`
 
 #### Scenario: Worktree removed
 
@@ -43,9 +43,9 @@ It SHALL NOT show the task's sidebar, tabs or status rail.
 
 These SHALL link to the Review page of the selected variant:
 
-- the Changes tab's Review changes button
 - the status rail's Changes section
 - the status strip's Review link
+- each variant's Review button on Compare
 - the stepper's Review & checks step when it is current
 
 The task page of an AI review task (a review of a pull request) SHALL link to the Review page of its checkout under the label "Review changes".

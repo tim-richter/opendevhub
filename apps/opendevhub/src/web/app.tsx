@@ -9,6 +9,7 @@ import type { AnyRoute, RouterHistory } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
+import { taskHref } from "../shared/urls";
 import type { PageLayout } from "./components/page";
 import { ChatStart } from "./features/chat/chat-start";
 import { ChatView } from "./features/chat/chat-view";
@@ -34,7 +35,6 @@ import {
   TaskCompare,
   TaskSpec,
 } from "./features/tasks/project-task";
-import { TaskChanges } from "./features/tasks/task-changes";
 import { TaskRuntime, TaskTerminal } from "./features/tasks/task-checkout-tabs";
 import { TaskConversation } from "./features/tasks/task-conversation";
 import { TaskReviewPage } from "./features/tasks/task-review";
@@ -141,7 +141,25 @@ const taskRoute = () => {
     });
   return route.addChildren([
     tab("/", TaskConversation, "workspace"),
-    tab("changes", TaskChanges),
+    // The Changes tab became the rail's Changes section; its old links open the Review page.
+    createRoute({
+      beforeLoad: ({ location, params }) => {
+        const { projectId, task } = params as {
+          projectId: string;
+          task: string;
+        };
+        const { v } = location.search as { v?: number | string };
+        throw redirect({
+          href: taskHref(projectId, task, {
+            tab: "review",
+            ...(v === undefined ? {} : { v: Number(v) }),
+          }),
+          replace: true,
+        });
+      },
+      getParentRoute: () => route,
+      path: "changes",
+    }),
     tab("terminal", TaskTerminal, "workspace"),
     tab("runtime", TaskRuntime),
     tab("spec", TaskSpec),
@@ -160,7 +178,7 @@ const taskReviewRoute = () =>
 
 /**
  * Project tabs from before worktrees came first; kept so old links still land somewhere sensible. A review of a
- * worktree a task made goes on from the worktree's page to the task's Changes tab.
+ * worktree a task made goes on from the worktree's page to the task's Review page.
  */
 const legacyRoute = (path: string, tab: Parameters<typeof legacyPath>[1]) =>
   createRoute({

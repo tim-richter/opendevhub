@@ -291,7 +291,7 @@ describe(checkouts, () => {
     const [main, login, old, pr] = checkouts(created);
     expect(worktreeRedirect(created, login)).toBe("/p/p%201/t/t1?v=2");
     expect(worktreeRedirect(created, login, "review")).toBe(
-      "/p/p%201/t/t1/changes?v=2"
+      "/p/p%201/t/t1/review?v=2"
     );
     expect(worktreeRedirect(created, login, "terminal")).toBe(
       "/p/p%201/t/t1/terminal?v=2"

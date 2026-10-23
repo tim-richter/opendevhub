@@ -1,9 +1,7 @@
-import { http, HttpResponse } from "msw";
-
 import preview from "../../../../.storybook/preview";
 import type { DashboardSnapshot, ProjectView } from "../../../shared/types";
 import { App } from "../../app";
-import { reviewData, snapshot } from "../../mocks/fixtures";
+import { snapshot } from "../../mocks/fixtures";
 import { mockApi } from "../../mocks/story";
 
 /** The widths the task page's layout changes at: phone, icon sidebar, laptop strip, wide rail. */
@@ -65,41 +63,6 @@ const meta = preview.meta({
 
 /** A running task from a Jira ticket, published as a PR: one variant, so no variant cards, Compare or "V1" labels. */
 export const Default = meta.story();
-
-/** The changed files only, nothing selected yet; Review changes opens the full review. */
-export const Changes = meta.story({
-  parameters: { route: "/p/acme-web/t/tsk_rate/changes" },
-});
-
-/** One file picked from the list: its diff below. */
-export const ChangesFileSelected = meta.story({
-  parameters: {
-    route: "/p/acme-web/t/tsk_rate/changes?file=src%2Fserver%2Frate-limit.ts",
-  },
-});
-
-/** A large file, whose patch wasn't sent with the list, loads on its own when picked. */
-export const ChangesLargeFile = meta.story({
-  parameters: {
-    route:
-      "/p/acme-web/t/tsk_rate/changes?file=test%2Fserver%2Frate-limit.test.ts",
-  },
-});
-
-/** A checkout with nothing changed. */
-export const ChangesEmpty = meta.story({
-  beforeEach: mockApi(
-    {},
-    http.get("/api/projects/:id/review", ({ request }) =>
-      HttpResponse.json({
-        ...reviewData(new URL(request.url).searchParams.get("directory") ?? ""),
-        dirty: false,
-        files: [],
-      })
-    )
-  ),
-  parameters: { route: "/p/acme-web/t/tsk_rate/changes" },
-});
 
 /** The full review of the variant, on its own page: diffs, comments, AI review, publish and merge. */
 export const ReviewPage = meta.story({

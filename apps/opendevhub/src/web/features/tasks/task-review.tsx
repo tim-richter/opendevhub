@@ -60,7 +60,7 @@ const ReviewHeader = (props: {
 
 /**
  * A task variant's full review, outside the task's frame: every diff with line comments, the AI review and Open Code
- * Review, publishing and merging. Its header links back to the variant's Changes tab.
+ * Review, publishing and merging. Its header links back to the variant's conversation.
  */
 export const TaskReviewPage = () => {
   const view = useProjectView();
@@ -75,10 +75,11 @@ export const TaskReviewPage = () => {
     );
   }
   const variant = selectedVariant(record, params.get("v"));
-  const back = taskHref(view.project.id, record.id, {
-    tab: "changes",
-    ...(variant ? { v: variant.n } : {}),
-  });
+  const back = taskHref(
+    view.project.id,
+    record.id,
+    variant ? { v: variant.n } : {}
+  );
   const checkout = variant?.directory && checkoutOf(view, variant.directory);
   if (!variant || !checkout) {
     return (

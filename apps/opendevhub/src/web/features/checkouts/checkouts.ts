@@ -240,10 +240,10 @@ export const legacyPath = (
   );
 };
 
-/** The checkout tabs a worktree created by a task maps to on the task page; `review` became Changes. */
-const TASK_TAB_OF: Record<string, TaskTab> = {
+/** The checkout tabs a worktree created by a task maps to on the task page, or its Review page. */
+const TASK_TAB_OF: Record<string, TaskTab | "review"> = {
   "": "conversation",
-  review: "changes",
+  review: "review",
   runtime: "runtime",
   terminal: "terminal",
 };

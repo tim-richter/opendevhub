@@ -40,8 +40,8 @@ describe(taskHref, () => {
   });
 
   it("adds the tab, variant and thread", () => {
-    expect(taskHref("app", "abc", { tab: "changes", v: 2 })).toBe(
-      "/p/app/t/abc/changes?v=2"
+    expect(taskHref("app", "abc", { tab: "terminal", v: 2 })).toBe(
+      "/p/app/t/abc/terminal?v=2"
     );
     expect(taskHref("app", "abc", { thread: "ses_9", v: 1 })).toBe(
       "/p/app/t/abc?v=1&thread=ses_9"
