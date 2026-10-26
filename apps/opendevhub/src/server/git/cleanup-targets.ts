@@ -14,6 +14,7 @@ import { OpencodeHttpError } from "../opencode/client";
 import type { OpencodeClient, RawSession } from "../opencode/client";
 import type { Checkouts } from "./checkouts";
 import { branchChanged, scanBranches, staleSessions } from "./cleanup";
+import type { BaseFreshness } from "./freshness";
 
 /** One session by id; undefined only when opencode answers 404. Any other failure throws. */
 const lookUp = async (
@@ -68,10 +69,17 @@ export class CleanupTargets {
   private readonly deps: HubDeps;
   private readonly envs: Environments;
   private readonly checkouts: Checkouts;
-  constructor(deps: HubDeps, envs: Environments, checkouts: Checkouts) {
+  private readonly freshness?: Pick<BaseFreshness, "record">;
+  constructor(
+    deps: HubDeps,
+    envs: Environments,
+    checkouts: Checkouts,
+    freshness?: Pick<BaseFreshness, "record">
+  ) {
     this.deps = deps;
     this.envs = envs;
     this.checkouts = checkouts;
+    this.freshness = freshness;
   }
 
   /** Lists the project's merged and upstream-gone branches, after `git fetch --prune`. */
@@ -90,6 +98,7 @@ export class CleanupTargets {
       return scanBranches(this.deps.git, {
         envOf: (dir) => envs.find((e) => e.worktree.path === dir)?.id,
         inUse: this.inUse(id),
+        onFetched: (remote) => this.freshness?.record(id, remote),
         project: p,
         workspace: ws,
         worktrees,

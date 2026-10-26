@@ -244,13 +244,16 @@ describe(scanBranches, () => {
       merged: { main: ["main", "feat"] },
       remoteHead: "main",
     });
+    const onFetched = vi.fn();
     const r = await scanBranches(git, {
       project,
       workspace: WS,
       worktrees: [wt("feat")],
       envOf: (p) => (p.endsWith("/feat") ? "env-feat" : undefined),
+      onFetched,
     });
     expect(git.fetchPrune).toHaveBeenCalledWith(project, WS, "origin");
+    expect(onFetched).toHaveBeenCalledWith("origin");
     expect(r.warning).toBeUndefined();
     expect(r.items).toStrictEqual([
       {
@@ -306,12 +309,15 @@ describe(scanBranches, () => {
       remoteHead: "main",
       fetchFails: "could not read from remote",
     });
+    const onFetched = vi.fn();
     const r = await scanBranches(git, {
       project,
       workspace: WS,
       worktrees: [],
       envOf: () => {},
+      onFetched,
     });
+    expect(onFetched).not.toHaveBeenCalled();
     expect(r.warning).toBe("using local refs: could not read from remote");
     expect(r.items.map((i) => i.branch)).toStrictEqual(["feat"]);
   });

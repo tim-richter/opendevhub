@@ -91,7 +91,7 @@ export class ReviewActions {
     const on = this.checkouts.gitFor(project, directory);
     const { branch, base } = await this.reviewBase(project, directory, request);
     const mode = diffMode(opts.mode, base, session !== undefined);
-    const [[raw, turn], status, counts, pushed, wsBranch, wsClean] =
+    const [[raw, turn], status, counts, pushed, wsBranch, wsClean, unpushed] =
       await Promise.all([
         session && mode === "turn"
           ? this.turnDiff(id, directory, session, opts.from)
@@ -111,6 +111,9 @@ export class ReviewActions {
         branch ? this.pushed(id, on.git, on.target, directory, branch) : false,
         git.currentBranch(project, ws),
         git.isClean(project, ws),
+        branch
+          ? on.git.unpushed(on.target, directory).catch(() => undefined)
+          : undefined,
       ]);
     const wanted =
       opts.file === undefined ? raw : raw.filter((f) => f.file === opts.file);
@@ -127,6 +130,7 @@ export class ReviewActions {
       ...counts,
       dirty: status.length > 0,
       pushed,
+      ...(unpushed === undefined ? {} : { upstreamAhead: unpushed }),
       workspace: { ...(wsBranch ? { branch: wsBranch } : {}), clean: wsClean },
       files,
       ...(truncated ? { truncated } : {}),

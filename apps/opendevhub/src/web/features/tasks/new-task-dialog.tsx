@@ -56,6 +56,8 @@ import { useNavigate } from "../../routing";
 import { useShortcut, useShortcutLabel } from "../../shell/use-shortcut";
 import { nodeChoices } from "../nodes/nodes";
 import { projectFlags } from "../projects/project-actions";
+import { basePositionQuery } from "./base-queries";
+import { BaseStatusLine } from "./base-status-line";
 import { modelKey, specUnavailable, taskPath } from "./tasks";
 import { EMPTY_ROW, rowsToVariants, VariantRows } from "./variant-rows";
 import type { VariantRow } from "./variant-rows";
@@ -170,6 +172,14 @@ const TaskForm = ({
   const locationReady =
     effectiveWhere !== "existing" || selectedWorktree !== undefined;
   const startKeys = useShortcutLabel("newTaskStart");
+  // A node's task branches from the base as it is, so only local worktree tasks get the line.
+  const showBaseStatus = effectiveWhere === "worktree" && !remote && canOpen;
+  // Read (and so fetched) on opening, while Options is still closed: the line is ready, and starting finds the fetch fresh.
+  const [openedBase] = useState(base.trim());
+  useQuery({
+    ...basePositionQuery(projectId, openedBase),
+    enabled: showBaseStatus,
+  });
 
   // Cached per project, so the dialog opens with its lists ready; without them, it offers the defaults. Refreshed on
   // every opening, so a model, agent or OpenSpec setup added since shows up.
@@ -611,8 +621,18 @@ const TaskForm = ({
                       id="task-base"
                       value={base}
                       placeholder="the main checkout's current branch"
+                      aria-describedby={
+                        showBaseStatus ? "task-base-status" : undefined
+                      }
                       onChange={(e) => setBase(e.target.value)}
                     />
+                    {showBaseStatus && (
+                      <BaseStatusLine
+                        id="task-base-status"
+                        projectId={projectId}
+                        base={base}
+                      />
+                    )}
                   </div>
                 </>
               )}

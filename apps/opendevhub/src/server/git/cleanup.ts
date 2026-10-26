@@ -173,6 +173,8 @@ export interface BranchScanInput {
   envOf: (worktreePath: string) => EnvId | undefined;
   /** Whether a running session or a checkout being set up uses the branch or its worktree; those are never listed. */
   inUse?: (branch: string, worktreePath: string | undefined) => boolean;
+  /** Called after the scan's fetch succeeded. */
+  onFetched?: (remote: string) => void;
 }
 
 const message = (err: unknown): string =>
@@ -235,6 +237,7 @@ export const scanBranches = async (
   if (ctx.remote) {
     try {
       await git.fetchPrune(p, ws, ctx.remote);
+      input.onFetched?.(ctx.remote);
     } catch (error) {
       warning = `using local refs: ${message(error)}`;
     }

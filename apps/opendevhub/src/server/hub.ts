@@ -1,5 +1,6 @@
 import { Environments } from "./environments/environments";
 import type { HubDeps } from "./environments/ports";
+import { BasePositions } from "./git/base-position";
 import { Checkouts } from "./git/checkouts";
 import { CleanupTargets } from "./git/cleanup-targets";
 import { ReviewActions } from "./git/review-actions";
@@ -19,16 +20,24 @@ export interface Hub {
   reviews: ReviewActions;
   cleanupTargets: CleanupTargets;
   permissions: SavedPermissions;
+  bases: BasePositions;
 }
 
 export const createHub = (deps: HubDeps): Hub => {
   const environments = new Environments(deps);
   const sessions = new Sessions(deps, environments);
   const checkouts = new Checkouts(deps, environments, sessions);
-  const cleanupTargets = new CleanupTargets(deps, environments, checkouts);
-  const setup = new CheckoutSetup(deps, environments);
+  const bases = new BasePositions(deps, environments);
+  const cleanupTargets = new CleanupTargets(
+    deps,
+    environments,
+    checkouts,
+    bases.freshness
+  );
+  const setup = new CheckoutSetup(deps, environments, bases);
   const tasks = new Tasks(deps, environments, setup, cleanupTargets);
   return {
+    bases,
     chat: new Chat(deps, environments, sessions, setup, tasks),
     checkouts,
     cleanupTargets,

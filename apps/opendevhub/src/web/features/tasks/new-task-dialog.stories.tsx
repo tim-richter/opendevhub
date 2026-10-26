@@ -1,11 +1,12 @@
 import { http, HttpResponse } from "msw";
 import { useEffect } from "react";
+import { expect, userEvent, within } from "storybook/test";
 
 import preview from "../../../../.storybook/preview";
 import { useDash } from "../../dashboard-context";
 import type { NewTaskDraft } from "../../dashboard-context";
-import { jiraTicket, models } from "../../mocks/fixtures";
-import { failing } from "../../mocks/handlers";
+import { basePositions, jiraTicket, models } from "../../mocks/fixtures";
+import { failing, pending } from "../../mocks/handlers";
 import { mockApi } from "../../mocks/story";
 import { NewTaskDialog } from "./new-task-dialog";
 
@@ -97,4 +98,66 @@ export const SpecWithoutCli = meta.story({
       HttpResponse.json({ ...models, spec: { cli: false, missing: [] } })
     )
   ),
+});
+
+/** Opens Options, where the Base field and its status line are. */
+const openOptions = async () => {
+  const body = within(document.body);
+  await userEvent.click(await body.findByRole("button", { name: "Options" }));
+  await body.findByRole("status");
+};
+
+/** `origin/main` is 5 commits ahead of a clean, checked-out `main`: starting updates it first. */
+export const BaseStale = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({ basePosition: () => basePositions.stale }),
+  play: async () => {
+    await openOptions();
+    await expect(
+      await within(document.body).findByText(
+        "Will update main from origin first · 5 new commits · fetched just now"
+      )
+    ).toBeVisible();
+  },
+});
+
+export const BaseUpToDate = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({ basePosition: () => basePositions.upToDate }),
+  play: openOptions,
+});
+
+/** The main checkout has uncommitted changes, so `main` stays where it is. */
+export const BaseDirty = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({ basePosition: () => basePositions.dirty }),
+  play: openOptions,
+});
+
+/** Local `main` has commits `origin/main` lacks, and the other way round. */
+export const BaseDiverged = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({ basePosition: () => basePositions.diverged }),
+  play: openOptions,
+});
+
+/** The remote can't be reached; the last good fetch was two hours ago. */
+export const BaseOffline = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({ basePosition: () => basePositions.offline }),
+  play: openOptions,
+});
+
+/** "Update the base branch before starting a task" is off. */
+export const BaseSettingOff = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({ basePosition: () => basePositions.disabled }),
+  play: openOptions,
+});
+
+/** The position is still being read (and fetched). */
+export const BaseLoading = meta.story({
+  args: { projectId: "acme-web" },
+  beforeEach: mockApi({}, pending("get", "/api/projects/:id/base-position")),
+  play: openOptions,
 });

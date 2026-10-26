@@ -1,4 +1,9 @@
-import type { UpdateResult, UpdateStrategy } from "../../shared/types";
+import type {
+  BasePosition,
+  BaseSkipReason,
+  UpdateResult,
+  UpdateStrategy,
+} from "../../shared/types";
 import { CommandError, gitReason, tailLines } from "../environments/containers";
 import type { Containers, ExecTarget } from "../environments/containers";
 import type { RunResult, Runner } from "../nodes/exec";
@@ -27,6 +32,21 @@ export const parseAheadBehind = (
 };
 
 const FETCH_TIMEOUT_MS = 60_000;
+const REMOTES = "refs/remotes/";
+
+/** A local branch's upstream: `origin/main`, its full ref, and the remote it lives on. */
+export interface BaseUpstream {
+  name: string;
+  ref: string;
+  remote?: string;
+}
+
+/** Where the local base stands against its upstream, and what bringing it up to date does (or did). */
+export type BaseState = Omit<
+  BasePosition,
+  "base" | "sinceBranch" | "branchAhead" | "lastFetchAt" | "fetchError"
+>;
+
 const REF_FORMAT = "%(refname:short)%09%(upstream)%09%(upstream:track)";
 
 export interface BranchRef {
@@ -336,6 +356,139 @@ export class GitOps {
     );
   }
 
+  /**
+   * The local branch `base`'s upstream: its configured one (`<base>@{u}`), else `<remote>/<base>` when that ref exists,
+   * with `origin` as the remote, else the first. Undefined for a base that isn't a local branch, or has neither.
+   */
+  async baseUpstream(
+    p: ExecTarget,
+    dir: string,
+    base: string
+  ): Promise<BaseUpstream | undefined> {
+    const local = await this.exec(p, dir, [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/heads/${base}`,
+    ]);
+    if (local.exitCode !== 0) {
+      return undefined;
+    }
+    const configured = await this.exec(p, dir, [
+      "rev-parse",
+      "--symbolic-full-name",
+      `${base}@{u}`,
+    ]);
+    const ref = configured.stdout.trim();
+    if (configured.exitCode === 0 && ref.startsWith(REMOTES)) {
+      const remote = await this.exec(p, dir, [
+        "config",
+        "--get",
+        `branch.${base}.remote`,
+      ]);
+      const name = remote.stdout.trim();
+      return {
+        name: ref.slice(REMOTES.length),
+        ref,
+        ...(remote.exitCode === 0 && name ? { remote: name } : {}),
+      };
+    }
+    const remotes = await this.remotes(p, dir);
+    const remote = remotes.includes("origin") ? "origin" : remotes[0];
+    if (!remote) {
+      return undefined;
+    }
+    const fallback = `${REMOTES}${remote}/${base}`;
+    const found = await this.exec(p, dir, [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      fallback,
+    ]);
+    return found.exitCode === 0
+      ? { name: `${remote}/${base}`, ref: fallback, remote }
+      : undefined;
+  }
+
+  /**
+   * Brings the local branch `base` up to its upstream when that is a fast-forward and touches no uncommitted work:
+   * `merge --ff-only` in the main checkout at `ws` when it is on `base` and clean, else `fetch .` into the branch
+   * (which git refuses unless it fast-forwards). `dryRun` only says what it would do. Never merges, rebases or resets.
+   */
+  async updateBase(
+    p: ExecTarget,
+    ws: string,
+    base: string,
+    opts: { dryRun?: boolean } = {}
+  ): Promise<BaseState> {
+    const upstream = await this.baseUpstream(p, ws, base);
+    if (!upstream) {
+      return {
+        ahead: 0,
+        behind: 0,
+        update: { kind: "skip", reason: "no-upstream" },
+      };
+    }
+    const counts = parseAheadBehind(
+      await this.git(p, ws, [
+        "rev-list",
+        "--left-right",
+        "--count",
+        `${upstream.ref}...refs/heads/${base}`,
+      ])
+    );
+    const state = {
+      ahead: counts.ahead,
+      behind: counts.behind,
+      upstream: upstream.name,
+      ...(upstream.remote ? { remote: upstream.remote } : {}),
+    };
+    const skip = (reason: BaseSkipReason): BaseState => ({
+      ...state,
+      update: { kind: "skip", reason },
+    });
+    if (counts.behind === 0) {
+      return { ...state, update: { kind: "up-to-date" } };
+    }
+    if (counts.ahead > 0) {
+      return skip("diverged");
+    }
+    const checkedOut = (await this.currentBranch(p, ws)) === base;
+    if (checkedOut && !(await this.isClean(p, ws))) {
+      return skip("dirty");
+    }
+    if (!opts.dryRun) {
+      await this.git(
+        p,
+        ws,
+        checkedOut
+          ? ["merge", "--ff-only", "--quiet", upstream.ref]
+          : ["fetch", "--quiet", ".", `${upstream.ref}:refs/heads/${base}`]
+      );
+    }
+    return { ...state, update: { commits: counts.behind, kind: "ff" } };
+  }
+
+  /**
+   * The local `branch` next to `ref` (its base's upstream): its commits `ref` lacks, and `ref`'s commits it lacks,
+   * which is what the upstream gained since the branch was made.
+   */
+  async branchVsUpstream(
+    p: ExecTarget,
+    dir: string,
+    branch: string,
+    ref: string
+  ): Promise<{ ahead: number; behind: number }> {
+    return parseAheadBehind(
+      await this.git(p, dir, [
+        "rev-list",
+        "--left-right",
+        "--count",
+        `${ref}...refs/heads/${branch}`,
+      ])
+    );
+  }
+
   async branchRefs(p: ExecTarget, dir: string): Promise<BranchRef[]> {
     return parseBranchRefs(
       await this.git(p, dir, [
@@ -529,6 +682,13 @@ export class GitOps {
       "@{u}",
     ]);
     return r.exitCode === 0;
+  }
+
+  /** Commits on HEAD its upstream lacks (not pushed yet); undefined without an upstream. */
+  async unpushed(p: ExecTarget, dir: string): Promise<number | undefined> {
+    const r = await this.exec(p, dir, ["rev-list", "--count", "@{u}..HEAD"]);
+    const n = Number(r.stdout.trim());
+    return r.exitCode === 0 && Number.isFinite(n) ? n : undefined;
   }
 
   private async requireIdentity(p: ExecTarget, dir: string): Promise<void> {

@@ -2,9 +2,13 @@ import { Button } from "@opendevhub/ui/button";
 import { Skeleton } from "@opendevhub/ui/skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowDownIcon,
+  ArrowDownToLineIcon,
   ArrowRightIcon,
+  ArrowUpIcon,
   GitBranchIcon,
   PlayIcon,
+  RefreshCwIcon,
   SquareIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -12,6 +16,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import type {
+  BasePosition,
   CheckDef,
   CheckResult,
   ChecksView,
@@ -24,7 +29,8 @@ import type {
 import { taskHref } from "../../../shared/urls";
 import { Empty, muted } from "../../components/page";
 import { StatusDot, STATE_LABEL } from "../../components/status";
-import { envOfDirectory } from "../../derive";
+import { Tip } from "../../components/tip";
+import { envOfDirectory, relativeTime } from "../../derive";
 import type { Tone } from "../../derive";
 import { Link } from "../../routing";
 import { checkoutOf, checkoutRuntime } from "../checkouts/checkouts";
@@ -38,6 +44,9 @@ import { ChecksIcon, useChecks } from "../checks/checks-panel";
 import { checksQuery } from "../checks/checks-queries";
 import { localAiReviewRunning } from "../review/local-ai-review";
 import { reviewQuery } from "../review/review-queries";
+import { basePositionQuery, useFetchBase, usePullBase } from "./base-queries";
+import { positionRows, pullBlocked, upstreamCounts } from "./base-status";
+import { BranchPosition } from "./branch-position";
 import { useTaskPage } from "./task-context";
 import { diffStats } from "./tasks";
 
@@ -71,6 +80,16 @@ export const useVariantStatus = (view: ProjectView, variant: VariantView) => {
   };
   const reviewData: ReviewData | null | undefined = read(review);
   const checksData: ChecksView | null | undefined = read(checks);
+  const mainCheckout = checkout?.target === "";
+  const baseName = reviewData?.base?.name ?? "";
+  // A node's branch isn't in this machine's repository, so only its base is placed against the upstream.
+  const positionBranch =
+    mainCheckout || variant.node ? undefined : reviewData?.branch;
+  const position = useQuery({
+    ...basePositionQuery(projectId, baseName, positionBranch),
+    enabled: !!checkout && !!baseName,
+  });
+  const positionData: BasePosition | null | undefined = read(position);
   const env = checkout ? envOfDirectory(view, directory) : undefined;
   const runtime = checkout ? checkoutRuntime(view, directory) : undefined;
   return {
@@ -84,7 +103,11 @@ export const useVariantStatus = (view: ProjectView, variant: VariantView) => {
     containerState: runtime?.containerState,
     env,
     failing: checksData ? failedNames(checksData.run).length : 0,
+    mainCheckout,
     node: variant.node,
+    position: positionData,
+    positionBranch,
+    positionError: position.error?.message,
     review: reviewData,
     stats: reviewData ? diffStats(reviewData) : undefined,
   };
@@ -126,31 +149,122 @@ const CONTAINER_TONE: Record<ContainerState, Tone> = {
   stopping: "running",
 };
 
-const Target = ({ status }: { status: VariantStatus }) => {
+/** Where the variant's branch stands against the base's upstream, with fetch, Pull and the checkout's environment. */
+const Position = ({
+  projectId,
+  status,
+}: {
+  projectId: string;
+  status: VariantStatus;
+}) => {
   const state = status.containerState;
+  const { position, review, base } = status;
+  const pull = usePullBase(projectId, base ?? "", status.positionBranch);
+  let diagram: ReactNode = loading;
+  if (review === null) {
+    diagram = <p className={muted}>Couldn&apos;t read the branch.</p>;
+  } else if (review && !base) {
+    diagram = <p className={muted}>No base to compare with.</p>;
+  } else if (review && base && position !== undefined) {
+    diagram = (
+      <BranchPosition
+        label={`Where ${status.branch ?? "the branch"} stands against ${position?.upstream ?? base}`}
+        rows={positionRows({
+          base,
+          mainCheckout: status.mainCheckout,
+          ...(position ? { position } : {}),
+          review,
+          ...(status.branch ? { branch: status.branch } : {}),
+        })}
+      />
+    );
+  }
+  const blocked = position ? pullBlocked(position) : undefined;
+  const pullError = pull.error?.message;
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
-      <dt className="text-muted-foreground">Branch</dt>
-      <dd className="truncate font-mono text-xs leading-5">
-        {status.branch ?? "—"}
-      </dd>
-      <dt className="text-muted-foreground">Base</dt>
-      <dd className="truncate font-mono text-xs leading-5">
-        {status.review === undefined && status.checkout
-          ? loading
-          : (status.base ?? "—")}
-      </dd>
-      <dt className="text-muted-foreground">Container</dt>
-      <dd className="flex min-w-0 items-center gap-1.5">
-        {state && <StatusDot tone={CONTAINER_TONE[state]} />}
-        <span className="truncate">
-          {status.env ? "Own" : "Shared"}
-          {state && ` · ${STATE_LABEL[state]}`}
-        </span>
-      </dd>
-      <dt className="text-muted-foreground">Runs</dt>
-      <dd>{status.node ? `on ${status.node}` : "Locally"}</dd>
-    </dl>
+    <div className="flex flex-col gap-3">
+      {diagram}
+      {position && position.behind > 0 && (
+        <div className="flex flex-col gap-1">
+          <Tip
+            label={blocked ?? `Fast-forward ${base} to ${position.upstream}`}
+          >
+            {/* A disabled button gets no pointer events; the span carries the tooltip. */}
+            <span className="self-start" tabIndex={blocked ? 0 : undefined}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!!blocked || pull.isPending}
+                onClick={() => pull.mutate()}
+              >
+                <ArrowDownToLineIcon /> {pull.isPending ? "Pulling…" : "Pull"}
+              </Button>
+            </span>
+          </Tip>
+          {pullError && <p className="text-destructive text-xs">{pullError}</p>}
+        </div>
+      )}
+      {(position?.fetchError ?? status.positionError) && (
+        <p className="text-warn text-xs break-words">
+          {position?.fetchError
+            ? `Couldn't fetch ${position.remote ?? "the remote"}: ${position.fetchError}`
+            : status.positionError}
+        </p>
+      )}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+        <dt className="text-muted-foreground">Container</dt>
+        <dd className="flex min-w-0 items-center gap-1.5">
+          {state && <StatusDot tone={CONTAINER_TONE[state]} />}
+          <span className="truncate">
+            {status.env ? "Own" : "Shared"}
+            {state && ` · ${STATE_LABEL[state]}`}
+          </span>
+        </dd>
+        <dt className="text-muted-foreground">Runs</dt>
+        <dd>{status.node ? `on ${status.node}` : "Locally"}</dd>
+        {position?.remote && (
+          <>
+            <dt className="text-muted-foreground">Fetched</dt>
+            <dd>
+              {position.lastFetchAt === undefined
+                ? "never"
+                : relativeTime(position.lastFetchAt)}
+            </dd>
+          </>
+        )}
+      </dl>
+    </div>
+  );
+};
+
+/** Fetches the base's remote now, whatever the last fetch's age. */
+const FetchButton = ({
+  projectId,
+  status,
+}: {
+  projectId: string;
+  status: VariantStatus;
+}) => {
+  const fetch = useFetchBase(
+    projectId,
+    status.base ?? "",
+    status.positionBranch
+  );
+  if (!status.base) {
+    return null;
+  }
+  const remote = status.position?.remote ?? "the remote";
+  return (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      aria-label={`Fetch ${remote}`}
+      title={`Fetch ${remote}`}
+      disabled={fetch.isPending}
+      onClick={() => fetch.mutate()}
+    >
+      <RefreshCwIcon className={fetch.isPending ? "animate-spin" : undefined} />
+    </Button>
   );
 };
 
@@ -308,7 +422,7 @@ const Changes = (props: { status: VariantStatus; href: string }) => {
   );
 };
 
-/** The selected variant's Target, Checks and Changes; the rail on wide screens and the Checks tab on phones. */
+/** The selected variant's Position, Checks and Changes; the rail on wide screens and the Checks tab on phones. */
 export const TaskStatusPanel = ({ className }: { className?: string }) => {
   const { view, task, variant } = useTaskPage();
   const status = useVariantStatus(view, variant);
@@ -324,8 +438,11 @@ export const TaskStatusPanel = ({ className }: { className?: string }) => {
       aria-label="Variant status"
       className={cn("flex min-w-0 flex-col gap-4", className)}
     >
-      <RailSection title="Target">
-        <Target status={status} />
+      <RailSection
+        title="Position"
+        action={<FetchButton projectId={view.project.id} status={status} />}
+      >
+        <Position projectId={view.project.id} status={status} />
       </RailSection>
       <RailSection
         title="Checks"
@@ -351,13 +468,14 @@ export const TaskStatusPanel = ({ className }: { className?: string }) => {
   );
 };
 
-/** The end of the tab bar row from 768px up to 1440px: branch · environment · failing checks · Review. */
+/** The end of the tab bar row from 768px up to 1440px: branch · ↑ahead ↓behind · environment · failing checks · Review. */
 export const TaskStatusStrip = ({ className }: { className?: string }) => {
   const { view, task, variant } = useTaskPage();
   const status = useVariantStatus(view, variant);
   if (!status.checkout) {
     return null;
   }
+  const counts = upstreamCounts(status.position, status.mainCheckout);
   return (
     <div
       className={cn(
@@ -369,6 +487,24 @@ export const TaskStatusStrip = ({ className }: { className?: string }) => {
       <span className="max-w-48 truncate font-mono">
         {status.branch ?? "—"}
       </span>
+      {counts && (
+        <Tip
+          label={`${counts.ahead} commit${counts.ahead === 1 ? "" : "s"} ahead of ${counts.upstream}, ${counts.behind} behind`}
+        >
+          <span className="inline-flex shrink-0 items-center gap-1.5 tabular-nums">
+            <span className="inline-flex items-center">
+              <ArrowUpIcon className="size-3.5" aria-hidden />
+              <span className="sr-only">ahead </span>
+              {counts.ahead}
+            </span>
+            <span className="inline-flex items-center">
+              <ArrowDownIcon className="size-3.5" aria-hidden />
+              <span className="sr-only">behind </span>
+              {counts.behind}
+            </span>
+          </span>
+        </Tip>
+      )}
       <span aria-hidden>·</span>
       <span className="shrink-0">
         {status.env ? "own container" : "shared"}

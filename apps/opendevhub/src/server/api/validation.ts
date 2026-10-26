@@ -254,6 +254,11 @@ export const bodies = {
   localAiFindings: z.object({ directory: z.string(), sessionId: z.string() }),
   ocrSettings: z.object({ provider: ocrProvider, limits: ocrLimits }),
   personalization,
+  preferences: z.object({ updateBaseBeforeTask: z.boolean() }),
+  basePull: z.object({
+    base: z.string().max(250).optional(),
+    branch: z.string().max(250).optional(),
+  }),
   projectPersonalization: personalization.extend({
     inheritGlobal: z.boolean(),
   }),
@@ -499,6 +504,12 @@ export const queries = {
     startAt: text,
   }),
   usage: z.object({ day: text }),
+  /** A base branch's position; `fetch=1` fetches whatever the last fetch's age. */
+  basePosition: z.object({
+    base: z.string().max(250).optional(),
+    branch: z.string().max(250).optional(),
+    fetch: z.enum(["0", "1"]).optional(),
+  }),
   /** An environment's log: one source, its last `lines` lines (at most 2000). */
   envLogs: z.object({
     source: z.enum(["setup", "container", "opencode"]).default("setup"),

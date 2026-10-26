@@ -22,6 +22,7 @@ import type { EnvSetup, Environments } from "../environments/environments";
 import { cleanLogLine } from "../environments/log-buffer";
 import type { HubDeps, NodeKit } from "../environments/ports";
 import { UnavailableError } from "../errors";
+import { BasePositions } from "../git/base-position";
 import { InvalidRequestError, validateBranch } from "../git/worktrees";
 import type { NodeRepoLayout } from "../nodes/repo";
 import type { OpencodeClient } from "../opencode/client";
@@ -120,9 +121,11 @@ const message = (error: unknown): string =>
 export class CheckoutSetup {
   private readonly deps: HubDeps;
   private readonly envs: Environments;
-  constructor(deps: HubDeps, envs: Environments) {
+  private readonly bases: BasePositions;
+  constructor(deps: HubDeps, envs: Environments, bases?: BasePositions) {
     this.deps = deps;
     this.envs = envs;
+    this.bases = bases ?? new BasePositions(deps, envs);
   }
 
   /** Runs the job; when it fails as a whole, every slot that has no session and hasn't failed yet records why. */
@@ -186,9 +189,18 @@ export class CheckoutSetup {
       let remote:
         | { layout: NodeRepoLayout; base: string; notice?: string }
         | undefined;
+      let baseNotice: string | undefined;
       if (job.where === "worktree") {
         if (!remoteKit && !root?.mounted) {
           throw new UnavailableError(NO_WORKTREE_MOUNT);
+        }
+        if (!remoteKit) {
+          // Every variant branches from the same, freshly updated base; a failed update only leaves a notice.
+          for (const [i] of slots.entries()) {
+            step(i, { step: "base" });
+          }
+          const prepared = await this.bases.beforeTask(p, ws, job.base, label);
+          baseNotice = prepared.notice;
         }
         if (remoteKit) {
           for (const [i] of slots.entries()) {
@@ -231,6 +243,12 @@ export class CheckoutSetup {
         }
         if (remote?.notice) {
           result.notice = remote.notice;
+        }
+        if (baseNotice) {
+          result.notice = result.notice
+            ? `${result.notice}; ${baseNotice}`
+            : baseNotice;
+          sink.log(baseNotice);
         }
         slotResults.push(result);
         const onLine = (l: string) => this.slotLog(id, sink, l);

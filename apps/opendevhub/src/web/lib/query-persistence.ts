@@ -20,13 +20,14 @@ export const PERSIST_MAX_AGE_MS = DAY_MS;
 
 /**
  * Diffs can run to megabytes and the whole cache is rewritten on every change; the git setup is live machine state
- * that a restored copy would only show stale.
+ * that a restored copy would only show stale, and so is where a base stands against its upstream.
  */
 const UNPERSISTED_KEYS = new Set([
   "patch",
   "review",
   "local-links",
   "git-setup",
+  "base-position",
 ]);
 
 const shouldPersist = (query: Query): boolean =>

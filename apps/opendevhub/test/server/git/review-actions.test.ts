@@ -127,6 +127,16 @@ describe("review", () => {
       workspace: { branch: "main", clean: true },
     });
     expect(r.files.map((f) => f.file)).toStrictEqual(["a.ts", "b.ts"]);
+    expect(r.upstreamAhead).toBeUndefined();
+  });
+
+  it("counts the commits a pushed branch hasn't pushed yet", async () => {
+    const { hub, git } = await running();
+    git.isPushed.mockResolvedValue(true);
+    git.unpushed.mockResolvedValue(2);
+    const r = await hub.reviews.review(project.id, wt, { mode: "branch" });
+    expect(git.unpushed).toHaveBeenCalledWith(project, wt);
+    expect(r).toMatchObject({ pushed: true, upstreamAhead: 2 });
   });
 
   it("reads an image's old version at HEAD or the merge-base, and its new one from the working copy", async () => {

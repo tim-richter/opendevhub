@@ -296,6 +296,137 @@ describe("tasks", () => {
     );
   });
 
+  describe("updating the base first", () => {
+    const behind =
+      (reason?: "dirty" | "diverged") =>
+      async (
+        _p: Project,
+        _ws: string,
+        _base: string,
+        _o?: { dryRun?: boolean }
+      ) => ({
+        ahead: reason === "diverged" ? 2 : 0,
+        behind: 5,
+        remote: "origin",
+        update: reason
+          ? { kind: "skip" as const, reason }
+          : { commits: 5, kind: "ff" as const },
+        upstream: "origin/main",
+      });
+
+    it("fetches and fast-forwards a stale main once, before any variant's worktree", async () => {
+      const { hub, git, worktrees } = await started();
+      const order: string[] = [];
+      git.fetchPrune.mockImplementation(async () => {
+        order.push("fetch");
+      });
+      git.updateBase.mockImplementation(async (...args) => {
+        order.push(args[3]?.dryRun ? "dry-run" : "update");
+        return behind()(...args);
+      });
+      worktrees.add.mockImplementation(async (_p, a) => {
+        order.push(`add ${a.branch}`);
+        return {
+          branch: a.branch,
+          path: `/workspaces/demo.worktrees/${a.branch}`,
+        };
+      });
+      const res = await hub.tasks.createTask(project.id, {
+        branch: "cache",
+        prompt: "Add caching",
+        variants: [{}, {}],
+      });
+      expect(order).toStrictEqual([
+        "fetch",
+        "update",
+        "add cache-1",
+        "add cache-2",
+      ]);
+      expect(git.updateBase).toHaveBeenCalledWith(
+        project,
+        "/workspaces/demo",
+        "main",
+        { dryRun: false }
+      );
+      expect(res.variants.every((v) => !v.notice)).toBeTruthy();
+      expect(hub.environments.logLines(project.id)).toContain(
+        "task Add caching: fast-forwarded main to origin/main (5 commits)"
+      );
+    });
+
+    it("starts from local main with a notice when the main checkout is dirty", async () => {
+      const { hub, git, worktrees } = await started();
+      git.updateBase.mockImplementation(behind("dirty"));
+      const res = await hub.tasks.createTask(project.id, {
+        prompt: "Add caching",
+        variants: [{}, {}],
+      });
+      expect(worktrees.add).toHaveBeenCalledTimes(2);
+      expect(res.variants.map((v) => v.notice)).toStrictEqual([
+        "started from local main, which wasn't updated: the main checkout has uncommitted changes",
+        "started from local main, which wasn't updated: the main checkout has uncommitted changes",
+      ]);
+      expect(hub.environments.logLines(project.id)).toContain(
+        "task Add caching: main wasn't updated: the main checkout has uncommitted changes"
+      );
+    });
+
+    it("starts from local main with a notice when the fetch fails, and never moves the base", async () => {
+      const { hub, git, worktrees } = await started();
+      git.fetchPrune.mockRejectedValue(
+        new CommandError("git fetch origin timed out after 60 s")
+      );
+      git.updateBase.mockImplementation(behind());
+      const res = await hub.tasks.createTask(project.id, {
+        prompt: "Add caching",
+        variants: [{}],
+      });
+      expect(git.updateBase).toHaveBeenCalledWith(
+        project,
+        "/workspaces/demo",
+        "main",
+        { dryRun: true }
+      );
+      expect(worktrees.add).toHaveBeenCalledOnce();
+      expect(res.variants[0].sessionId).toBeDefined();
+      expect(res.variants[0].notice).toBe(
+        "started from local main, which wasn't updated: fetching origin failed"
+      );
+      expect(hub.environments.logLines(project.id)).toContain(
+        "task Add caching: main wasn't updated: fetching origin failed (git fetch origin timed out after 60 s); last fetched never"
+      );
+    });
+
+    it("only fetches when the setting is off", async () => {
+      const { hub, git, preferences } = await started();
+      preferences.mockReturnValue({ updateBaseBeforeTask: false });
+      git.updateBase.mockImplementation(behind());
+      const res = await hub.tasks.createTask(project.id, {
+        prompt: "Add caching",
+        variants: [{}],
+      });
+      expect(git.fetchPrune).toHaveBeenCalledOnce();
+      expect(git.updateBase).toHaveBeenCalledWith(
+        project,
+        "/workspaces/demo",
+        "main",
+        { dryRun: true }
+      );
+      expect(res.variants[0].notice).toBeUndefined();
+    });
+
+    it("leaves main-checkout and existing-worktree tasks alone", async () => {
+      const { hub, git } = await started();
+      await hub.tasks.createTask(project.id, {
+        prompt: "Explain the build",
+        variants: [{}],
+        where: "workspace",
+      });
+      expect(git.fetchPrune).not.toHaveBeenCalled();
+      expect(git.updateBase).not.toHaveBeenCalled();
+    });
+  });
+
   it("records a failed worktree on its variant and still refreshes the list", async () => {
     const { hub, worktrees, store } = await started();
     worktrees.add.mockRejectedValueOnce(
@@ -1416,6 +1547,9 @@ describe("starting tasks in the background", () => {
       node: "box",
       error: "pushing main to box failed: denied",
     });
+    // A node's task keeps branching from the local base as it is.
+    expect(s.git.fetchPrune).not.toHaveBeenCalled();
+    expect(s.git.updateBase).not.toHaveBeenCalled();
   });
 
   it("checks a remote task's base before answering", async () => {

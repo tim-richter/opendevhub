@@ -170,6 +170,8 @@ export interface ProjectRuntime {
   worktrees?: Worktree[];
   /** The personalization (features and dotfiles) the container was created with, as `creationSettings` gives it. */
   personalization?: string;
+  /** The main checkout's last successful fetch: which remote, and when. Kept in memory only. */
+  lastFetch?: { remote: string; at: number };
 }
 
 export type PublicRuntime = Omit<ProjectRuntime, "password" | "relayToken">;
@@ -293,6 +295,55 @@ export interface UpdateResult {
   conflicts?: string[];
 }
 
+/** Settings for the whole app, kept in config.json `preferences`. */
+export interface AppPreferences {
+  /** Fast-forward the local base to its upstream, when that's safe, before a task's worktrees are made. */
+  updateBaseBeforeTask: boolean;
+}
+
+export const DEFAULT_PREFERENCES: AppPreferences = {
+  updateBaseBeforeTask: true,
+};
+
+/**
+ * Why the local base wasn't (or wouldn't be) fast-forwarded to its upstream: uncommitted changes in the main checkout
+ * while it is on the base, local commits the upstream lacks, no upstream, a failed fetch, or the setting is off.
+ */
+export type BaseSkipReason =
+  | "dirty"
+  | "diverged"
+  | "no-upstream"
+  | "fetch-failed"
+  | "disabled";
+
+/** What bringing the local base up to its upstream does: fast-forwards it, nothing, or skips it and says why. */
+export type BaseUpdate =
+  | { kind: "ff"; commits: number }
+  | { kind: "up-to-date" }
+  | { kind: "skip"; reason: BaseSkipReason };
+
+/** A local base branch next to its upstream, as `GET /api/projects/:id/base-position` reports it. */
+export interface BasePosition {
+  base: string;
+  remote?: string;
+  /** Such as `origin/main`. */
+  upstream?: string;
+  /** Local base commits not on the upstream. */
+  ahead: number;
+  /** Upstream commits not on the local base. */
+  behind: number;
+  /** What starting a task (or Pull) would do. */
+  update: BaseUpdate;
+  /** Upstream commits since `branch` (the request's) was made from the base, when a branch was given. */
+  sinceBranch?: number;
+  /** The branch's commits the upstream lacks, when a branch was given. */
+  branchAhead?: number;
+  /** When the remote was last fetched successfully. */
+  lastFetchAt?: number;
+  /** Why the last fetch failed, when this read's fetch did. */
+  fetchError?: string;
+}
+
 export interface ReviewBase {
   name: string;
   source: "request" | "config" | "opencode" | "default";
@@ -354,6 +405,8 @@ export interface ReviewData {
   /** Uncommitted changes in the target. */
   dirty: boolean;
   pushed: boolean;
+  /** Commits not pushed to the branch's upstream yet, when it has one. */
+  upstreamAhead?: number;
   /** The main checkout, which "Merge into base" needs clean and on the base. */
   workspace: { branch?: string; clean: boolean };
   files: ReviewFile[];
@@ -1017,6 +1070,7 @@ export interface PendingConfigApproval {
 /** Where a starting task variant is: its worktree, its environment (approval, image, container), then its session. */
 export type StartStep =
   | "queued"
+  | "base"
   | "pushing"
   | "worktree"
   | "approval"

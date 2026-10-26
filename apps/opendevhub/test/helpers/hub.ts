@@ -14,6 +14,7 @@ import type {
   NodeKit,
   NodeKitsPort,
 } from "../../src/server/environments/ports";
+import type { BaseState, BaseUpstream } from "../../src/server/git/ops";
 import type {
   AddedWorktree,
   AddWorktreeArgs,
@@ -249,6 +250,10 @@ export function boxKit() {
       ),
       isClean: vi.fn(async (_t: ExecTarget, _dir: string) => true),
       isPushed: vi.fn(async (_t: ExecTarget, _dir: string) => false),
+      unpushed: vi.fn(
+        async (_t: ExecTarget, _dir: string): Promise<number | undefined> =>
+          undefined
+      ),
       commit: vi.fn(async (_t: ExecTarget, _dir: string, _m: string) => {}),
       update: vi.fn(
         async (
@@ -473,6 +478,10 @@ export function setup(
     })),
     isClean: vi.fn(async (_p: Project, _dir: string) => true),
     isPushed: vi.fn(async (_p: Project, _dir: string) => false),
+    unpushed: vi.fn(
+      async (_p: Project, _dir: string): Promise<number | undefined> =>
+        undefined
+    ),
     commit: vi.fn(async (_p: Project, _dir: string, _m: string) => {}),
     update: vi.fn(
       async (
@@ -500,6 +509,37 @@ export function setup(
       upstream: "origin/feature/pr",
     })),
     fetchPrune: vi.fn(async (_p: Project, _dir: string, _remote: string) => {}),
+    baseUpstream: vi.fn(
+      async (
+        _p: Project,
+        _dir: string,
+        base: string
+      ): Promise<BaseUpstream | undefined> => ({
+        name: `origin/${base}`,
+        ref: `refs/remotes/origin/${base}`,
+        remote: "origin",
+      })
+    ),
+    updateBase: vi.fn(
+      async (
+        _p: Project,
+        _ws: string,
+        _base: string,
+        _o?: { dryRun?: boolean }
+      ): Promise<BaseState> => ({
+        ahead: 0,
+        behind: 0,
+        remote: "origin",
+        update: { kind: "up-to-date" },
+        upstream: "origin/main",
+      })
+    ),
+    branchVsUpstream: vi.fn(
+      async (_p: Project, _dir: string, _b: string, _ref: string) => ({
+        ahead: 0,
+        behind: 0,
+      })
+    ),
     branchRefs: vi.fn(
       async (
         _p: Project,
@@ -760,6 +800,7 @@ export function setup(
   };
   const projectSettings = vi.fn((_p: Project): unknown => undefined);
   const personalization = vi.fn((): unknown => undefined);
+  const preferences = vi.fn(() => ({ updateBaseBeforeTask: true }));
   const mkdir = vi.fn(async (_dir: string) => {});
   const clientFor = vi.fn(
     (_ep: OpencodeEndpoint) => client as unknown as OpencodeClient
@@ -828,6 +869,7 @@ export function setup(
     envFiles,
     projectSettings,
     personalization,
+    preferences,
     credentials,
     agentTunnel,
     hostPortTunnel,
@@ -884,6 +926,7 @@ export function setup(
     envFiles,
     projectSettings,
     personalization,
+    preferences,
     credentials,
     agentTunnel,
     tunnels,

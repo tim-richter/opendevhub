@@ -1,4 +1,5 @@
 import { Button } from "@opendevhub/ui/button";
+import { Switch } from "@opendevhub/ui/switch";
 import { useQuery } from "@tanstack/react-query";
 import {
   CircleAlertIcon,
@@ -19,7 +20,13 @@ import type {
 } from "../../../shared/git-setup";
 import { fetchGitSetup, testSshHost } from "../../api";
 import { Chip, Note } from "../../components/page";
-import { SettingsBlock, SettingsHeader, SettingsList } from "./settings-layout";
+import { preferencesQuery, useSavePreferences } from "../tasks/base-queries";
+import {
+  SettingRow,
+  SettingsBlock,
+  SettingsHeader,
+  SettingsList,
+} from "./settings-layout";
 
 /** Not persisted (see query-persistence): it describes this machine right now, and is cheap to read again. */
 const GIT_SETUP_KEY = ["git-setup"] as const;
@@ -302,6 +309,38 @@ const Hosts = ({ setup }: { setup: GitSetup }) => (
   </SettingsBlock>
 );
 
+/** What opendevhub does with git when a task starts. */
+const Tasks = () => {
+  const query = useQuery(preferencesQuery());
+  const save = useSavePreferences();
+  const on =
+    (save.isPending ? save.variables : query.data)?.updateBaseBeforeTask ??
+    true;
+  return (
+    <SettingsBlock title="Tasks">
+      <SettingRow
+        label="Update the base branch before starting a task"
+        description="Fetches the base's remote, then fast-forwards the local base when the main checkout has no uncommitted changes. It never merges or rebases."
+        htmlFor="update-base-before-task"
+      >
+        <Switch
+          id="update-base-before-task"
+          checked={on}
+          disabled={!query.data || save.isPending}
+          onCheckedChange={(checked) =>
+            save.mutate({ updateBaseBeforeTask: checked })
+          }
+        />
+      </SettingRow>
+      {(query.error ?? save.error) && (
+        <div role="alert">
+          <Note error>{(query.error ?? save.error)?.message}</Note>
+        </div>
+      )}
+    </SettingsBlock>
+  );
+};
+
 export const GitSettings = () => {
   const query = useQuery({
     queryFn: fetchGitSetup,
@@ -346,6 +385,7 @@ export const GitSettings = () => {
           <Hosts setup={setup} />
         </>
       )}
+      <Tasks />
     </>
   );
 };

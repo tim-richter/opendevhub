@@ -11,6 +11,7 @@ import type {
 } from "../shared/personalization";
 import type { ProjectAppearance } from "../shared/project-appearance";
 import type {
+  AppPreferences,
   ProjectLinks,
   ProjectTeamView,
   SettingsScope,
@@ -30,6 +31,7 @@ import type { ProvenanceStore } from "./db/provenance";
 import type { TodoStore } from "./db/todos";
 import type { Checks } from "./environments/checks";
 import type { Environments } from "./environments/environments";
+import type { BasePositions } from "./git/base-position";
 import type { Checkouts } from "./git/checkouts";
 import type { Cleanup } from "./git/cleanup";
 import type { ReviewActions } from "./git/review-actions";
@@ -131,6 +133,7 @@ export interface DashboardHub {
     | "startDraft"
   >;
   permissions: Pick<SavedPermissions, "list" | "update" | "remove">;
+  bases: Pick<BasePositions, "position" | "pull">;
 }
 
 export type PushPort = Pick<
@@ -176,6 +179,11 @@ export interface DashboardDeps {
   personalization?: {
     get: () => PersonalizationView;
     save: (p: Personalization) => PersonalizationView;
+  };
+  /** Settings for the whole app. */
+  preferences?: {
+    get: () => AppPreferences;
+    save: (p: AppPreferences) => AppPreferences;
   };
   /** A project's own additions to the personalization, and whether its container needs a rebuild for them. */
   projectPersonalization?: {

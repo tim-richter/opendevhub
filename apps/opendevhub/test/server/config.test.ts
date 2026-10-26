@@ -16,6 +16,7 @@ import {
   FileForgeStore,
   FileProjectSettings,
   loadConfig,
+  readPreferences,
   validateRoots,
   saveConfig,
   stateDir,
@@ -207,6 +208,25 @@ describe("config personalization", () => {
     );
     saveConfig(dir, loadConfig(dir));
     expect(loadConfig(dir).personalization).toStrictEqual(personalization);
+  });
+});
+
+describe(readPreferences, () => {
+  it("updates the base before a task unless the user turned it off", () => {
+    expect(readPreferences(undefined)).toStrictEqual({
+      updateBaseBeforeTask: true,
+    });
+    expect(readPreferences({ updateBaseBeforeTask: "no" })).toStrictEqual({
+      updateBaseBeforeTask: true,
+    });
+    fs.writeFileSync(
+      path.join(dir, "config.json"),
+      JSON.stringify({ port: 1, preferences: { updateBaseBeforeTask: false } })
+    );
+    saveConfig(dir, loadConfig(dir));
+    expect(readPreferences(loadConfig(dir).preferences)).toStrictEqual({
+      updateBaseBeforeTask: false,
+    });
   });
 });
 

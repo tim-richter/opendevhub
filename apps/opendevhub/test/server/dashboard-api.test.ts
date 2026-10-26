@@ -62,6 +62,7 @@ import type {
   Project,
   SavedPermission,
   SavedPermissionsView,
+  BasePosition,
   SessionDetail,
   StoredAiReview,
   TaskResult,
@@ -322,6 +323,38 @@ function setup(webDir?: string) {
         pushedFrom: "host" as const,
         output: [],
       })),
+    },
+    bases: {
+      position: vi.fn(
+        async (
+          _id: string,
+          base: string | undefined,
+          _o?: { branch?: string; fetch?: boolean }
+        ): Promise<BasePosition> => ({
+          ahead: 0,
+          base: base ?? "main",
+          behind: 5,
+          lastFetchAt: 1000,
+          remote: "origin",
+          update: { commits: 5, kind: "ff" },
+          upstream: "origin/main",
+        })
+      ),
+      pull: vi.fn(
+        async (
+          _id: string,
+          base: string | undefined,
+          _o?: { branch?: string }
+        ): Promise<BasePosition> => ({
+          ahead: 0,
+          base: base ?? "main",
+          behind: 0,
+          lastFetchAt: 1000,
+          remote: "origin",
+          update: { kind: "up-to-date" },
+          upstream: "origin/main",
+        })
+      ),
     },
     permissions: {
       list: vi.fn(
@@ -1699,6 +1732,65 @@ describe("dashboard API", () => {
     ).toBe(400);
     expect((await put(app, own, body)).status).toBe(400);
     expect((await put(deps.app, global, body)).status).toBe(412);
+  });
+
+  it("reads and saves the app's preferences", async () => {
+    const deps = setup();
+    const preferences = {
+      get: vi.fn(() => ({ updateBaseBeforeTask: true })),
+      save: vi.fn((p: { updateBaseBeforeTask: boolean }) => p),
+    };
+    const app = createDashboardApp({ ...deps, preferences });
+    const put = (target: typeof app, body: unknown) =>
+      target.request("/api/settings/preferences", {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+    await expect(
+      (await app.request("/api/settings/preferences")).json()
+    ).resolves.toStrictEqual({ updateBaseBeforeTask: true });
+    const saved = await put(app, { updateBaseBeforeTask: false });
+    expect(saved.status).toBe(200);
+    expect(preferences.save).toHaveBeenCalledWith({
+      updateBaseBeforeTask: false,
+    });
+    expect((await put(app, { updateBaseBeforeTask: "off" })).status).toBe(400);
+    expect((await put(deps.app, { updateBaseBeforeTask: true })).status).toBe(
+      412
+    );
+  });
+
+  it("reads a base's position, fetching when asked, and pulls it", async () => {
+    const { app, hub } = setup();
+    const url = `/api/projects/${project.id}/base-position`;
+    const res = await app.request(`${url}?base=release/2.0&branch=fix&fetch=1`);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      base: "release/2.0",
+      update: { commits: 5, kind: "ff" },
+    });
+    expect(hub.bases.position).toHaveBeenCalledWith(project.id, "release/2.0", {
+      branch: "fix",
+      fetch: true,
+    });
+    await app.request(`${url}?base=`);
+    expect(hub.bases.position).toHaveBeenLastCalledWith(project.id, undefined, {
+      fetch: false,
+    });
+    expect((await app.request(`${url}?fetch=yes`)).status).toBe(400);
+    const pulled = await app.request(`${url}/pull`, {
+      body: JSON.stringify({ base: "main", branch: "fix" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    await expect(pulled.json()).resolves.toMatchObject({
+      behind: 0,
+      update: { kind: "up-to-date" },
+    });
+    expect(hub.bases.pull).toHaveBeenCalledWith(project.id, "main", {
+      branch: "fix",
+    });
   });
 
   it("serves the git setup and tests a host", async () => {

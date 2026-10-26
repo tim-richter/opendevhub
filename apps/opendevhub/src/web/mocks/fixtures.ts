@@ -32,6 +32,7 @@ import type {
 } from "../../shared/ocr";
 import type {
   AgentOption,
+  BasePosition,
   CandidateList,
   PullLinks,
   PullRequestRef,
@@ -906,6 +907,50 @@ export const reviewImage = (file: string, old: boolean): string => {
     .join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="200" viewBox="0 0 380 200"><rect width="380" height="200" fill="#fff"/><line x1="16" y1="140" x2="364" y2="140" stroke="#94a3b8" stroke-dasharray="4 4"/>${bars}</svg>`;
 };
+
+/** A base and its upstream, fetched two minutes ago: up to date unless the overrides say otherwise. */
+export const basePosition = (
+  base = "main",
+  overrides: Partial<BasePosition> = {}
+): BasePosition => ({
+  ahead: 0,
+  base,
+  behind: 0,
+  lastFetchAt: ago(2 * MINUTE),
+  remote: "origin",
+  update: { kind: "up-to-date" },
+  upstream: `origin/${base}`,
+  ...overrides,
+});
+
+/** The outcomes the new task dialog and the task page describe, by name. */
+export const basePositions = {
+  diverged: basePosition("main", {
+    ahead: 2,
+    behind: 3,
+    update: { kind: "skip", reason: "diverged" },
+  }),
+  dirty: basePosition("main", {
+    behind: 5,
+    update: { kind: "skip", reason: "dirty" },
+  }),
+  disabled: basePosition("main", {
+    behind: 5,
+    update: { kind: "skip", reason: "disabled" },
+  }),
+  offline: basePosition("main", {
+    behind: 0,
+    fetchError: "git fetch failed: Could not resolve host: github.com",
+    lastFetchAt: ago(2 * HOUR),
+    update: { kind: "skip", reason: "fetch-failed" },
+  }),
+  stale: basePosition("main", {
+    behind: 5,
+    lastFetchAt: ago(10_000),
+    update: { commits: 5, kind: "ff" },
+  }),
+  upToDate: basePosition("main"),
+} satisfies Record<string, BasePosition>;
 
 export const reviewData = (directory: string): ReviewData => ({
   ahead: 2,

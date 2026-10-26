@@ -1,7 +1,7 @@
 import preview from "../../../../.storybook/preview";
 import type { DashboardSnapshot, ProjectView } from "../../../shared/types";
 import { App } from "../../app";
-import { snapshot } from "../../mocks/fixtures";
+import { basePosition, snapshot } from "../../mocks/fixtures";
 import { mockApi } from "../../mocks/story";
 
 /** The widths the task page's layout changes at: phone, icon sidebar, laptop strip, wide rail. */
@@ -159,4 +159,143 @@ export const Laptop = meta.story({
 export const Wide = meta.story({
   globals: at("wide"),
   parameters: { route: "/p/billing-api/t/tsk_round" },
+});
+
+/** The snapshot with acme-web's project changed by `edit`. */
+const withWeb = (
+  edit: (view: ProjectView) => ProjectView
+): DashboardSnapshot => ({
+  ...snapshot,
+  projects: snapshot.projects.map((p) =>
+    p.project.id === "acme-web" ? edit(p) : p
+  ),
+});
+
+/** tsk_rate run in the main checkout instead of a worktree. */
+const inMainCheckout = withWeb((view) => ({
+  ...view,
+  tasks: view.tasks.map((t) =>
+    t.id === "tsk_rate"
+      ? {
+          ...t,
+          variants: t.variants.map((v) => ({
+            ...v,
+            branch: "main",
+            directory: view.runtime.workspaceFolder ?? "/workspaces/acme-web",
+          })),
+        }
+      : t
+  ),
+}));
+
+const LONG_BRANCH =
+  "feat/ACME-118-login-endpoint-needs-burst-protection-against-credential-stuffing";
+
+/** tsk_rate on a branch whose name is far wider than the rail. */
+const longBranch = withWeb((view) => ({
+  ...view,
+  runtime: {
+    ...view.runtime,
+    worktrees: view.runtime.worktrees?.map((w) =>
+      w.branch === "feat/rate-limit" ? { ...w, branch: LONG_BRANCH } : w
+    ),
+  },
+  tasks: view.tasks.map((t) =>
+    t.id === "tsk_rate"
+      ? {
+          ...t,
+          variants: t.variants.map((v) => ({ ...v, branch: LONG_BRANCH })),
+        }
+      : t
+  ),
+}));
+
+/** `origin/main` gained 4 commits since the branch was made, and local `main` lacks them: Pull is offered. */
+export const PositionBehind = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) =>
+      basePosition(base, {
+        behind: 4,
+        branchAhead: 2,
+        sinceBranch: 4,
+        update: { commits: 4, kind: "ff" },
+      }),
+    review: (d) => ({ ...d, ahead: 2, behind: 0, dirty: false }),
+  }),
+  globals: at("wide"),
+});
+
+/** The branch is 3 ahead of `origin/main` and 2 behind it; `main` itself is up to date. */
+export const PositionAheadAndBehind = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) =>
+      basePosition(base, { branchAhead: 3, sinceBranch: 2 }),
+    review: (d) => ({ ...d, ahead: 3, behind: 2, dirty: false }),
+  }),
+  globals: at("wide"),
+});
+
+/** The same at 1280px: no rail, and the strip reads ↑3 ↓2. */
+export const StripAheadAndBehind = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) =>
+      basePosition(base, { branchAhead: 3, sinceBranch: 2 }),
+    review: (d) => ({ ...d, ahead: 3, behind: 2, dirty: false }),
+  }),
+  globals: at("laptop"),
+});
+
+/** Pushed once, with 2 commits made since. */
+export const PositionUnpushed = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) => basePosition(base, { branchAhead: 5 }),
+    review: (d) => ({
+      ...d,
+      ahead: 5,
+      behind: 0,
+      dirty: false,
+      pushed: true,
+      upstreamAhead: 2,
+    }),
+  }),
+  globals: at("wide"),
+});
+
+/** The main checkout has uncommitted changes, so Pull is disabled and says why. */
+export const PositionDirty = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) =>
+      basePosition(base, {
+        behind: 4,
+        branchAhead: 2,
+        sinceBranch: 4,
+        update: { kind: "skip", reason: "dirty" },
+      }),
+  }),
+  globals: at("wide"),
+});
+
+/** A variant in the main checkout is on the base: only `origin/main` and `main`. */
+export const PositionMainCheckout = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) =>
+      basePosition(base, {
+        ahead: 1,
+        behind: 2,
+        update: { kind: "skip", reason: "diverged" },
+      }),
+    snapshot: inMainCheckout,
+  }),
+  globals: at("wide"),
+});
+
+/** A branch name far wider than the rail and the strip. */
+export const PositionLongBranch = meta.story({
+  beforeEach: mockApi({
+    basePosition: (base) =>
+      basePosition(base, { branchAhead: 1234, sinceBranch: 87 }),
+    review: (d) => ({ ...d, ahead: 1234, behind: 87, branch: LONG_BRANCH }),
+    snapshot: longBranch,
+  }),
+  globals: at("wide"),
 });

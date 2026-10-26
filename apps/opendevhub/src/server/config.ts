@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ForgeKind, NodeId } from "../shared/types";
+import { DEFAULT_PREFERENCES } from "../shared/types";
+import type { AppPreferences, ForgeKind, NodeId } from "../shared/types";
 import type { ForgeEntry } from "./git/forge";
 import { LOCAL_NODE } from "./nodes/host";
 
@@ -18,6 +19,8 @@ export interface Config {
   nodes?: NodeConfig[];
   /** What the user adds to every project's containers (features, setup command, dotfiles), validated where used. */
   personalization?: Record<string, unknown>;
+  /** Settings for the whole app (`AppPreferences`), validated where used. */
+  preferences?: Record<string, unknown>;
 }
 
 export const DEFAULT_PORT = 7777;
@@ -237,6 +240,23 @@ export const loadConfig = (dir: string): Config => {
     !Array.isArray(raw.personalization)
       ? { personalization: raw.personalization }
       : {}),
+    ...(raw.preferences &&
+    typeof raw.preferences === "object" &&
+    !Array.isArray(raw.preferences)
+      ? { preferences: raw.preferences }
+      : {}),
+  };
+};
+
+/** The stored preferences, with the default for each one missing or malformed. */
+export const readPreferences = (raw: unknown): AppPreferences => {
+  const stored =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return {
+    updateBaseBeforeTask:
+      typeof stored.updateBaseBeforeTask === "boolean"
+        ? stored.updateBaseBeforeTask
+        : DEFAULT_PREFERENCES.updateBaseBeforeTask,
   };
 };
 

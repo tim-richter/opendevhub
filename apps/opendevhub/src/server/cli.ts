@@ -14,6 +14,7 @@ import {
   configDir,
   nodeInUse,
   loadConfig,
+  readPreferences,
   removeNode,
   saveConfig,
   stateDir,
@@ -451,6 +452,7 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
     envFiles: new EnvFiles(path.join(stateDir(), "envs")),
     projectSettings: (p) => loadConfig(dir).projects?.[p.path],
     personalization: () => loadConfig(dir).personalization,
+    preferences: () => readPreferences(loadConfig(dir).preferences),
     worktrees: new Worktrees({
       containers,
       relativeLinks: process.env.OPENDEVHUB_RELATIVE_WORKTREES !== "0",
@@ -581,6 +583,14 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
         }
         const saved = readProjectAppearance(sharedSettings(project));
         store.setProjectAppearance(id, saved);
+        return saved;
+      },
+    },
+    preferences: {
+      get: () => readPreferences(loadConfig(dir).preferences),
+      save: (preferences) => {
+        const saved = readPreferences(preferences);
+        saveConfig(dir, { ...loadConfig(dir), preferences: { ...saved } });
         return saved;
       },
     },

@@ -427,6 +427,159 @@ describe("git", () => {
     });
   });
 
+  describe("updateBase", () => {
+    let origin: string;
+    let other: string;
+    const head = (dir: string, ref = "HEAD") =>
+      git(dir, "rev-parse", ref).trim();
+    /** Pushes `n` new commits to origin's main from a second clone, then fetches them into `repo`. */
+    const advanceOrigin = (n: number) => {
+      for (let i = 0; i < n; i += 1) {
+        write(other, `up${i}.txt`, `${i}\n`);
+        commitAll(other, `up ${i}`);
+      }
+      git(other, "push", "-q", "origin", "main");
+      git(repo, "fetch", "-q", "origin");
+    };
+
+    beforeEach(() => {
+      origin = path.join(tmp, "origin.git");
+      execFileSync("git", ["clone", "-q", "--bare", repo, origin], {
+        env: { ...process.env, ...env },
+      });
+      git(repo, "remote", "add", "origin", origin);
+      git(repo, "fetch", "-q", "origin");
+      git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main");
+      other = path.join(tmp, "other");
+      execFileSync("git", ["clone", "-q", origin, other], {
+        env: { ...process.env, ...env },
+      });
+      git(other, "config", "user.name", "o");
+      git(other, "config", "user.email", "o@o");
+    });
+
+    it("fast-forwards the checked-out base when the main checkout is clean", async () => {
+      advanceOrigin(2);
+      await expect(
+        ops.updateBase(project, repo, "main", { dryRun: true })
+      ).resolves.toStrictEqual({
+        ahead: 0,
+        behind: 2,
+        remote: "origin",
+        update: { commits: 2, kind: "ff" },
+        upstream: "origin/main",
+      });
+      expect(head(repo)).not.toBe(head(repo, "origin/main"));
+      await ops.updateBase(project, repo, "main");
+      expect(head(repo)).toBe(head(repo, "origin/main"));
+      expect(fs.existsSync(path.join(repo, "up1.txt"))).toBeTruthy();
+    });
+
+    it("moves a base that isn't checked out without touching the checkout", async () => {
+      git(repo, "checkout", "-q", "-b", "feature");
+      advanceOrigin(1);
+      const state = await ops.updateBase(project, repo, "main");
+      expect(state.update).toStrictEqual({ commits: 1, kind: "ff" });
+      expect(head(repo, "main")).toBe(head(repo, "origin/main"));
+      expect(fs.existsSync(path.join(repo, "up0.txt"))).toBeFalsy();
+      await expect(ops.currentBranch(project, repo)).resolves.toBe("feature");
+    });
+
+    it("leaves a dirty checked-out base alone", async () => {
+      advanceOrigin(1);
+      write(repo, "a.txt", "changed\n");
+      const before = head(repo);
+      await expect(
+        ops.updateBase(project, repo, "main")
+      ).resolves.toMatchObject({
+        behind: 1,
+        update: { kind: "skip", reason: "dirty" },
+      });
+      expect(head(repo)).toBe(before);
+    });
+
+    it("leaves a diverged base alone", async () => {
+      advanceOrigin(3);
+      write(repo, "mine.txt", "x\n");
+      commitAll(repo, "mine 1");
+      write(repo, "mine2.txt", "x\n");
+      commitAll(repo, "mine 2");
+      const before = head(repo);
+      await expect(
+        ops.updateBase(project, repo, "main")
+      ).resolves.toMatchObject({
+        ahead: 2,
+        behind: 3,
+        update: { kind: "skip", reason: "diverged" },
+      });
+      expect(head(repo)).toBe(before);
+    });
+
+    it("finds <remote>/<base> without a configured upstream, and reports none otherwise", async () => {
+      git(repo, "branch", "-q", "--unset-upstream", "main");
+      advanceOrigin(1);
+      await expect(
+        ops.updateBase(project, repo, "main", { dryRun: true })
+      ).resolves.toMatchObject({
+        remote: "origin",
+        update: { commits: 1, kind: "ff" },
+        upstream: "origin/main",
+      });
+      git(repo, "branch", "-q", "solo");
+      await expect(
+        ops.updateBase(project, repo, "solo")
+      ).resolves.toStrictEqual({
+        ahead: 0,
+        behind: 0,
+        update: { kind: "skip", reason: "no-upstream" },
+      });
+      // A remote ref as the base isn't a local branch to move.
+      await expect(
+        ops.updateBase(project, repo, "origin/main")
+      ).resolves.toMatchObject({
+        update: { kind: "skip", reason: "no-upstream" },
+      });
+    });
+
+    it("reports an up-to-date base, also with local commits on top", async () => {
+      await expect(
+        ops.updateBase(project, repo, "main")
+      ).resolves.toMatchObject({
+        ahead: 0,
+        behind: 0,
+        update: { kind: "up-to-date" },
+      });
+      write(repo, "mine.txt", "x\n");
+      commitAll(repo, "mine");
+      await expect(
+        ops.updateBase(project, repo, "main")
+      ).resolves.toMatchObject({
+        ahead: 1,
+        behind: 0,
+        update: { kind: "up-to-date" },
+      });
+    });
+
+    it("counts the commits not pushed to the branch's upstream", async () => {
+      await expect(ops.unpushed(project, repo)).resolves.toBe(0);
+      write(repo, "mine.txt", "x\n");
+      commitAll(repo, "mine");
+      await expect(ops.unpushed(project, repo)).resolves.toBe(1);
+      git(repo, "checkout", "-q", "-b", "solo");
+      await expect(ops.unpushed(project, repo)).resolves.toBeUndefined();
+    });
+
+    it("counts what the upstream gained since a branch was made", async () => {
+      git(repo, "checkout", "-q", "-b", "task");
+      write(repo, "task.txt", "x\n");
+      commitAll(repo, "task");
+      advanceOrigin(4);
+      await expect(
+        ops.branchVsUpstream(project, repo, "task", "refs/remotes/origin/main")
+      ).resolves.toStrictEqual({ ahead: 1, behind: 4 });
+    });
+  });
+
   describe(parseBranchRefs, () => {
     it("reads names, upstreams and gone tracking", () => {
       const out =

@@ -181,6 +181,22 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           return deps.personalization.save(c.req.valid("json"));
         })
     )
+    .get("/api/settings/preferences", (c) =>
+      json(c, () => {
+        if (!deps.preferences) {
+          throw new UnavailableError("Preferences are not available");
+        }
+        return deps.preferences.get();
+      })
+    )
+    .put("/api/settings/preferences", validateJson(bodies.preferences), (c) =>
+      json(c, () => {
+        if (!deps.preferences) {
+          throw new UnavailableError("Preferences are not available");
+        }
+        return deps.preferences.save(c.req.valid("json"));
+      })
+    )
     .get("/api/projects/:id/personalization", (c) =>
       json(c, (id) => {
         if (!deps.projectPersonalization) {
@@ -776,6 +792,31 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           str(b.message) ?? ""
         );
       })
+    )
+    .get(
+      "/api/projects/:id/base-position",
+      validateQuery(queries.basePosition),
+      (c) =>
+        json(c, (id) => {
+          const q = c.req.valid("query");
+          return hub.bases.position(id, q.base || undefined, {
+            fetch: q.fetch === "1",
+            ...(q.branch ? { branch: q.branch } : {}),
+          });
+        })
+    )
+    .post(
+      "/api/projects/:id/base-position/pull",
+      validateJson(bodies.basePull),
+      (c) =>
+        json(c, (id) => {
+          const b = c.req.valid("json");
+          return hub.bases.pull(
+            id,
+            b.base || undefined,
+            b.branch ? { branch: b.branch } : {}
+          );
+        })
     )
     .post("/api/projects/:id/review/update", validateJson(bodies.update), (c) =>
       json(c, (id) => {

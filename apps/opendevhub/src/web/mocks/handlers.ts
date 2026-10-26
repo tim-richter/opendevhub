@@ -26,14 +26,18 @@ import type {
   ProjectPersonalization,
 } from "../../shared/personalization";
 import type {
+  AppPreferences,
+  BasePosition,
   DashboardSnapshot,
   ProjectLinks,
   ProjectTodo,
+  ReviewData,
   SavedPermission,
   SavedPermissionsView,
 } from "../../shared/types";
 import {
   activityPage,
+  basePosition,
   provenanceOf,
   candidates,
   checksView,
@@ -92,6 +96,11 @@ export interface MockOptions {
   ocrTest?: OcrTestResult;
   /** Every environment's saved permissions; removing and editing change this copy. */
   savedPermissions?: SavedPermissionsView;
+  /** What `GET base-position` answers for a base; up to date by default. Pull makes it up to date. */
+  basePosition?: (base: string) => BasePosition;
+  /** Changes every checkout's review data, e.g. its ahead/behind or pushed state. */
+  review?: (data: ReviewData) => ReviewData;
+  preferences?: AppPreferences;
 }
 
 const aiReview: AiReviewResult = {
@@ -130,6 +139,14 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     ocrTest = { ok: true },
   } = options;
   let ocr = options.ocr ?? ocrSettings;
+  let preferences: AppPreferences = options.preferences ?? {
+    updateBaseBeforeTask: true,
+  };
+  const pulled = new Set<string>();
+  const positionOf = (base: string): BasePosition =>
+    pulled.has(base)
+      ? basePosition(base)
+      : (options.basePosition?.(base) ?? basePosition(base));
   const saved = structuredClone(options.savedPermissions ?? savedPermissions());
   let personalization: Personalization = readPersonalization({
     features: { "ghcr.io/devcontainers/features/github-cli:1": {} },
@@ -508,6 +525,26 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.get("/api/push/browsers", () => HttpResponse.json([])),
     http.post("/api/push/unsubscribe", ok),
 
+    http.get("/api/settings/preferences", async () => {
+      await wait();
+      return HttpResponse.json(preferences);
+    }),
+    http.put("/api/settings/preferences", async ({ request }) => {
+      preferences = (await request.json()) as AppPreferences;
+      return HttpResponse.json(preferences);
+    }),
+    http.get("/api/projects/:id/base-position", async ({ request }) => {
+      await wait();
+      const base = new URL(request.url).searchParams.get("base") || "main";
+      return HttpResponse.json(positionOf(base));
+    }),
+    http.post("/api/projects/:id/base-position/pull", async ({ request }) => {
+      await delay(400);
+      const { base = "main" } = (await request.json()) as { base?: string };
+      pulled.add(base);
+      return HttpResponse.json(positionOf(base));
+    }),
+
     // Settings
     http.get("/api/settings/git", async () => {
       await wait();
@@ -576,7 +613,9 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
           turnReviewData(directory, query.get("from") ?? undefined)
         );
       }
-      const data = reviewData(directory);
+      const data = (options.review ?? ((d: ReviewData) => d))(
+        reviewData(directory)
+      );
       const file = query.get("file");
       if (file) {
         // One file's patch, as the server sends one that was too large for the list.

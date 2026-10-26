@@ -1,4 +1,9 @@
-import type { NodeId, Project, ProjectId } from "../../shared/types";
+import type {
+  AppPreferences,
+  NodeId,
+  Project,
+  ProjectId,
+} from "../../shared/types";
 import type { ChatStore } from "../db/chats";
 import type { CheckoutStore } from "../db/checkouts";
 import type { LinkStore } from "../db/links";
@@ -58,6 +63,7 @@ export type GitPort = Pick<
   | "aheadBehind"
   | "isClean"
   | "isPushed"
+  | "unpushed"
   | "commit"
   | "update"
   | "mergeInto"
@@ -67,6 +73,9 @@ export type GitPort = Pick<
   | "localBranches"
   | "remotes"
   | "fetchPrune"
+  | "baseUpstream"
+  | "updateBase"
+  | "branchVsUpstream"
   | "branchRefs"
   | "remoteHead"
   | "isAncestor"
@@ -188,6 +197,8 @@ export interface HubDeps {
   projectSettings?: (project: Project) => unknown;
   /** config.json's `personalization`: what the user adds to every project's containers. */
   personalization?: () => unknown;
+  /** The app's preferences; their defaults when absent. */
+  preferences?: () => AppPreferences;
   /** Git identity, known_hosts and git's ssh command in containers; skipped when absent. */
   credentials?: CredentialsPort;
   /** Books what each poll's sessions spent; skipped when absent (no usage ledger). */

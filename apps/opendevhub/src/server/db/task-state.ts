@@ -5,6 +5,7 @@ export const RESTART_ERROR = "interrupted: opendevhub restarted";
 /** Steps a variant passes through before its session is created. */
 const SETUP_STEPS: ReadonlySet<StartStep> = new Set([
   "queued",
+  "base",
   "pushing",
   "worktree",
   "approval",

@@ -26,6 +26,7 @@ import type {
 import type { ProjectColor } from "../shared/project-appearance";
 import type { StackId } from "../shared/stacks";
 import type {
+  AppPreferences,
   ChatStartRequest,
   CheckOverlay,
   CleanupItem,
@@ -1644,6 +1645,55 @@ export const fetchOcrLog = (id: string) =>
   read(
     api.ocr.runs[":id"].logs.$get({ param: { id } }),
     "Open Code Review progress"
+  );
+
+/** Settings for the whole app. */
+export const fetchPreferences = (signal?: AbortSignal) =>
+  read(
+    api.settings.preferences.$get(undefined, {
+      init: { cache: "no-store", signal },
+    }),
+    "preferences"
+  );
+
+export const savePreferences = (input: AppPreferences) =>
+  read(api.settings.preferences.$put({ json: input }), "save preferences");
+
+/**
+ * Where a base branch (the main checkout's own by default) stands against its upstream; fetches first when the last
+ * fetch is older than five minutes, or always with `fetch`. With `branch`, also what the upstream gained since it.
+ */
+export const fetchBasePosition = (
+  projectId: string,
+  opts: { base?: string; branch?: string; fetch?: boolean } = {},
+  signal?: AbortSignal
+) =>
+  read(
+    project["base-position"].$get(
+      {
+        param: projectParam(projectId),
+        query: {
+          ...(opts.base ? { base: opts.base } : {}),
+          ...(opts.branch ? { branch: opts.branch } : {}),
+          ...(opts.fetch ? { fetch: "1" as const } : {}),
+        },
+      },
+      { init: { cache: "no-store", signal } }
+    ),
+    "base position"
+  );
+
+/** Fast-forwards the base to its upstream when that's safe, and returns where it stands then. */
+export const pullBase = (
+  projectId: string,
+  opts: { base?: string; branch?: string } = {}
+) =>
+  read(
+    project["base-position"].pull.$post({
+      json: opts,
+      param: projectParam(projectId),
+    }),
+    "pull the base"
   );
 
 /** What the user adds to every project's containers: features, a setup command and dotfiles. */
