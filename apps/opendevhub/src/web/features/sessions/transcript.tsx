@@ -41,7 +41,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -367,6 +367,53 @@ const AgentItemView = ({
   );
 };
 
+/** What the agent is said to be doing while it works: a random one, changed every ten seconds. */
+const WORKING_VERBS = [
+  "Working",
+  "Pondering",
+  "Cogitating",
+  "Noodling",
+  "Tinkering",
+  "Mulling",
+  "Brewing",
+  "Conjuring",
+  "Percolating",
+  "Ruminating",
+  "Scheming",
+  "Whittling",
+  "Untangling",
+  "Spelunking",
+  "Wrangling",
+  "Simmering",
+  "Puzzling",
+  "Finagling",
+  "Hatching",
+  "Clauding",
+] as const;
+
+const VERB_CHANGE_MS = 10_000;
+
+const pickVerb = (current?: string) => {
+  const others = WORKING_VERBS.filter((v) => v !== current);
+  return others[Math.floor(Math.random() * others.length)];
+};
+
+const WorkingLine = () => {
+  const [verb, setVerb] = useState(() => pickVerb());
+  useEffect(() => {
+    const timer = setInterval(
+      () => setVerb((current) => pickVerb(current)),
+      VERB_CHANGE_MS
+    );
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+      <LoaderCircleIcon className="size-3.5 animate-spin" /> {verb}…
+    </p>
+  );
+};
+
 /**
  * A conversation's messages, oldest at the top: the user's as bubbles, the agent's text as markdown with its
  * reasoning and tool calls collapsed. `more` says older messages are left out and links to `openHref` for them.
@@ -404,11 +451,7 @@ const TranscriptRow = ({
     );
   }
   if (row.kind === "working") {
-    return (
-      <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-        <LoaderCircleIcon className="size-3.5 animate-spin" /> Working
-      </p>
-    );
+    return <WorkingLine />;
   }
   if (row.kind === "user") {
     return (
