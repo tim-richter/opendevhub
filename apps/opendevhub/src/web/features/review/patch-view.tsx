@@ -1,13 +1,45 @@
-import { MultiFileDiff, PatchDiff } from "@pierre/diffs/react";
+import {
+  MultiFileDiff,
+  PatchDiff,
+  WorkerPoolContext,
+} from "@pierre/diffs/react";
 import type {
   DiffLineAnnotation,
   FileDiffOptions,
   SelectedLineRange,
 } from "@pierre/diffs/react";
+import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { fileVersions } from "./review";
+
+const MAX_DIFF_WORKERS = 4;
+
+/**
+ * One pool for every diff on the page: parsing and highlighting run in workers instead of blocking the main
+ * thread, and results are cached, so reopening a diff doesn't highlight it again.
+ */
+const workerPool =
+  typeof Worker === "undefined"
+    ? undefined
+    : getOrCreateWorkerPoolSingleton({
+        highlighterOptions: {
+          langs: ["typescript", "tsx", "javascript", "json", "css", "markdown"],
+          theme: { dark: "pierre-dark", light: "pierre-light" },
+        },
+        poolOptions: {
+          poolSize: Math.max(
+            1,
+            Math.min(MAX_DIFF_WORKERS, (navigator.hardwareConcurrency || 2) - 1)
+          ),
+          workerFactory: () =>
+            new Worker(
+              new URL("@pierre/diffs/worker/worker.js", import.meta.url),
+              { type: "module" }
+            ),
+        },
+      });
 
 /** Diffs with syntax highlighting that follow the system's light or dark scheme, like the rest of the UI. */
 export const BASE_OPTIONS = {
@@ -86,13 +118,17 @@ export default function PatchView<A = undefined>(props: {
     renderHeaderPrefix: props.renderHeaderPrefix,
     selectedLines: dragged ?? props.selectedLines,
   };
-  return files ? (
-    <MultiFileDiff<A, undefined>
-      oldFile={files.oldFile}
-      newFile={files.newFile}
-      {...shared}
-    />
-  ) : (
-    <PatchDiff<A, undefined> patch={props.patch} {...shared} />
+  return (
+    <WorkerPoolContext.Provider value={workerPool}>
+      {files ? (
+        <MultiFileDiff<A, undefined>
+          oldFile={files.oldFile}
+          newFile={files.newFile}
+          {...shared}
+        />
+      ) : (
+        <PatchDiff<A, undefined> patch={props.patch} {...shared} />
+      )}
+    </WorkerPoolContext.Provider>
   );
 }
