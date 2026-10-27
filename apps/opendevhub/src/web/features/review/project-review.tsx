@@ -41,6 +41,7 @@ import type {
   PublishResult,
   ReviewFile,
   ReviewMode,
+  StageAction,
   UpdateResult,
 } from "../../../shared/types";
 import {
@@ -111,8 +112,8 @@ import {
 } from "./review-queries";
 import { ReviewSidebar } from "./review-sidebar";
 import { ReviewToolbar } from "./review-toolbar";
-import { pickSelection } from "./stage";
-import type { Selection } from "./stage";
+import { pickSelection, selectionAfter } from "./stage";
+import type { Selection, StageChange } from "./stage";
 import { ChangeSections, useStage } from "./stage-view";
 import type { DiffListProps } from "./stage-view";
 import { StepPanel } from "./step-panel";
@@ -267,7 +268,7 @@ const ReviewTarget = ({
   const [diffView, setDiffView] = useState(readDiffView);
   // The file whose diff is open: a file of the branch diff, or an entry of the unstaged or staged list.
   const [selectedFile, setSelectedFile] = useState<string>();
-  const [picked, setPicked] = useState<Selection>();
+  const [picked, setPicked] = useState<Selection | null>();
   // Uncommitted changes are decided hunk by hunk (kept or undone) and can be commented on in the same view.
   const stage = useStage(projectId, directory, shownMode === "working");
   const changeDiffView = (change: Partial<DiffView>) => {
@@ -456,6 +457,13 @@ const ReviewTarget = ({
 
   const showingUncommitted = shownMode === "working";
   const selection = pickSelection(stage.data, picked);
+  // Keeping or undoing the open file moves on to the next one of its list, or to no diff.
+  const changeStage = (stageAction: StageAction, what: StageChange) => {
+    if (stage.data) {
+      setPicked(selectionAfter(stage.data, selection, stageAction, what));
+    }
+    stage.change(stageAction, what);
+  };
   // One file at a time, as in other git clients: the first until another is picked.
   const branchFile =
     data?.files.find((f) => f.file === selectedFile) ?? data?.files[0];
@@ -797,7 +805,7 @@ const ReviewTarget = ({
                   selection={selection}
                   disabled={stage.busy}
                   onSelect={setPicked}
-                  change={stage.change}
+                  change={changeStage}
                 />
               ) : undefined
             }
@@ -816,7 +824,7 @@ const ReviewTarget = ({
                 await stage.commit(message);
                 setNotice("Committed.");
               }}
-              onKeepAll={() => stage.change("stage", {})}
+              onKeepAll={() => changeStage("stage", {})}
               onSuggest={() => suggestCommitMessage(projectId, directory)}
               onShowUncommitted={() => changeMode("working")}
               onComments={() => setDialog("comments")}
@@ -825,7 +833,7 @@ const ReviewTarget = ({
           <div className="flex min-w-0 flex-col gap-4">
             {showingUncommitted && (
               <ChangeSections
-                stage={stage}
+                stage={{ ...stage, change: changeStage }}
                 diffProps={diffProps}
                 selection={selection}
               />

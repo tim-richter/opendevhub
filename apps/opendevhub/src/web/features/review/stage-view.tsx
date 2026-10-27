@@ -114,7 +114,13 @@ export const ChangeSections = (props: {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {stage.error && <Note error>{stage.error.message}</Note>}
-      {!file && <p className={muted}>No uncommitted changes.</p>}
+      {!file && (
+        <p className={muted}>
+          {data.unstaged.length + data.staged.length === 0
+            ? "No uncommitted changes."
+            : "Select a file to see its changes."}
+        </p>
+      )}
       {file && (
         <ReviewDiffs
           // A new file starts with fresh diff state.

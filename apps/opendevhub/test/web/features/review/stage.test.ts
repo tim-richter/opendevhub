@@ -6,6 +6,7 @@ import {
   hunkCount,
   pickSelection,
   optimisticStage,
+  selectionAfter,
 } from "../../../../src/web/features/review/stage";
 
 const patch = `diff --git a/a.ts b/a.ts
@@ -103,11 +104,8 @@ describe(pickSelection, () => {
     });
   });
 
-  it("follows a file to the other list", () => {
-    expect(pickSelection(data, { file: "b.ts", staged: false })).toEqual({
-      file: "b.ts",
-      staged: true,
-    });
+  it("shows no diff when none is wanted", () => {
+    expect(pickSelection(data, null)).toBeUndefined();
   });
 
   it("falls back to the first file waiting for a decision", () => {
@@ -128,5 +126,58 @@ describe(pickSelection, () => {
     expect(
       pickSelection({ ...data, staged: [], unstaged: [] })
     ).toBeUndefined();
+  });
+});
+
+describe(selectionAfter, () => {
+  const at = (name: string) => ({ ...file, file: name });
+  const data = {
+    directory: "/d",
+    staged: [at("s.ts")],
+    unstaged: [at("a.ts"), at("b.ts"), at("c.ts")],
+  };
+
+  it("moves on to the next file of the list", () => {
+    expect(
+      selectionAfter(data, { file: "b.ts", staged: false }, "stage", {
+        paths: ["b.ts"],
+      })
+    ).toEqual({ file: "c.ts", staged: false });
+  });
+
+  it("goes back to the previous file when none is left after it", () => {
+    expect(
+      selectionAfter(data, { file: "c.ts", staged: false }, "stage", {
+        paths: ["c.ts"],
+      })
+    ).toEqual({ file: "b.ts", staged: false });
+  });
+
+  it("shows no diff when the list is empty", () => {
+    expect(
+      selectionAfter(data, { file: "c.ts", staged: false }, "stage", {})
+    ).toBeNull();
+  });
+
+  it("stays on a file that still has hunks", () => {
+    const selection = { file: "a.ts", staged: false };
+    expect(
+      selectionAfter(
+        { ...data, unstaged: [file] },
+        { file: "a.ts", staged: false },
+        "stage",
+        {
+          file: "a.ts",
+          hunk: 0,
+        }
+      )
+    ).toEqual(selection);
+  });
+
+  it("leaves a selection alone when the other list changes", () => {
+    const selection = { file: "s.ts", staged: true };
+    expect(selectionAfter(data, selection, "stage", { paths: ["a.ts"] })).toBe(
+      selection
+    );
   });
 });

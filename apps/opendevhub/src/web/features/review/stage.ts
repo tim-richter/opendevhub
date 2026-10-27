@@ -61,7 +61,7 @@ export const dropHunk = (patch: string, index: number): string | undefined => {
 export interface StageChange {
   file?: string;
   hunk?: number;
-  paths?: readonly string[];
+  paths?: string[];
 }
 
 const without = (
@@ -100,27 +100,51 @@ export interface Selection {
 }
 
 /**
- * The selection to show: the wanted one while it still has changes, else the same file in the other list (its
- * last hunk was just kept or unstaged), else the first file waiting for a decision, else the first kept one.
+ * The selection to show: the wanted one while it still has changes, else the first file waiting for a decision,
+ * else the first kept one. `null` is a wish to show no diff.
  */
 export const pickSelection = (
   data: StageData | undefined,
-  want?: Selection
+  want?: Selection | null
 ): Selection | undefined => {
-  if (!data) {
+  if (!data || want === null) {
     return undefined;
   }
-  const has = (files: ReviewFile[], file: string) =>
-    files.some((f) => f.file === file);
-  if (want) {
-    const { unstaged, staged } = data;
-    if (has(want.staged ? staged : unstaged, want.file)) {
-      return want;
-    }
-    if (has(want.staged ? unstaged : staged, want.file)) {
-      return { file: want.file, staged: !want.staged };
-    }
+  if (
+    want &&
+    (want.staged ? data.staged : data.unstaged).some(
+      (f) => f.file === want.file
+    )
+  ) {
+    return want;
   }
   const first = data.unstaged[0] ?? data.staged[0];
   return first && { file: first.file, staged: data.unstaged.length === 0 };
+};
+
+/**
+ * Where the selection goes once `action` has been done: it stays while its file has hunks left on its side,
+ * else it moves to the next file of that list, else the previous one, else to no diff at all.
+ */
+export const selectionAfter = (
+  data: StageData,
+  selection: Selection | undefined,
+  action: StageAction,
+  change: StageChange
+): Selection | null | undefined => {
+  if (!selection || selection.staged !== (action === "unstage")) {
+    return selection;
+  }
+  const files = selection.staged ? data.staged : data.unstaged;
+  const after = optimisticStage(data, action, change);
+  const left = selection.staged ? after.staged : after.unstaged;
+  if (left.some((f) => f.file === selection.file)) {
+    return selection;
+  }
+  const index = files.findIndex((f) => f.file === selection.file);
+  const remains = (f: ReviewFile) => left.some((l) => l.file === f.file);
+  const next =
+    files.slice(index + 1).find(remains) ??
+    files.slice(0, index).findLast(remains);
+  return next ? { file: next.file, staged: selection.staged } : null;
 };
