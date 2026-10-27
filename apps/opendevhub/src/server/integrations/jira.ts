@@ -13,6 +13,7 @@ import type {
   JiraBoard,
   JiraBoardColumn,
   JiraCatalog,
+  JiraComment,
   JiraEpic,
   JiraFilter,
   JiraProject,
@@ -74,6 +75,7 @@ interface Issue {
     project?: { name: string };
     labels?: string[];
     created?: string;
+    comment?: { comments?: unknown; total?: unknown } | null;
     updated: string;
     [custom: `customfield_${string}`]: unknown;
   };
@@ -192,6 +194,43 @@ export const ticketJql = (query: JiraTicketQuery): string => {
   const where = clauses.join(" AND ");
   return `${where ? `${where} ` : ""}ORDER BY ${raw.order || ORDER_JQL[query.sort]}`;
 };
+
+/** Comments are extra detail, so one Jira returns malformed is left out rather than failing the ticket. */
+const ticketComments = (raw: unknown): JiraComment[] =>
+  Array.isArray(raw)
+    ? (
+        raw as {
+          id?: unknown;
+          author?: { displayName?: unknown } | null;
+          body?: unknown;
+          created?: unknown;
+          updated?: unknown;
+        }[]
+      ).flatMap((c): JiraComment[] => {
+        if (
+          typeof c?.id !== "string" ||
+          c.id.length > 100 ||
+          typeof c.body !== "string" ||
+          typeof c.created !== "string"
+        ) {
+          return [];
+        }
+        const author = c.author?.displayName;
+        // Jira stamps `updated` a few milliseconds after `created` on new comments.
+        const edited =
+          typeof c.updated === "string" &&
+          Date.parse(c.updated) - Date.parse(c.created) > 1000;
+        return [
+          {
+            author: typeof author === "string" ? author : "Unknown user",
+            body: jiraToMarkdown(c.body),
+            createdAt: c.created,
+            id: c.id,
+            ...(edited ? { updatedAt: c.updated as string } : {}),
+          },
+        ];
+      })
+    : [];
 
 /** Jira Server/Data Center REST v2 with a personal access token (Bearer authentication). */
 export class Jira {
@@ -398,7 +437,7 @@ export class Jira {
     const epicFields = await this.epicFields(connection);
     const fields = [
       FIELDS,
-      "description,project,reporter,labels,created",
+      "description,project,reporter,labels,created,comment",
       epicFields.link,
     ].filter(Boolean);
     const issue = await this.json<Issue>(
@@ -426,8 +465,15 @@ export class Jira {
     ) {
       throw new JiraError("Jira returned invalid ticket details.", 502);
     }
+    const comments = ticketComments(f.comment?.comments);
+    const total = f.comment?.total;
     return {
       ...summary,
+      commentTotal:
+        Number.isSafeInteger(total) && (total as number) >= comments.length
+          ? (total as number)
+          : comments.length,
+      comments,
       createdAt: f.created,
       description: jiraToMarkdown(f.description ?? ""),
       instanceUrl: connection.url,

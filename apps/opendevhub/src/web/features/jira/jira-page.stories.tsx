@@ -26,6 +26,10 @@ export const KanbanBoardColumns = meta.story({
 
 export const Ticket = meta.story({ parameters: { route: "/jira/ACME-118" } });
 
+export const TicketWithoutComments = meta.story({
+  parameters: { route: "/jira/ACME-121" },
+});
+
 export const NotConfigured = meta.story({
   beforeEach: mockApi({ jira: integrationOff }),
 });

@@ -1830,7 +1830,56 @@ export const jiraTicket = (key: string): JiraTicket => {
     labels: ["security"],
     project: summary.key.split("-")[0],
     reporter: "Alex Kim",
+    ...jiraComments(key),
   };
+};
+
+const jiraComments = (
+  key: string
+): Pick<JiraTicket, "comments" | "commentTotal"> => {
+  if (key !== "ACME-118") {
+    return { commentTotal: 0, comments: [] };
+  }
+  const comments = [
+    {
+      author: "Alex Kim",
+      body: "Seeing roughly 400 req/s from a handful of IPs in last night's logs.",
+      createdAt: isoAgo(6 * DAY),
+      id: "10201",
+    },
+    {
+      author: "Jonas Weber",
+      body: "The gateway already has a token bucket we can reuse:\n\n```ts\nlimiter.consume(ip, 1)\n```\n\nShould we key it by IP or by account?",
+      createdAt: isoAgo(5 * DAY),
+      id: "10202",
+    },
+    {
+      author: "Tim Richter",
+      body: "By IP for now, account-based limits are tracked in **ACME-130**.",
+      createdAt: isoAgo(4 * DAY),
+      id: "10203",
+      updatedAt: isoAgo(3 * DAY),
+    },
+    {
+      author: "Priya Natarajan",
+      body: "Security review signed off on the 20 req/s threshold.",
+      createdAt: isoAgo(2 * DAY),
+      id: "10204",
+    },
+    {
+      author: "Jonas Weber",
+      body: "PR is up, the limiter now returns `Retry-After` too.",
+      createdAt: isoAgo(DAY),
+      id: "10205",
+    },
+    {
+      author: "Alex Kim",
+      body: "Thanks, I'll verify on staging once it's merged.",
+      createdAt: isoAgo(2 * HOUR),
+      id: "10206",
+    },
+  ];
+  return { commentTotal: comments.length, comments };
 };
 
 export const logLines: string[] = [

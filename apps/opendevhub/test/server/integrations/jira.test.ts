@@ -436,8 +436,59 @@ describe("Jira Server/Data Center API", () => {
       "/rest/api/2/issue/APP-1?fields="
     );
     await expect(jira.ticket("APP-1")).resolves.toMatchObject({
+      commentTotal: 0,
+      comments: [],
       description: "",
     });
+  });
+
+  it("loads a ticket's comments as Markdown, leaving out malformed ones", async () => {
+    await settings.save(configured);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      response(
+        issue("APP-1", {
+          comment: {
+            comments: [
+              {
+                author: { displayName: "Carol" },
+                body: "Looks *good*",
+                created: "2026-10-02T12:00:00.000Z",
+                id: "1",
+                updated: "2026-10-02T12:00:00.004Z",
+              },
+              { body: "No id", created: "2026-10-02T12:00:00Z" },
+              {
+                author: null,
+                body: "Edited later",
+                created: "2026-10-03T12:00:00Z",
+                id: "2",
+                updated: "2026-10-04T12:00:00Z",
+              },
+            ],
+            total: 7,
+          },
+        })
+      )
+    );
+    const jira = new Jira(settings, withFields(fetcher));
+    const ticket = await jira.ticket("APP-1");
+    expect(String(fetcher.mock.calls[0][0])).toContain(",comment");
+    expect(ticket.commentTotal).toBe(7);
+    expect(ticket.comments).toEqual([
+      {
+        author: "Carol",
+        body: "Looks **good**",
+        createdAt: "2026-10-02T12:00:00.000Z",
+        id: "1",
+      },
+      {
+        author: "Unknown user",
+        body: "Edited later",
+        createdAt: "2026-10-03T12:00:00Z",
+        id: "2",
+        updatedAt: "2026-10-04T12:00:00Z",
+      },
+    ]);
   });
 
   it("shows each ticket's epic by name and colour from Jira Software's epic fields", async () => {

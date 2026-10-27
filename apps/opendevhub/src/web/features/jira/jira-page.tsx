@@ -73,6 +73,7 @@ import { ProvenanceBreadcrumb } from "../activity/provenance-breadcrumb";
 import { PullRequestBadge } from "../forgejo/pull-request-badge";
 import { SettingsLink } from "../settings/settings-link";
 import { taskPath } from "../tasks/tasks";
+import { TicketComments } from "./ticket-comments";
 import { Assignee, EpicBadge } from "./ticket-labels";
 import { useJiraQuery, useTicketLinks } from "./use-jira";
 
@@ -1007,6 +1008,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                   </ul>
                 </Section>
               )}
+              <TicketComments ticket={data} />
             </div>
             <aside
               className="bg-muted/30 rounded-xl border p-5"

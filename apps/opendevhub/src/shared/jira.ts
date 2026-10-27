@@ -31,6 +31,16 @@ export interface JiraTicketSummary {
   updatedAt: string;
 }
 
+/** A comment on a ticket, its body converted from Jira markup to Markdown. */
+export interface JiraComment {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  /** Set when the comment was edited after it was posted. */
+  updatedAt?: string;
+}
+
 export interface JiraTicket extends JiraTicketSummary {
   instanceUrl: string;
   description: string;
@@ -38,6 +48,10 @@ export interface JiraTicket extends JiraTicketSummary {
   reporter?: string;
   labels: string[];
   createdAt: string;
+  /** Oldest first, as Jira returns them. */
+  comments: JiraComment[];
+  /** How many comments the ticket has, which may exceed those Jira returned. */
+  commentTotal: number;
 }
 
 /** Which tickets to list before the project, status and text filters narrow them down. */

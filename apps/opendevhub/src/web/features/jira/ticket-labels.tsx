@@ -58,6 +58,29 @@ const initials = (name: string): string => {
   return `${first}${last}`.toUpperCase() || "?";
 };
 
+/** A person's initials in the colour their name always gets; a dashed ring for nobody. */
+export const PersonAvatar = (props: {
+  name?: string;
+  size?: "sm" | "default";
+  className?: string;
+}) => {
+  const { name } = props;
+  return (
+    <Avatar size={props.size ?? "sm"} className={props.className} aria-hidden>
+      <AvatarFallback
+        className={cn(
+          "font-semibold tracking-tight group-data-[size=default]/avatar:text-xs group-data-[size=sm]/avatar:text-[0.625rem]",
+          name
+            ? cn("ring-1 ring-inset", tone(hashTone(name)))
+            : "border-muted-foreground/40 border border-dashed bg-transparent"
+        )}
+      >
+        {name ? initials(name) : ""}
+      </AvatarFallback>
+    </Avatar>
+  );
+};
+
 /** The assignee's initials and name, or a muted "Unassigned". */
 export const Assignee = (props: { name?: string; className?: string }) => {
   const { name } = props;
@@ -69,18 +92,7 @@ export const Assignee = (props: { name?: string; className?: string }) => {
         props.className
       )}
     >
-      <Avatar size="sm" aria-hidden>
-        <AvatarFallback
-          className={cn(
-            "font-semibold tracking-tight group-data-[size=sm]/avatar:text-[0.625rem]",
-            name
-              ? cn("ring-1 ring-inset", tone(hashTone(name)))
-              : "border-muted-foreground/40 border border-dashed bg-transparent"
-          )}
-        >
-          {name ? initials(name) : ""}
-        </AvatarFallback>
-      </Avatar>
+      <PersonAvatar name={name} />
       <span className="truncate">{name ?? "Unassigned"}</span>
     </span>
   );

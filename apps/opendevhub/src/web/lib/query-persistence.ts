@@ -12,7 +12,7 @@ const IDB_KEY = "opendevhub-query-cache";
  * Bump when a persisted response changes shape: the version only changes on release, so without this a dev build
  * (or anyone between releases) restores responses the new code can't read.
  */
-const CACHE_SHAPE = 2;
+const CACHE_SHAPE = 3;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** How long a cached response may be restored after a reload; queries must stay in memory as long. */
