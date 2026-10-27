@@ -422,6 +422,9 @@ class DiffBoundary extends Component<
   }
 }
 
+/** Matches the header @pierre/diffs draws on an open diff, so a closed one looks like the same card. */
+const FILE_HEADER = "flex min-h-11 items-center gap-2 px-4";
+
 const Stats = ({ file }: { file: ReviewFile }) => (
   <span className="ml-auto font-mono text-xs whitespace-nowrap">
     <span className="text-ok">+{file.additions}</span>{" "}
@@ -519,8 +522,8 @@ const DeferredFileDiff = (props: FileDiffProps) => {
         <FileDiff {...props} />
       ) : (
         <Card className="min-h-40 gap-0 overflow-hidden py-0">
-          <header className="bg-muted/50 flex items-center gap-2 px-3 py-1.5">
-            <span className="min-w-0 truncate font-mono text-sm">
+          <header className={FILE_HEADER}>
+            <span className="min-w-0 truncate font-mono text-xs">
               {props.file.file}
             </span>
             <Stats file={props.file} />
@@ -644,22 +647,8 @@ const FileDiff = (props: FileDiffProps) => {
     [tracksViewed, viewed, onViewed]
   );
 
-  // A collapsed diff shows only its header: @pierre/diffs parses and highlights the whole patch even when
-  // collapsed, which for a lockfile or a generated spec blocks the page for seconds.
-  if (patch !== undefined && !file.binary && collapsed) {
-    return (
-      <Card className={cn("gap-0 overflow-hidden py-0", diffFont)}>
-        <header className="bg-muted/50 flex items-center gap-2 px-3 py-1.5">
-          {toggle()}
-          <span className="min-w-0 truncate font-mono text-sm">
-            {file.file}
-          </span>
-          <Stats file={file} />
-          {viewedBox()}
-        </header>
-      </Card>
-    );
-  }
+  // A collapsed diff renders only @pierre/diffs' own header, so it looks like the open one; the lines aren't
+  // highlighted until it opens.
   if (patch !== undefined && !file.binary) {
     return (
       <Card className={cn("overflow-hidden py-0", diffFont)}>
@@ -673,6 +662,7 @@ const FileDiff = (props: FileDiffProps) => {
             annotations={annotations}
             selectedLines={selectedLines}
             renderAnnotation={renderAnnotation}
+            collapsed={collapsed}
             renderHeaderPrefix={toggle}
             renderHeaderMetadata={tracksViewed ? viewedBox : undefined}
           />
@@ -708,8 +698,8 @@ const FileDiff = (props: FileDiffProps) => {
   );
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <header className="bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-1.5">
-        <span className="font-mono text-sm">{file.file}</span>
+      <header className={cn(FILE_HEADER, "border-b")}>
+        <span className="font-mono text-xs">{file.file}</span>
         <Stats file={file} />
         {viewedBox()}
       </header>
