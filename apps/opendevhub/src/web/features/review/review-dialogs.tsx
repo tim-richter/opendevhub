@@ -1,4 +1,3 @@
-import { Alert, AlertDescription } from "@opendevhub/ui/alert";
 import { Button } from "@opendevhub/ui/button";
 import { Checkbox } from "@opendevhub/ui/checkbox";
 import {
@@ -18,105 +17,13 @@ import { Input } from "@opendevhub/ui/input";
 import { Label } from "@opendevhub/ui/label";
 import { Textarea } from "@opendevhub/ui/textarea";
 import { ChevronRightIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
-import { commitChanges, suggestCommitMessage } from "../../api";
 import { Choice } from "../../components/choice";
 import type { ChoiceOption } from "../../components/choice";
-import { acceptSuggestion, linesLabel } from "./review";
+import { linesLabel } from "./review";
 import type { ReviewComment } from "./review";
-
-const message = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
-
-/** Commits every change in the checkout. The agent suggests a message in the background; typing wins over it. */
-export const CommitDialog = (props: {
-  projectId: string;
-  directory: string;
-  onClose: () => void;
-  onCommitted: () => void;
-}) => {
-  const { projectId, directory } = props;
-  const [text, setText] = useState("");
-  const [generating, setGenerating] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const suggestion = useRef(0);
-  useEffect(() => {
-    const request = ++suggestion.current;
-    suggestCommitMessage(projectId, directory)
-      .then((s) =>
-        setText((current) =>
-          acceptSuggestion({
-            current,
-            latest: suggestion.current,
-            request,
-            suggestion: s,
-          })
-        )
-      )
-      .catch(() => undefined)
-      .finally(() => {
-        if (request === suggestion.current) {
-          setGenerating(false);
-        }
-      });
-    return () => {
-      suggestion.current += 1;
-    };
-  }, [projectId, directory]);
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    commitChanges(projectId, directory, text)
-      .then(() => {
-        props.onCommitted();
-        props.onClose();
-      })
-      .catch((err) => setError(message(err)))
-      .finally(() => setBusy(false));
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && props.onClose()}>
-      <DialogContent className="sm:max-w-xl">
-        <form className="flex flex-col gap-4" onSubmit={submit}>
-          <DialogHeader>
-            <DialogTitle>Commit</DialogTitle>
-            <DialogDescription>
-              Commits every uncommitted change in this checkout.
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            aria-label="Commit message"
-            rows={6}
-            value={text}
-            placeholder={
-              generating ? "Asking the agent for a message…" : "Commit message"
-            }
-            onChange={(e) => setText(e.target.value)}
-          />
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={props.onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!text.trim() || busy}>
-              {busy ? "Committing…" : "Commit"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 /** Confirms merging the branch into its base, optionally fast-forward only. */
 export const MergeDialog = (props: {

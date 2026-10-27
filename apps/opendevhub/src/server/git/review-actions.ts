@@ -10,6 +10,9 @@ import type {
   ReviewMode,
   ReviewTurn,
   SessionSummary,
+  StageAction,
+  StageData,
+  StageTarget,
   UpdateResult,
 } from "../../shared/types";
 import { USER } from "../db/events";
@@ -23,6 +26,7 @@ import type { RawFileDiff } from "../opencode/client";
 import type { Sessions } from "../sessions/sessions";
 import type { Checkouts } from "./checkouts";
 import { splitTitleBody } from "./forge";
+import { hunkPatch, splitDiff } from "./hunks";
 import {
   diffMode,
   isMessageId,
@@ -40,6 +44,11 @@ const COMMIT_PROMPT =
 const PUBLISH_PROMPT =
   "Write a pull request title on the first line, then a blank line, then a short description of this branch's changes. Reply with that text only.";
 const STRATEGIES: ReadonlySet<string> = new Set(["branch", "agit"]);
+const count = (patch: string, sign: "+" | "-"): number =>
+  patch
+    .split("\n")
+    .filter((l) => l.startsWith(sign) && !l.startsWith(`${sign}${sign}${sign}`))
+    .length;
 const REMOTE_NAME = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/u;
 
 /** The Review tab: what a checkout changed, and committing, updating, merging and publishing it. */
@@ -269,6 +278,109 @@ export class ReviewActions {
     } catch {
       return "";
     }
+  }
+
+  /** The index and the working tree as two diffs, for staging hunks. */
+  // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
+  async stageView(id: ProjectId, directory: string): Promise<StageData> {
+    this.envs.checkDirectory(id, directory);
+    return this.envs.withGitWhenFree(id, (p) =>
+      this.readStage(this.checkouts.gitFor(p, directory), directory)
+    );
+  }
+
+  private async readStage(
+    on: ReturnType<Checkouts["gitFor"]>,
+    directory: string
+  ): Promise<StageData> {
+    const { unstaged, staged } = await on.git.diffs(on.target, directory);
+    const raw = (diff: string): RawFileDiff[] =>
+      splitDiff(diff).map((f) => {
+        const patch = `${f.header}${f.hunks.join("")}`;
+        return {
+          additions: count(patch, "+"),
+          deletions: count(patch, "-"),
+          file: f.file,
+          patch,
+          status: f.status,
+        };
+      });
+    return {
+      directory,
+      staged: toReviewFiles(raw(staged), NO_LIMITS).files,
+      unstaged: toReviewFiles(raw(unstaged), NO_LIMITS).files,
+    };
+  }
+
+  /**
+   * Stages, unstages or discards one hunk, or every change of a file, or everything, and returns the view as it
+   * is afterwards. A hunk acts on the diff it came from (the index's for unstage, the working tree's otherwise); its
+   * position must match what the client saw, or the change is refused as stale.
+   */
+  // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
+  async stage(
+    id: ProjectId,
+    directory: string,
+    action: StageAction,
+    target?: StageTarget,
+    paths: readonly string[] = []
+  ): Promise<StageData> {
+    this.envs.checkDirectory(id, directory);
+    for (const path of [...paths, ...(target ? [target.file] : [])]) {
+      if (!isRepoPath(path)) {
+        throw new InvalidRequestError(`invalid path ${path}`);
+      }
+    }
+    return this.envs.withGitWhenFree(id, async (p) => {
+      const on = this.checkouts.gitFor(p, directory);
+      await this.envs.gitAction(id, `${action} in ${directory}`, async () => {
+        if (!target) {
+          await (action === "stage"
+            ? on.git.stageAll(on.target, directory, paths)
+            : on.git.unstageAll(on.target, directory, paths));
+          return;
+        }
+        const diffs = await on.git.diffs(
+          on.target,
+          directory,
+          action === "unstage" ? "staged" : "unstaged"
+        );
+        const patch = hunkPatch(
+          action === "unstage" ? diffs.staged : diffs.unstaged,
+          target.file,
+          target.hunk
+        );
+        if (patch === undefined) {
+          throw new InvalidRequestError(
+            `${target.file} changed since it was shown; reload the diff`
+          );
+        }
+        await on.git.applyHunk(on.target, directory, patch, action);
+      });
+      return this.readStage(on, directory);
+    });
+  }
+
+  /** Commits what is staged, and nothing else. */
+  async commitStaged(
+    id: ProjectId,
+    directory: string,
+    message: string
+  ): Promise<void> {
+    const msg = message.trim();
+    if (!msg) {
+      throw new InvalidRequestError("the commit message is empty");
+    }
+    this.envs.checkDirectory(id, directory);
+    await this.envs.withGitWhenFree(id, async (p) => {
+      const on = this.checkouts.gitFor(p, directory);
+      if (!(await on.git.hasStaged(on.target, directory))) {
+        throw new InvalidRequestError("nothing is staged");
+      }
+      await this.envs.gitAction(id, `commit staged in ${directory}`, () =>
+        on.git.commitStaged(on.target, directory, msg)
+      );
+    });
   }
 
   async commit(

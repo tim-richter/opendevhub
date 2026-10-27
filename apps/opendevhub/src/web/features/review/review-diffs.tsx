@@ -40,6 +40,8 @@ import { Note, diffFont } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import { Tip } from "../../components/tip";
 import { useMediaQuery } from "../../hooks/use-media-query";
+import { FileKeepButton, HunkButtons } from "./hunk-controls";
+import type { HunkControls } from "./hunk-controls";
 import { ImageDiff } from "./image-diff";
 import type { ImageUrl } from "./image-diff";
 import { ChangedFilesTree } from "./lazy-changed-files-tree";
@@ -62,6 +64,7 @@ import type {
   ReviewComment,
   ViewedFiles,
 } from "./review";
+import { hunkAnnotations } from "./stage";
 
 /** The tooltip trigger takes over `data-state`, so a toggle inside one shows its selection from `aria-checked`. */
 export const checkedItem =
@@ -287,6 +290,13 @@ export const ReviewDiffs = (props: {
   /** With `onViewed`, each diff has a Viewed checkbox; a viewed diff starts collapsed. */
   viewed?: ViewedFiles;
   onViewed?: (file: ReviewFile, viewed: boolean) => void;
+  /** With it, each hunk and file can be kept or undone. */
+  hunks?: HunkControls;
+  /** Leaves the file tree to the caller, which passes the file to scroll to as `selectedFile`. */
+  hideTree?: boolean;
+  selectedFile?: string;
+  /** Prefix of the diffs' element ids, so two lists on one page don't share them. */
+  idPrefix?: string;
   /** These three must be stable: annotations may keep the first ones they were rendered with. */
   onAdd: (file: string, anchor: LineAnchor, text: string) => void;
   onCancel: () => void;
@@ -296,7 +306,9 @@ export const ReviewDiffs = (props: {
   // Side-by-side diffs don't fit a phone.
   const view = phone ? { ...props.view, split: false } : props.view;
   useSeek(props.focus, props.files);
-  const [selectedFile, setSelectedFile] = useState<string>();
+  const idPrefix = props.idPrefix ?? "review-file";
+  const [pickedFile, setSelectedFile] = useState<string>();
+  const selectedFile = props.hideTree ? props.selectedFile : pickedFile;
   const selectedIndex = props.files.findIndex(
     (file) => file.file === selectedFile
   );
@@ -304,7 +316,7 @@ export const ReviewDiffs = (props: {
     if (selectedIndex === -1) {
       return;
     }
-    const target = document.getElementById(`review-file-${selectedIndex}`);
+    const target = document.getElementById(`${idPrefix}-${selectedIndex}`);
     if (!target) {
       return;
     }
@@ -325,49 +337,56 @@ export const ReviewDiffs = (props: {
       window.clearTimeout(timeout);
       observer.disconnect();
     };
-  }, [selectedIndex]);
+  }, [selectedIndex, idPrefix]);
   const tree = (
     <ChangedFilesTree files={props.files} onSelect={setSelectedFile} />
   );
+  const showTree = !props.hideTree && !props.view.hideFiles;
+  let treeSlot: ReactNode = null;
+  if (props.hideTree) {
+    treeSlot = null;
+  } else if (phone) {
+    treeSlot = (
+      <Card className="overflow-hidden py-0">
+        <details>
+          <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium">
+            {props.files.length} changed file
+            {props.files.length === 1 ? "" : "s"}
+          </summary>
+          <div className="border-t">{tree}</div>
+        </details>
+      </Card>
+    );
+  } else if (!props.view.hideFiles) {
+    treeSlot = (
+      <Card className="sticky top-[calc(var(--review-bar-top,0px)+var(--review-bar-height,3rem)+1rem)] overflow-hidden py-0">
+        {tree}
+      </Card>
+    );
+  }
   return (
     <div
       className={cn(
         "grid items-start gap-4",
-        !props.view.hideFiles &&
-          "md:grid-cols-[minmax(14rem,22rem)_minmax(0,1fr)]"
+        showTree && "md:grid-cols-[minmax(14rem,22rem)_minmax(0,1fr)]"
       )}
     >
-      {phone ? (
-        <Card className="overflow-hidden py-0">
-          <details>
-            <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium">
-              {props.files.length} changed file
-              {props.files.length === 1 ? "" : "s"}
-            </summary>
-            <div className="border-t">{tree}</div>
-          </details>
-        </Card>
-      ) : (
-        !props.view.hideFiles && (
-          <Card className="sticky top-[calc(var(--review-bar-top,0px)+var(--review-bar-height,3rem)+1rem)] overflow-hidden py-0">
-            {tree}
-          </Card>
-        )
-      )}
+      {treeSlot}
       <div className="flex min-w-0 flex-col gap-3">
         {props.files.map((f, i) =>
           props.imageUrl && f.binary && imageType(f.file) ? (
             <ImageDiff
               key={`${diffKey(f)}:${props.version ?? ""}`}
-              id={`review-file-${i}`}
+              id={`${idPrefix}-${i}`}
               file={f}
               imageUrl={props.imageUrl}
             />
           ) : (
             <DeferredFileDiff
               key={`${diffKey(f)}:${props.version ?? ""}`}
-              id={`review-file-${i}`}
+              id={`${idPrefix}-${i}`}
               file={f}
+              hunks={props.hunks}
               selected={selectedFile === f.file}
               viewed={props.viewed && isViewed(props.viewed, f)}
               onViewed={props.onViewed && ((on) => props.onViewed?.(f, on))}
@@ -459,6 +478,7 @@ interface FileDiffProps {
   id: string;
   file: ReviewFile;
   selected: boolean;
+  hunks?: HunkControls;
   /** Undefined when the review doesn't track viewed files. */
   viewed?: boolean;
   onViewed?: (viewed: boolean) => void;
@@ -561,10 +581,30 @@ const FileDiff = (props: FileDiffProps) => {
       props.onAnchor?.(anchorFromRange(patch, range));
     }
   });
-  const annotations = useMemo(
-    () => annotationsFor(props.comments, file.file, props.open, props.notes),
-    [props.comments, file.file, props.open, props.notes]
-  );
+  const { hunks } = props;
+  const keepStaged = hunks?.staged;
+  const keepDisabled = hunks?.disabled ?? true;
+  const annotations = useMemo(() => {
+    const own = annotationsFor(
+      props.comments,
+      file.file,
+      props.open,
+      props.notes
+    );
+    if (keepStaged === undefined) {
+      return own;
+    }
+    // The buttons' state travels in the annotation, so a change repaints them.
+    const buttons = hunkAnnotations(file, keepStaged).map((a) => ({
+      ...a,
+      metadata: {
+        disabled: keepDisabled,
+        kind: "hunk" as const,
+        target: a.metadata,
+      },
+    }));
+    return [...own, ...buttons];
+  }, [props.comments, file, props.open, props.notes, keepStaged, keepDisabled]);
   const selectedLines = useMemo(() => selectionFor(props.open), [props.open]);
   const renderAnnotation = useStableCallback(
     (a: DiffLineAnnotation<ReviewAnnotation>) => {
@@ -573,6 +613,15 @@ const FileDiff = (props: FileDiffProps) => {
           <div data-comment-stop={a.metadata.id} className="rounded-md">
             {props.renderNote?.(a.metadata.id)}
           </div>
+        );
+      }
+      if (a.metadata.kind === "hunk") {
+        return (
+          <HunkButtons
+            target={a.metadata.target}
+            disabled={a.metadata.disabled}
+            change={(action, target) => hunks?.change(action, target)}
+          />
         );
       }
       if (a.metadata.kind === "draft") {
@@ -646,6 +695,19 @@ const FileDiff = (props: FileDiffProps) => {
       tracksViewed ? <ViewedBox viewed={viewed} onChange={onViewed} /> : null,
     [tracksViewed, viewed, onViewed]
   );
+  const fileKeep = useCallback(
+    () => (hunks ? <FileKeepButton file={file.file} controls={hunks} /> : null),
+    [file.file, hunks]
+  );
+  const headerActions = useCallback(
+    () => (
+      <span className="flex items-center gap-3">
+        {fileKeep()}
+        {viewedBox()}
+      </span>
+    ),
+    [fileKeep, viewedBox]
+  );
 
   // A collapsed diff renders only @pierre/diffs' own header, so it looks like the open one; the lines aren't
   // highlighted until it opens.
@@ -664,7 +726,9 @@ const FileDiff = (props: FileDiffProps) => {
             renderAnnotation={renderAnnotation}
             collapsed={collapsed}
             renderHeaderPrefix={toggle}
-            renderHeaderMetadata={tracksViewed ? viewedBox : undefined}
+            renderHeaderMetadata={
+              tracksViewed || hunks ? headerActions : undefined
+            }
           />
         </DiffBoundary>
       </Card>
@@ -701,6 +765,7 @@ const FileDiff = (props: FileDiffProps) => {
       <header className={cn(FILE_HEADER, "border-b")}>
         <span className="font-mono text-xs">{file.file}</span>
         <Stats file={file} />
+        {fileKeep()}
         {viewedBox()}
       </header>
       {file.binary ? (

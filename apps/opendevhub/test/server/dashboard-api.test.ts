@@ -266,6 +266,17 @@ function setup(webDir?: string) {
       })),
     },
     reviews: {
+      stageView: vi.fn(async (_id: string, directory: string) => ({
+        directory,
+        staged: [],
+        unstaged: [],
+      })),
+      stage: vi.fn(async (_id: string, directory: string) => ({
+        directory,
+        staged: [],
+        unstaged: [],
+      })),
+      commitStaged: vi.fn(async () => undefined),
       review: vi.fn(
         async (
           _id: string,

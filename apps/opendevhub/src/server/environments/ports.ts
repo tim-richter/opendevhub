@@ -85,6 +85,12 @@ export type GitPort = Pick<
   | "commitsSince"
   | "diffStat"
   | "statusLines"
+  | "diffs"
+  | "applyHunk"
+  | "stageAll"
+  | "unstageAll"
+  | "commitStaged"
+  | "hasStaged"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;

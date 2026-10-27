@@ -7,8 +7,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@opendevhub/ui/dropdown-menu";
-import { Skeleton } from "@opendevhub/ui/skeleton";
-import { ToggleGroup, ToggleGroupItem } from "@opendevhub/ui/toggle-group";
 import {
   keepPreviousData,
   useMutation,
@@ -16,23 +14,14 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
-  ArrowDownIcon,
   ArrowDownToLineIcon,
-  ArrowUpIcon,
   BotIcon,
   ChevronDownIcon,
   DownloadIcon,
-  CircleDotIcon,
   ExternalLinkIcon,
-  GitBranchIcon,
-  GitCommitHorizontalIcon,
   GitCompareArrowsIcon,
-  GitForkIcon,
   GitMergeIcon,
   GitPullRequestArrowIcon,
-  LoaderCircleIcon,
-  MessageSquareIcon,
-  RefreshCwIcon,
   ScanSearchIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -46,8 +35,6 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
-
 import type { JiraTaskSource } from "../../../shared/jira";
 import type {
   ProjectView,
@@ -60,6 +47,7 @@ import {
   bringHome,
   fetchReview,
   reviewImageUrl,
+  suggestCommitMessage,
   mergeIntoBase,
   removeWorktree,
   sendPrompt,
@@ -68,7 +56,6 @@ import {
 } from "../../api";
 import { Empty, muted } from "../../components/page";
 import { ReviewSkeleton } from "../../components/skeletons";
-import { Tip } from "../../components/tip";
 import { workspaceFolderOf } from "../../derive";
 import { useNavigate } from "../../routing";
 import { useCheckoutContext } from "../checkouts/checkout-context";
@@ -85,7 +72,9 @@ import { ProjectSettingsDialog } from "../projects/project-settings-dialog";
 import { OCR_SECTION, useProjectOcr } from "../settings/ocr-settings";
 import { SettingsLink } from "../settings/settings-link";
 import { variantOf } from "../tasks/tasks";
+import { FileGroups } from "./file-groups";
 import { useLocalAiReview } from "./local-ai-review";
+import { gitBlockers, nextStep } from "./next-step";
 import { PublishDialog, usePublishInfo } from "./publish-dialog";
 import {
   aheadHint,
@@ -113,23 +102,20 @@ import type {
   ReviewComment,
   ViewedFiles,
 } from "./review";
-import {
-  BaseDialog,
-  CommentsDialog,
-  CommitDialog,
-  MergeDialog,
-} from "./review-dialogs";
-import {
-  checkedItem,
-  FilesToggle,
-  LayoutToggle,
-  ReviewDiffs,
-} from "./review-diffs";
+import { BaseDialog, CommentsDialog, MergeDialog } from "./review-dialogs";
+import { ReviewDiffs } from "./review-diffs";
 import {
   publishInfoQuery,
   refreshCheckout,
   reviewQuery,
 } from "./review-queries";
+import { ReviewSidebar } from "./review-sidebar";
+import { ReviewToolbar } from "./review-toolbar";
+import { pickSelection } from "./stage";
+import type { Selection } from "./stage";
+import { ChangeSections, useStage } from "./stage-view";
+import type { DiffListProps } from "./stage-view";
+import { StepPanel } from "./step-panel";
 
 // oxlint-disable-next-line complexity
 const ReviewTarget = ({
@@ -279,6 +265,11 @@ const ReviewTarget = ({
   );
   const [open, setOpen] = useState<{ file: string; anchor: LineAnchor }>();
   const [diffView, setDiffView] = useState(readDiffView);
+  // The file whose diff is open: a file of the branch diff, or an entry of the unstaged or staged list.
+  const [selectedFile, setSelectedFile] = useState<string>();
+  const [picked, setPicked] = useState<Selection>();
+  // Uncommitted changes are decided hunk by hunk (kept or undone) and can be commented on in the same view.
+  const stage = useStage(projectId, directory, shownMode === "working");
   const changeDiffView = (change: Partial<DiffView>) => {
     const next = { ...diffView, ...change };
     setDiffView(next);
@@ -449,52 +440,9 @@ const ReviewTarget = ({
     ),
   ] as string[];
 
-  let commitBlocker;
-  if (data) {
-    if (data.dirty) {
-      commitBlocker = undefined;
-    } else {
-      commitBlocker = "No uncommitted changes";
-    }
-  } else {
-    commitBlocker = "Loading…";
-  }
-  let updateBlocker;
-  if (data) {
-    if (!baseName || !data.branch) {
-      updateBlocker = "No base branch";
-    } else if (data.dirty) {
-      updateBlocker = "Commit the changes first";
-    } else if (data.behind === 0) {
-      updateBlocker = `Already up to date with ${baseName}`;
-    } else {
-      updateBlocker = undefined;
-    }
-  } else {
-    updateBlocker = "Loading…";
-  }
-  let mergeBlocker;
-  if (data) {
-    if (isWorktree) {
-      if (data.ahead === 0) {
-        mergeBlocker = "Nothing to merge";
-      } else if (data.dirty) {
-        mergeBlocker = "Commit the changes first";
-      } else if (data.workspace.clean) {
-        if (data.workspace.branch === baseName) {
-          mergeBlocker = undefined;
-        } else {
-          mergeBlocker = `The main checkout is on ${data.workspace.branch ?? "a detached HEAD"}, not ${baseName}`;
-        }
-      } else {
-        mergeBlocker = "The main checkout has uncommitted changes";
-      }
-    } else {
-      mergeBlocker = "The main checkout is the base";
-    }
-  } else {
-    mergeBlocker = "Loading…";
-  }
+  const blockers = gitBlockers(data, { baseName, isWorktree });
+  const hasPullRequest = !!publish.info?.pr;
+  const step = data ? nextStep(data, { baseName, hasPullRequest }) : undefined;
   const base = baseName ?? "base";
   const conflictInfo =
     conflicts?.conflicts && data?.branch && baseName
@@ -506,266 +454,167 @@ const ReviewTarget = ({
         }
       : undefined;
 
+  const showingUncommitted = shownMode === "working";
+  const selection = pickSelection(stage.data, picked);
+  // One file at a time, as in other git clients: the first until another is picked.
+  const branchFile =
+    data?.files.find((f) => f.file === selectedFile) ?? data?.files[0];
+
+  let primary;
+  if (step?.kind === "update") {
+    primary = {
+      blocker: blockers.update,
+      icon: <ArrowDownToLineIcon />,
+      label: step.title,
+      run: update,
+    };
+  } else if (step?.kind === "publish") {
+    primary = {
+      blocker: publish.blocker,
+      icon: <GitPullRequestArrowIcon />,
+      label: hasPullRequest ? "Update pull request…" : "Publish…",
+      run: () => setDialog("publish"),
+    };
+  }
+
+  const aiBusy = !!(ai.run && !["done", "failed"].includes(ai.run.stage));
+  const tools = (
+    <>
+      {hasChecks && (
+        <Button
+          variant="outline"
+          size="sm"
+          aria-pressed={checksOpen}
+          title={`${STATE_LABEL[checks.state]}. Click to ${checksOpen ? "hide" : "show"} them.`}
+          onClick={() => setChecksOpen((o) => !o)}
+        >
+          <ChecksIcon state={checks.state} />{" "}
+          <span className="max-sm:sr-only">Checks</span>
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading || !data?.files.length || aiBusy}
+          >
+            <SparklesIcon /> <span className="max-sm:sr-only">AI review</span>{" "}
+            <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-72">
+          <DropdownMenuItem onSelect={() => ai.start("agent")}>
+            <BotIcon /> Agent review
+          </DropdownMenuItem>
+          {ocr.data?.effective.configured && (
+            <DropdownMenuItem onSelect={() => ai.start("ocr")}>
+              <ScanSearchIcon /> Open Code Review
+            </DropdownMenuItem>
+          )}
+          {!ocr.data?.effective.configured &&
+            ocr.data?.override.mode === "custom" && (
+              <DropdownMenuItem onSelect={() => setProjectSettings(true)}>
+                <ScanSearchIcon /> Set up Open Code Review…
+              </DropdownMenuItem>
+            )}
+          {!ocr.data?.effective.configured &&
+            ocr.data?.override.mode !== "custom" && (
+              <DropdownMenuItem asChild>
+                <SettingsLink section={OCR_SECTION}>
+                  <ScanSearchIcon /> Set up Open Code Review…
+                </SettingsLink>
+              </DropdownMenuItem>
+            )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ProjectSettingsDialog
+        view={view}
+        open={projectSettings}
+        onOpenChange={setProjectSettings}
+      />
+    </>
+  );
+
+  const more = (
+    <>
+      <GitItem
+        icon={<ArrowDownToLineIcon />}
+        label={`Update from ${base}`}
+        blocker={blockers.update}
+        onSelect={update}
+      />
+      <GitItem
+        icon={<GitMergeIcon />}
+        label={`Merge into ${base}…`}
+        blocker={blockers.merge}
+        onSelect={() => setDialog("merge")}
+      />
+      {remoteNode && (
+        <GitItem
+          icon={<DownloadIcon />}
+          label={`Bring home from ${remoteNode}`}
+          blocker={data ? undefined : "Loading…"}
+          onSelect={fetchHome}
+        />
+      )}
+      <DropdownMenuSeparator />
+      <GitItem
+        icon={<GitPullRequestArrowIcon />}
+        label={hasPullRequest ? "Update pull request…" : "Publish…"}
+        blocker={publish.blocker}
+        onSelect={() => setDialog("publish")}
+      />
+      {publish.info?.pr && (
+        <DropdownMenuItem asChild>
+          <a href={publish.info.pr} target="_blank" rel="noreferrer">
+            <ExternalLinkIcon /> View pull request
+          </a>
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuSeparator />
+      <GitItem
+        icon={<GitCompareArrowsIcon />}
+        label="Compare with…"
+        onSelect={() => setDialog("base")}
+      />
+    </>
+  );
+
+  // What both ways of showing the changes pass to their diffs.
+  const diffProps: DiffListProps = {
+    comments,
+    notes: aiNotes,
+    onAdd: addLineComment,
+    onAnchor: openLineComment,
+    onCancel: cancelLineComment,
+    onDelete: deleteComment,
+    open,
+    placeholder: "Comment for the agent…",
+    renderNote: (id) => suggestionCard(id, true),
+    version: `${shownMode}:${baseName}`,
+    view: diffView,
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {[...ticketSources].map(([id, source]) => (
         <JiraSourceCard key={id} source={source} />
       ))}
-      <div
-        ref={toolbar}
-        className="bg-background/95 sticky top-[var(--review-bar-top,0px)] z-20 -mx-[var(--review-gutter,1rem)] flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-[var(--review-gutter,1rem)] py-2 backdrop-blur max-md:top-[var(--review-bar-top,45px)] md:-mx-[var(--review-gutter,2rem)] md:px-[var(--review-gutter,2rem)]"
-      >
-        <FilesToggle view={diffView} onChange={changeDiffView} />
-        {!data && !error && <Skeleton className="h-5 w-48" />}
-        {data && (
-          <div className="contents text-sm">
-            <Tip label="Current branch">
-              <span className="inline-flex min-w-0 items-center gap-1 font-medium">
-                <GitBranchIcon className="text-muted-foreground size-4 shrink-0" />
-                <span className="truncate">
-                  {data.branch ?? "detached HEAD"}
-                </span>
-              </span>
-            </Tip>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              aria-label="Changes shown"
-              value={data.mode}
-              onValueChange={(v) => v && changeMode(v as ReviewMode)}
-            >
-              <Tip label="Uncommitted changes, like git diff">
-                <ToggleGroupItem
-                  className={cn(checkedItem, "font-normal")}
-                  value="working"
-                >
-                  Uncommitted
-                </ToggleGroupItem>
-              </Tip>
-              <Tip
-                label={
-                  data.base
-                    ? `Everything since ${base} (from ${data.base.source}), committed or not.${data.mode === "branch" ? " Click to change the base." : ""}`
-                    : "No base branch to compare with"
-                }
-              >
-                <ToggleGroupItem
-                  className={cn(checkedItem, "font-normal")}
-                  value="branch"
-                  aria-label={`Compare with ${base}`}
-                  disabled={!data.base}
-                  onClick={() => data.mode === "branch" && setDialog("base")}
-                >
-                  <GitCompareArrowsIcon /> {base}
-                </ToggleGroupItem>
-              </Tip>
-            </ToggleGroup>
-            <Tip
-              label={`${data.ahead} commit${data.ahead === 1 ? "" : "s"} ahead of ${base}, ${data.behind} behind`}
-            >
-              <span className="text-muted-foreground inline-flex items-center gap-1.5 tabular-nums">
-                <span className="inline-flex items-center">
-                  <ArrowUpIcon className="size-3.5" />
-                  {data.ahead}
-                </span>
-                <span className="inline-flex items-center">
-                  <ArrowDownIcon className="size-3.5" />
-                  {data.behind}
-                </span>
-              </span>
-            </Tip>
-            {data.dirty && (
-              <Tip label="Uncommitted changes">
-                <span className="text-warn inline-flex items-center gap-1">
-                  <CircleDotIcon className="size-3.5" />{" "}
-                  <span className="max-sm:sr-only">uncommitted</span>
-                </span>
-              </Tip>
-            )}
-            {busy && (
-              <span className="text-muted-foreground inline-flex items-center gap-1">
-                <LoaderCircleIcon className="size-3.5 animate-spin" /> {busy}…
-              </span>
-            )}
-          </div>
-        )}
-        <div className="ml-auto flex items-center gap-1.5">
-          {!!data?.files.length && (
-            <Tip label="Files marked viewed">
-              <span className="text-muted-foreground px-1 text-sm whitespace-nowrap tabular-nums">
-                {viewedCount}/{data.files.length}
-                <span className="max-sm:sr-only"> viewed</span>
-              </span>
-            </Tip>
-          )}
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            size="sm"
-            aria-label="Lines shown"
-            value={diffView.fullFile ? "full" : "changes"}
-            onValueChange={(v) =>
-              v && changeDiffView({ fullFile: v === "full" })
-            }
-          >
-            <Tip label="Only changes, with a few lines around them">
-              <ToggleGroupItem
-                className={cn(checkedItem, "px-2.5 font-normal")}
-                value="changes"
-              >
-                Changes
-              </ToggleGroupItem>
-            </Tip>
-            <Tip label="Full file">
-              <ToggleGroupItem
-                className={cn(checkedItem, "px-2.5 font-normal")}
-                value="full"
-              >
-                Full file
-              </ToggleGroupItem>
-            </Tip>
-          </ToggleGroup>
-          <LayoutToggle view={diffView} onChange={changeDiffView} />
-          {hasChecks && (
-            <Tip
-              label={`${STATE_LABEL[checks.state]}. Click to ${checksOpen ? "hide" : "show"} them.`}
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                aria-pressed={checksOpen}
-                onClick={() => setChecksOpen((o) => !o)}
-              >
-                <ChecksIcon state={checks.state} />{" "}
-                <span className="max-sm:sr-only">Checks</span>
-              </Button>
-            </Tip>
-          )}
-          <Tip label="Comments for the agent">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label="Comments for the agent"
-              onClick={() => setDialog("comments")}
-            >
-              <MessageSquareIcon /> {comments.length}
-            </Button>
-          </Tip>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={
-                  loading ||
-                  !data?.files.length ||
-                  !!(ai.run && !["done", "failed"].includes(ai.run.stage))
-                }
-              >
-                <SparklesIcon /> AI review <ChevronDownIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72">
-              <DropdownMenuItem onSelect={() => ai.start("agent")}>
-                <BotIcon /> Agent review
-              </DropdownMenuItem>
-              {ocr.data?.effective.configured && (
-                <DropdownMenuItem onSelect={() => ai.start("ocr")}>
-                  <ScanSearchIcon /> Open Code Review
-                </DropdownMenuItem>
-              )}
-              {!ocr.data?.effective.configured &&
-                ocr.data?.override.mode === "custom" && (
-                  <DropdownMenuItem onSelect={() => setProjectSettings(true)}>
-                    <ScanSearchIcon /> Set up Open Code Review…
-                  </DropdownMenuItem>
-                )}
-              {!ocr.data?.effective.configured &&
-                ocr.data?.override.mode !== "custom" && (
-                  <DropdownMenuItem asChild>
-                    <SettingsLink section={OCR_SECTION}>
-                      <ScanSearchIcon /> Set up Open Code Review…
-                    </SettingsLink>
-                  </DropdownMenuItem>
-                )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <ProjectSettingsDialog
-            view={view}
-            open={projectSettings}
-            onOpenChange={setProjectSettings}
-          />
-          <DropdownMenu>
-            <Tip label="Commit, update, merge and publish">
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" disabled={!!busy}>
-                  <GitForkIcon /> Git <ChevronDownIcon />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tip>
-            <DropdownMenuContent align="end" className="w-64">
-              <GitItem
-                icon={<GitCommitHorizontalIcon />}
-                label="Commit…"
-                blocker={commitBlocker}
-                onSelect={() => setDialog("commit")}
-              />
-              <GitItem
-                icon={<ArrowDownToLineIcon />}
-                label={`Update from ${base}`}
-                blocker={updateBlocker}
-                onSelect={update}
-              />
-              <GitItem
-                icon={<GitMergeIcon />}
-                label={`Merge into ${base}…`}
-                blocker={mergeBlocker}
-                onSelect={() => setDialog("merge")}
-              />
-              {remoteNode && (
-                <GitItem
-                  icon={<DownloadIcon />}
-                  label={`Bring home from ${remoteNode}`}
-                  blocker={data ? undefined : "Loading…"}
-                  onSelect={fetchHome}
-                />
-              )}
-              <DropdownMenuSeparator />
-              <GitItem
-                icon={<GitPullRequestArrowIcon />}
-                label={publish.info?.pr ? "Update pull request…" : "Publish…"}
-                blocker={publish.blocker}
-                onSelect={() => setDialog("publish")}
-              />
-              {publish.info?.pr && (
-                <DropdownMenuItem asChild>
-                  <a href={publish.info.pr} target="_blank" rel="noreferrer">
-                    <ExternalLinkIcon /> View pull request
-                  </a>
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <GitItem
-                icon={<GitCompareArrowsIcon />}
-                label="Compare with…"
-                onSelect={() => setDialog("base")}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Tip label="Refresh">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Refresh"
-              disabled={loading}
-              onClick={refresh}
-            >
-              <RefreshCwIcon className={cn(loading && "animate-spin")} />
-            </Button>
-          </Tip>
-        </div>
-      </div>
+      <ReviewToolbar
+        barRef={toolbar}
+        data={data}
+        hasError={!!error}
+        base={base}
+        busy={busy}
+        loading={loading}
+        view={diffView}
+        onView={changeDiffView}
+        onMode={changeMode}
+        onPickBase={() => setDialog("base")}
+        onRefresh={refresh}
+        tools={tools}
+      />
 
       {checksOpen && hasChecks && (
         <ChecksPanel
@@ -870,17 +719,6 @@ const ReviewTarget = ({
         </OkBanner>
       )}
 
-      {dialog === "commit" && (
-        <CommitDialog
-          projectId={projectId}
-          directory={directory}
-          onClose={() => setDialog(undefined)}
-          onCommitted={() => {
-            setNotice("Committed.");
-            refresh();
-          }}
-        />
-      )}
       {dialog === "merge" && baseName && data && (
         <MergeDialog
           branch={data.branch}
@@ -944,61 +782,102 @@ const ReviewTarget = ({
       )}
 
       {!data && !error && <ReviewSkeleton />}
-      {data && data.files.length === 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className={muted}>
-            {data.mode === "branch"
-              ? `No changes compared with ${base}.`
-              : "No uncommitted changes."}{" "}
-            {aheadHint(data)}
-          </p>
-          {aheadHint(data) && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => changeMode("branch")}
-            >
-              <GitCompareArrowsIcon /> Compare with {base}
-            </Button>
-          )}
+      {data && (
+        <div className="grid items-start gap-4 md:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]">
+          <ReviewSidebar
+            files={showingUncommitted ? [] : data.files}
+            viewedCount={showingUncommitted ? undefined : viewedCount}
+            showFiles={!diffView.hideFiles}
+            onSelect={setSelectedFile}
+            list={
+              showingUncommitted && stage.data ? (
+                <FileGroups
+                  unstaged={stage.data.unstaged}
+                  staged={stage.data.staged}
+                  selection={selection}
+                  disabled={stage.busy}
+                  onSelect={setPicked}
+                  change={stage.change}
+                />
+              ) : undefined
+            }
+          >
+            <StepPanel
+              step={step}
+              showingUncommitted={showingUncommitted}
+              kept={stage.kept}
+              left={stage.left}
+              busy={busy}
+              committing={stage.busy}
+              comments={comments.length}
+              primary={primary}
+              more={more}
+              onCommit={async (message) => {
+                await stage.commit(message);
+                setNotice("Committed.");
+              }}
+              onKeepAll={() => stage.change("stage", {})}
+              onSuggest={() => suggestCommitMessage(projectId, directory)}
+              onShowUncommitted={() => changeMode("working")}
+              onComments={() => setDialog("comments")}
+            />
+          </ReviewSidebar>
+          <div className="flex min-w-0 flex-col gap-4">
+            {showingUncommitted && (
+              <ChangeSections
+                stage={stage}
+                diffProps={diffProps}
+                selection={selection}
+              />
+            )}
+            {showingUncommitted &&
+              data.files.length === 0 &&
+              aheadHint(data) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <p className={muted}>{aheadHint(data)}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => changeMode("branch")}
+                  >
+                    <GitCompareArrowsIcon /> Compare with {base}
+                  </Button>
+                </div>
+              )}
+            {!showingUncommitted && data.files.length === 0 && (
+              <p className={muted}>No changes compared with {base}.</p>
+            )}
+            {!showingUncommitted && branchFile && (
+              <ReviewDiffs
+                key={branchFile.file}
+                {...diffProps}
+                files={[branchFile]}
+                hideTree
+                wholeFilePatches
+                load={(file) =>
+                  fetchReview(projectId, directory, {
+                    base: baseOverride,
+                    file,
+                    mode,
+                  }).then((d) => d.files[0]?.patch)
+                }
+                imageUrl={(file, side) =>
+                  // A turn's earlier versions aren't in git; only the newest turn's result is still in the working copy.
+                  data.mode === "turn" && (side === "old" || !data.turn?.latest)
+                    ? undefined
+                    : reviewImageUrl(projectId, directory, {
+                        base: baseOverride,
+                        file,
+                        mode: data.mode,
+                        side,
+                      })
+                }
+                viewed={viewed}
+                onViewed={changeViewed}
+              />
+            )}
+          </div>
         </div>
-      )}
-      {data && data.files.length > 0 && (
-        <ReviewDiffs
-          files={data.files}
-          view={diffView}
-          version={`${data.mode}:${baseName}`}
-          wholeFilePatches
-          load={(file) =>
-            fetchReview(projectId, directory, {
-              base: baseOverride,
-              file,
-              mode,
-            }).then((d) => d.files[0]?.patch)
-          }
-          imageUrl={(file, side) =>
-            // A turn's earlier versions aren't in git; only the newest turn's result is still in the working copy.
-            data.mode === "turn" && (side === "old" || !data.turn?.latest)
-              ? undefined
-              : reviewImageUrl(projectId, directory, {
-                  base: baseOverride,
-                  file,
-                  mode: data.mode,
-                  side,
-                })
-          }
-          viewed={viewed}
-          onViewed={changeViewed}
-          comments={comments}
-          notes={aiNotes}
-          renderNote={(id) => suggestionCard(id, true)}
-          open={open}
-          placeholder="Comment for the agent…"
-          onAnchor={openLineComment}
-          onAdd={addLineComment}
-          onCancel={cancelLineComment}
-          onDelete={deleteComment}
-        />
       )}
       {data?.truncated && (
         <p className={muted}>

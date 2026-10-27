@@ -83,25 +83,6 @@ export default function PatchView<A = undefined>(props: {
   const { collapsed, disableHeader, onComment, split, fullFile, name } = props;
   // A controlled selection isn't painted while the gutter is dragged, so the drag's range is shown from here.
   const [dragged, setDragged] = useState<SelectedLineRange | null>(null);
-  const options = useMemo<FileDiffOptions<A, undefined>>(
-    () => ({
-      ...BASE_OPTIONS,
-      collapsed,
-      diffStyle: split ? "split" : "unified",
-      disableFileHeader: disableHeader,
-      expandUnchanged: !!fullFile,
-      ...(onComment
-        ? {
-            enableGutterUtility: true,
-            onGutterUtilityClick: onComment,
-            onLineSelectionChange: setDragged,
-            onLineSelectionEnd: () => setDragged(null),
-            onLineSelectionStart: setDragged,
-          }
-        : {}),
-    }),
-    [collapsed, disableHeader, onComment, split, fullFile]
-  );
   const files = useMemo(() => {
     if (name === undefined) {
       return;
@@ -114,6 +95,26 @@ export default function PatchView<A = undefined>(props: {
       }
     );
   }, [name, props.patch]);
+  const options = useMemo<FileDiffOptions<A, undefined>>(
+    () => ({
+      ...BASE_OPTIONS,
+      collapsed,
+      diffStyle: split ? "split" : "unified",
+      disableFileHeader: disableHeader,
+      // Only a diff drawn from both versions of the file can show the lines between its changes.
+      expandUnchanged: !!fullFile && !!files,
+      ...(onComment
+        ? {
+            enableGutterUtility: true,
+            onGutterUtilityClick: onComment,
+            onLineSelectionChange: setDragged,
+            onLineSelectionEnd: () => setDragged(null),
+            onLineSelectionStart: setDragged,
+          }
+        : {}),
+    }),
+    [collapsed, disableHeader, onComment, split, fullFile, files]
+  );
   const shared = {
     lineAnnotations: props.annotations,
     options,

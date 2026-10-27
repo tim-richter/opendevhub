@@ -586,6 +586,12 @@ export function setup(
         " 1 file changed, 1 insertion(+)",
       ]
     ),
+    diffs: vi.fn(async () => ({ staged: "", unstaged: "" })),
+    applyHunk: vi.fn(async () => undefined),
+    stageAll: vi.fn(async () => undefined),
+    unstageAll: vi.fn(async () => undefined),
+    commitStaged: vi.fn(async () => undefined),
+    hasStaged: vi.fn(async () => false),
     statusLines: vi.fn(
       async (_p: Project, _dir: string): Promise<string[]> => []
     ),

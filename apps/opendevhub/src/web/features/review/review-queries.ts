@@ -3,11 +3,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import type { DashboardSnapshot, ReviewMode } from "../../../shared/types";
-import { fetchPublishInfo, fetchReview } from "../../api";
+import { fetchPublishInfo, fetchReview, fetchStage } from "../../api";
 import { checksKey } from "../checks/checks-queries";
 import { specKey } from "../specs/spec-queries";
 
 const DIFF_GC_MS = 5 * 60_000;
+const STAGE_KEY = "stage";
 
 export interface ReviewOptions {
   base?: string;
@@ -36,6 +37,17 @@ export const reviewQuery = (
     staleTime: 0,
   });
 
+/** A checkout's index and working tree as two diffs. Always read fresh: the index changes with every click. */
+export const stageQuery = (projectId: string, directory: string) =>
+  queryOptions({
+    gcTime: DIFF_GC_MS,
+    queryFn: ({ signal }) => fetchStage(projectId, directory, signal),
+    // Under the review key, so a refreshed checkout reads its index again too.
+    queryKey: [...reviewKey(projectId, directory), STAGE_KEY],
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+  });
+
 /** The checkout's remotes, forge and pull request; for one remote, or the default one. */
 export const publishInfoQuery = (
   projectId: string,
@@ -56,10 +68,13 @@ export const publishInfoQuery = (
 export const refreshCheckout = (
   queryClient: QueryClient,
   projectId: string,
-  directory: string
+  directory: string,
+  /** Leave the stage view as it is: the caller already holds its latest state. */
+  keepStage = false
 ) =>
   Promise.all([
     queryClient.invalidateQueries({
+      predicate: (q) => !keepStage || q.queryKey.at(-1) !== STAGE_KEY,
       queryKey: reviewKey(projectId, directory),
     }),
     // A commit makes the last check run out of date.

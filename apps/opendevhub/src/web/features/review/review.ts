@@ -504,8 +504,17 @@ export interface DiffNote {
   start?: number;
 }
 
+/** What a hunk's Keep, Undo or Unstage buttons act on. `hunk` counts the file's hunks from 0, as git lists them. */
+export interface HunkTarget {
+  file: string;
+  hunk: number;
+  /** Shown from the index: the button takes it out instead of putting it in. */
+  staged: boolean;
+}
+
 export type ReviewAnnotation =
   | { kind: "comment"; comment: ReviewComment }
+  | { kind: "hunk"; target: HunkTarget; disabled: boolean }
   | { kind: "draft"; anchor: LineAnchor }
   | { kind: "note"; id: string };
 

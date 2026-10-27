@@ -412,6 +412,12 @@ export const bodies = {
   }),
   directory,
   commit: directory.extend({ message: text }),
+  stage: directory.extend({
+    action: z.enum(["stage", "unstage", "discard"]),
+    file: z.string().max(1000).optional(),
+    hunk: z.number().int().min(0).optional(),
+    paths: z.array(z.string().max(1000)).max(500).optional(),
+  }),
   update: directory.extend({ base: text }),
   merge: directory.extend({ base: text, ffOnly: actionFlag }),
   publish: directory.extend({
@@ -523,6 +529,7 @@ export const queries = {
   directory,
   files: directory.extend({ query: z.string().max(500) }),
   review,
+  reviewStage: directory,
   reviewImage: review.extend({
     side: z.enum(["old", "new"]),
     file: z.string(),

@@ -27,6 +27,8 @@ const CARD_FIT = `
 export default function ChangedFilesTree(props: {
   files: ReviewFile[];
   onSelect: (file: string) => void;
+  /** CSS height of the tree; it fills a tall block by default. */
+  height?: string;
 }) {
   // The model is created once; its callbacks read the latest files and handler from refs.
   const files = useRef(props.files);
@@ -76,7 +78,8 @@ export default function ChangedFilesTree(props: {
   return (
     <FileTree
       model={model}
-      className="block h-[min(60vh,32rem)] [--trees-font-family-override:var(--font-sans)] [--trees-padding-inline-override:6px] [--trees-theme-focus-ring:var(--ring)] [--trees-theme-list-active-selection-bg:var(--accent)] [--trees-theme-list-active-selection-fg:var(--accent-foreground)] [--trees-theme-list-hover-bg:color-mix(in_oklab,var(--accent)_60%,transparent)]"
+      style={{ height: props.height ?? "min(60vh, 32rem)" }}
+      className="block [--trees-font-family-override:var(--font-sans)] [--trees-padding-inline-override:6px] [--trees-theme-focus-ring:var(--ring)] [--trees-theme-list-active-selection-bg:var(--accent)] [--trees-theme-list-active-selection-fg:var(--accent-foreground)] [--trees-theme-list-hover-bg:color-mix(in_oklab,var(--accent)_60%,transparent)]"
       aria-label="Changed files"
     />
   );

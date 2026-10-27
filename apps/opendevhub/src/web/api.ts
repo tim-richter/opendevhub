@@ -563,6 +563,54 @@ export const fetchReview = (
     "review"
   );
 
+/** The index and the working tree as two diffs, for staging hunks. */
+export const fetchStage = (
+  projectId: string,
+  directory: string,
+  signal?: AbortSignal
+) =>
+  read(
+    project.review.stage.$get(
+      { param: projectParam(projectId), query: { directory } },
+      { init: { signal } }
+    ),
+    "stage view"
+  );
+
+/** Stages, unstages or discards one hunk (`file` and `hunk`), a file (`file`) or `paths`, or everything; answers with the view afterwards. */
+export const stageChanges = (
+  projectId: string,
+  directory: string,
+  input: {
+    action: "stage" | "unstage" | "discard";
+    file?: string;
+    hunk?: number;
+    paths?: string[];
+  }
+) =>
+  read(
+    project.review.stage.$post({
+      param: projectParam(projectId),
+      json: { directory, ...input },
+    }),
+    input.action
+  );
+
+/** Commits what is staged and nothing else. */
+export const commitStaged = async (
+  projectId: string,
+  directory: string,
+  message: string
+) => {
+  await complete(
+    project.review["commit-staged"].$post({
+      param: projectParam(projectId),
+      json: { directory, message },
+    }),
+    "commit"
+  );
+};
+
 export const startLocalAiReview = async (
   projectId: string,
   input: {

@@ -413,6 +413,22 @@ export interface ReviewData {
   truncated?: boolean;
 }
 
+/** One side of the stage view: what is in the index (`staged`) or what is still only in the working tree. */
+export interface StageData {
+  directory: string;
+  staged: ReviewFile[];
+  unstaged: ReviewFile[];
+}
+
+/** What a stage action does to one hunk, one file or everything. */
+export type StageAction = "stage" | "unstage" | "discard";
+
+/** The hunk a stage action targets, by its position in the file's diff of the side it acts on. */
+export interface StageTarget {
+  file: string;
+  hunk: number;
+}
+
 /** Where a check runs: in the checkout's environment, or on this machine in its host folder. */
 export type CheckWhere = "container" | "host";
 

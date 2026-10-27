@@ -783,6 +783,40 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           };
         })
     )
+    .get(
+      "/api/projects/:id/review/stage",
+      validateQuery(queries.reviewStage),
+      (c) =>
+        json(c, (id) =>
+          hub.reviews.stageView(id, c.req.valid("query").directory ?? "")
+        )
+    )
+    .post("/api/projects/:id/review/stage", validateJson(bodies.stage), (c) =>
+      json(c, (id) => {
+        const b = c.req.valid("json");
+        const { file, hunk } = b;
+        return hub.reviews.stage(
+          id,
+          str(b.directory) ?? "",
+          b.action,
+          file !== undefined && hunk !== undefined ? { file, hunk } : undefined,
+          b.paths ?? (file !== undefined && hunk === undefined ? [file] : [])
+        );
+      })
+    )
+    .post(
+      "/api/projects/:id/review/commit-staged",
+      validateJson(bodies.commit),
+      (c) =>
+        ok(c, (id) => {
+          const b = c.req.valid("json");
+          return hub.reviews.commitStaged(
+            id,
+            str(b.directory) ?? "",
+            str(b.message) ?? ""
+          );
+        })
+    )
     .post("/api/projects/:id/review/commit", validateJson(bodies.commit), (c) =>
       ok(c, (id) => {
         const b = c.req.valid("json");

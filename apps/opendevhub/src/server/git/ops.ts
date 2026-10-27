@@ -82,6 +82,15 @@ const failure = (args: string[], r: RunResult): CommandError => {
 const HEAD_OBJECTS =
   'd="$1"; shift; for p in "$@"; do git -C "$d" rev-parse --verify --quiet "HEAD:$p" || echo -; done';
 
+const STAGE_SPLIT = "\n@@@odh-split-7f3a9c@@@\n";
+const STAGE_DIFFS = `cd "$1" || exit 1
+if [ "$2" = 1 ]; then
+  git ls-files --others --exclude-standard -z | xargs -0 -r git add -N -- || exit 1
+  git diff --no-color --no-ext-diff || exit 1
+fi
+printf '${STAGE_SPLIT.replaceAll("\n", "\\n")}'
+if [ "$3" = 1 ]; then git diff --cached --no-color --no-ext-diff || exit 1; fi`;
+
 const MISSING_EXIT = 3;
 const TOO_LARGE_EXIT = 4;
 
@@ -698,6 +707,106 @@ export class GitOps {
         throw new CommandError(IDENTITY_HINT);
       }
     }
+  }
+
+  /**
+   * The raw `git diff` of the working tree against the index (`unstaged`) and of the index against HEAD (`staged`),
+   * read in one exec: every call into a container costs a round trip. New files the agent created are registered
+   * with intent-to-add first, so the working tree diff lists them as added.
+   */
+  async diffs(
+    p: ExecTarget,
+    dir: string,
+    want: "unstaged" | "staged" | "both" = "both"
+  ): Promise<{ unstaged: string; staged: string }> {
+    const args = ["diff", dir, want];
+    const r = await this.deps.containers.exec(
+      p,
+      [
+        "sh",
+        "-c",
+        STAGE_DIFFS,
+        "sh",
+        dir,
+        want === "staged" ? "0" : "1",
+        want === "unstaged" ? "0" : "1",
+      ],
+      { timeoutMs: GIT_TIMEOUT_MS }
+    );
+    if (r.exitCode !== 0) {
+      throw failure(args, r);
+    }
+    const [unstaged = "", staged = ""] = r.stdout.split(STAGE_SPLIT);
+    return { staged, unstaged };
+  }
+
+  /**
+   * Applies one hunk's patch: to the index (`stage`), out of the index (`unstage`) or backwards onto the working
+   * tree (`discard`, which drops the change from the file).
+   */
+  async applyHunk(
+    p: ExecTarget,
+    dir: string,
+    patch: string,
+    action: "stage" | "unstage" | "discard"
+  ): Promise<void> {
+    const flags = {
+      discard: ["-R"],
+      stage: ["--cached"],
+      unstage: ["--cached", "-R"],
+    }[action];
+    const args = ["apply", "--whitespace=nowarn", ...flags, "-"];
+    const r = await this.deps.containers.exec(p, ["git", "-C", dir, ...args], {
+      input: patch,
+      timeoutMs: GIT_TIMEOUT_MS,
+    });
+    if (r.exitCode !== 0) {
+      throw failure(args, r);
+    }
+  }
+
+  /** Stages every change under `paths`, or all of them. */
+  async stageAll(
+    p: ExecTarget,
+    dir: string,
+    paths: readonly string[] = []
+  ): Promise<void> {
+    await this.git(p, dir, [
+      "add",
+      "-A",
+      "--",
+      ...(paths.length ? paths : ["."]),
+    ]);
+  }
+
+  /** Takes every change under `paths`, or all of them, out of the index. */
+  async unstageAll(
+    p: ExecTarget,
+    dir: string,
+    paths: readonly string[] = []
+  ): Promise<void> {
+    await this.git(p, dir, [
+      "reset",
+      "-q",
+      "--",
+      ...(paths.length ? paths : ["."]),
+    ]);
+  }
+
+  /** Commits what is staged. */
+  async commitStaged(
+    p: ExecTarget,
+    dir: string,
+    message: string
+  ): Promise<void> {
+    await this.requireIdentity(p, dir);
+    await this.git(p, dir, ["commit", "-q", "-m", message]);
+  }
+
+  /** Whether anything is staged. */
+  async hasStaged(p: ExecTarget, dir: string): Promise<boolean> {
+    const r = await this.exec(p, dir, ["diff", "--cached", "--quiet"]);
+    return r.exitCode === 1;
   }
 
   /** Commits every change, or only those under `paths` when given. */
