@@ -12,7 +12,30 @@ const ExternalLink = (props: ComponentPropsWithoutRef<"a">) => (
 );
 
 const components = { a: ExternalLink };
-const remarkPlugins = [remarkGfm];
+
+interface MdastParent {
+  children: { type: string; value?: string; children?: unknown[] }[];
+}
+
+/** Raw HTML that is nothing but comments, e.g. a tool's `<!-- branch-stack-start -->` marker. */
+const HTML_COMMENTS = /^(?:\s*<!--[\s\S]*?-->)+\s*$/u;
+
+/** Drops HTML comments, which would otherwise render as literal text since raw HTML isn't interpreted. */
+const stripHtmlComments = () => (tree: MdastParent) => {
+  const strip = (parent: MdastParent) => {
+    parent.children = parent.children.filter(
+      (child) =>
+        !(child.type === "html" && HTML_COMMENTS.test(child.value ?? ""))
+    );
+    for (const child of parent.children) {
+      if (child.children) {
+        strip(child as MdastParent);
+      }
+    }
+  };
+  strip(tree);
+};
+const remarkPlugins = [remarkGfm, stripHtmlComments];
 
 /** Typography plugin tweaks: GitHub-style heading rules and inline code without backticks. */
 const STYLES = [
