@@ -16,6 +16,9 @@ import { fileVersions } from "./review";
 
 const MAX_DIFF_WORKERS = 4;
 
+/** Only one highlighter type can be active at a time, so the pool and every diff component must agree. */
+const HIGHLIGHTER = "highlights";
+
 /**
  * One pool for every diff on the page: parsing and highlighting run in workers instead of blocking the main
  * thread, and results are cached, so reopening a diff doesn't highlight it again.
@@ -25,7 +28,7 @@ const workerPool =
     ? undefined
     : getOrCreateWorkerPoolSingleton({
         highlighterOptions: {
-          langs: ["typescript", "tsx", "javascript", "json", "css", "markdown"],
+          preferredHighlighter: HIGHLIGHTER,
           theme: { dark: "pierre-dark", light: "pierre-light" },
         },
         poolOptions: {
@@ -45,6 +48,7 @@ const workerPool =
 export const BASE_OPTIONS = {
   theme: { dark: "pierre-dark", light: "pierre-light" },
   themeType: "system",
+  preferredHighlighter: HIGHLIGHTER,
   hunkSeparators: "line-info",
   overflow: "wrap",
   // Lines of context around each change while unchanged lines are hidden.
