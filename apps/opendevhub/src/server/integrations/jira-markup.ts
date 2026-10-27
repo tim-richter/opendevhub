@@ -86,22 +86,22 @@ class Converter {
   }
 
   private restore(text: string): string {
-    return text.replace(PLACEHOLDER, (_, index: string) =>
+    return text.replaceAll(PLACEHOLDER, (_, index: string) =>
       this.restore(this.stashed[Number(index)])
     );
   }
 
   private codeBlock(language: string, content: string): string {
-    const body = content.replace(OUTER_NEWLINES, "");
+    const body = content.replaceAll(OUTER_NEWLINES, "");
     const fence = fenceFor(body, 3);
     return `\n${this.stash(`${fence}${language}\n${body}\n${fence}`)}\n`;
   }
 
   private emphasis(text: string): string {
     return text
-      .replace(BOLD, "$<before>**$<text>**")
-      .replace(STRIKE, "$<before>~~$<text>~~")
-      .replace(INSERT, "$<before>$<text>");
+      .replaceAll(BOLD, "$<before>**$<text>**")
+      .replaceAll(STRIKE, "$<before>~~$<text>~~")
+      .replaceAll(INSERT, "$<before>$<text>");
   }
 
   private link(raw: string, inner: string): string {
@@ -131,18 +131,18 @@ class Converter {
   /** Stash code, links, images and URLs so emphasis and table splitting skip them. */
   private protect(text: string): string {
     return text
-      .replace(INLINE_CODE, (_, code: string) => {
+      .replaceAll(INLINE_CODE, (_, code: string) => {
         const fence = fenceFor(code, 1);
         const pad = code.startsWith("`") || code.endsWith("`") ? " " : "";
         return this.stash(`${fence}${pad}${code}${pad}${fence}`);
       })
-      .replace(LINK, (raw, inner: string) => this.link(raw, inner))
-      .replace(IMAGE, (raw, name: string) =>
+      .replaceAll(LINK, (raw, inner: string) => this.link(raw, inner))
+      .replaceAll(IMAGE, (raw, name: string) =>
         ABSOLUTE_URL.test(name) || IMAGE_FILE.test(name)
           ? this.image(name)
           : raw
       )
-      .replace(URL_IN_TEXT, (url) => this.stash(url));
+      .replaceAll(URL_IN_TEXT, (url) => this.stash(url));
   }
 
   private inline(text: string): string {
@@ -152,7 +152,7 @@ class Converter {
   private table(rows: string[]): string[] {
     const cells = rows.map((row) =>
       this.protect(row)
-        .replace(TABLE_EDGES, "")
+        .replaceAll(TABLE_EDGES, "")
         .split(TABLE_CELL_SPLIT)
         .map((cell) => this.emphasis(cell.trim()))
     );
@@ -245,27 +245,27 @@ class Converter {
 
   convert(markup: string): string {
     const prepared = markup
-      .replace(NEWLINES, "\n")
-      .replace(CODE_BLOCK, (_, params: string | undefined, code: string) =>
+      .replaceAll(NEWLINES, "\n")
+      .replaceAll(CODE_BLOCK, (_, params: string | undefined, code: string) =>
         this.codeBlock(codeLanguage(params), code)
       )
-      .replace(NOFORMAT_BLOCK, (_, code: string) => this.codeBlock("", code))
-      .replace(QUOTE_BLOCK, (_, quote: string) =>
+      .replaceAll(NOFORMAT_BLOCK, (_, code: string) => this.codeBlock("", code))
+      .replaceAll(QUOTE_BLOCK, (_, quote: string) =>
         quote
-          .replace(OUTER_NEWLINES, "")
+          .replaceAll(OUTER_NEWLINES, "")
           .split("\n")
           .map((line) => `\nbq. ${line}`)
           .join("")
       )
-      .replace(PANEL_OPEN, (_, params: string | undefined) => {
+      .replaceAll(PANEL_OPEN, (_, params: string | undefined) => {
         const title = params
           ?.split("|")
           .find((p) => p.startsWith("title="))
           ?.slice("title=".length);
         return title ? `\n*${title}*\n` : "\n";
       })
-      .replace(PANEL_CLOSE, "\n")
-      .replace(DROPPED_MACROS, "");
+      .replaceAll(PANEL_CLOSE, "\n")
+      .replaceAll(DROPPED_MACROS, "");
 
     // Group consecutive lines of the same kind; blocks of different kinds
     // (and separate block elements) are separated by a blank line.

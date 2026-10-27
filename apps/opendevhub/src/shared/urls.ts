@@ -6,7 +6,7 @@ export const sessionUrl = (projectBase: string, sessionId: string): string => {
   const key = btoa(origin)
     .replaceAll("+", "-")
     .replaceAll("/", "_")
-    .replace(/=+$/u, "");
+    .replace(/[=]+$/u, "");
   return `${origin}/server/${key}/session/${sessionId}`;
 };
 

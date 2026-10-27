@@ -31,6 +31,17 @@ export default defineConfig({
     "react/refs": "off",
     // then(a, b) deliberately keeps b from catching errors thrown by a.
     "promise/prefer-catch": "off",
+    // Terminal `.then(ok, onError)` calls are handled; `.then(cb)` with no value to pass on is fire-and-forget.
+    "promise/catch-or-return": [
+      "error",
+      { allowThen: true, allowFinally: true },
+    ],
+    "promise/always-return": ["error", { ignoreLastCallback: true }],
+    // Label wraps Radix items, which render the real control.
+    "jsx-a11y/label-has-associated-control": [
+      "error",
+      { controlComponents: ["RadioGroupItem", "Checkbox", "Switch"] },
+    ],
     "eslint/no-bitwise": "off",
     "eslint/no-control-regex": "off",
     "node/callback-return": "off",

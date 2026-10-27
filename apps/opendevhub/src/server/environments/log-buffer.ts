@@ -8,7 +8,7 @@ const ANSI =
  * progress output that rewrites itself with bare `\r` (docker/BuildKit), and caps its length.
  */
 export const cleanLogLine = (line: string): string => {
-  const redraws = line.replace(ANSI, "").split("\r");
+  const redraws = line.replaceAll(ANSI, "").split("\r");
   const last = redraws.findLast((part) => part.trim()) ?? "";
   if (last.length <= MAX_LINE_LENGTH) {
     return last;
