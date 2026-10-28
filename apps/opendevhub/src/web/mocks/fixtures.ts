@@ -1463,8 +1463,8 @@ export const publishInfo: PublishInfo = {
   pushFrom: "host",
   remote: "origin",
   remotes: ["origin", "upstream"],
-  strategies: ["branch", "agit"],
-  strategy: "branch",
+  strategies: ["push", "agit", "branch"],
+  strategy: "push",
 };
 
 export const candidates: CandidateList = {

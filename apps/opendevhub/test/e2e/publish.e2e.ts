@@ -111,7 +111,7 @@ describe.skipIf(!process.env.OPENDEVHUB_E2E)(
           remotes: ["origin"],
           remote: "origin",
           forge: { kind: "unknown" },
-          strategy: "branch",
+          strategy: "push",
           pushFrom: "host",
         });
         const result = await hub.reviews.publish(project.id, ws, {

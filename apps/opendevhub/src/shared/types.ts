@@ -507,7 +507,8 @@ export type ForgeKind =
   | "gitea"
   | "bitbucket"
   | "unknown";
-export type PublishStrategy = "branch" | "agit";
+/** "push" only pushes the branch; "branch" also opens the PR; "agit" opens it with the push itself. */
+export type PublishStrategy = "push" | "branch" | "agit";
 
 export interface PublishInfo {
   /** Undefined on a detached HEAD. */

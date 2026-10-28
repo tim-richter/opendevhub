@@ -5,6 +5,7 @@ import type {
   ProjectId,
   PublishInfo,
   PublishResult,
+  PublishStrategy,
   ReviewBase,
   ReviewData,
   ReviewMode,
@@ -43,7 +44,7 @@ const COMMIT_PROMPT =
   "Write a conventional commit message for the uncommitted changes. Reply with the message only.";
 const PUBLISH_PROMPT =
   "Write a pull request title on the first line, then a blank line, then a short description of this branch's changes. Reply with that text only.";
-const STRATEGIES: ReadonlySet<string> = new Set(["branch", "agit"]);
+const STRATEGIES: ReadonlySet<string> = new Set(["push", "branch", "agit"]);
 const count = (patch: string, sign: "+" | "-"): number =>
   patch
     .split("\n")
@@ -641,7 +642,7 @@ export class ReviewActions {
     }
   }
 
-  /** Pushes the checkout's branch and opens (or links) its pull request. */
+  /** Pushes the checkout's branch and, unless the strategy is "push", opens (or links) its pull request. */
   // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
   async publish(
     id: ProjectId,
@@ -657,13 +658,21 @@ export class ReviewActions {
     if (!REMOTE_NAME.test(req.remote)) {
       throw new InvalidRequestError(`invalid remote "${req.remote}"`);
     }
-    const base = validateBranch(req.base);
     if (!STRATEGIES.has(req.strategy)) {
       throw new InvalidRequestError(`invalid strategy "${req.strategy}"`);
     }
+    const strategy = req.strategy as PublishStrategy;
+    const opensPr = strategy !== "push";
+    // A plain push needs no target branch; one given still shapes the forge's "create a PR" link.
+    const base =
+      opensPr || req.base.trim() ? validateBranch(req.base) : undefined;
     const title = req.title.trim();
-    if (!title || title.length > 200) {
-      throw new InvalidRequestError("the title must be 1 to 200 characters");
+    if (title.length > 200 || (opensPr && !title)) {
+      throw new InvalidRequestError(
+        opensPr
+          ? "the title must be 1 to 200 characters"
+          : "the title must be at most 200 characters"
+      );
     }
     this.envs.checkDirectory(id, directory);
     return this.envs.withGit(id, async (p) => {
@@ -684,7 +693,6 @@ export class ReviewActions {
         p,
         on.remote ? this.envs.workspaceFolder(p) : directory
       );
-      const strategy = req.strategy as "branch" | "agit";
       const result = await this.envs.gitAction(
         id,
         `publish ${branch} to ${req.remote} (${req.strategy})`,
@@ -694,7 +702,7 @@ export class ReviewActions {
             checkout,
             branch,
             {
-              base,
+              base: base ?? "",
               description: req.description,
               remote: req.remote,
               strategy,

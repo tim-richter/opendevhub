@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import type { ProjectView, ReviewFile } from "../../../../src/shared/types";
 import {
   aheadHint,
-  acceptSuggestion,
   anchorFor,
   anchorFromRange,
   annotationsFor,
@@ -408,33 +407,6 @@ describe("targets", () => {
     );
     expect(diffKey(f)).not.toBe(diffKey({ ...f, additions: 2 }));
     expect(diffKey({ ...f, patch: undefined })).not.toBe(diffKey(f));
-  });
-
-  it("only fills in a suggested commit message the user hasn't overtaken", () => {
-    expect(
-      acceptSuggestion({
-        current: "",
-        suggestion: "feat: x",
-        request: 2,
-        latest: 2,
-      })
-    ).toBe("feat: x");
-    expect(
-      acceptSuggestion({
-        current: "my own",
-        suggestion: "feat: x",
-        request: 2,
-        latest: 2,
-      })
-    ).toBe("my own");
-    expect(
-      acceptSuggestion({
-        current: "",
-        suggestion: "feat: old",
-        request: 1,
-        latest: 2,
-      })
-    ).toBe("");
   });
 });
 

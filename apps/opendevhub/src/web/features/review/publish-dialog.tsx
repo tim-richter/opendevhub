@@ -12,6 +12,7 @@ import { Input } from "@opendevhub/ui/input";
 import { Label } from "@opendevhub/ui/label";
 import { Textarea } from "@opendevhub/ui/textarea";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { LoaderCircleIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
@@ -23,12 +24,13 @@ import type {
 } from "../../../shared/types";
 import { publishChanges, suggestPublish } from "../../api";
 import { Choice } from "../../components/choice";
-import { acceptSuggestion, publishBlocker } from "./review";
+import { publishBlocker } from "./review";
 import { publishInfoQuery } from "./review-queries";
 
 const STRATEGY_LABEL: Record<PublishStrategy, string> = {
-  agit: "AGit (the push opens the PR)",
-  branch: "Push a branch, then open the PR",
+  agit: "Push and open the PR (AGit)",
+  branch: "Push, then open the PR",
+  push: "Just push the branch",
 };
 
 /** The checkout's remotes, forge and open PR; read once the review loads, and again when its branch changes. */
@@ -74,7 +76,7 @@ export const usePublishInfo = (
   return { blocker, info, loadInfo };
 };
 
-/** Pushes the branch and opens or updates its pull request. Mount it while open, so every opening starts fresh. */
+/** Pushes the branch and, when asked, opens or updates its pull request. Mount it while open, so every opening starts fresh. */
 export const PublishDialog = (props: {
   projectId: string;
   directory: string;
@@ -97,40 +99,23 @@ export const PublishDialog = (props: {
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [generating, setGenerating] = useState(true);
-  // The suggestion arrives in the background and never replaces what you typed.
-  const suggestion = useRef(0);
-  useEffect(() => {
-    const request = ++suggestion.current;
+  const [suggesting, setSuggesting] = useState(false);
+  const opensPr = strategy !== "push";
+  const suggest = () => {
+    setSuggesting(true);
+    setError(undefined);
     suggestPublish(projectId, directory)
       .then((s) => {
-        setTitle((current) =>
-          acceptSuggestion({
-            current,
-            latest: suggestion.current,
-            request,
-            suggestion: s.title,
-          })
-        );
-        setDescription((current) =>
-          acceptSuggestion({
-            current,
-            latest: suggestion.current,
-            request,
-            suggestion: s.description,
-          })
-        );
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (request === suggestion.current) {
-          setGenerating(false);
+        if (s.title) {
+          setTitle(s.title);
+          setDescription(s.description);
         }
-      });
-    return () => {
-      suggestion.current += 1;
-    };
-  }, [projectId, directory]);
+      })
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : String(err))
+      )
+      .finally(() => setSuggesting(false));
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -141,10 +126,10 @@ export const PublishDialog = (props: {
     setError(undefined);
     publishChanges(projectId, directory, {
       base,
-      description,
+      description: opensPr ? description : "",
       remote,
       strategy,
-      title,
+      title: opensPr ? title : "",
     })
       .then((r) => {
         props.onPublished(r);
@@ -180,19 +165,6 @@ export const PublishDialog = (props: {
               </AlertDescription>
             </Alert>
           )}
-          <Input
-            aria-label="Pull request title"
-            placeholder={generating ? "Asking the agent for a title…" : "Title"}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <Textarea
-            aria-label="Pull request description"
-            rows={6}
-            placeholder="Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
           <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm">
             <Label className="font-normal" htmlFor="publish-remote">
               Remote
@@ -213,16 +185,6 @@ export const PublishDialog = (props: {
               }}
               options={info.remotes.map((r) => ({ label: r, value: r }))}
             />
-            <Label className="font-normal" htmlFor="publish-base">
-              Into
-            </Label>
-            <Input
-              id="publish-base"
-              className="h-8"
-              value={base}
-              onChange={(e) => setBase(e.target.value)}
-              aria-label="Target branch"
-            />
             <Label className="font-normal" htmlFor="publish-strategy">
               How
             </Label>
@@ -236,7 +198,55 @@ export const PublishDialog = (props: {
                 value: s,
               }))}
             />
+            {opensPr && (
+              <>
+                <Label className="font-normal" htmlFor="publish-base">
+                  Into
+                </Label>
+                <Input
+                  id="publish-base"
+                  className="h-8"
+                  value={base}
+                  onChange={(e) => setBase(e.target.value)}
+                  aria-label="Target branch"
+                />
+              </>
+            )}
           </div>
+          {opensPr && (
+            <>
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label="Pull request title"
+                  placeholder="Title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Suggest a title and description"
+                  title="Ask the agent for a title and description"
+                  disabled={suggesting}
+                  onClick={suggest}
+                >
+                  {suggesting ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <SparklesIcon />
+                  )}
+                </Button>
+              </div>
+              <Textarea
+                aria-label="Pull request description"
+                rows={6}
+                placeholder="Description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </>
+          )}
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
@@ -248,9 +258,11 @@ export const PublishDialog = (props: {
             </Button>
             <Button
               type="submit"
-              disabled={busy || !remote || !title.trim() || !base.trim()}
+              disabled={
+                busy || !remote || (opensPr && (!title.trim() || !base.trim()))
+              }
             >
-              {publishLabel(busy, !!info.pr)}
+              {publishLabel(busy, opensPr, !!info.pr)}
             </Button>
           </DialogFooter>
         </form>
@@ -259,9 +271,16 @@ export const PublishDialog = (props: {
   );
 };
 
-const publishLabel = (busy: boolean, hasPr: boolean): string => {
+const publishLabel = (
+  busy: boolean,
+  opensPr: boolean,
+  hasPr: boolean
+): string => {
   if (busy) {
     return "Publishing…";
   }
-  return hasPr ? "Update PR" : "Publish";
+  if (!opensPr) {
+    return "Push";
+  }
+  return hasPr ? "Update PR" : "Open PR";
 };

@@ -214,7 +214,10 @@ export const splitTitleBody = (
 };
 
 export const strategiesFor = (kind: ForgeKind): PublishStrategy[] =>
-  kind === "forgejo" || kind === "gitea" ? ["agit", "branch"] : ["branch"];
+  kind === "forgejo" || kind === "gitea"
+    ? ["push", "agit", "branch"]
+    : ["push", "branch"];
 
+/** Just pushing is the default: opening a pull request is a choice. */
 export const defaultStrategy = (kind: ForgeKind): PublishStrategy =>
   strategiesFor(kind)[0];

@@ -79,6 +79,24 @@ describe("review", () => {
     ).rejects.toThrow(/not the base itself/u);
   });
 
+  it("just pushes without a title or target branch", async () => {
+    const { hub, publisher } = await running();
+    await hub.reviews.publish(project.id, wt, {
+      remote: "origin",
+      base: "",
+      strategy: "push",
+      title: "",
+      description: "",
+    });
+    expect(publisher.publish.mock.calls[0][3]).toEqual({
+      remote: "origin",
+      base: "",
+      strategy: "push",
+      title: "",
+      description: "",
+    });
+  });
+
   it("suggests a title and description from the latest session", async () => {
     const { hub, client, store } = await running();
     await expect(

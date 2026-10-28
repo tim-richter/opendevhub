@@ -223,10 +223,10 @@ describe("titles and strategies", () => {
     expect(splitTitleBody("")).toStrictEqual({ title: "", description: "" });
   });
 
-  it("offers AGit only on Forgejo and Gitea, where it is the default", () => {
-    expect(strategiesFor("forgejo")).toStrictEqual(["agit", "branch"]);
-    expect(strategiesFor("github")).toStrictEqual(["branch"]);
-    expect(defaultStrategy("gitea")).toBe("agit");
-    expect(defaultStrategy("unknown")).toBe("branch");
+  it("offers AGit only on Forgejo and Gitea, and defaults to just pushing", () => {
+    expect(strategiesFor("forgejo")).toStrictEqual(["push", "agit", "branch"]);
+    expect(strategiesFor("github")).toStrictEqual(["push", "branch"]);
+    expect(defaultStrategy("gitea")).toBe("push");
+    expect(defaultStrategy("unknown")).toBe("push");
   });
 });

@@ -484,15 +484,6 @@ const fingerprint = (text: string): string => {
 export const diffKey = (f: ReviewFile): string =>
   `${f.file}:${f.additions}:${f.deletions}:${f.patch === undefined ? "-" : `${f.patch.length}.${fingerprint(f.patch)}`}`;
 
-/** A generated commit message fills the box only if it is the latest request and the user hasn't typed one. */
-export const acceptSuggestion = (o: {
-  current: string;
-  suggestion: string;
-  request: number;
-  latest: number;
-}): string =>
-  o.request === o.latest && !o.current.trim() ? o.suggestion : o.current;
-
 /** What a review annotation in the diff shows: a saved comment, or the box for writing one. */
 /** Something shown inside the diff that isn't one of your draft comments, drawn by the page that owns it. */
 export interface DiffNote {

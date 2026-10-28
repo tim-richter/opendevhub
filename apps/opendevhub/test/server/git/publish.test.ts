@@ -311,8 +311,8 @@ describe(Publisher, () => {
       remotes: ["fork", "origin"],
       remote: "origin",
       forge: { kind: "unknown" },
-      strategies: ["branch"],
-      strategy: "branch",
+      strategies: ["push", "branch"],
+      strategy: "push",
       pushFrom: "host",
     });
     expect(

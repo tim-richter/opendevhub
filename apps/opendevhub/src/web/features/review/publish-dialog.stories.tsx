@@ -20,8 +20,13 @@ const meta = preview.meta({
   title: "Components/PublishDialog",
 });
 
-/** Title and description are suggested in the background. */
+/** Just pushes the branch by default; no title needed. */
 export const Default = meta.story();
+
+/** Opening a PR asks for a title; the sparkles button asks the agent for one. */
+export const OpensPr = meta.story({
+  args: { info: { ...publishInfo, strategy: "branch" } },
+});
 
 export const ChecksNotPassing = meta.story({
   args: { checksWarning: "1 of 3 checks failed on this commit" },
@@ -35,6 +40,7 @@ export const UpdatesExistingPr = meta.story({
 });
 
 export const SuggestionFails = meta.story({
+  args: { info: { ...publishInfo, strategy: "branch" } },
   beforeEach: mockApi(
     {},
     failing("post", "/api/projects/:id/publish/suggest", "model unavailable")

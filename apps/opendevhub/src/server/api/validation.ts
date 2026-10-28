@@ -424,7 +424,7 @@ export const bodies = {
   publish: directory.extend({
     base: text,
     remote: text,
-    strategy: z.enum(["branch", "agit"]),
+    strategy: z.enum(["push", "branch", "agit"]),
     title: text,
     description: text,
   }),

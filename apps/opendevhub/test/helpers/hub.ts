@@ -52,6 +52,7 @@ import type {
   PendingItems,
   ModelRef,
   Project,
+  PublishStrategy,
   SessionSummary,
   UpdateResult,
 } from "../../src/shared/types";
@@ -774,7 +775,7 @@ export function setup(
         _p: Project,
         _c: { container: string; host?: string },
         _branch: string,
-        req: { strategy: "branch" | "agit" }
+        req: { strategy: PublishStrategy }
       ) => ({
         strategy: req.strategy,
         pushedFrom: "host" as const,

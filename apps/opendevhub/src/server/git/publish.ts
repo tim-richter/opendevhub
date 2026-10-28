@@ -224,7 +224,8 @@ export class Publisher {
   }
 
   /**
-   * Pushes the branch (or an AGit ref) and reports what the forge said; the caller records it. `previousPr` is the
+   * Pushes the branch (or an AGit ref) and reports what the forge said; the caller records it. A plain push (or a
+   * "branch" one) links the forge's new-PR page when there's a base to compare against. `previousPr` is the
    * pull request the branch was published to before, if any. Never force-pushes.
    */
   async publish(
@@ -276,7 +277,7 @@ export class Publisher {
     const urls = pushUrls(output);
     const prUrl = urls.find(isPrUrl);
     const compare =
-      req.strategy === "branch"
+      req.strategy !== "agit" && req.base
         ? compareUrl(forge, {
             base: req.base,
             body: req.description,
