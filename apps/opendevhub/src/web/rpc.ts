@@ -6,27 +6,40 @@ import type { DashboardApi } from "../server/dashboard-api";
 /** Only the route type crosses into the frontend; server implementations stay in the Node bundle. */
 export const { api } = hc<DashboardApi>("/");
 
-/** A request the server refused; `status` is its HTTP status (409 while another action runs). */
+/**
+ * A request the server refused; `status` is its HTTP status (409 while another action runs), and `log` the last
+ * output of a command that failed, such as a git hook's.
+ */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  readonly log: string[];
+  constructor(message: string, status: number, log: string[] = []) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.log = log;
   }
 }
 
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string")
+    : [];
+
 const failure = async (res: Response, what: string): Promise<Error> => {
   const body: unknown = await res.json().catch(() => undefined);
+  const isObject = !!body && typeof body === "object";
   const message =
-    body &&
-    typeof body === "object" &&
-    "error" in body &&
-    typeof body.error === "string"
+    isObject && "error" in body && typeof body.error === "string"
       ? body.error
       : `${what} failed (${res.status})`;
-  return new ApiError(message, res.status);
+  const log = isObject && "log" in body ? stringList(body.log) : [];
+  return new ApiError(message, res.status, log);
 };
+
+/** The output a failed command left, when the error came from the server with one. */
+export const errorLog = (error: unknown): string[] =>
+  error instanceof ApiError ? error.log : [];
 
 /** The success type comes from the server handler, including its JSON serialization. */
 export const read = async <R extends ClientResponse<unknown>>(

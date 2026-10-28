@@ -1421,6 +1421,24 @@ describe("dashboard API", () => {
     await expect(res.json()).resolves.toStrictEqual({ error: err.message });
   });
 
+  it("sends a failed command's output along with its message", async () => {
+    const { app, hub } = setup();
+    hub.checkouts.openInEditor.mockImplementationOnce(() => {
+      throw new CommandError("git commit failed: husky - pre-commit failed", [
+        "src/a.ts:1 lint error",
+        "husky - pre-commit failed",
+      ]);
+    });
+    const res = await app.request(`/api/projects/${project.id}/open`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toStrictEqual({
+      error: "git commit failed: husky - pre-commit failed",
+      log: ["src/a.ts:1 lint error", "husky - pre-commit failed"],
+    });
+  });
+
   it("rejects cross-site POST actions with a mismatched Origin", async () => {
     const { app, hub } = setup();
     const res = await app.request(`/api/projects/${project.id}/start`, {

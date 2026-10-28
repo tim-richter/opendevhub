@@ -92,9 +92,15 @@ export const imageResponse = (
     "x-content-type-options": "nosniff",
   });
 
+/** The error's message, plus the output a failed command left (e.g. a git hook's), so the page can show why. */
 export const errorResponse = (c: Context, error: unknown) =>
   c.json(
-    { error: error instanceof Error ? error.message : String(error) },
+    {
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof CommandError && error.tail.length > 0
+        ? { log: error.tail }
+        : {}),
+    },
     errorStatus(error)
   );
 

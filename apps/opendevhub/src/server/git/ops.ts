@@ -71,8 +71,11 @@ export const parseBranchRefs = (out: string): BranchRef[] =>
       };
     });
 
+/** Enough of a failed command's output to show what a hook (lint, tests) complained about. */
+const FAILURE_LOG_LINES = 60;
+
 const failure = (args: string[], r: RunResult): CommandError => {
-  const tail = tailLines(`${r.stderr}\n${r.stdout}`, 5);
+  const tail = tailLines(`${r.stderr}\n${r.stdout}`, FAILURE_LOG_LINES);
   return new CommandError(
     `git ${args[0]} failed: ${gitReason(tail) ?? `exit ${r.exitCode}`}`,
     tail

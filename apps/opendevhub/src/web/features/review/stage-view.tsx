@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 
 import { commitStaged, stageChanges } from "../../api";
-import { Note, muted } from "../../components/page";
+import { ErrorText, Note, muted } from "../../components/page";
 import { DiffLinesSkeleton } from "../../components/skeletons";
 import type { StageChange } from "./hunk-controls";
 import { ReviewDiffs } from "./review-diffs";
@@ -103,7 +103,9 @@ export const ChangeSections = (props: {
   );
   if (!data) {
     return stage.error ? (
-      <Note error>{stage.error.message}</Note>
+      <Note error>
+        <ErrorText error={stage.error} />
+      </Note>
     ) : (
       <DiffLinesSkeleton />
     );
@@ -113,7 +115,11 @@ export const ChangeSections = (props: {
   );
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {stage.error && <Note error>{stage.error.message}</Note>}
+      {stage.error && (
+        <Note error>
+          <ErrorText error={stage.error} />
+        </Note>
+      )}
       {!file && (
         <p className={muted}>
           {data.unstaged.length + data.staged.length === 0

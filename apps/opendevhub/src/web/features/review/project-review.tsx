@@ -55,7 +55,7 @@ import {
   startSession,
   updateFromBase,
 } from "../../api";
-import { Empty, muted } from "../../components/page";
+import { Empty, ErrorText, muted } from "../../components/page";
 import { ReviewSkeleton } from "../../components/skeletons";
 import { workspaceFolderOf } from "../../derive";
 import { useNavigate } from "../../routing";
@@ -173,7 +173,7 @@ const ReviewTarget = ({
   const run = (label: string, fn: () => Promise<unknown>) =>
     action.mutate({ fn, label });
   const busy = action.isPending ? action.variables.label : undefined;
-  const error = (action.error ?? review.error)?.message;
+  const error = action.error ?? review.error ?? undefined;
 
   const baseName = data?.base?.name;
   useEffect(() => setBaseInput(baseName ?? ""), [baseName]);
@@ -639,7 +639,9 @@ const ReviewTarget = ({
       )}
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            <ErrorText error={error} />
+          </AlertDescription>
         </Alert>
       )}
       {notice && <OkBanner>{notice}</OkBanner>}

@@ -9,6 +9,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import { Link, useIsActive } from "../routing";
+import { errorLog } from "../rpc";
 
 /**
  * How the shell lays a page out: `index` uses the full content width, `document` caps the body below the header,
@@ -213,6 +214,21 @@ export const Note = (props: {
       )}
       <div className="min-w-0 flex-1 break-words">{props.children}</div>
     </div>
+  );
+};
+
+/** An error's message, with the output of the command that failed below it when the server sent one. */
+export const ErrorText = ({ error }: { error: Error }) => {
+  const log = errorLog(error);
+  return (
+    <>
+      {error.message}
+      {log.length > 0 && (
+        <pre className="bg-muted/50 text-muted-foreground mt-2 max-h-64 overflow-auto rounded-md px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+          {log.join("\n")}
+        </pre>
+      )}
+    </>
   );
 };
 
