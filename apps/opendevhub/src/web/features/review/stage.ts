@@ -148,3 +148,77 @@ export const selectionAfter = (
     files.slice(0, index).findLast(remains);
   return next ? { file: next.file, staged: selection.staged } : null;
 };
+
+/** A folder or file in the uncommitted file lists. A folder lists the files under it, at any depth. */
+export type FileTreeNode =
+  | {
+      kind: "folder";
+      name: string;
+      path: string;
+      children: FileTreeNode[];
+      files: ReviewFile[];
+    }
+  | { kind: "file"; name: string; file: ReviewFile };
+
+interface FolderDraft {
+  folders: Map<string, FolderDraft>;
+  files: ReviewFile[];
+}
+
+const finish = (draft: FolderDraft, parent: string): FileTreeNode[] => {
+  const folders = [...draft.folders]
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([name, sub]): FileTreeNode => {
+      let label = name;
+      let inner = sub;
+      // A folder holding only one folder shares its row: "src / web".
+      while (inner.files.length === 0 && inner.folders.size === 1) {
+        const [[next, deeper]] = inner.folders;
+        label = `${label}/${next}`;
+        inner = deeper;
+      }
+      const path = parent ? `${parent}/${label}` : label;
+      const children = finish(inner, path);
+      return {
+        children,
+        files: children.flatMap((c) =>
+          c.kind === "file" ? [c.file] : c.files
+        ),
+        kind: "folder",
+        name: label,
+        path,
+      };
+    });
+  const files = draft.files
+    .map((file): FileTreeNode => ({
+      file,
+      kind: "file",
+      name: file.file.slice(file.file.lastIndexOf("/") + 1),
+    }))
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+  return [...folders, ...files];
+};
+
+/** The files as a folder tree, folders before files, each alphabetical, single-folder chains on one row. */
+export const fileTree = (files: readonly ReviewFile[]): FileTreeNode[] => {
+  const root: FolderDraft = { files: [], folders: new Map() };
+  for (const file of files) {
+    let at = root;
+    for (const part of file.file.split("/").slice(0, -1)) {
+      let next = at.folders.get(part);
+      if (!next) {
+        next = { files: [], folders: new Map() };
+        at.folders.set(part, next);
+      }
+      at = next;
+    }
+    at.files.push(file);
+  }
+  return finish(root, "");
+};
+
+/** The paths of every folder in the trees, to collapse them all. */
+export const folderPaths = (nodes: readonly FileTreeNode[]): string[] =>
+  nodes.flatMap((n) =>
+    n.kind === "folder" ? [n.path, ...folderPaths(n.children)] : []
+  );

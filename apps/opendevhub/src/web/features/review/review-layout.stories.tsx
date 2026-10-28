@@ -41,7 +41,12 @@ const stage = (kept: number): Stage => ({
   data: {
     directory: "/work",
     staged: kept ? [file("src/server/limits.ts")] : [],
-    unstaged: [file("src/server/rate-limit.ts")],
+    unstaged: [
+      file("src/server/rate-limit.ts"),
+      file("src/server/middleware/auth.ts"),
+      file("src/web/features/settings/rate-limit-settings.tsx"),
+      file("README.md"),
+    ],
   },
   error: undefined,
   kept,

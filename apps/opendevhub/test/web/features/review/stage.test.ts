@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   dropHunk,
+  fileTree,
+  folderPaths,
   hunkAnnotations,
   hunkCount,
   pickSelection,
@@ -179,5 +181,41 @@ describe(selectionAfter, () => {
     expect(selectionAfter(data, selection, "stage", { paths: ["a.ts"] })).toBe(
       selection
     );
+  });
+});
+
+describe("fileTree", () => {
+  const file = (path: string) => ({
+    additions: 1,
+    deletions: 0,
+    file: path,
+    status: "modified" as const,
+  });
+
+  it("nests files under folders, folders first, and joins single-folder chains", () => {
+    const tree = fileTree([
+      file("tokens.db"),
+      file("storage/layout.json"),
+      file("apps/web/src/a.ts"),
+      file("apps/web/src/lib/b.ts"),
+      file("storage/.cache/x"),
+    ]);
+    expect(
+      tree.map((n) => (n.kind === "folder" ? `${n.path}/` : n.name))
+    ).toEqual(["apps/web/src/", "storage/", "tokens.db"]);
+    const [apps, storage] = tree;
+    expect(apps?.kind === "folder" && apps.files.map((f) => f.file)).toEqual([
+      "apps/web/src/lib/b.ts",
+      "apps/web/src/a.ts",
+    ]);
+    expect(
+      storage?.kind === "folder" && storage.children.map((n) => n.name)
+    ).toEqual([".cache", "layout.json"]);
+    expect(folderPaths(tree)).toEqual([
+      "apps/web/src",
+      "apps/web/src/lib",
+      "storage",
+      "storage/.cache",
+    ]);
   });
 });
