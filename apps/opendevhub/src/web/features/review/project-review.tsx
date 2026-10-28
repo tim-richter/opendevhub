@@ -861,6 +861,7 @@ const ReviewTarget = ({
                 {...diffProps}
                 files={[branchFile]}
                 hideTree
+                collapsible={false}
                 wholeFilePatches
                 load={(file) =>
                   fetchReview(projectId, directory, {

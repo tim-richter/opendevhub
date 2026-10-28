@@ -128,6 +128,7 @@ export const ChangeSections = (props: {
           {...diffProps}
           files={[file]}
           hideTree
+          collapsible={false}
           idPrefix="review-file"
           hunks={controls}
           {...(selection?.staged

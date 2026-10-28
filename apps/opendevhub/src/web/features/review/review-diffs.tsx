@@ -290,6 +290,8 @@ export const ReviewDiffs = (props: {
   /** With `onViewed`, each diff has a Viewed checkbox; a viewed diff starts collapsed. */
   viewed?: ViewedFiles;
   onViewed?: (file: ReviewFile, viewed: boolean) => void;
+  /** False keeps every diff open, without the toggle: viewing one file, there is nothing to make room for. */
+  collapsible?: boolean;
   /** With it, each hunk and file can be kept or undone. */
   hunks?: HunkControls;
   /** Leaves the file tree to the caller, which passes the file to scroll to as `selectedFile`. */
@@ -390,6 +392,7 @@ export const ReviewDiffs = (props: {
               selected={selectedFile === f.file}
               viewed={props.viewed && isViewed(props.viewed, f)}
               onViewed={props.onViewed && ((on) => props.onViewed?.(f, on))}
+              collapsible={props.collapsible ?? true}
               load={
                 props.load &&
                 (() => props.load?.(f.file) ?? Promise.resolve(undefined))
@@ -482,6 +485,7 @@ interface FileDiffProps {
   /** Undefined when the review doesn't track viewed files. */
   viewed?: boolean;
   onViewed?: (viewed: boolean) => void;
+  collapsible: boolean;
   load?: () => Promise<string | undefined>;
   view: DiffView;
   wholeFilePatch: boolean;
@@ -511,7 +515,7 @@ const DeferredFileDiff = (props: FileDiffProps) => {
     props.open !== undefined ||
     props.reveal !== undefined ||
     // Collapsed, so only its header renders.
-    props.viewed === true;
+    (props.collapsible && props.viewed === true);
 
   useEffect(() => {
     if (ready) {
@@ -559,7 +563,8 @@ const DeferredFileDiff = (props: FileDiffProps) => {
 
 const FileDiff = (props: FileDiffProps) => {
   const { file } = props;
-  const [collapsed, setCollapsed] = useState(props.viewed === true);
+  const [closed, setCollapsed] = useState(props.viewed === true);
+  const collapsed = props.collapsible && closed;
   const [revealed, setRevealed] = useState(props.reveal);
   if (props.reveal !== revealed) {
     setRevealed(props.reveal);
@@ -567,7 +572,7 @@ const FileDiff = (props: FileDiffProps) => {
       setCollapsed(false);
     }
   }
-  // Marking a diff viewed closes it; unmarking it, or the file changing since, opens it again.
+  // Marking a diff viewed closes it (when it can close); unmarking it, or the file changing since, opens it again.
   const [wasViewed, setWasViewed] = useState(props.viewed);
   if (props.viewed !== wasViewed) {
     setWasViewed(props.viewed);
@@ -725,7 +730,7 @@ const FileDiff = (props: FileDiffProps) => {
             selectedLines={selectedLines}
             renderAnnotation={renderAnnotation}
             collapsed={collapsed}
-            renderHeaderPrefix={toggle}
+            renderHeaderPrefix={props.collapsible ? toggle : undefined}
             renderHeaderMetadata={
               tracksViewed || hunks ? headerActions : undefined
             }
