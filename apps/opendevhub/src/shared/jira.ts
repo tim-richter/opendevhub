@@ -315,13 +315,24 @@ export interface JiraTickets {
   nextStartAt?: number;
 }
 
+/** A comment picked to go into a task with its ticket. */
+export type JiraTaskComment = Pick<
+  JiraComment,
+  "id" | "author" | "body" | "createdAt"
+>;
+
 /** A durable snapshot of the ticket used to create a task, stored in session metadata. */
 export interface JiraTaskSource {
   key: string;
   instanceUrl: string;
   title: string;
   description: string;
+  /** The comments picked to go with it, oldest first; most tasks have none. */
+  comments?: JiraTaskComment[];
 }
+
+/** The most comments a task may take from its ticket. */
+export const JIRA_TASK_COMMENTS_MAX = 100;
 
 export const JIRA_KEY = /^[A-Z][A-Z0-9_]*-[1-9]\d*$/u;
 
@@ -329,5 +340,22 @@ export const jiraTicketUrl = (
   ticket: Pick<JiraTaskSource, "instanceUrl" | "key">
 ): string => `${ticket.instanceUrl}/browse/${encodeURIComponent(ticket.key)}`;
 
+/** `brief` followed by the picked comments, each headed by its author and day, or `brief` alone without any. */
+export const withJiraComments = (
+  brief: string,
+  comments: JiraTaskComment[] = []
+): string => {
+  if (comments.length === 0) {
+    return brief;
+  }
+  const thread = comments
+    .map((c) => `**${c.author}** on ${c.createdAt.slice(0, 10)}:\n\n${c.body}`)
+    .join("\n\n");
+  return `${brief}\n\nRelevant comments from the ticket:\n\n${thread}`;
+};
+
 export const jiraTaskPrompt = (ticket: JiraTaskSource): string =>
-  `Implement ${ticket.key}: ${ticket.title}\n\nTicket: ${jiraTicketUrl(ticket)}\n\n${ticket.description || "No description provided."}`;
+  withJiraComments(
+    `Implement ${ticket.key}: ${ticket.title}\n\nTicket: ${jiraTicketUrl(ticket)}\n\n${ticket.description || "No description provided."}`,
+    ticket.comments
+  );

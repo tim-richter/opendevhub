@@ -19,6 +19,7 @@ import {
   ExternalLinkIcon,
   KanbanIcon,
   ListIcon,
+  MessageSquareIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -834,14 +835,34 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
     ["ticket", ticketKey],
     (signal) => fetchJiraTicket(ticketKey, signal)
   );
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const pickedComments = (data?.comments ?? [])
+    .filter((c) => picked.has(c.id))
+    .map(({ author, body, createdAt, id }) => ({
+      author,
+      body,
+      createdAt,
+      id,
+    }));
   const source: JiraTaskSource | undefined = data
     ? {
         description: data.description,
         instanceUrl: data.instanceUrl,
         key: data.key,
         title: data.title,
+        ...(pickedComments.length > 0 ? { comments: pickedComments } : {}),
       }
     : undefined;
+  const pick = (id: string, on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
   const { data: links } = useTicketLinks(data);
   const projectName = (id: string) =>
     snapshot?.projects.find((v) => v.project.id === id)?.project.name ?? id;
@@ -932,6 +953,21 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
           <Button variant="ghost" size="sm" disabled={busy} onClick={refresh}>
             <RefreshCwIcon className={busy ? "animate-spin" : ""} /> Refresh
           </Button>
+          {pickedComments.length > 0 && (
+            <p className="text-muted-foreground flex items-center gap-2 text-sm sm:ml-2">
+              <MessageSquareIcon className="size-4" aria-hidden />
+              {pickedComments.length}{" "}
+              {pickedComments.length === 1 ? "comment" : "comments"} added to
+              the task
+              <button
+                type="button"
+                onClick={() => setPicked(new Set())}
+                className="hover:text-foreground focus-visible:outline-ring rounded-sm font-medium underline-offset-4 transition-colors hover:underline focus-visible:outline-2"
+              >
+                Clear
+              </button>
+            </p>
+          )}
         </div>
       </header>
       <JiraGate>
@@ -947,8 +983,9 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
         )}
         {tooLarge && (
           <Note warn>
-            This ticket exceeds the task size limit. Shorten its description in
-            Jira before creating a task.
+            {pickedComments.length > 0
+              ? "The ticket and its picked comments exceed the task size limit. Pick fewer comments before creating a task."
+              : "This ticket exceeds the task size limit. Shorten its description in Jira before creating a task."}
           </Note>
         )}
         {data && (
@@ -1008,7 +1045,7 @@ const TicketDetails = ({ ticketKey }: { ticketKey: string }) => {
                   </ul>
                 </Section>
               )}
-              <TicketComments ticket={data} />
+              <TicketComments ticket={data} picks={{ onPick: pick, picked }} />
             </div>
             <aside
               className="bg-muted/30 rounded-xl border p-5"

@@ -1,5 +1,5 @@
-import { JIRA_KEY } from "../../shared/jira";
-import type { JiraTaskSource } from "../../shared/jira";
+import { JIRA_KEY, JIRA_TASK_COMMENTS_MAX } from "../../shared/jira";
+import type { JiraTaskComment, JiraTaskSource } from "../../shared/jira";
 import { MAX_VARIANTS } from "../../shared/tasks";
 import { ATTACHMENTS_MAX } from "../../shared/types";
 import type {
@@ -138,6 +138,35 @@ export const parseFirstMessage = (value: unknown): ComposerSendRequest => {
   };
 };
 
+const parseJiraComment = (value: unknown): JiraTaskComment => {
+  const v = (value ?? {}) as Record<string, unknown>;
+  if (
+    typeof v.id !== "string" ||
+    v.id.length > 200 ||
+    typeof v.author !== "string" ||
+    v.author.length > 1000 ||
+    typeof v.body !== "string" ||
+    v.body.length > PROMPT_MAX ||
+    typeof v.createdAt !== "string" ||
+    v.createdAt.length > 100
+  ) {
+    throw new InvalidRequestError("invalid Jira ticket comment");
+  }
+  return { author: v.author, body: v.body, createdAt: v.createdAt, id: v.id };
+};
+
+const parseJiraComments = (value: unknown): JiraTaskComment[] => {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > JIRA_TASK_COMMENTS_MAX) {
+    throw new InvalidRequestError(
+      `a task takes at most ${JIRA_TASK_COMMENTS_MAX} ticket comments`
+    );
+  }
+  return value.map(parseJiraComment);
+};
+
 /** Copy only the ticket snapshot fields; never accept credentials or remote HTML. */
 export const parseJiraTaskSource = (value: unknown): JiraTaskSource => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -156,11 +185,13 @@ export const parseJiraTaskSource = (value: unknown): JiraTaskSource => {
   ) {
     throw new InvalidRequestError("invalid Jira ticket reference");
   }
+  const comments = parseJiraComments(v.comments);
   return {
     description: v.description,
     instanceUrl: jiraUrl(v.instanceUrl),
     key: v.key,
     title: v.title,
+    ...(comments.length > 0 ? { comments } : {}),
   };
 };
 

@@ -1828,6 +1828,40 @@ describe("draft tasks", () => {
     ]);
   });
 
+  it("drafts from a ticket with its picked comments after the description", async () => {
+    const s = await started();
+    const comments = [
+      {
+        author: "Alex Kim",
+        body: "Respect the OS setting too.",
+        createdAt: "2026-10-01T09:00:00.000Z",
+        id: "10001",
+      },
+    ];
+    const { task } = s.hub.tasks.draftFromTicket(project.id, {
+      jira: { ...jira, comments },
+    });
+    expect(s.tasks.get(task)).toMatchObject({
+      jira: { comments },
+      prompt:
+        "Users want a dark theme\n\nRelevant comments from the ticket:\n\n**Alex Kim** on 2026-10-01:\n\nRespect the OS setting too.",
+    });
+  });
+
+  it("refuses a ticket whose comments are malformed", async () => {
+    const s = await started();
+    expect(() =>
+      s.hub.tasks.draftFromTicket(project.id, {
+        jira: { ...jira, comments: [{ author: "Alex Kim", body: 1 }] },
+      })
+    ).toThrow(InvalidRequestError);
+    expect(() =>
+      s.hub.tasks.draftFromTicket(project.id, {
+        jira: { ...jira, comments: "all" },
+      })
+    ).toThrow(InvalidRequestError);
+  });
+
   it("refuses a draft with neither title nor brief", async () => {
     const s = await started();
     expect(() => s.hub.tasks.createDraft(project.id, { prompt: " " })).toThrow(

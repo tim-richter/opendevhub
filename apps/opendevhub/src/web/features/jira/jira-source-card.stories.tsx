@@ -19,3 +19,15 @@ const meta = preview.meta({
 });
 
 export const Default = meta.story();
+
+export const WithComments = meta.story({
+  args: {
+    source: {
+      comments: ticket.comments.slice(0, 2),
+      description: ticket.description,
+      instanceUrl: ticket.instanceUrl,
+      key: ticket.key,
+      title: ticket.title,
+    },
+  },
+});

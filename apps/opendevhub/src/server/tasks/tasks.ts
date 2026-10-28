@@ -1,3 +1,4 @@
+import { withJiraComments } from "../../shared/jira";
 import { deriveTitle, variantLabels, variantTitle } from "../../shared/tasks";
 import type {
   ArchivedTask,
@@ -255,7 +256,10 @@ export class Tasks {
     return { task };
   }
 
-  /** A draft from a Jira ticket: titled from it, its description as the brief, linked to it, one default variant. */
+  /**
+   * A draft from a Jira ticket: titled from it, its description and picked comments as the brief, linked to it, one
+   * default variant.
+   */
   draftFromTicket(
     id: ProjectId,
     body: Record<string, unknown>
@@ -263,7 +267,10 @@ export class Tasks {
     const jira = parseJiraTaskSource(body.jira);
     return this.createDraft(id, {
       jira,
-      prompt: jira.description.trim() || jira.title,
+      prompt: withJiraComments(
+        jira.description.trim() || jira.title,
+        jira.comments
+      ),
       title: `${jira.key}: ${jira.title}`.slice(0, TITLE_LIMIT),
       where: "worktree",
     });

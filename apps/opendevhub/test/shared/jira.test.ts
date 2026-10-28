@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   jiraKanban,
   jiraQueryParams,
+  jiraTaskPrompt,
   parseJiraQuery,
 } from "../../src/shared/jira";
 import type { JiraTicketSummary } from "../../src/shared/jira";
@@ -98,5 +99,43 @@ describe(parseJiraQuery, () => {
     expect(
       parseJiraQuery(new URLSearchParams({ jql: "x".repeat(2001) }))
     ).toBeUndefined();
+  });
+});
+
+describe("jiraTaskPrompt", () => {
+  const source = {
+    description: "Users want a dark theme",
+    instanceUrl: "https://jira.example.com",
+    key: "APP-42",
+    title: "Dark mode",
+  };
+
+  it("leads with the ticket and leaves comments out when none are picked", () => {
+    expect(jiraTaskPrompt(source)).toBe(
+      "Implement APP-42: Dark mode\n\nTicket: https://jira.example.com/browse/APP-42\n\nUsers want a dark theme"
+    );
+  });
+
+  it("follows the description with the picked comments, oldest first", () => {
+    const prompt = jiraTaskPrompt({
+      ...source,
+      comments: [
+        {
+          author: "Alex Kim",
+          body: "Respect the OS setting.",
+          createdAt: "2026-10-01T09:00:00.000Z",
+          id: "1",
+        },
+        {
+          author: "Sam Lee",
+          body: "Keep the toggle in settings.",
+          createdAt: "2026-10-03T12:00:00.000Z",
+          id: "2",
+        },
+      ],
+    });
+    expect(prompt).toBe(
+      "Implement APP-42: Dark mode\n\nTicket: https://jira.example.com/browse/APP-42\n\nUsers want a dark theme\n\nRelevant comments from the ticket:\n\n**Alex Kim** on 2026-10-01:\n\nRespect the OS setting.\n\n**Sam Lee** on 2026-10-03:\n\nKeep the toggle in settings."
+    );
   });
 });

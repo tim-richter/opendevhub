@@ -1,3 +1,5 @@
+import { Checkbox } from "@opendevhub/ui/checkbox";
+import { Label } from "@opendevhub/ui/label";
 import {
   ChevronsUpIcon,
   ExternalLinkIcon,
@@ -27,15 +29,23 @@ const roleOf = (ticket: JiraTicket, author: string) => {
   return author === ticket.assignee ? "Assignee" : undefined;
 };
 
+/** Which comments go into a task created from the ticket. */
+export interface CommentPicks {
+  picked: ReadonlySet<string>;
+  onPick: (id: string, picked: boolean) => void;
+}
+
 const Comment = (props: {
   ticket: JiraTicket;
   comment: JiraComment;
   last: boolean;
   revealed: boolean;
   articleRef?: Ref<HTMLElement>;
+  picks?: CommentPicks;
 }) => {
-  const { ticket, comment } = props;
+  const { ticket, comment, picks } = props;
   const role = roleOf(ticket, comment.author);
+  const picked = picks?.picked.has(comment.id) ?? false;
   return (
     <li
       className={cn(
@@ -55,7 +65,10 @@ const Comment = (props: {
         aria-label={`Comment by ${comment.author}`}
         tabIndex={props.articleRef ? -1 : undefined}
         ref={props.articleRef}
-        className="bg-card focus-visible:outline-ring min-w-0 flex-1 rounded-lg border focus-visible:outline-2"
+        className={cn(
+          "bg-card focus-visible:outline-ring min-w-0 flex-1 rounded-lg border transition-[border-color,box-shadow] duration-150 ease-out focus-visible:outline-2",
+          picked && "border-primary/60 ring-primary/15 ring-2"
+        )}
       >
         <header className="bg-muted/40 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-t-lg border-b px-4 py-2 text-sm">
           <span className="min-w-0 truncate font-medium">{comment.author}</span>
@@ -80,6 +93,17 @@ const Comment = (props: {
               </span>
             </span>
           )}
+          {picks && (
+            <Label className="text-muted-foreground has-[[data-state=checked]]:text-foreground ml-auto cursor-pointer text-xs">
+              <Checkbox
+                checked={picked}
+                onCheckedChange={(checked) =>
+                  picks.onPick(comment.id, checked === true)
+                }
+              />
+              Add to task
+            </Label>
+          )}
         </header>
         <MarkdownBody className="text-foreground/90 px-4 py-3">
           {comment.body}
@@ -89,8 +113,17 @@ const Comment = (props: {
   );
 };
 
-/** The ticket's discussion as a thread, oldest first like Jira, so it reads top to bottom. */
-export const TicketComments = ({ ticket }: { ticket: JiraTicket }) => {
+/**
+ * The ticket's discussion as a thread, oldest first like Jira, so it reads top to bottom. With `picks`, each comment
+ * can be added to a task created from the ticket.
+ */
+export const TicketComments = ({
+  ticket,
+  picks,
+}: {
+  ticket: JiraTicket;
+  picks?: CommentPicks;
+}) => {
   const { comments, commentTotal } = ticket;
   const [expanded, setExpanded] = useState(false);
   const hidden =
@@ -110,7 +143,10 @@ export const TicketComments = ({ ticket }: { ticket: JiraTicket }) => {
     <section aria-labelledby="jira-comments-title">
       <h2
         id="jira-comments-title"
-        className="mb-4 flex items-center gap-2 text-base font-semibold"
+        className={cn(
+          "flex items-center gap-2 text-base font-semibold",
+          picks && comments.length > 0 ? "mb-1" : "mb-4"
+        )}
       >
         Comments
         {commentTotal > 0 && (
@@ -119,6 +155,12 @@ export const TicketComments = ({ ticket }: { ticket: JiraTicket }) => {
           </span>
         )}
       </h2>
+      {picks && comments.length > 0 && (
+        <p className="text-muted-foreground mb-4 text-sm">
+          A task gets the ticket’s description. Add the comments it should also
+          know about.
+        </p>
+      )}
       {comments.length === 0 ? (
         <div className="text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center text-sm">
           <MessageSquareIcon className="size-5 opacity-60" aria-hidden />
@@ -165,6 +207,7 @@ export const TicketComments = ({ ticket }: { ticket: JiraTicket }) => {
               comment={comment}
               last={i === comments.length - hidden - 1}
               revealed={i < revealed}
+              {...(picks ? { picks } : {})}
               {...(revealed > 0 && i === 0
                 ? { articleRef: firstRevealed }
                 : {})}

@@ -5,8 +5,16 @@ import type { JiraTaskSource } from "../../../shared/jira";
 import type { TicketRef } from "../../../shared/types";
 import { MarkdownBody } from "../../components/markdown-body";
 import { Chip } from "../../components/page";
+import { When } from "../../components/when";
 import { useDash } from "../../dashboard-context";
 import { Link } from "../../routing";
+
+const summaryOf = (comments: number): string => {
+  if (comments === 0) {
+    return "Ticket description at task creation";
+  }
+  return `Ticket description and ${comments} ${comments === 1 ? "comment" : "comments"} at task creation`;
+};
 
 /**
  * Keep the original requirements available even when Jira is disabled or unreachable. `ticket` is the ticket as
@@ -57,12 +65,27 @@ export const JiraSourceCard = ({
       </div>
       <details className="mt-2">
         <summary className="text-muted-foreground cursor-pointer">
-          Ticket description at task creation
+          {summaryOf(source.comments?.length ?? 0)}
         </summary>
         {source.description ? (
           <MarkdownBody className="mt-2">{source.description}</MarkdownBody>
         ) : (
           <p className="mt-2">No description provided.</p>
+        )}
+        {source.comments && source.comments.length > 0 && (
+          <ol className="mt-3 space-y-3 border-t pt-3">
+            {source.comments.map((comment) => (
+              <li key={comment.id}>
+                <p className="text-muted-foreground text-xs">
+                  <span className="text-foreground font-medium">
+                    {comment.author}
+                  </span>{" "}
+                  <When at={comment.createdAt} />
+                </p>
+                <MarkdownBody className="mt-1">{comment.body}</MarkdownBody>
+              </li>
+            ))}
+          </ol>
         )}
       </details>
     </div>
