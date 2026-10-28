@@ -135,7 +135,7 @@ const JiraBoardPicker = (props: FieldProps) => {
         <SelectTrigger id="project-jira-board" className="w-full max-w-sm">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent position="popper" align="start">
           <SelectItem value={NO_BOARD}>Not linked</SelectItem>
           {boards.map((b) => (
             <SelectItem key={b.id} value={String(b.id)}>

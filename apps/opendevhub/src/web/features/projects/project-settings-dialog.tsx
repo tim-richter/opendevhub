@@ -151,7 +151,7 @@ const ProjectSettingsPanel = ({ view }: { view: ProjectView }) => {
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper" align="start">
               {GROUPS.map((group) => {
                 const items = sections.filter(
                   (section) => section.group === group.id

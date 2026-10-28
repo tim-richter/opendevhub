@@ -301,7 +301,7 @@ const SettingsPicker = (props: { sections: SectionDef[]; current: string }) => {
       <SelectTrigger aria-label="Settings section" className="w-full">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper" align="start">
         {GROUPS.map((group) => (
           <SelectGroup key={group.id}>
             <SelectLabel>{group.label}</SelectLabel>

@@ -68,7 +68,8 @@ export const Choice = (props: {
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      {/* Item-aligned content re-positions on every re-render, snapping a scrolled list back to the selected item. */}
+      <SelectContent position="popper" align="start">
         {groups(options).map(({ group, items }, index) => {
           const rendered = items.map((o) => (
             <SelectItem
