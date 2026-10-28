@@ -116,6 +116,7 @@ export interface DashboardHub {
     | "stage"
     | "commitStaged"
     | "updateFromBase"
+    | "createBranch"
     | "mergeIntoBase"
     | "publishInfo"
     | "publishSuggestion"

@@ -419,6 +419,7 @@ export const bodies = {
     paths: z.array(z.string().max(1000)).max(500).optional(),
   }),
   update: directory.extend({ base: text }),
+  branch: directory.extend({ name: text }),
   merge: directory.extend({ base: text, ffOnly: actionFlag }),
   publish: directory.extend({
     base: text,

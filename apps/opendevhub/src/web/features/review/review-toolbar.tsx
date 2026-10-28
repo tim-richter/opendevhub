@@ -83,7 +83,7 @@ const ViewMenu = (props: {
 
 /**
  * One slim row: where you are (branch, what it is compared with), then the tools for looking at the diff. What to do
- * with the changes lives in the sidebar's step panel.
+ * with the changes lives in the sidebar's step panel; what to do with the branch, on its name.
  */
 export const ReviewToolbar = (props: {
   barRef: Ref<HTMLDivElement>;
@@ -100,6 +100,8 @@ export const ReviewToolbar = (props: {
   onRefresh: () => void;
   /** AI review, checks and other tools for the diff. */
   tools: ReactNode;
+  /** Entries of the menu on the branch name, such as making a new branch. */
+  branchItems: ReactNode;
 }) => {
   const { data, base } = props;
   return (
@@ -110,12 +112,26 @@ export const ReviewToolbar = (props: {
       {!data && !props.hasError && <Skeleton className="h-5 w-48" />}
       {data && (
         <div className="contents text-sm">
-          <Tip label="Current branch">
-            <span className="inline-flex min-w-0 items-center gap-1 font-medium">
-              <GitBranchIcon className="text-muted-foreground size-4 shrink-0" />
-              <span className="truncate">{data.branch ?? "detached HEAD"}</span>
-            </span>
-          </Tip>
+          <DropdownMenu>
+            <Tip label="Current branch">
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-2 min-w-0 font-medium"
+                >
+                  <GitBranchIcon className="text-muted-foreground" />
+                  <span className="truncate">
+                    {data.branch ?? "detached HEAD"}
+                  </span>
+                  <ChevronDownIcon className="text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tip>
+            <DropdownMenuContent align="start" className="w-64">
+              {props.branchItems}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ToggleGroup
             type="single"
             variant="outline"

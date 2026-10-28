@@ -70,6 +70,73 @@ export const MergeDialog = (props: {
   );
 };
 
+/** Names a new branch for the main checkout; stays open with the reason when git refuses the name. */
+export const NewBranchDialog = (props: {
+  from?: string;
+  /** Whether uncommitted changes come along. */
+  dirty: boolean;
+  onClose: () => void;
+  onCreate: (name: string) => Promise<unknown>;
+}) => {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string>();
+  const [creating, setCreating] = useState(false);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const branch = name.trim();
+    if (!branch) {
+      return;
+    }
+    setCreating(true);
+    setError(undefined);
+    props
+      .onCreate(branch)
+      .then(props.onClose)
+      .catch((error_: unknown) =>
+        setError(error_ instanceof Error ? error_.message : String(error_))
+      )
+      .finally(() => setCreating(false));
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && props.onClose()}>
+      <DialogContent>
+        <form className="flex flex-col gap-4" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>New branch</DialogTitle>
+            <DialogDescription>
+              Starts from {props.from ?? "the current commit"} and switches to
+              it.
+              {props.dirty && " Your uncommitted changes come along."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <Input
+              aria-label="Branch name"
+              aria-invalid={!!error}
+              value={name}
+              // Branch names can't hold spaces; turn them into the dash people mean.
+              onChange={(e) => setName(e.target.value.replaceAll(" ", "-"))}
+              placeholder="feature/name"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+            />
+            {error && <p className="text-destructive text-xs">{error}</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={props.onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={creating || !name.trim()}>
+              {creating ? "Creating…" : "Create branch"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 /** Picks the branch the review compares with; empty goes back to the default. */
 export const BaseDialog = (props: {
   current?: string;

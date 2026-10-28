@@ -651,6 +651,42 @@ describe("review", () => {
     ).rejects.toThrow(/main checkout has uncommitted/u);
   });
 
+  it("creates a branch in the main checkout with the old branch's base, refusing worktrees and taken names", async () => {
+    const { hub, git } = await running();
+    const ws = "/workspaces/demo";
+    git.recordedBase.mockResolvedValueOnce(undefined);
+    await expect(
+      hub.reviews.createBranch(project.id, ws, " feature/login ")
+    ).resolves.toStrictEqual({ branch: "feature/login", base: "main" });
+    expect(git.createBranch).toHaveBeenCalledWith(
+      project,
+      ws,
+      "feature/login",
+      "main"
+    );
+    expect(hub.environments.logLines(project.id).join("\n")).toMatch(
+      /review: create branch feature\/login/u
+    );
+    git.currentBranch.mockResolvedValueOnce("fix");
+    git.recordedBase.mockResolvedValueOnce("develop");
+    await expect(
+      hub.reviews.createBranch(project.id, ws, "fix-2")
+    ).resolves.toStrictEqual({ branch: "fix-2", base: "develop" });
+    git.currentBranch.mockResolvedValueOnce(undefined);
+    await expect(
+      hub.reviews.createBranch(project.id, ws, "from-detached")
+    ).resolves.toStrictEqual({ branch: "from-detached" });
+    await expect(
+      hub.reviews.createBranch(project.id, ws, "main")
+    ).rejects.toThrow(/already exists/u);
+    await expect(
+      hub.reviews.createBranch(project.id, ws, "-x")
+    ).rejects.toThrow(InvalidRequestError);
+    await expect(hub.reviews.createBranch(project.id, wt, "y")).rejects.toThrow(
+      /worktree stays on its own branch/u
+    );
+  });
+
   it("still refreshes the worktree list when deleting the branch fails", async () => {
     const { hub, git, worktrees, store } = await running();
     git.deleteBranch.mockRejectedValueOnce(

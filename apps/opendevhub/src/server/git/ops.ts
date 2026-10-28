@@ -902,6 +902,22 @@ export class GitOps {
     );
   }
 
+  /**
+   * Creates `branch` at HEAD and switches to it; uncommitted changes, staged or not, come along. Records `base`
+   * as what the branch was made from, for review.
+   */
+  async createBranch(
+    p: ExecTarget,
+    dir: string,
+    branch: string,
+    base?: string
+  ): Promise<void> {
+    await this.git(p, dir, ["switch", "-q", "-c", branch]);
+    if (base) {
+      await this.git(p, dir, ["config", baseKey(branch), base]);
+    }
+  }
+
   /** `-d` refuses a branch that isn't merged; `force` (-D) is for branches the user chose to discard. */
   async deleteBranch(
     p: ExecTarget,

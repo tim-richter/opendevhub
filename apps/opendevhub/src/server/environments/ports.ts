@@ -91,6 +91,7 @@ export type GitPort = Pick<
   | "unstageAll"
   | "commitStaged"
   | "hasStaged"
+  | "createBranch"
 >;
 export type WorktreesPort = Pick<Worktrees, "list" | "add" | "remove">;
 export type EditorsPort = Pick<EditorLauncher, "open">;

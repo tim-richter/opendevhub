@@ -63,10 +63,18 @@ describe(gitBlockers, () => {
 
   it("waits for the data to load", () => {
     expect(gitBlockers(undefined, worktree)).toEqual({
+      branch: "Loading…",
       commit: "Loading…",
       merge: "Loading…",
       update: "Loading…",
     });
+  });
+
+  it("makes new branches only in the main checkout", () => {
+    expect(gitBlockers(data, worktree).branch).toMatch(/own branch/u);
+    expect(
+      gitBlockers(data, { ...worktree, isWorktree: false }).branch
+    ).toBeUndefined();
   });
 
   it("allows merging a clean, ahead worktree into a clean base", () => {

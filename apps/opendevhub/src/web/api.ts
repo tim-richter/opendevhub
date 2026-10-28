@@ -702,6 +702,19 @@ export const commitChanges = async (
   );
 };
 
+export const createBranch = (
+  projectId: string,
+  directory: string,
+  name: string
+) =>
+  read(
+    project.review.branch.$post({
+      param: projectParam(projectId),
+      json: { directory, name },
+    }),
+    "create branch"
+  );
+
 export const updateFromBase = (
   projectId: string,
   directory: string,

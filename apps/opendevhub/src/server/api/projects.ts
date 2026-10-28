@@ -852,6 +852,16 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
           );
         })
     )
+    .post("/api/projects/:id/review/branch", validateJson(bodies.branch), (c) =>
+      json(c, (id) => {
+        const b = c.req.valid("json");
+        return hub.reviews.createBranch(
+          id,
+          str(b.directory) ?? "",
+          str(b.name) ?? ""
+        );
+      })
+    )
     .post("/api/projects/:id/review/update", validateJson(bodies.update), (c) =>
       json(c, (id) => {
         const b = c.req.valid("json");

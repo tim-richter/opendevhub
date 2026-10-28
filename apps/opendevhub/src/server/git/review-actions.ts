@@ -405,6 +405,41 @@ export class ReviewActions {
   }
 
   /**
+   * Creates a branch in the main checkout and switches to it, taking the uncommitted changes along. Its base is
+   * the old branch's base, or the old branch itself. Worktrees belong to their branch and are refused.
+   */
+  // oxlint-disable-next-line eslint/require-await -- async so that validation errors reject instead of throwing
+  async createBranch(
+    id: ProjectId,
+    directory: string,
+    name: string
+  ): Promise<{ branch: string; base?: string }> {
+    const branch = validateBranch(name);
+    this.envs.checkDirectory(id, directory);
+    return this.envs.withGit(id, async (p) => {
+      if (directory !== this.envs.workspaceFolder(p)) {
+        throw new InvalidRequestError(
+          "a worktree stays on its own branch; start a new task to branch off"
+        );
+      }
+      const on = this.checkouts.gitFor(p, directory);
+      const { git } = on;
+      const taken = await git.localBranches(on.target, directory);
+      if (taken.includes(branch)) {
+        throw new InvalidRequestError(`branch ${branch} already exists`);
+      }
+      const from = await git.currentBranch(on.target, directory);
+      const base = from
+        ? ((await git.recordedBase(on.target, directory, from)) ?? from)
+        : undefined;
+      await this.envs.gitAction(id, `create branch ${branch}`, () =>
+        git.createBranch(on.target, directory, branch, base)
+      );
+      return { branch, ...(base ? { base } : {}) };
+    });
+  }
+
+  /**
    * Commits what changed under `paths`, if anything did, so that a new worktree based on the checkout's branch
    * has it; other changes stay uncommitted. Returns that branch; a detached HEAD is refused.
    */

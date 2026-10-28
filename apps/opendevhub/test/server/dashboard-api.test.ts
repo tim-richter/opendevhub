@@ -305,6 +305,10 @@ function setup(webDir?: string) {
       ),
       commitMessage: vi.fn(async (_id: string, _dir: string) => "feat: x"),
       commit: vi.fn(async (_id: string, _dir: string, _m: string) => {}),
+      createBranch: vi.fn(async (_id: string, _dir: string, name: string) => ({
+        branch: name,
+        base: "main",
+      })),
       updateFromBase: vi.fn(
         async (_id: string, _dir: string, _base: string) => ({
           strategy: "rebase" as const,
@@ -2196,6 +2200,16 @@ describe("dashboard API", () => {
           await post(app, "review/update", { directory: "/w", base: "main" })
         ).json()
       ).resolves.toStrictEqual({ strategy: "rebase" });
+      await expect(
+        (
+          await post(app, "review/branch", { directory: "/w", name: "y" })
+        ).json()
+      ).resolves.toStrictEqual({ branch: "y", base: "main" });
+      expect(hub.reviews.createBranch).toHaveBeenCalledWith(
+        project.id,
+        "/w",
+        "y"
+      );
       await expect(
         (
           await post(app, "review/merge", {

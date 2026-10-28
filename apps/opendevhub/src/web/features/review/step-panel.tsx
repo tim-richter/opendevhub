@@ -10,6 +10,7 @@ import { Textarea } from "@opendevhub/ui/textarea";
 import {
   CheckCircle2Icon,
   EllipsisIcon,
+  GitBranchPlusIcon,
   GitCommitHorizontalIcon,
   LoaderCircleIcon,
   MessageSquareIcon,
@@ -27,9 +28,12 @@ const CommitForm = (props: {
   kept?: number;
   left?: number;
   disabled: boolean;
+  /** The base branch the commit would land on, when it would. */
+  onBase?: string;
   onCommit: (message: string) => Promise<unknown>;
   onKeepAll: () => void;
   onSuggest: () => Promise<string | undefined>;
+  onNewBranch: () => void;
 }) => {
   const { kept, left, disabled } = props;
   const [message, setMessage] = useState("");
@@ -126,6 +130,21 @@ const CommitForm = (props: {
           Stage a change to commit it.
         </p>
       )}
+      {props.onBase && (
+        <p className="text-muted-foreground flex flex-wrap items-center gap-x-1 text-xs">
+          Commits go straight onto {props.onBase}.
+          <Button
+            type="button"
+            variant="link"
+            size="xs"
+            className="h-auto px-0 text-xs"
+            disabled={props.disabled}
+            onClick={props.onNewBranch}
+          >
+            <GitBranchPlusIcon aria-hidden /> New branch…
+          </Button>
+        </p>
+      )}
     </form>
   );
 };
@@ -159,6 +178,9 @@ export const StepPanel = (props: {
   onSuggest: () => Promise<string | undefined>;
   onShowUncommitted: () => void;
   onComments: () => void;
+  /** The base branch commits would land on, in the main checkout; offers a new branch first. */
+  onBase?: string;
+  onNewBranch: () => void;
 }) => {
   const { step, busy, primary } = props;
   const disabled = props.committing || !!busy;
@@ -171,9 +193,11 @@ export const StepPanel = (props: {
         kept={props.kept}
         left={props.left}
         disabled={disabled}
+        onBase={props.onBase}
         onCommit={props.onCommit}
         onKeepAll={props.onKeepAll}
         onSuggest={props.onSuggest}
+        onNewBranch={props.onNewBranch}
       />
     );
   } else if (step.kind === "commit") {

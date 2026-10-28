@@ -5,6 +5,7 @@ export interface GitBlockers {
   commit?: string;
   update?: string;
   merge?: string;
+  branch?: string;
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -15,7 +16,12 @@ export const gitBlockers = (
   options: { isWorktree: boolean; baseName?: string }
 ): GitBlockers => {
   if (!data) {
-    return { commit: "Loading…", merge: "Loading…", update: "Loading…" };
+    return {
+      branch: "Loading…",
+      commit: "Loading…",
+      merge: "Loading…",
+      update: "Loading…",
+    };
   }
   const { baseName, isWorktree } = options;
   const blockers: GitBlockers = {};
@@ -28,6 +34,10 @@ export const gitBlockers = (
     blockers.update = "Commit the changes first";
   } else if (data.behind === 0) {
     blockers.update = `Already up to date with ${baseName}`;
+  }
+  if (isWorktree) {
+    blockers.branch =
+      "A worktree stays on its own branch; start a new task to branch off";
   }
   if (!isWorktree) {
     blockers.merge = "The main checkout is the base";

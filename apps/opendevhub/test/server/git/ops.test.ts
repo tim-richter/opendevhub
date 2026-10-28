@@ -123,6 +123,21 @@ describe("git", () => {
       await expect(ops.isPushed(project, repo)).resolves.toBeTruthy();
     });
 
+    it("creates a branch at HEAD, takes the uncommitted changes along and records its base", async () => {
+      write(repo, "a.txt", "changed\n");
+      git(repo, "add", "a.txt");
+      write(repo, "new.txt", "x\n");
+      await ops.createBranch(project, repo, "feature", "main");
+      await expect(ops.currentBranch(project, repo)).resolves.toBe("feature");
+      await expect(ops.recordedBase(project, repo, "feature")).resolves.toBe(
+        "main"
+      );
+      expect(git(repo, "status", "--porcelain")).toBe("M  a.txt\n?? new.txt\n");
+      await expect(
+        ops.createBranch(project, repo, "feature", "main")
+      ).rejects.toThrow();
+    });
+
     it("commits everything, untracked files included", async () => {
       write(repo, "new.txt", "x\n");
       write(repo, "a.txt", "changed\n");

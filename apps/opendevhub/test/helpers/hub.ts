@@ -592,6 +592,9 @@ export function setup(
     unstageAll: vi.fn(async () => undefined),
     commitStaged: vi.fn(async () => undefined),
     hasStaged: vi.fn(async () => false),
+    createBranch: vi.fn(
+      async (_p: Project, _dir: string, _b: string, _base?: string) => {}
+    ),
     statusLines: vi.fn(
       async (_p: Project, _dir: string): Promise<string[]> => []
     ),

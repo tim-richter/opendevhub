@@ -17,8 +17,10 @@ import {
   ArrowDownToLineIcon,
   BotIcon,
   ChevronDownIcon,
+  CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  GitBranchPlusIcon,
   GitCompareArrowsIcon,
   GitMergeIcon,
   GitPullRequestArrowIcon,
@@ -46,6 +48,7 @@ import type {
 } from "../../../shared/types";
 import {
   bringHome,
+  createBranch,
   fetchReview,
   reviewImageUrl,
   suggestCommitMessage,
@@ -103,7 +106,12 @@ import type {
   ReviewComment,
   ViewedFiles,
 } from "./review";
-import { BaseDialog, CommentsDialog, MergeDialog } from "./review-dialogs";
+import {
+  BaseDialog,
+  CommentsDialog,
+  MergeDialog,
+  NewBranchDialog,
+} from "./review-dialogs";
 import { ReviewDiffs } from "./review-diffs";
 import {
   publishInfoQuery,
@@ -356,7 +364,7 @@ const ReviewTarget = ({
 
   // Git actions: each opens a dialog, or runs at once when there is nothing to choose.
   const [dialog, setDialog] = useState<
-    "commit" | "merge" | "publish" | "base" | "comments"
+    "commit" | "merge" | "publish" | "base" | "comments" | "branch"
   >();
   const [conflicts, setConflicts] = useState<UpdateResult>();
   const [merged, setMerged] = useState<string>();
@@ -425,6 +433,13 @@ const ReviewTarget = ({
       setNotice(`Merged ${branch} into ${baseName}.`);
       refresh();
     });
+  const newBranch = async (name: string) => {
+    const created = await createBranch(projectId, directory, name);
+    setNotice(
+      `Switched to the new branch ${created.branch}${created.base ? `, based on ${created.base}` : ""}.`
+    );
+    refresh();
+  };
   const removeMerged = () =>
     run("Removing", async () => {
       await removeWorktree(projectId, directory, false, true);
@@ -442,6 +457,9 @@ const ReviewTarget = ({
   ] as string[];
 
   const blockers = gitBlockers(data, { baseName, isWorktree });
+  // Committing straight onto the base is rarely meant; the commit form offers a branch first.
+  const onBase =
+    !isWorktree && !!data?.branch && data.branch === baseName && data.dirty;
   const hasPullRequest = !!publish.info?.pr;
   const step = data ? nextStep(data, { baseName, hasPullRequest }) : undefined;
   const base = baseName ?? "base";
@@ -544,6 +562,24 @@ const ReviewTarget = ({
     </>
   );
 
+  const branchItems = (
+    <>
+      <GitItem
+        icon={<GitBranchPlusIcon />}
+        label="New branch…"
+        blocker={blockers.branch}
+        onSelect={() => setDialog("branch")}
+      />
+      {data?.branch && (
+        <DropdownMenuItem
+          onSelect={() => void navigator.clipboard.writeText(data.branch ?? "")}
+        >
+          <CopyIcon /> Copy branch name
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+
   const more = (
     <>
       <GitItem
@@ -621,6 +657,7 @@ const ReviewTarget = ({
         onMode={changeMode}
         onPickBase={() => setDialog("base")}
         onRefresh={refresh}
+        branchItems={branchItems}
         tools={tools}
       />
 
@@ -756,6 +793,14 @@ const ReviewTarget = ({
           }}
         />
       )}
+      {dialog === "branch" && data && (
+        <NewBranchDialog
+          from={data.branch}
+          dirty={data.dirty}
+          onClose={() => setDialog(undefined)}
+          onCreate={newBranch}
+        />
+      )}
       {dialog === "base" && (
         <BaseDialog
           current={baseOverride ?? baseName}
@@ -829,6 +874,8 @@ const ReviewTarget = ({
               onKeepAll={() => changeStage("stage", {})}
               onSuggest={() => suggestCommitMessage(projectId, directory)}
               onShowUncommitted={() => changeMode("working")}
+              onBase={onBase ? baseName : undefined}
+              onNewBranch={() => setDialog("branch")}
               onComments={() => setDialog("comments")}
             />
           </ReviewSidebar>

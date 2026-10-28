@@ -1,4 +1,5 @@
-import { GitPullRequestArrowIcon } from "lucide-react";
+import { DropdownMenuItem } from "@opendevhub/ui/dropdown-menu";
+import { GitBranchPlusIcon, GitPullRequestArrowIcon } from "lucide-react";
 import { fn } from "storybook/test";
 
 import preview from "../../../../.storybook/preview";
@@ -68,6 +69,11 @@ const Layout = (props: { kept: number; review: ReviewData }) => {
         onPickBase={fn()}
         onRefresh={fn()}
         tools={null}
+        branchItems={
+          <DropdownMenuItem onSelect={fn()}>
+            <GitBranchPlusIcon /> New branch…
+          </DropdownMenuItem>
+        }
       />
       <div className="grid items-start gap-4 md:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]">
         <ReviewSidebar
@@ -107,6 +113,10 @@ const Layout = (props: { kept: number; review: ReviewData }) => {
             onSuggest={fn(() => Promise.resolve("Rate limit requests per key"))}
             onShowUncommitted={fn()}
             onComments={fn()}
+            onBase={
+              review.dirty && review.branch === "main" ? "main" : undefined
+            }
+            onNewBranch={fn()}
           />
         </ReviewSidebar>
         <ChangeSections
@@ -141,4 +151,9 @@ export const ReadyToCommit = meta.story({ args: { kept: 1, review: data } });
 /** Committed: the panel moves on to publishing. */
 export const ReadyToPublish = meta.story({
   args: { kept: 0, review: { ...data, dirty: false, files: [] } },
+});
+
+/** Changes on the base itself: the commit form offers a branch before they land on main. */
+export const OnTheBase = meta.story({
+  args: { kept: 1, review: { ...data, ahead: 0, branch: "main" } },
 });
