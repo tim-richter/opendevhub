@@ -5,13 +5,43 @@ import type { ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { cn } from "../lib/utils";
+import { CodeFence } from "./code-fence";
 
 const ExternalLink = (props: ComponentPropsWithoutRef<"a">) => (
   // oxlint-disable-next-line jsx-a11y/anchor-has-content -- content comes from props
   <a {...props} target="_blank" rel="noopener noreferrer" />
 );
 
-const components = { a: ExternalLink };
+type HastNode = NonNullable<ExtraProps["node"]>["children"][number];
+
+const textOf = (node: HastNode): string => {
+  if (node.type === "text") {
+    return node.value;
+  }
+  return "children" in node ? node.children.map(textOf).join("") : "";
+};
+
+const LANGUAGE_CLASS = /^language-(?<lang>.+)$/u;
+
+/** A fenced code block, rendered as a code block with highlighting and a copy button; other `pre`s stay as they are. */
+const Pre = ({
+  node,
+  ...props
+}: ComponentPropsWithoutRef<"pre"> & ExtraProps) => {
+  const code = node?.children.find(
+    (child) => child.type === "element" && child.tagName === "code"
+  );
+  if (!code || code.type !== "element") {
+    return <pre {...props} />;
+  }
+  const classes = code.properties.className;
+  const language = (Array.isArray(classes) ? classes : [])
+    .map((name) => LANGUAGE_CLASS.exec(String(name))?.groups?.lang)
+    .find(Boolean);
+  return <CodeFence code={textOf(code)} language={language ?? ""} />;
+};
+
+const components = { a: ExternalLink, pre: Pre };
 
 interface MdastParent {
   children: { type: string; value?: string; children?: unknown[] }[];
@@ -115,8 +145,15 @@ const BlockElement = ({
 }: BlockProps & { tag: BlockTag }) => {
   const context = useContext(BlockContext);
   const position = node?.position;
+  const element =
+    tag === "pre" ? (
+      // The props are typed for a div so every block tag shares them; react-markdown gave them to a pre.
+      <Pre node={node} {...(props as ComponentPropsWithoutRef<"pre">)} />
+    ) : (
+      createElement(tag, props)
+    );
   if (!context || !position || node?.properties.dataBlock !== true) {
-    return createElement(tag, props);
+    return element;
   }
   const block: MarkdownBlock = {
     end: position.end.line,
@@ -134,7 +171,7 @@ const BlockElement = ({
   }
   return (
     <div className="group/block relative">
-      {createElement(tag, props)}
+      {element}
       {context.aside(block)}
     </div>
   );

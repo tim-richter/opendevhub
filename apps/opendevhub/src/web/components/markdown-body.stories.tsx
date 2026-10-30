@@ -22,6 +22,7 @@ export const Kitchen = meta.story({
       "Some **bold**, _italic_, `code` and a [link](https://example.com).",
       "| Column | Value |\n| --- | --- |\n| a | 1 |\n| b | 2 |",
       "```ts\nconst limit = createLimiter(100);\n```",
+      "```\nplain output, no language\n```",
       "> A quote",
       "- [x] done\n- [ ] todo",
     ].join("\n\n"),
