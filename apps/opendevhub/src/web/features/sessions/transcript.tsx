@@ -28,6 +28,9 @@ import {
 import {
   BotIcon,
   CircleCheckIcon,
+  CircleDotIcon,
+  CircleIcon,
+  CircleSlashIcon,
   ChevronRightIcon,
   ClipboardListIcon,
   FileIcon,
@@ -52,6 +55,7 @@ import type {
   TranscriptAttachment,
   TranscriptMessage,
   TranscriptPart,
+  TranscriptTodo,
 } from "../../../shared/types";
 import { MarkdownBody } from "../../components/markdown-body";
 import { muted } from "../../components/page";
@@ -75,6 +79,8 @@ type AgentItem =
       streaming: boolean;
     }
   | { key: string; kind: "tools"; tools: ToolPart[] }
+  /** A `todowrite` call's list; `latest`: no later call replaced it, so it is the agent's current plan. */
+  | { key: string; kind: "plan"; todos: TranscriptTodo[]; latest: boolean }
   | { key: string; kind: "error"; error: string };
 
 type Block =
@@ -106,6 +112,10 @@ const agentItems = (messages: AgentMessage[]): AgentItem[] => {
       if (part.kind === "reasoning") {
         const streaming = m.completed === undefined && i === m.parts.length - 1;
         items.push({ key, ...part, streaming });
+        continue;
+      }
+      if (part.todos?.length) {
+        items.push({ key, kind: "plan", latest: false, todos: part.todos });
         continue;
       }
       const last = items.at(-1);
@@ -152,6 +162,13 @@ const toBlocks = (transcript: TranscriptMessage[]): Block[] => {
     }
   }
   flush();
+  const plans = blocks.flatMap((b) =>
+    b.kind === "agent" ? b.items.filter((i) => i.kind === "plan") : []
+  );
+  const latest = plans.at(-1);
+  if (latest) {
+    latest.latest = true;
+  }
   return blocks;
 };
 
@@ -325,6 +342,81 @@ const Reasoning = ({
   );
 };
 
+const TODO_ICONS: Record<TranscriptTodo["status"], LucideIcon> = {
+  cancelled: CircleSlashIcon,
+  completed: CircleCheckIcon,
+  in_progress: CircleDotIcon,
+  pending: CircleIcon,
+};
+
+/** One step of a plan; a step left in progress once the agent stopped reads as not done. */
+const TodoLine = ({ todo, live }: { todo: TranscriptTodo; live: boolean }) => {
+  const Icon = TODO_ICONS[todo.status];
+  let status: "running" | "pending" | undefined;
+  if (todo.status === "in_progress") {
+    status = live ? "running" : "pending";
+  } else if (todo.status !== "completed") {
+    status = "pending";
+  }
+  return (
+    <TraceLine status={status}>
+      <TraceIcon>
+        <Icon />
+      </TraceIcon>
+      <TraceTitle className={cn(todo.status === "cancelled" && "line-through")}>
+        {todo.text}
+      </TraceTitle>
+    </TraceLine>
+  );
+};
+
+/**
+ * The agent's to-do list as a plan: how many steps are done, and each step behind a disclosure. The current plan is
+ * open while the agent works, an earlier one closed, unless the user opened or closed it. Dropped steps don't count.
+ */
+const Plan = ({
+  todos,
+  latest,
+  working,
+}: {
+  todos: TranscriptTodo[];
+  latest: boolean;
+  working: boolean;
+}) => {
+  const [open, setOpen] = useState<boolean>();
+  const live = latest && working;
+  const steps = todos.filter((t) => t.status !== "cancelled");
+  const done = steps.filter((t) => t.status === "completed").length;
+  return (
+    <Trace>
+      <TraceCollapsible open={open ?? live} onOpenChange={setOpen}>
+        <TraceCollapsibleTrigger>
+          <TraceLine
+            status={live && done < steps.length ? "running" : undefined}
+          >
+            <TraceIcon>
+              <ListTodoIcon />
+            </TraceIcon>
+            <TraceTitle>Plan</TraceTitle>
+            {steps.length > 0 && (
+              <TraceDescription>
+                {done} of {steps.length} done
+              </TraceDescription>
+            )}
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <Trace>
+            {todos.map((todo, i) => (
+              <TodoLine key={`${i}:${todo.text}`} todo={todo} live={live} />
+            ))}
+          </Trace>
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
+  );
+};
+
 /** What the agent was told about its task, collapsed until asked for. */
 const Briefing = ({ text }: { text: string }) => (
   <Collapsible className="rounded-md border">
@@ -360,6 +452,9 @@ const AgentItemView = ({
   }
   if (item.kind === "tools") {
     return <ToolGroup tools={item.tools} working={working} />;
+  }
+  if (item.kind === "plan") {
+    return <Plan todos={item.todos} latest={item.latest} working={working} />;
   }
   return (
     <p

@@ -5,6 +5,7 @@ import type {
   TranscriptAttachment,
   TranscriptMessage,
   TranscriptPart,
+  TranscriptTodo,
 } from "../../shared/types";
 import type {
   RawAssistantContent,
@@ -26,6 +27,12 @@ export const PART_CHARS = 20_000;
 /** The most of a tool call's output the detail carries. */
 export const TOOL_OUTPUT_CHARS = 4000;
 const TOOL_STATUSES = new Set(["pending", "running", "completed", "error"]);
+const TODO_STATUSES = new Set([
+  "pending",
+  "in_progress",
+  "completed",
+  "cancelled",
+]);
 /** The input fields that say what a tool call did when opencode gives it no title, most telling first. */
 const TOOL_SUBJECTS = [
   "command",
@@ -142,6 +149,38 @@ const toolTitle = (state: RawToolState | undefined): string | undefined => {
   return undefined;
 };
 
+/** The to-do list a `todowrite` call set, if its input holds one; steps it can't read are left out. */
+const toolTodos = (
+  name: string,
+  state: RawToolState | undefined
+): TranscriptTodo[] | undefined => {
+  const input = state?.input;
+  if (name !== "todowrite" || !input || typeof input === "string") {
+    return undefined;
+  }
+  const { todos } = input;
+  if (!Array.isArray(todos)) {
+    return undefined;
+  }
+  return todos.flatMap((t: unknown): TranscriptTodo[] => {
+    if (typeof t !== "object" || t === null) {
+      return [];
+    }
+    const { content, status } = t as Record<string, unknown>;
+    if (typeof content !== "string" || !content.trim()) {
+      return [];
+    }
+    return [
+      {
+        status: TODO_STATUSES.has(status as string)
+          ? (status as TranscriptTodo["status"])
+          : "pending",
+        text: cut(content, PROMPT_CHARS),
+      },
+    ];
+  });
+};
+
 /** The text a tool call returned, if any. */
 const toolOutput = (state: RawToolState | undefined): string | undefined => {
   const text = (state?.content ?? [])
@@ -170,6 +209,7 @@ const toPart = (c: RawAssistantContent): TranscriptPart | undefined => {
     const title = toolTitle(c.state);
     const output = toolOutput(c.state);
     const error = c.state?.error?.message?.trim();
+    const todos = toolTodos(c.name, c.state);
     return {
       kind: "tool",
       name: c.name,
@@ -179,6 +219,7 @@ const toPart = (c: RawAssistantContent): TranscriptPart | undefined => {
       ...(title ? { title } : {}),
       ...(output ? { output } : {}),
       ...(error ? { error: cut(error, TOOL_OUTPUT_CHARS) } : {}),
+      ...(todos ? { todos } : {}),
     };
   }
   return undefined;

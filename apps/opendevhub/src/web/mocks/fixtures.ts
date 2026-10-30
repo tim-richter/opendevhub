@@ -1059,6 +1059,13 @@ const tool = (
   result: { output?: string; error?: string } = {}
 ) => ({ kind: "tool" as const, name, status, title, ...result });
 
+const plan = (
+  ...todos: [string, "pending" | "in_progress" | "completed" | "cancelled"][]
+) => ({
+  ...tool("todowrite", `${todos.length} todos`),
+  todos: todos.map(([text, status]) => ({ status, text })),
+});
+
 /** What a later conversation of the rate-limit task was told about it. */
 const RATE_BRIEFING = [
   "# Task briefing",
@@ -1127,6 +1134,12 @@ const rateLimitTranscript = (
       text: `${burst.text}.\n\nKeep the steady rate at 10 requests a minute, allow bursts of up to 5 more, and make both configurable through the existing limiter options. Add tests for the burst, for running out of it and for the refill.`,
     },
     reply("msg_02a", burst.created + 4000, [
+      plan(
+        ["Add a burst option to the token bucket", "in_progress"],
+        ["Make it configurable through the limiter options", "pending"],
+        ["Test the burst, running out and the refill", "pending"],
+        ["Run the whole suite", "pending"]
+      ),
       tool("read", "src/server/rate-limit.ts"),
       tool("read", "test/rate-limit.test.ts"),
       tool("edit", "src/server/rate-limit.ts"),
@@ -1143,6 +1156,13 @@ const rateLimitTranscript = (
       },
       tool("edit", "src/server/rate-limit.ts"),
       tool("bash", "pnpm vitest run rate-limit"),
+      plan(
+        ["Add a burst option to the token bucket", "completed"],
+        ["Make it configurable through the limiter options", "in_progress"],
+        ["Test the burst, running out and the refill", "completed"],
+        ["Document the option in the README", "cancelled"],
+        ["Run the whole suite", "pending"]
+      ),
       tool("read", "src/server/config.ts"),
       tool("edit", "src/server/config.ts"),
       tool("bash", "pnpm typecheck", "completed", {

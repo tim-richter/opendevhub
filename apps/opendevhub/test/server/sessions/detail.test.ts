@@ -324,6 +324,62 @@ describe(toTranscript, () => {
     ]);
   });
 
+  it("carries the to-do list a todowrite call set, skipping steps it can't read", () => {
+    const [message] = toTranscript([
+      {
+        content: [
+          {
+            name: "todowrite",
+            state: {
+              input: {
+                todos: [
+                  { content: "Read the limiter", status: "completed" },
+                  { content: "Add a burst", status: "in_progress" },
+                  { content: "Old idea", status: "cancelled" },
+                  { content: "Test it", status: "odd" },
+                  { content: "  ", status: "pending" },
+                  { status: "pending" },
+                  "junk",
+                ],
+              },
+              status: "completed",
+              title: "3 todos",
+            },
+            type: "tool",
+          },
+          {
+            name: "todowrite",
+            state: { input: '{"todos": [', status: "pending" },
+            type: "tool",
+          },
+          {
+            name: "bash",
+            state: { input: { todos: [] }, status: "completed" },
+            type: "tool",
+          },
+        ],
+        id: "msg_1",
+        type: "assistant",
+      },
+    ]);
+    expect(message.role === "assistant" && message.parts).toStrictEqual([
+      {
+        kind: "tool",
+        name: "todowrite",
+        status: "completed",
+        title: "3 todos",
+        todos: [
+          { status: "completed", text: "Read the limiter" },
+          { status: "in_progress", text: "Add a burst" },
+          { status: "cancelled", text: "Old idea" },
+          { status: "pending", text: "Test it" },
+        ],
+      },
+      { kind: "tool", name: "todowrite", status: "pending" },
+      { kind: "tool", name: "bash", status: "completed" },
+    ]);
+  });
+
   it("cuts long text, reasoning and prompts short", () => {
     const long = "x".repeat(PART_CHARS + 10);
     const transcript = toTranscript([

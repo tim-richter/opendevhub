@@ -967,7 +967,15 @@ export type TranscriptPart =
       output?: string;
       /** Why it failed; set on an error. */
       error?: string;
+      /** The agent's whole to-do list as a `todowrite` call set it; the latest call's list is its current plan. */
+      todos?: TranscriptTodo[];
     };
+
+/** One step of the agent's to-do list. */
+export interface TranscriptTodo {
+  text: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+}
 
 /** A file a user message carried; the bytes stay with opencode. */
 export interface TranscriptAttachment {
