@@ -61,6 +61,56 @@ export const Conversation = meta.story({
   },
 });
 
+/**
+ * Restoring the checkpoint above a message hides it and what followed, fills the composer with it, and shows the
+ * bar with Redo; Redo brings everything back.
+ */
+export const RestoreCheckpoint = meta.story({
+  parameters: { route: "/chat/acme-web/c_idle" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const prompt = "Also register the limiter on the login route";
+    const transcript = within(
+      await canvas.findByRole("region", { name: "Conversation transcript" })
+    );
+    await transcript.findByText(prompt);
+    const checkpoints = transcript.getAllByRole("button", {
+      name: "Restore checkpoint",
+    });
+    await userEvent.click(checkpoints.at(-1) as HTMLElement);
+    const bar = within(
+      await canvas.findByRole("region", { name: "Restored checkpoint" })
+    );
+    await expect(bar.getByText(/2 messages hidden/iu)).toBeVisible();
+    await expect(bar.getByText("2 files changed back")).toBeVisible();
+    await expect(
+      canvas.getByRole("combobox", { name: "Message the agent" })
+    ).toHaveValue(prompt);
+    await userEvent.click(bar.getByRole("button", { name: "Redo" }));
+    await waitFor(() =>
+      expect(
+        canvas.queryByRole("region", { name: "Restored checkpoint" })
+      ).not.toBeInTheDocument()
+    );
+    await expect(await transcript.findByText(prompt)).toBeInTheDocument();
+  },
+});
+
+/** While the agent works, the checkpoints are turned off. */
+export const CheckpointsWhileRunning = meta.story({
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText(
+      "Read the rate limiter and explain how it counts requests"
+    );
+    for (const button of canvas.getAllByRole("button", {
+      name: "Restore checkpoint",
+    })) {
+      await expect(button).toBeDisabled();
+    }
+  },
+});
+
 /** The usage button opens a popover with the conversation's cost, tokens and context. */
 export const Usage = meta.story({
   play: async ({ canvasElement }) => {

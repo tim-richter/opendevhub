@@ -3,7 +3,12 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { ProjectView, SessionSummary } from "../../../shared/types";
-import { fetchSessionDetail, sendComposerMessage } from "../../api";
+import {
+  fetchSessionDetail,
+  redoCheckpoint,
+  restoreCheckpoint,
+  sendComposerMessage,
+} from "../../api";
 import type { Checkout } from "../checkouts/checkouts";
 import { Conversation } from "./conversation";
 import type { PanelId } from "./side-panel";
@@ -81,6 +86,10 @@ export const SessionView = ({
       });
     }
   }, [version, queryClient, projectId, session.id]);
+  const refresh = () =>
+    queryClient.invalidateQueries({
+      queryKey: sessionDetailQuery(projectId, session.id).queryKey,
+    });
 
   return (
     <Conversation
@@ -97,6 +106,14 @@ export const SessionView = ({
       composerLabel={composerLabel}
       chips={chips}
       actions={actions}
+      onRestore={async (messageId) => {
+        await restoreCheckpoint(projectId, session.id, messageId);
+        await refresh();
+      }}
+      onRedo={async () => {
+        await redoCheckpoint(projectId, session.id);
+        await refresh();
+      }}
       onSend={async (message) => {
         const result = await sendComposerMessage(
           projectId,

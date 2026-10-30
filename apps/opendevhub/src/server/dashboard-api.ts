@@ -102,6 +102,8 @@ export interface DashboardHub {
     | "sessionDetail"
     | "removeSession"
     | "killShell"
+    | "restoreCheckpoint"
+    | "redoCheckpoint"
     | "startTaskConversation"
     | "archiveTaskConversation"
     | "models"

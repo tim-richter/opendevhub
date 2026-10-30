@@ -21,7 +21,7 @@ import { USER } from "../db/events";
 import type { TaskRecord } from "../db/tasks";
 import type { Environments } from "../environments/environments";
 import type { HubDeps } from "../environments/ports";
-import { AlreadyAnsweredError, NotFoundError } from "../errors";
+import { AlreadyAnsweredError, ConflictError, NotFoundError } from "../errors";
 import { InvalidRequestError } from "../git/worktrees";
 import { OpencodeHttpError, isGone, isInvalidAnswer } from "../opencode/client";
 import type {
@@ -35,6 +35,7 @@ import { OPENSPEC_CLI_CHECK, specWorkflow } from "../tasks/openspec";
 import { toModelsInfo } from "../tasks/request";
 import {
   DETAIL_MESSAGES,
+  cutAtRevert,
   subagentsOf,
   toBreakdown,
   toSessionTurns,
@@ -386,6 +387,56 @@ export class Sessions {
     this.envs.reconcile(envId);
   }
 
+  /**
+   * Rewinds one of the project's sessions to before user message `messageId`: stages a revert there in opencode,
+   * restoring the checkout's files, until the next message makes it permanent or `redoCheckpoint` clears it.
+   */
+  async restoreCheckpoint(
+    id: ProjectId,
+    sessionId: string,
+    messageId: string
+  ): Promise<void> {
+    await this.changeRevert(id, sessionId, (client, directory) =>
+      client.stageRevert(sessionId, messageId, directory)
+    );
+  }
+
+  /** Clears a session's staged revert, bringing back its messages and files. */
+  async redoCheckpoint(id: ProjectId, sessionId: string): Promise<void> {
+    await this.changeRevert(id, sessionId, (client, directory) =>
+      client.clearRevert(sessionId, directory)
+    );
+  }
+
+  private async changeRevert(
+    id: ProjectId,
+    sessionId: string,
+    change: (client: OpencodeClient, directory: string) => Promise<unknown>
+  ): Promise<void> {
+    this.envs.requireProject(id);
+    const session = this.deps.store
+      .sessionsOf(id)
+      .find((s) => s.id === sessionId);
+    if (!session) {
+      throw new NotFoundError(sessionId, "session");
+    }
+    const envId = session.envId ?? id;
+    try {
+      await change(this.envs.opencodeClient(envId), session.directory);
+    } catch (error) {
+      if (
+        error instanceof OpencodeHttpError &&
+        error.tag === "SessionBusyError"
+      ) {
+        throw new ConflictError(
+          "the agent is still working; wait for it to stop"
+        );
+      }
+      throw error;
+    }
+    this.envs.reconcile(envId);
+  }
+
   /** What one of the project's sessions did: its turns, token usage and subagents. */
   async sessionDetail(
     id: ProjectId,
@@ -420,6 +471,9 @@ export class Sessions {
       (candidate) =>
         candidate.id === model?.id && candidate.providerID === model.providerID
     )?.limit?.context;
+    const { visible, hidden } = raw.revert
+      ? cutAtRevert(messages, raw.revert.messageID)
+      : { hidden: 0, visible: messages };
     return {
       createdAt: raw.time.created,
       more: messages.length >= DETAIL_MESSAGES,
@@ -430,11 +484,24 @@ export class Sessions {
         ).values(),
       ]),
       transcript: withBriefing(
-        toTranscript(messages),
+        toTranscript(visible),
         instructions,
         raw.time.created
       ),
-      turns: toSessionTurns(messages),
+      turns: toSessionTurns(visible),
+      ...(raw.revert
+        ? {
+            revert: {
+              files: (raw.revert.files ?? []).map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.file,
+              })),
+              hidden,
+              messageId: raw.revert.messageID,
+            },
+          }
+        : {}),
       ...(raw.agent ? { agent: raw.agent } : {}),
       ...(raw.outcome ? { outcome: raw.outcome } : {}),
       ...(raw.tokens ? { tokens: toBreakdown(raw.tokens) } : {}),

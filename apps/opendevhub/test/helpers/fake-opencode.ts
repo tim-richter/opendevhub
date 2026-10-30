@@ -86,6 +86,10 @@ export interface FakeState {
   turnDiffs?: Record<string, Record<string, RawFileDiff[]>>;
   /** Every session diff opendevhub asked for. */
   turnQueries: { sessionId: string; from?: string; to?: string }[];
+  /** The files a revert stage restores, per session. */
+  revertFiles?: Record<string, RawFileDiff[]>;
+  /** Every revert route opendevhub called, as `stage <messageID>`, `clear` or `commit`, with the session id. */
+  reverts: { sessionId: string; call: string; body?: unknown }[];
 }
 
 export async function startFakeOpencode(
@@ -114,6 +118,7 @@ export async function startFakeOpencode(
     agentSwitches: [],
     deleted: [],
     killedShells: [],
+    reverts: [],
     ...init,
   };
   const sseClients = new Set<http.ServerResponse>();
@@ -532,6 +537,49 @@ export async function startFakeOpencode(
             });
             return;
           }
+        }
+        const revert = url.pathname.match(
+          /^\/api\/session\/([^/]+)\/revert(?:\/(stage|commit))?$/u
+        );
+        const revertCall =
+          revert &&
+          ((req.method === "POST" && revert[2]) ||
+            (req.method === "DELETE" && !revert[2]));
+        if (revert && revertCall) {
+          let raw = "";
+          req.on("data", (c: Buffer) => (raw += c.toString("utf-8")));
+          req.on("end", () => {
+            const body = raw ? JSON.parse(raw) : undefined;
+            const sessionId = decodeURIComponent(revert[1]);
+            const call = revert[2] ?? "clear";
+            state.reverts.push({ sessionId, call, ...(body ? { body } : {}) });
+            const session = state.sessions.find((s) => s.id === sessionId);
+            if (!session) {
+              return fail(404, "SessionNotFoundError");
+            }
+            if (state.active.includes(sessionId)) {
+              return fail(409, "SessionBusyError", "session is busy");
+            }
+            if (call === "stage") {
+              const { messageID } = body as { messageID: string };
+              session.revert = {
+                files: state.revertFiles?.[sessionId] ?? [],
+                messageID,
+              };
+              return json({ data: session.revert });
+            }
+            if (call === "commit" && session.revert && state.messages) {
+              const list = state.messages[sessionId] ?? [];
+              const at = list.findIndex(
+                (m) => m.id === session.revert?.messageID
+              );
+              state.messages[sessionId] = at === -1 ? list : list.slice(0, at);
+            }
+            delete session.revert;
+            res.writeHead(204);
+            res.end();
+          });
+          return;
         }
         const sessionCall = url.pathname.match(
           /^\/api\/session\/([^/]+)\/(prompt|command|generate)$/u

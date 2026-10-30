@@ -248,6 +248,8 @@ export const Composer = (props: {
   agent?: string;
   /** What the box starts with; for stories. */
   initialText?: string;
+  /** Text to put in the box each time `key` changes, unless the box already holds a draft. */
+  fill?: { text: string; key: number };
   /** Hears the text as it is typed; Chat's start page hands it to a new task. */
   onTextChange?: (text: string) => void;
 }) => {
@@ -416,6 +418,25 @@ export const Composer = (props: {
   const selectable = suggestions.filter((s) => !s.disabled);
   const active =
     selectable.find((s) => s.key === activeKey) ?? selectable.at(0);
+
+  // A new fill goes in only when the box is empty, so a draft is never lost.
+  const fillKey = props.fill?.key;
+  const fillText = props.fill?.text;
+  const filledKey = useRef(fillKey);
+  useEffect(() => {
+    if (fillKey === filledKey.current) {
+      return;
+    }
+    filledKey.current = fillKey;
+    if (fillText === undefined || value.text.trim() || attachments.length > 0) {
+      return;
+    }
+    setValue({ mentions: [], text: fillText });
+    setCaret(fillText.length);
+    pendingCaret.current = fillText.length;
+    setFocused(true);
+    textarea.current?.focus();
+  }, [fillKey, fillText, value.text, attachments.length]);
 
   // Put the caret where an insertion left it, once the textarea holds the new text.
   useLayoutEffect(() => {

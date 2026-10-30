@@ -1031,6 +1031,18 @@ export interface SessionDetail {
   transcript: TranscriptMessage[];
   /** It has older turns than those listed. */
   more: boolean;
+  /** A revert staged at one of its user messages; `transcript` and `turns` leave that message and later ones out. */
+  revert?: SessionRevert;
+}
+
+/** A checkpoint restore that has not been made permanent yet: sending a message commits it, redo clears it. */
+export interface SessionRevert {
+  /** The user message it is staged at. */
+  messageId: string;
+  /** How many transcript messages it leaves out. */
+  hidden: number;
+  /** The files it changed back; empty when opencode took no snapshot. */
+  files: { path: string; additions?: number; deletions?: number }[];
 }
 
 export interface Preflight {

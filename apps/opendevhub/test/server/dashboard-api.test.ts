@@ -242,6 +242,10 @@ function setup(webDir?: string) {
       ]),
       removeSession: vi.fn(async (_id: string, _sid: string) => {}),
       killShell: vi.fn(async (_id: string, _sid: string, _shid: string) => {}),
+      restoreCheckpoint: vi.fn(
+        async (_id: string, _sid: string, _messageId: string) => {}
+      ),
+      redoCheckpoint: vi.fn(async (_id: string, _sid: string) => {}),
       startInCheckout: vi.fn(
         async (
           _id: string,
@@ -2039,6 +2043,46 @@ describe("dashboard API", () => {
         "ses_1",
         "sh_1"
       );
+    });
+
+    it("restores a checkpoint and redoes it, answering 409 while the agent works", async () => {
+      const { app, hub } = setup();
+      expect(
+        (
+          await send(app, "POST", "sessions/ses_1/checkpoint", {
+            messageId: "msg_3",
+          })
+        ).status
+      ).toBe(200);
+      expect(hub.sessions.restoreCheckpoint).toHaveBeenCalledWith(
+        project.id,
+        "ses_1",
+        "msg_3"
+      );
+      expect(
+        (await send(app, "POST", "sessions/ses_1/checkpoint", {})).status
+      ).toBe(400);
+      expect(
+        (await send(app, "DELETE", "sessions/ses_1/checkpoint", undefined))
+          .status
+      ).toBe(200);
+      expect(hub.sessions.redoCheckpoint).toHaveBeenCalledWith(
+        project.id,
+        "ses_1"
+      );
+      hub.sessions.redoCheckpoint.mockRejectedValueOnce(
+        new ConflictError("the agent is still working; wait for it to stop")
+      );
+      const busy = await send(
+        app,
+        "DELETE",
+        "sessions/ses_1/checkpoint",
+        undefined
+      );
+      expect(busy.status).toBe(409);
+      expect(await busy.json()).toStrictEqual({
+        error: "the agent is still working; wait for it to stop",
+      });
     });
 
     it("maps unknown ids to 404, already answered to 409 and invalid answers to 400 with the message", async () => {

@@ -34,6 +34,7 @@ import type {
   ReviewData,
   SavedPermission,
   SavedPermissionsView,
+  SessionDetail,
 } from "../../shared/types";
 import {
   activityPage,
@@ -128,6 +129,31 @@ const aiReview: AiReviewResult = {
 
 const ok = () => HttpResponse.json({ ok: true });
 
+/** A session's detail with a revert staged at user message `messageId`: that message and later ones left out. */
+const withRevert = (
+  detail: SessionDetail,
+  messageId: string
+): SessionDetail => {
+  const at = detail.transcript.findIndex((m) => m.id === messageId);
+  if (at === -1) {
+    return detail;
+  }
+  const boundary = detail.transcript[at].created;
+  return {
+    ...detail,
+    revert: {
+      files: [
+        { additions: 0, deletions: 12, path: "src/server/rate-limit.ts" },
+        { additions: 2, deletions: 1, path: "src/server/routes.ts" },
+      ],
+      hidden: detail.transcript.length - at,
+      messageId,
+    },
+    transcript: detail.transcript.slice(0, at),
+    turns: detail.turns.filter((t) => t.created < boundary),
+  };
+};
+
 export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
   const {
     snapshot: snap = snapshot,
@@ -153,6 +179,8 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     setupCommand: "git config --global alias.co checkout",
   });
   const projectPersonalization = new Map<string, ProjectPersonalization>();
+  /** Each session's staged revert, by the user message it is staged at. */
+  const reverts = new Map<string, string>();
   const projectPersonalizationView = (id: string) => {
     const own =
       projectPersonalization.get(id) ?? readProjectPersonalization(undefined);
@@ -826,10 +854,26 @@ export const createHandlers = (options: MockOptions = {}): AnyHandler[] => {
     http.get("/api/projects/:id/sessions/:session", async ({ params }) => {
       await wait();
       const detail = sessionDetail(String(params.session));
+      const at = reverts.get(String(params.session));
       return detail
-        ? HttpResponse.json(detail)
+        ? HttpResponse.json(at ? withRevert(detail, at) : detail)
         : HttpResponse.json({ error: "unknown session" }, { status: 404 });
     }),
+    http.post(
+      "/api/projects/:id/sessions/:session/checkpoint",
+      async ({ params, request }) => {
+        const { messageId } = (await request.json()) as { messageId: string };
+        reverts.set(String(params.session), messageId);
+        return ok();
+      }
+    ),
+    http.delete(
+      "/api/projects/:id/sessions/:session/checkpoint",
+      ({ params }) => {
+        reverts.delete(String(params.session));
+        return ok();
+      }
+    ),
     http.post("/api/projects/:id/sessions/:session/prompt", ok),
     http.delete("/api/projects/:id/sessions/:session", ok),
     http.post("/api/projects/:id/permissions/:request", ok),

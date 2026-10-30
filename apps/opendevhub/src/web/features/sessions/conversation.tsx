@@ -1,6 +1,11 @@
 import { Alert, AlertDescription } from "@opendevhub/ui/alert";
 import { Button } from "@opendevhub/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@opendevhub/ui/collapsible";
+import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
@@ -9,7 +14,7 @@ import {
   MessageScrollerViewport,
 } from "@opendevhub/ui/message-scroller";
 import { Skeleton } from "@opendevhub/ui/skeleton";
-import { ExternalLinkIcon } from "lucide-react";
+import { ChevronRightIcon, ExternalLinkIcon, HistoryIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -21,6 +26,7 @@ import type {
   ComposerSendResult,
   ProjectView,
   SessionDetail,
+  SessionRevert,
   SessionSummary,
 } from "../../../shared/types";
 import { sessionLink } from "../../../shared/urls";
@@ -63,6 +69,91 @@ const CheckoutTerminal = lazy(() =>
   }))
 );
 
+const plural = (count: number, one: string, many = `${one}s`): string =>
+  `${count} ${count === 1 ? one : many}`;
+
+/**
+ * What a restored checkpoint rewound, above the composer: how many messages are hidden, the files changed back, and
+ * a Redo that brings both back until the next message makes the restore permanent.
+ */
+export const RevertBar = ({
+  revert,
+  running,
+  onRedo,
+}: {
+  revert: SessionRevert;
+  running: boolean;
+  onRedo: () => void;
+}) => (
+  <section
+    aria-label="Restored checkpoint"
+    className="bg-muted/40 flex flex-col gap-1.5 rounded-md border px-3 py-2 text-xs"
+  >
+    <div className="flex items-center gap-2">
+      <HistoryIcon
+        className="text-muted-foreground size-3.5 shrink-0"
+        aria-hidden
+      />
+      <p className="min-w-0 flex-1">
+        <span className="font-medium">Checkpoint restored</span>
+        <span className="text-muted-foreground">
+          {" "}
+          · {plural(revert.hidden, "message")} hidden. Sending a message makes
+          this permanent.
+        </span>
+      </p>
+      <Tip
+        label={
+          running
+            ? "Wait for the agent to stop before redoing"
+            : "Bring back the hidden messages and the files as they were"
+        }
+      >
+        {/* A disabled button gets no pointer events; the span carries the tooltip. */}
+        <span tabIndex={running ? 0 : undefined} className="shrink-0">
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={running}
+            onClick={onRedo}
+          >
+            Redo
+          </Button>
+        </span>
+      </Tip>
+    </div>
+    {revert.files.length === 0 ? (
+      <p className="text-muted-foreground pl-5.5">No files changed back.</p>
+    ) : (
+      <Collapsible className="pl-5.5">
+        <CollapsibleTrigger className="text-muted-foreground hover:text-foreground group flex items-center gap-1">
+          <ChevronRightIcon className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
+          {plural(revert.files.length, "file")} changed back
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ul className="mt-1 flex max-h-40 flex-col gap-0.5 overflow-y-auto font-mono">
+            {revert.files.map((f) => (
+              <li key={f.path} className="flex min-w-0 gap-2">
+                <span className="truncate" title={f.path}>
+                  {f.path}
+                </span>
+                {f.additions !== undefined && (
+                  <span className="text-ok shrink-0">+{f.additions}</span>
+                )}
+                {f.deletions !== undefined && (
+                  <span className="text-destructive shrink-0">
+                    −{f.deletions}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </CollapsibleContent>
+      </Collapsible>
+    )}
+  </section>
+);
+
 /**
  * One conversation, filling the height it is given: a one-line header, the transcript scrolling under it, the
  * pending cards and the composer pinned to the bottom, and a right sidebar of panels. `chips` and `actions` add to
@@ -90,11 +181,17 @@ export const Conversation = (props: {
   onSend: (
     message: ComposerSendRequest
   ) => Promise<ComposerSendResult | undefined>;
+  /** Rewinds the conversation and its files to before a user message. */
+  onRestore: (messageId: string) => Promise<void>;
+  /** Clears a restored checkpoint, bringing back what it hid. */
+  onRedo: () => Promise<void>;
 }) => {
   const { view, checkout, session, detail } = props;
   const projectId = view.project.id;
   const { panel, toggle, close } = useSidePanel(props.initialPanel);
-  const [notice, setNotice] = useState<string>();
+  const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
+  const showNotice = (text: string) => setNotice({ text });
+  const [fill, setFill] = useState<{ text: string; key: number }>();
   useEffect(() => {
     if (!notice) {
       return;
@@ -106,6 +203,30 @@ export const Conversation = (props: {
   const title = session.title || "Untitled conversation";
   const task = props.showTask ? taskChip(view, session) : undefined;
   const running = session.status !== "idle";
+  const failed = (error: unknown) =>
+    setNotice({
+      error: true,
+      text: error instanceof Error ? error.message : String(error),
+    });
+  const restore = async (messageId: string) => {
+    const restored = detail?.transcript.find((m) => m.id === messageId);
+    try {
+      await props.onRestore(messageId);
+    } catch (error) {
+      failed(error);
+      return;
+    }
+    if (restored?.role === "user") {
+      setFill((last) => ({ key: (last?.key ?? 0) + 1, text: restored.text }));
+    }
+  };
+  const redo = async () => {
+    try {
+      await props.onRedo();
+    } catch (error) {
+      failed(error);
+    }
+  };
   const openHref = sessionHref(view, session);
   const statusByAgent = new Map(
     session.subagents?.map((agent) => [agent.id, agent.status])
@@ -172,7 +293,7 @@ export const Conversation = (props: {
           session={session}
           projectId={projectId}
           checkout={checkout}
-          onSent={setNotice}
+          onSent={showNotice}
         />
       ),
       hint: `${detail.turns.length}${detail.more ? "+" : ""}, newest first`,
@@ -308,6 +429,8 @@ export const Conversation = (props: {
                       more={detail.more}
                       openHref={openHref}
                       working={running && !needsAttention(session.status)}
+                      onRestore={(messageId) => void restore(messageId)}
+                      restoreDisabled={running}
                       className={column}
                     />
                   )}
@@ -326,9 +449,22 @@ export const Conversation = (props: {
               <PendingStack session={session} view={view} />
             </div>
           )}
+          {detail?.revert && (
+            <RevertBar
+              revert={detail.revert}
+              running={running}
+              onRedo={() => void redo()}
+            />
+          )}
           {notice && (
-            <p className="text-ok text-xs" role="status">
-              {notice}
+            <p
+              className={cn(
+                "text-xs",
+                notice.error ? "text-destructive" : "text-ok"
+              )}
+              role={notice.error ? "alert" : "status"}
+            >
+              {notice.text}
             </p>
           )}
           {props.composerLabel && (
@@ -348,7 +484,8 @@ export const Conversation = (props: {
             agent={detail?.agent ?? detail?.turns[0]?.agent}
             hubCommands
             onSend={props.onSend}
-            onSent={setNotice}
+            onSent={showNotice}
+            fill={fill}
           />
         </footer>
       </div>

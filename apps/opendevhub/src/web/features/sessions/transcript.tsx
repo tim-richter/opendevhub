@@ -5,12 +5,14 @@ import {
   AttachmentTitle,
 } from "@opendevhub/ui/attachment";
 import { Bubble, BubbleContent } from "@opendevhub/ui/bubble";
+import { Button } from "@opendevhub/ui/button";
 import { CodeBlock, CodeBlockContent } from "@opendevhub/ui/code-block";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@opendevhub/ui/collapsible";
+import { Marker, MarkerContent, MarkerIcon } from "@opendevhub/ui/marker";
 import { Message, MessageContent } from "@opendevhub/ui/message";
 import { MessageScrollerItem } from "@opendevhub/ui/message-scroller";
 import {
@@ -33,6 +35,7 @@ import {
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
+  HistoryIcon,
   ImageIcon,
   ListTodoIcon,
   LoaderCircleIcon,
@@ -52,6 +55,7 @@ import type {
 } from "../../../shared/types";
 import { MarkdownBody } from "../../components/markdown-body";
 import { muted } from "../../components/page";
+import { Tip } from "../../components/tip";
 
 /** A run of consecutive tool calls longer than this collapses to one "N tool calls" row. */
 const TOOL_GROUP_MAX = 5;
@@ -414,6 +418,49 @@ const WorkingLine = () => {
   );
 };
 
+/** How a checkpoint above a user message is offered; left out, the transcript shows none. */
+interface Checkpoints {
+  onRestore: (messageId: string) => void;
+  /** The agent is at work, so opencode would refuse. */
+  disabled: boolean;
+}
+
+/** A checkpoint above a user message: a separator Marker whose button rewinds to before that message. */
+const CheckpointMarker = ({
+  messageId,
+  checkpoints,
+}: {
+  messageId: string;
+  checkpoints: Checkpoints;
+}) => (
+  <Marker variant="separator" className="mb-3">
+    <MarkerContent className="inline-flex items-center gap-2">
+      <MarkerIcon>
+        <HistoryIcon />
+      </MarkerIcon>
+      <Tip
+        label={
+          checkpoints.disabled
+            ? "Wait for the agent to stop before restoring"
+            : "Take the conversation and the checkout's files back to before this message. Commands it ran are not undone."
+        }
+      >
+        {/* A disabled button gets no pointer events; the span carries the tooltip. */}
+        <span tabIndex={checkpoints.disabled ? 0 : undefined}>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={checkpoints.disabled}
+            onClick={() => checkpoints.onRestore(messageId)}
+          >
+            Restore checkpoint
+          </Button>
+        </span>
+      </Tip>
+    </MarkerContent>
+  </Marker>
+);
+
 /**
  * A conversation's messages, oldest at the top: the user's as bubbles, the agent's text as markdown with its
  * reasoning and tool calls collapsed. `more` says older messages are left out and links to `openHref` for them.
@@ -422,10 +469,12 @@ const TranscriptRow = ({
   row,
   openHref,
   working,
+  checkpoints,
 }: {
   row: Row;
   openHref: string;
   working: boolean;
+  checkpoints?: Checkpoints;
 }) => {
   if (row.kind === "more") {
     return (
@@ -455,32 +504,37 @@ const TranscriptRow = ({
   }
   if (row.kind === "user") {
     return (
-      <Message align="end">
-        <MessageContent>
-          {row.attachments.map((a, i) => (
-            <Attachment key={`${i}:${a.name}`} size="sm">
-              <AttachmentMedia>
-                {a.mime?.startsWith("image/") ? (
-                  <ImageIcon aria-hidden />
-                ) : (
-                  <FileIcon aria-hidden />
-                )}
-              </AttachmentMedia>
-              <AttachmentContent>
-                <AttachmentTitle title={a.name}>{a.name}</AttachmentTitle>
-              </AttachmentContent>
-            </Attachment>
-          ))}
-          {(row.text || row.attachments.length === 0) && (
-            <Bubble align="end" variant="muted">
-              {/* Keeps the line breaks of what the user typed. */}
-              <BubbleContent className="whitespace-pre-wrap">
-                {row.text || "(empty message)"}
-              </BubbleContent>
-            </Bubble>
-          )}
-        </MessageContent>
-      </Message>
+      <>
+        {checkpoints && (
+          <CheckpointMarker messageId={row.key} checkpoints={checkpoints} />
+        )}
+        <Message align="end">
+          <MessageContent>
+            {row.attachments.map((a, i) => (
+              <Attachment key={`${i}:${a.name}`} size="sm">
+                <AttachmentMedia>
+                  {a.mime?.startsWith("image/") ? (
+                    <ImageIcon aria-hidden />
+                  ) : (
+                    <FileIcon aria-hidden />
+                  )}
+                </AttachmentMedia>
+                <AttachmentContent>
+                  <AttachmentTitle title={a.name}>{a.name}</AttachmentTitle>
+                </AttachmentContent>
+              </Attachment>
+            ))}
+            {(row.text || row.attachments.length === 0) && (
+              <Bubble align="end" variant="muted">
+                {/* Keeps the line breaks of what the user typed. */}
+                <BubbleContent className="whitespace-pre-wrap">
+                  {row.text || "(empty message)"}
+                </BubbleContent>
+              </Bubble>
+            )}
+          </MessageContent>
+        </Message>
+      </>
     );
   }
   if (row.kind === "agent") {
@@ -519,8 +573,15 @@ export const Transcript = (props: {
   openHref: string;
   /** The agent is at it and not waiting on the user. */
   working: boolean;
+  /** Offers a checkpoint above each user message; restoring rewinds to before it. */
+  onRestore?: (messageId: string) => void;
+  /** Turns the checkpoints off, e.g. while the session runs. */
+  restoreDisabled?: boolean;
   className?: string;
 }) => {
+  const checkpoints = props.onRestore
+    ? { disabled: props.restoreDisabled ?? false, onRestore: props.onRestore }
+    : undefined;
   const rows = useMemo(() => {
     const all: Row[] = toBlocks(props.transcript);
     if (props.more) {
@@ -545,6 +606,7 @@ export const Transcript = (props: {
           row={row}
           openHref={props.openHref}
           working={props.working}
+          checkpoints={checkpoints}
         />
       </div>
     </MessageScrollerItem>

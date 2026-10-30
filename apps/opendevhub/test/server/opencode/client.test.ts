@@ -401,6 +401,51 @@ describe(OpencodeClient, () => {
     expect(fake.state.interrupts).toStrictEqual(["ses_1"]);
   });
 
+  it("stages, clears and commits a session's revert", async () => {
+    const files = [
+      {
+        file: "a.ts",
+        patch: "",
+        additions: 2,
+        deletions: 1,
+        status: "modified" as const,
+      },
+    ];
+    fake.state.sessions = [rawSession("ses_1")];
+    fake.state.revertFiles = { ses_1: files };
+    await expect(
+      client.stageRevert("ses_1", "msg_2", "/w/x")
+    ).resolves.toStrictEqual({ files, messageID: "msg_2" });
+    expect((await client.session("ses_1")).revert?.messageID).toBe("msg_2");
+    await client.clearRevert("ses_1", "/w/x");
+    expect((await client.session("ses_1")).revert).toBeUndefined();
+    await client.stageRevert("ses_1", "msg_2");
+    await client.commitRevert("ses_1");
+    expect(fake.state.reverts).toStrictEqual([
+      {
+        body: { files: true, messageID: "msg_2" },
+        call: "stage",
+        sessionId: "ses_1",
+      },
+      { call: "clear", sessionId: "ses_1" },
+      {
+        body: { files: true, messageID: "msg_2" },
+        call: "stage",
+        sessionId: "ses_1",
+      },
+      { call: "commit", sessionId: "ses_1" },
+    ]);
+  });
+
+  it("surfaces opencode's busy error when staging a revert while the session runs", async () => {
+    fake.state.sessions = [rawSession("ses_1")];
+    fake.state.active = ["ses_1"];
+    await expect(client.stageRevert("ses_1", "msg_2")).rejects.toMatchObject({
+      status: 409,
+      tag: "SessionBusyError",
+    });
+  });
+
   it("switches a session's model", async () => {
     const model = { id: "gpt-5", providerID: "openai", variant: "high" };
     await client.switchModel("ses_1", model, "/w/x");

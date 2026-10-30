@@ -246,6 +246,24 @@ export const toTranscript = (newestFirst: RawMessage[]): TranscriptMessage[] =>
     .filter((m): m is TranscriptMessage => m !== undefined);
 
 /**
+ * The messages a revert staged at `messageId` leaves, newest first, and how many transcript messages it hides: the
+ * boundary and every message after it. When the boundary is older than the messages read, all of them are hidden.
+ */
+export const cutAtRevert = (
+  newestFirst: RawMessage[],
+  messageId: string
+): { visible: RawMessage[]; hidden: number } => {
+  const at = newestFirst.findIndex((m) => m.id === messageId);
+  const cutOff = at === -1 ? newestFirst.length : at + 1;
+  return {
+    hidden: newestFirst
+      .slice(0, cutOff)
+      .filter((m) => toTranscriptMessage(m) !== undefined).length,
+    visible: newestFirst.slice(cutOff),
+  };
+};
+
+/**
  * The transcript with the task briefing first, when the session's instruction entries hold one. opencode adds no
  * message for an entry set before the first prompt, so the row comes from the entry itself.
  */

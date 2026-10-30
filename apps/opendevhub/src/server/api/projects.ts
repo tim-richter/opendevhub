@@ -430,6 +430,21 @@ export const createProjectsRoutes = (deps: DashboardDeps) => {
         )
       )
     )
+    .post(
+      "/api/projects/:id/sessions/:sid/checkpoint",
+      validateJson(bodies.checkpoint),
+      (c) =>
+        ok(c, (id) =>
+          hub.sessions.restoreCheckpoint(
+            id,
+            c.req.param("sid") ?? "",
+            c.req.valid("json").messageId
+          )
+        )
+    )
+    .delete("/api/projects/:id/sessions/:sid/checkpoint", (c) =>
+      ok(c, (id) => hub.sessions.redoCheckpoint(id, c.req.param("sid") ?? ""))
+    )
     .post("/api/projects/:id/sessions/:sid/task-conversation", (c) =>
       json(c, (id) =>
         hub.sessions.startTaskConversation(id, c.req.param("sid") ?? "")

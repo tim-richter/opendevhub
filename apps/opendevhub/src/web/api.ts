@@ -968,6 +968,31 @@ export const killShell = async (
   );
 };
 
+/** Rewinds a session and its checkout's files to before user message `messageId`, until the next message or a redo. */
+export const restoreCheckpoint = async (
+  projectId: string,
+  sessionId: string,
+  messageId: string
+) => {
+  await complete(
+    project.sessions[":sid"].checkpoint.$post({
+      json: { messageId },
+      param: { ...projectParam(projectId), sid: encodeURIComponent(sessionId) },
+    }),
+    "restore the checkpoint"
+  );
+};
+
+/** Clears a session's restored checkpoint, bringing back its messages and files. */
+export const redoCheckpoint = async (projectId: string, sessionId: string) => {
+  await complete(
+    project.sessions[":sid"].checkpoint.$delete({
+      param: { ...projectParam(projectId), sid: encodeURIComponent(sessionId) },
+    }),
+    "redo"
+  );
+};
+
 /** A session's turns, token usage and subagents. */
 export const fetchSessionDetail = (projectId: string, sessionId: string) =>
   read(

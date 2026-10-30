@@ -36,6 +36,14 @@ export interface RawSession {
   cost?: number;
   tokens?: RawTokens;
   outcome?: "succeeded" | "failed" | "interrupted";
+  /** A staged revert: messages from `messageID` on are rewound, and `files` were restored from the snapshot. */
+  revert?: RawRevert;
+}
+
+/** The fields of opencode's `Session.Revert` that opendevhub reads. */
+export interface RawRevert {
+  messageID: string;
+  files?: RawFileDiff[];
 }
 
 /** One piece of an assistant message: text, reasoning or a tool call. */
@@ -568,6 +576,49 @@ export class OpencodeClient {
       DIFF_TIMEOUT_MS
     );
     return result.data;
+  }
+
+  /**
+   * Stages a revert at user message `messageId`, or moves a staged one there, restoring the checkout's files from
+   * the turn's snapshot. opencode refuses with `SessionBusyError` while the session runs.
+   */
+  async stageRevert(
+    sessionId: string,
+    messageId: string,
+    directory?: string
+  ): Promise<RawRevert> {
+    const res = await this.request(
+      "POST",
+      `/api/session/${encodeURIComponent(sessionId)}/revert/stage`,
+      { files: true, messageID: messageId },
+      directory,
+      DIFF_TIMEOUT_MS
+    );
+    const staged = (await res.json()) as {
+      data?: RawRevert;
+    } & Partial<RawRevert>;
+    return (staged.data ?? staged) as RawRevert;
+  }
+
+  /** Clears the staged revert, bringing back its messages and the files as they were before the first stage. */
+  clearRevert(sessionId: string, directory?: string): Promise<void> {
+    return this.send(
+      "DELETE",
+      `/api/session/${encodeURIComponent(sessionId)}/revert`,
+      undefined,
+      directory,
+      DIFF_TIMEOUT_MS
+    );
+  }
+
+  /** Makes the staged revert permanent, dropping its messages. */
+  commitRevert(sessionId: string, directory?: string): Promise<void> {
+    return this.send(
+      "POST",
+      `/api/session/${encodeURIComponent(sessionId)}/revert/commit`,
+      undefined,
+      directory
+    );
   }
 
   /**

@@ -4,6 +4,7 @@ import type { RawMessage } from "../../../src/server/opencode/client";
 import {
   PART_CHARS,
   TOOL_OUTPUT_CHARS,
+  cutAtRevert,
   subagentsOf,
   toSessionTurns,
   toTranscript,
@@ -397,5 +398,34 @@ describe(withBriefing, () => {
       type: "system",
     } as RawMessage;
     expect(toTranscript([system])).toStrictEqual([]);
+  });
+});
+
+describe(cutAtRevert, () => {
+  const newestFirst: RawMessage[] = [
+    { id: "msg_6", type: "assistant", time: { created: 60 } },
+    { id: "msg_5", type: "system", text: "note" } as RawMessage,
+    {
+      id: "msg_4",
+      type: "user",
+      text: "switch to Redux",
+      time: { created: 40 },
+    },
+    { id: "msg_3", type: "assistant", time: { created: 30 } },
+    { id: "msg_2", type: "user", text: "add dark mode", time: { created: 20 } },
+  ];
+
+  it("cuts at the boundary message, inclusive, counting only transcript messages", () => {
+    const { visible, hidden } = cutAtRevert(newestFirst, "msg_4");
+    expect(visible.map((m) => m.id)).toStrictEqual(["msg_3", "msg_2"]);
+    expect(hidden).toBe(2);
+    expect(toSessionTurns(visible).map((t) => t.id)).toStrictEqual(["msg_2"]);
+  });
+
+  it("hides every message read when the boundary is older than them", () => {
+    expect(cutAtRevert(newestFirst, "msg_1")).toStrictEqual({
+      hidden: 4,
+      visible: [],
+    });
   });
 });

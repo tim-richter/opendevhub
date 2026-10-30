@@ -347,6 +347,7 @@ export const bodies = {
   }),
   session: directory.extend({ title: text, prompt: text }),
   prompt: z.object({ text }),
+  checkpoint: z.object({ messageId: z.string().min(1).max(255) }),
   composerSend,
   chat: z.object({
     target: z.discriminatedUnion("kind", [

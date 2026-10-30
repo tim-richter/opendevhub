@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { USER } from "../../../src/server/db/events";
 import {
   AlreadyAnsweredError,
+  ConflictError,
   NotFoundError,
   UnavailableError,
 } from "../../../src/server/errors";
@@ -64,6 +65,101 @@ describe("removeSession", () => {
     await expect(
       s.hub.sessions.removeSession(project.id, "nope")
     ).rejects.toThrow(NotFoundError);
+  });
+});
+
+describe("checkpoints", () => {
+  const idle = {
+    id: "ses_1",
+    projectId: project.id,
+    title: "Idle one",
+    directory: "/workspaces/demo",
+    updatedAt: 1,
+    status: "idle" as const,
+  };
+
+  it("leaves a staged revert's messages out of the detail and says what it restored", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.store.setSessions(project.id, [idle]);
+    s.client.messages.mockResolvedValue([
+      { id: "msg_4", type: "assistant", time: { created: 4 } },
+      { id: "msg_3", type: "user", text: "use Redux", time: { created: 3 } },
+      { id: "msg_2", type: "assistant", time: { created: 2 } },
+      { id: "msg_1", type: "user", text: "dark mode", time: { created: 1 } },
+    ]);
+    s.client.session.mockResolvedValue({
+      id: "ses_1",
+      location: { directory: "/workspaces/demo" },
+      revert: {
+        files: [
+          {
+            additions: 3,
+            deletions: 1,
+            file: "store.ts",
+            patch: "",
+            status: "modified",
+          },
+        ],
+        messageID: "msg_3",
+      },
+      time: { created: 1, updated: 1 },
+    });
+    const detail = await s.hub.sessions.sessionDetail(project.id, "ses_1");
+    expect(detail.transcript.map((m) => m.id)).toStrictEqual([
+      "msg_1",
+      "msg_2",
+    ]);
+    expect(detail.turns.map((t) => t.id)).toStrictEqual(["msg_1"]);
+    expect(detail.revert).toStrictEqual({
+      files: [{ additions: 3, deletions: 1, path: "store.ts" }],
+      hidden: 2,
+      messageId: "msg_3",
+    });
+  });
+
+  it("stages and clears a revert through the session's opencode, reconciling after", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.store.setSessions(project.id, [idle]);
+    const { reconciled } = s.monitors[0];
+    await s.hub.sessions.restoreCheckpoint(project.id, "ses_1", "msg_3");
+    expect(s.client.stageRevert).toHaveBeenCalledWith(
+      "ses_1",
+      "msg_3",
+      "/workspaces/demo"
+    );
+    await s.hub.sessions.redoCheckpoint(project.id, "ses_1");
+    expect(s.client.clearRevert).toHaveBeenCalledWith(
+      "ses_1",
+      "/workspaces/demo"
+    );
+    expect(s.monitors[0].reconciled).toBe(reconciled + 2);
+    await expect(
+      s.hub.sessions.redoCheckpoint(project.id, "nope")
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it("says the agent is still working when opencode refuses a busy session", async () => {
+    const s = setup();
+    await s.hub.environments.rescan();
+    await s.hub.environments.start(project.id);
+    s.store.setSessions(project.id, [idle]);
+    s.client.stageRevert.mockRejectedValue(
+      new OpencodeHttpError(
+        409,
+        "/api/session/ses_1/revert/stage",
+        "SessionBusyError"
+      )
+    );
+    await expect(
+      s.hub.sessions.restoreCheckpoint(project.id, "ses_1", "msg_3")
+    ).rejects.toThrow(ConflictError);
+    await expect(
+      s.hub.sessions.restoreCheckpoint(project.id, "ses_1", "msg_3")
+    ).rejects.toThrow(/still working/u);
   });
 });
 

@@ -38,6 +38,7 @@ import type {
   OpencodeEndpoint,
   RawAgent,
   RawCommand,
+  RawFileDiff,
   RawMessage,
   RawModel,
   RawSession,
@@ -728,6 +729,14 @@ export function setup(
       async (_sid: string, _key: string, _value: unknown, _dir?: string) => {}
     ),
     interrupt: vi.fn(async (_sid: string, _dir?: string) => {}),
+    stageRevert: vi.fn(
+      async (_sid: string, messageId: string, _dir?: string) => ({
+        files: [] as RawFileDiff[],
+        messageID: messageId,
+      })
+    ),
+    clearRevert: vi.fn(async (_sid: string, _dir?: string) => {}),
+    commitRevert: vi.fn(async (_sid: string, _dir?: string) => {}),
     switchModel: vi.fn(
       async (_sid: string, _model: ModelRef, _dir?: string) => {}
     ),
