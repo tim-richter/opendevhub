@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 
 import type { ReviewMode } from "../../shared/types";
 import { InvalidNodeError, InvalidRootError } from "../config";
+import { ApprovalRequiredError } from "../environments/approvals";
 import { CommandError } from "../environments/containers";
 import { EditorUnavailableError } from "../environments/editors";
 import {
@@ -99,6 +100,14 @@ export const errorResponse = (c: Context, error: unknown) =>
       error: error instanceof Error ? error.message : String(error),
       ...(error instanceof CommandError && error.tail.length > 0
         ? { log: error.tail }
+        : {}),
+      ...(error instanceof ApprovalRequiredError
+        ? {
+            approval: {
+              changes: error.changes,
+              fingerprint: error.fingerprint,
+            },
+          }
         : {}),
     },
     errorStatus(error)

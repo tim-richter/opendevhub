@@ -12,11 +12,13 @@ import type {
 import type { ProjectAppearance } from "../shared/project-appearance";
 import type {
   AppPreferences,
+  NodeId,
   ProjectLinks,
   ProjectTeamView,
   SettingsScope,
 } from "../shared/types";
 import { createActivityRoutes } from "./api/activity";
+import { createCliRoutes } from "./api/cli";
 import { createCoreRoutes } from "./api/core";
 import { createForgejoRoutes } from "./api/forgejo";
 import { errorResponse } from "./api/helpers";
@@ -39,6 +41,7 @@ import type { GitSetupProbe } from "./git/setup";
 import type { Forgejo } from "./integrations/forgejo";
 import type { Jira } from "./integrations/jira";
 import type { Nodes } from "./nodes/registry";
+import type { SshTarget } from "./nodes/ssh";
 import type { Push } from "./notifications/push";
 import type { OcrService } from "./ocr/service";
 import type { OcrSettingsStore } from "./ocr/settings";
@@ -76,6 +79,8 @@ export interface DashboardHub {
     | "rebuildEnv"
     | "restartEnvOpencode"
     | "removeEnv"
+    | "cliTarget"
+    | "cliEnvs"
   >;
   checkouts: Pick<
     Checkouts,
@@ -212,6 +217,8 @@ export interface DashboardDeps {
   usage?: Pick<UsageStore, "report">;
   /** Absent in tests that don't need it. */
   nodes?: Pick<Nodes, "add" | "remove">;
+  /** A remote node's ssh target while it's online, for the CLI to exec through; absent in tests that don't need it. */
+  nodeSsh?: (id: NodeId) => SshTarget | undefined;
   forgejo?: Pick<
     Forgejo,
     | "view"
@@ -308,6 +315,7 @@ export const createDashboardApp = (deps: DashboardDeps) => {
 
   const api = app
     .route("/", createActivityRoutes(deps))
+    .route("/", createCliRoutes(deps))
     .route("/", createCoreRoutes(deps))
     .route("/", createForgejoRoutes(deps))
     .route("/", createJiraRoutes(deps))

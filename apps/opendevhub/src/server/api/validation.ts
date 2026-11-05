@@ -58,6 +58,12 @@ const webUrl = z
   .max(2000)
   .refine((value) => /^https?:\/\//iu.test(value) && URL.canParse(value));
 const flag = z.boolean().optional();
+/** An absolute folder on this machine, as the CLI sends its working directory. */
+const hostFolder = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => value.startsWith("/") && !value.includes("\0"));
 // Only literal true enables these options; preserve the existing conservative coercion.
 const actionFlag = z
   .unknown()
@@ -518,6 +524,12 @@ export const queries = {
     branch: z.string().max(250).optional(),
     fetch: z.enum(["0", "1"]).optional(),
   }),
+  /** The CLI's folder on this machine and, optionally, the environment it names. */
+  cliTarget: z.object({
+    dir: hostFolder,
+    name: z.string().min(1).max(250).optional(),
+  }),
+  cliEnvs: z.object({ dir: hostFolder }),
   /** An environment's log: one source, its last `lines` lines (at most 2000). */
   envLogs: z.object({
     source: z.enum(["setup", "container", "opencode"]).default("setup"),

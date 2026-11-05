@@ -88,6 +88,11 @@ import { projectName, projectTeamView } from "./projects/team-view";
 import { startServer } from "./server";
 import { UsageStore, trackUsage } from "./sessions/usage";
 import { Specs } from "./specs/specs";
+import {
+  isTerminalCommand,
+  runTerminalCommand,
+  terminalSetup,
+} from "./terminal-cli";
 import { startDevUi } from "./vite-dev";
 
 const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
@@ -99,6 +104,12 @@ const USAGE = `Usage: opendevhub [--port <n>] [--no-open]
 Dashboard access:
   opendevhub open [--no-open]   Print and open the dashboard link of a running opendevhub
   opendevhub token --reset      Replace the access token; every browser needs the new link
+
+From your own terminal (needs a running opendevhub; the target is a branch or env id, else this folder's):
+  opendevhub ls                              List this project's environments
+  opendevhub up [target]                     Start an environment
+  opendevhub attach [target] [--shell <s>]   Start if needed and open a shell in it (bash, zsh, sh, fish)
+  opendevhub exec [target] -- <command…>     Run one command in a running environment
 
 Remote nodes:
   opendevhub nodes add <ssh-destination> [--label <name>]
@@ -330,6 +341,16 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
   }
   if (argv[0] === "token") {
     process.exitCode = runTokenCommand(argv.slice(1), dirs, console);
+    return;
+  }
+  if (isTerminalCommand(argv[0])) {
+    const { io, deps } = terminalSetup(dirs);
+    process.exitCode = await runTerminalCommand(
+      argv[0],
+      argv.slice(1),
+      io,
+      deps
+    );
     return;
   }
   let opts: CliOptions;
@@ -633,6 +654,10 @@ export const main = async (argv = process.argv.slice(2)): Promise<void> => {
       settings: projectSettings,
       team: teamSettings,
     }),
+    nodeSsh: (id) => {
+      const conn = nodes.connection(id);
+      return conn?.online ? conn.target : undefined;
+    },
     gitSetup: new GitSetupProbe({
       projects: () => store.projects(),
       run: spawnRunner,

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 import { Hono } from "hono";
@@ -6,7 +7,12 @@ import { WebSocket } from "ws";
 
 const fake = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock(import("node-pty"), () => ({ spawn: fake.spawn }));
-import { terminalCommand } from "../../../src/server/environments/terminals";
+import {
+  execCommand,
+  inDirectory,
+  shellCommand,
+  terminalCommand,
+} from "../../../src/server/environments/terminals";
 import { startServer } from "../../../src/server/server";
 import { testAccess } from "../../helpers/access";
 
@@ -306,5 +312,113 @@ describe("terminal routing", () => {
     server = undefined;
     expect(pty.kill).toHaveBeenCalledOnce();
     second.ws.terminate();
+  });
+});
+
+describe("CLI exec commands", () => {
+  const target = { containerId: "c", env: { A: "1" }, user: "dev" };
+
+  it("runs a command locally with or without a TTY", () => {
+    expect(
+      execCommand(target, "/w", ["jq", "."], { tty: false, term: "xterm" })
+    ).toStrictEqual({
+      args: [
+        "exec",
+        "-i",
+        "-w",
+        "/w",
+        "-e",
+        "A=1",
+        "-u",
+        "dev",
+        "c",
+        "jq",
+        ".",
+      ],
+      file: "docker",
+    });
+    expect(
+      execCommand(target, "/w", ["zsh", "-i"], {
+        tty: true,
+        term: "tmux-256color",
+      }).args
+    ).toStrictEqual([
+      "exec",
+      "-it",
+      "-e",
+      "TERM=tmux-256color",
+      "-w",
+      "/w",
+      "-e",
+      "A=1",
+      "-u",
+      "dev",
+      "c",
+      "zsh",
+      "-i",
+    ]);
+  });
+
+  it("wraps the command in ssh for a remote node, with a TTY only when asked", () => {
+    const ssh = { control: "/socket", dest: "tim@box" };
+    const piped = execCommand(
+      { ...target, ssh },
+      "/w",
+      ["sh", "-c", "exit 3"],
+      {
+        tty: false,
+      }
+    );
+    expect(piped.file).toBe("ssh");
+    expect(piped.args).toContain("-T");
+    expect(piped.args).not.toContain("-tt");
+    expect(piped.args.at(-1)).toBe(
+      "docker exec -i -w /w -e A=1 -u dev c sh -c 'exit 3'"
+    );
+    const attached = execCommand({ ...target, ssh }, "/w", ["bash", "-i"], {
+      tty: true,
+    });
+    expect(attached.args).toContain("-tt");
+    expect(attached.args.slice(0, 4)).toStrictEqual([
+      "-S",
+      "/socket",
+      "-o",
+      "BatchMode=yes",
+    ]);
+  });
+
+  it("uses --shell as given and refuses others", () => {
+    expect(shellCommand("fish", "/bin/zsh")).toStrictEqual(["fish", "-i"]);
+    expect(() => shellCommand("python", undefined)).toThrow(
+      /Unsupported shell/u
+    );
+  });
+
+  it("prefers the host shell by name, falling back to bash for unknown ones", () => {
+    expect(shellCommand(undefined, "/usr/bin/zsh").at(-1)).toBe("zsh");
+    expect(shellCommand(undefined, "/opt/bin/nu").at(-1)).toBe("bash");
+    expect(shellCommand(undefined, undefined).at(-1)).toBe("bash");
+  });
+
+  it("falls back from a missing shell to bash, then sh", () => {
+    const [file, ...args] = shellCommand(undefined, undefined);
+    const run = (first: string) =>
+      spawnSync(file, [...args.slice(0, -1), first], {
+        encoding: "utf8",
+        input: 'echo "shell=$0"\n',
+      }).stdout;
+    expect(run("no-such-shell")).toMatch(/shell=bash/u);
+  });
+
+  it("starts in the folder when it exists, and in the working directory otherwise", () => {
+    const pwd = (dir: string) => {
+      const [file, ...args] = inDirectory(dir, ["pwd"]);
+      return spawnSync(file, args, {
+        cwd: "/",
+        encoding: "utf8",
+      }).stdout.trim();
+    };
+    expect(pwd("/tmp")).toBe("/tmp");
+    expect(pwd("/no/such/folder")).toBe("/");
   });
 });

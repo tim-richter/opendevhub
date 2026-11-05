@@ -14,6 +14,7 @@ import {
 import type { ResolvedPersonalization } from "../../shared/personalization";
 import type {
   ConfigApprovalSource,
+  ContainerState,
   EnvId,
   EnvLogs,
   EnvLogSource,
@@ -99,6 +100,7 @@ import type {
   Kit,
   MonitorHandle,
 } from "./ports";
+import type { TerminalTarget } from "./terminals";
 
 const RELAY_RECOVERY_INTERVAL_MS = 30_000;
 const GIT_WAIT_MS = 200;
@@ -119,6 +121,26 @@ rm -f "$s"
 if [ "$rc" -eq 0 ]; then mkdir -p "\${m%/*}" && touch "$m"; fi
 exit "$rc"`;
 
+const HEAD_BRANCH = /^ref: refs\/heads\/(?<branch>.+)$/u;
+
+/** `dir` relative to `base` as a POSIX path ("" for `base` itself), or undefined when it's outside. */
+const relativeInside = (base: string, dir: string): string | undefined => {
+  const rel = path.relative(base, dir);
+  if (rel === "") {
+    return "";
+  }
+  if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    return undefined;
+  }
+  return rel.split(path.sep).join("/");
+};
+
+/** A host folder as recorded and, when it differs, as the CLI's `realpath` gives it (symlinked roots). */
+const hostAliases = async (host: string): Promise<string[]> => {
+  const real = await fs.realpath(host).catch(() => host);
+  return real === host ? [host] : [host, real];
+};
+
 /**
  * One devcontainer with its opencode, relay, route, port forwards and monitor. A project's main
  * environment has the project's id and the project's container; a task environment serves one worktree.
@@ -135,6 +157,40 @@ export interface Env {
 }
 
 export type TaskEnv = Env & { worktree: EnvWorktree };
+
+/** One of a project's environments as `opendevhub ls` lists it; a main environment's id is its project's. */
+export interface CliEnv {
+  envId: EnvId;
+  main: boolean;
+  branch?: string;
+  node: NodeId;
+  state: ContainerState;
+  /** A start, stop or rebuild is running. */
+  busy: boolean;
+  error?: string;
+}
+
+/** The environment `opendevhub attach`/`exec`/`up` act on, and how to get into it while it runs. */
+export interface CliTarget extends CliEnv {
+  projectId: ProjectId;
+  projectName: string;
+  /** Present when running; `ssh` is the API's to add for a remote node. */
+  exec?: Omit<TerminalTarget, "ssh"> & {
+    /** The container folder matching the host folder the CLI runs in. */
+    directory: string;
+    /** The checkout's root, for when `directory` doesn't exist in the container. */
+    root: string;
+  };
+}
+
+/** A host folder that maps to a container folder of one environment. */
+interface HostCheckout {
+  env: Env;
+  host: string;
+  container: string;
+  /** The checkout the container folder belongs to. */
+  root: string;
+}
 
 /** A line of a project's log: the environment that wrote it, when, and (for a task environment) its branch. */
 interface LogEntry {
@@ -550,7 +606,50 @@ export class Environments {
   async terminalTarget(id: ProjectId, directory: string) {
     const project = this.requireProject(id);
     this.checkDirectory(id, directory);
-    const env = this.envForDirectory(project, directory);
+    return await this.shellTarget(this.envForDirectory(project, directory));
+  }
+
+  /**
+   * What `opendevhub attach`/`exec`/`up` act on: the environment named by `name` (env id or branch) in the project
+   * that holds the host folder `dir`, or else the one whose checkout holds `dir`. Remote environments have no folder
+   * on this machine, so only a name selects them.
+   */
+  async cliTarget(dir: string, name?: string): Promise<CliTarget> {
+    const found = await this.locate(dir);
+    const { project } = found;
+    const main = await this.mainBranch(project);
+    const env = name ? this.envNamed(project, name, main) : found.env;
+    const view = this.cliEnv(env, main);
+    const base = { ...view, projectId: project.id, projectName: project.name };
+    if (view.state !== "running") {
+      return base;
+    }
+    const here = env.id === found.env.id;
+    const root = here ? found.root : this.envDirectory(env);
+    return {
+      ...base,
+      exec: {
+        ...(await this.shellTarget(env)),
+        directory: here ? found.directory : root,
+        root,
+      },
+    };
+  }
+
+  /** The environments of the project that holds the host folder `dir`, main environment first. */
+  async cliEnvs(
+    dir: string
+  ): Promise<{ projectId: ProjectId; projectName: string; envs: CliEnv[] }> {
+    const { project } = await this.locate(dir);
+    const main = await this.mainBranch(project);
+    return {
+      envs: this.projectEnvs(project).map((env) => this.cliEnv(env, main)),
+      projectId: project.id,
+      projectName: project.name,
+    };
+  }
+
+  private async shellTarget(env: Env) {
     const rt = this.deps.store.runtime(env.id);
     if (rt.containerState !== "running" || !rt.containerId) {
       throw new UnavailableError(
@@ -1706,6 +1805,144 @@ export class Environments {
         throw new Error("discarded while it waited for approval");
       }
     }
+  }
+
+  /** The project, environment and container folder of a host folder; the deepest checkout holding it wins. */
+  private async locate(
+    dir: string
+  ): Promise<{ project: Project; env: Env; directory: string; root: string }> {
+    let best: { checkout: HostCheckout; rest: string } | undefined;
+    for (const project of this.deps.store.projects()) {
+      for (const checkout of this.hostCheckouts(project)) {
+        for (const host of await hostAliases(checkout.host)) {
+          const rest = relativeInside(host, dir);
+          if (
+            rest !== undefined &&
+            (!best || host.length > best.checkout.host.length)
+          ) {
+            best = { checkout: { ...checkout, host }, rest };
+          }
+        }
+      }
+    }
+    if (!best) {
+      const error = new NotFoundError(dir, "folder");
+      error.message = `${dir} is not inside a project opendevhub knows; add the project in the dashboard`;
+      throw error;
+    }
+    const { checkout, rest } = best;
+    return {
+      directory: rest
+        ? path.posix.join(checkout.container, rest)
+        : checkout.container,
+      env: checkout.env,
+      project: checkout.env.project,
+      root: checkout.root,
+    };
+  }
+
+  /** Where a project's checkouts are on this machine: its folder, its worktrees, and their own environments'. */
+  private hostCheckouts(project: Project): HostCheckout[] {
+    const main = this.mainEnv(project);
+    const ws = this.workspaceFolder(project);
+    const rt = this.deps.store.runtime(project.id);
+    const root = rt.worktreeRoot ?? worktreeRoot(project.path, ws, false);
+    const own = this.deps.store
+      .environments(project.id)
+      .filter((rec) => (rec.node ?? LOCAL_NODE) === LOCAL_NODE)
+      .map((rec) => ({
+        container: rec.worktree.path,
+        env: this.taskEnv(project, rec),
+        host: rec.worktree.hostPath,
+        root: rec.worktree.path,
+      }));
+    const shared = (rt.worktrees ?? []).flatMap((w) =>
+      w.hostPath && !w.node && !own.some((o) => o.host === w.hostPath)
+        ? [{ container: w.path, env: main, host: w.hostPath, root: w.path }]
+        : []
+    );
+    return [
+      ...own,
+      ...shared,
+      { container: ws, env: main, host: project.path, root: ws },
+      {
+        container: root.container,
+        env: main,
+        host: root.host,
+        root: ws,
+      },
+    ];
+  }
+
+  /** The environment whose id or branch is `name`; none or several fail with the candidates. */
+  private envNamed(
+    project: Project,
+    name: string,
+    main: string | undefined
+  ): Env {
+    const envs = this.projectEnvs(project);
+    const byId = envs.find((env) => env.id === name);
+    if (byId) {
+      return byId;
+    }
+    const matches = envs.filter((env) => this.branchOf(env, main) === name);
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    const list = (candidates: Env[]) =>
+      candidates
+        .map(
+          (env) => `  ${this.branchOf(env, main) ?? "(no branch)"}\t${env.id}`
+        )
+        .join("\n");
+    if (matches.length === 0) {
+      throw new NotFoundError(
+        `${name} in ${project.name}; its environments are:\n${list(envs)}`,
+        "environment"
+      );
+    }
+    throw new ConflictError(
+      `${name} matches ${matches.length} environments; name one by its id:\n${list(matches)}`
+    );
+  }
+
+  private projectEnvs(project: Project): Env[] {
+    return [
+      this.mainEnv(project),
+      ...this.deps.store
+        .environments(project.id)
+        .map((rec) => this.taskEnv(project, rec)),
+    ];
+  }
+
+  /** A task environment's branch, or `main`, the branch the main checkout has out. */
+  private branchOf(env: Env, main: string | undefined): string | undefined {
+    return env.worktree ? env.worktree.branch : main;
+  }
+
+  /**
+   * The branch the project's own folder has out, read from its `.git/HEAD` on this machine (git's worktree list,
+   * which the runtime keeps, leaves the main checkout out); undefined on a detached HEAD or without a repository.
+   */
+  private async mainBranch(project: Project): Promise<string | undefined> {
+    const head = await fs
+      .readFile(path.join(project.path, ".git", "HEAD"), "utf-8")
+      .catch(() => "");
+    return HEAD_BRANCH.exec(head.trim())?.groups?.branch;
+  }
+
+  private cliEnv(env: Env, main: string | undefined): CliEnv {
+    const rt = this.deps.store.runtime(env.id);
+    const branch = this.branchOf(env, main);
+    return {
+      busy: this.busy.has(env.id),
+      ...(branch ? { branch } : {}),
+      envId: env.id,
+      main: !env.worktree,
+      node: env.node,
+      state: rt.containerState,
+      ...(rt.error ? { error: rt.error } : {}),
+    };
   }
 
   private mainEnv(project: Project): Env {

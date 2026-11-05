@@ -1,0 +1,56 @@
+---
+title: Working from your own terminal
+description: Open a shell in an environment, or run a command there, from the terminal you already use.
+icon: SquareTerminal
+---
+
+The dashboard has a terminal, but you can also get into opendevhub's containers from your own terminal, with your keybindings, tmux and scrollback. These commands talk to the opendevhub running on this machine, so start it first with `opendevhub`. Forwarded ports, host ports and personalization work as usual, because opendevhub applies them, not the command.
+
+```bash
+opendevhub ls                              # this project's environments
+opendevhub up [target]                     # start one
+opendevhub attach [target] [--shell zsh]   # start it if needed and open a shell
+opendevhub exec [target] -- <command…>     # run one command in a running one
+```
+
+## Which environment
+
+Without a target, the folder you run the command in decides:
+
+- In a task's worktree that has its own container, you get that task's environment.
+- Anywhere else in the project, including a worktree that shares the main container, you get the project's main environment.
+
+A target names an environment by its branch or its env id, as `opendevhub ls` shows them. If a name matches more than one environment, the command lists them so you can pick one by id. The project still comes from the current folder, so run the command inside the project. A folder outside every project fails with a hint to add the project in the dashboard.
+
+The shell starts in the container folder that matches your current folder, for example `packages/ui` under the workspace folder. When that folder doesn't exist in the container, or you named a different environment, it starts at the checkout's root.
+
+## attach
+
+`opendevhub attach` opens an interactive shell as the container's user, with its `remoteEnv`. If the environment is stopped, it starts it first and prints the start log while it waits. Exiting the shell ends the command.
+
+Pick the shell with `--shell` (bash, zsh, sh or fish). Without it, you get your own shell (`$SHELL`) when the container has it, otherwise bash, otherwise sh.
+
+## exec
+
+`opendevhub exec -- <command…>` runs one command and exits with its exit code, so it works in scripts and pipes:
+
+```bash
+echo '{}' | opendevhub exec -- jq .
+opendevhub exec feat/login -- pnpm test
+```
+
+It allocates a terminal only when both input and output are one, so piped output has no terminal control characters. `exec` doesn't start a stopped environment; run `opendevhub up` first.
+
+## Starting and approvals
+
+`up` and `attach` start an environment the same way the dashboard's Start does, and the dashboard shows the start too. If its devcontainer.json has [host-affecting settings](/docs/access-and-approvals) that aren't approved, the command lists them with the dashboard link and exits without starting anything. Approve them in the dashboard, then run the command again.
+
+## Remote nodes
+
+Environments on [remote nodes](/docs/remote-nodes) have no folder on this machine, so name them: `opendevhub attach fix` or `opendevhub attach <env-id>`. The shell runs over opendevhub's ssh connection to the node, so the node has to be online.
+
+## Good to know
+
+- Shells opened this way aren't recorded and don't show in the dashboard's terminal tabs.
+- A shell keeps running if opendevhub stops, but forwarded ports stop until it's back.
+- For a shell that survives closing your terminal, use tmux: run `opendevhub attach` inside a tmux session on your side, or, if the container has tmux, `opendevhub exec -- tmux new -A -s main` to keep the session in the container.

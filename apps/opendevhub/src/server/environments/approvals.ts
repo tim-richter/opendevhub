@@ -12,15 +12,20 @@ import type { HostSurface } from "./config-surface";
 /** A container start that needs the user to approve its config's host-affecting settings first. */
 export class ApprovalRequiredError extends ConflictError {
   readonly fingerprint: string;
+  /** The settings to approve, as the API answers them so the CLI can list them. */
+  readonly changes: Pick<ConfigApprovalChange, "key" | "kind">[];
   constructor(pending: PendingConfigApproval) {
+    const changes = pending.changes
+      .filter((c) => c.kind !== "unchanged")
+      .map(({ key, kind }) => ({ key, kind }));
     super(
-      `its devcontainer config changes host-affecting settings (${pending.changes
-        .filter((c) => c.kind !== "unchanged")
+      `its devcontainer config changes host-affecting settings (${changes
         .map((c) => c.key)
         .join(", ")}): review and approve them on the project's banner`
     );
     this.name = "ApprovalRequiredError";
     this.fingerprint = pending.fingerprint;
+    this.changes = changes;
   }
 }
 

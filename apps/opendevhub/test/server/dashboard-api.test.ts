@@ -17,8 +17,10 @@ import {
 import { ProjectStore } from "../../src/server/db/projects";
 import { ProvenanceStore } from "../../src/server/db/provenance";
 import { TodoStore } from "../../src/server/db/todos";
+import { ApprovalRequiredError } from "../../src/server/environments/approvals";
 import { CommandError } from "../../src/server/environments/containers";
 import { EditorUnavailableError } from "../../src/server/environments/editors";
+import type { CliTarget } from "../../src/server/environments/environments";
 import {
   AlreadyAnsweredError,
   ConflictError,
@@ -159,6 +161,23 @@ function setup(webDir?: string) {
         })
       ),
       onLog: vi.fn(() => () => {}),
+      cliTarget: vi.fn(
+        async (_dir: string, _name?: string): Promise<CliTarget> => ({
+          branch: "main",
+          busy: false,
+          envId: project.id,
+          main: true,
+          node: "local",
+          projectId: project.id,
+          projectName: project.name,
+          state: "stopped",
+        })
+      ),
+      cliEnvs: vi.fn(async (_dir: string) => ({
+        envs: [],
+        projectId: project.id,
+        projectName: project.name,
+      })),
     },
     checkouts: {
       branches: vi.fn((_id: string) => [
@@ -3363,5 +3382,128 @@ describe("to-do endpoints", () => {
     expect((await setup().app.request("/api/projects/demo/todos")).status).toBe(
       412
     );
+  });
+});
+
+describe("CLI API", () => {
+  const running: CliTarget = {
+    busy: false,
+    envId: "box-env",
+    exec: {
+      containerId: "r1",
+      directory: "/workspaces/demo",
+      root: "/workspaces/demo",
+      user: "node",
+    },
+    main: false,
+    node: "box",
+    projectId: project.id,
+    projectName: project.name,
+    state: "running",
+  };
+
+  it("resolves a folder and an optional name to a target", async () => {
+    const { app, hub } = setup();
+    const res = await app.request(
+      `/api/cli/target?${new URLSearchParams({ dir: "/src/demo/ui", name: "feat" })}`
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ envId: project.id });
+    expect(hub.environments.cliTarget).toHaveBeenCalledWith(
+      "/src/demo/ui",
+      "feat"
+    );
+  });
+
+  it("refuses missing or relative folders", async () => {
+    const { app, hub } = setup();
+    expect((await app.request("/api/cli/target")).status).toBe(400);
+    expect((await app.request("/api/cli/target?dir=src")).status).toBe(400);
+    expect((await app.request("/api/cli/envs?dir=")).status).toBe(400);
+    expect(hub.environments.cliTarget).not.toHaveBeenCalled();
+  });
+
+  it("answers an unregistered folder with 404 and an ambiguous name with 409, listing the candidates", async () => {
+    const { app, hub } = setup();
+    hub.environments.cliTarget.mockRejectedValueOnce(
+      Object.assign(new NotFoundError("/elsewhere", "folder"), {
+        message:
+          "/elsewhere is not inside a project opendevhub knows; add the project in the dashboard",
+      })
+    );
+    const unknown = await app.request("/api/cli/target?dir=/elsewhere");
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({
+      error: expect.stringContaining("add the project in the dashboard"),
+    });
+    hub.environments.cliTarget.mockRejectedValueOnce(
+      new ConflictError(
+        "feat matches 2 environments; name one by its id:\n  feat\ta\n  feat\tb"
+      )
+    );
+    const ambiguous = await app.request(
+      "/api/cli/target?dir=/src/demo&name=feat"
+    );
+    expect(ambiguous.status).toBe(409);
+    expect(await ambiguous.json()).toMatchObject({
+      error: expect.stringContaining("feat\tb"),
+    });
+  });
+
+  it("adds a remote node's ssh target, or says the node is offline", async () => {
+    const deps = setup();
+    const ssh = { control: "/tmp/box.sock", dest: "tim@box" };
+    const nodeSsh = vi.fn((id: string) => (id === "box" ? ssh : undefined));
+    const app = createDashboardApp({ ...deps, nodeSsh });
+    deps.hub.environments.cliTarget.mockResolvedValueOnce(running);
+    const res = await app.request("/api/cli/target?dir=/src/demo&name=fix");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      exec: { containerId: "r1", ssh },
+    });
+    deps.hub.environments.cliTarget.mockResolvedValueOnce({
+      ...running,
+      node: "gone",
+    });
+    const offline = await app.request("/api/cli/target?dir=/src/demo&name=fix");
+    expect(offline.status).toBe(412);
+    expect(await offline.json()).toMatchObject({
+      error: "node gone is offline",
+    });
+  });
+
+  it("lists a folder's project environments", async () => {
+    const { app, hub } = setup();
+    const res = await app.request("/api/cli/envs?dir=/src/demo");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ projectId: project.id, envs: [] });
+    expect(hub.environments.cliEnvs).toHaveBeenCalledWith("/src/demo");
+  });
+
+  it("answers a start that needs approval with the settings to approve", async () => {
+    const { app, hub } = setup();
+    hub.environments.checkConfig.mockRejectedValueOnce(
+      new ApprovalRequiredError({
+        at: 1,
+        changes: [
+          { key: "runArgs", kind: "added" },
+          { key: "mounts", kind: "unchanged" },
+        ],
+        first: true,
+        fingerprint: "f".repeat(64),
+        sources: [{ kind: "main" }],
+        surface: {},
+      })
+    );
+    const res = await app.request(`/api/projects/${project.id}/start`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      approval: {
+        changes: [{ key: "runArgs", kind: "added" }],
+        fingerprint: "f".repeat(64),
+      },
+    });
   });
 });

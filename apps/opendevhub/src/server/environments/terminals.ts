@@ -17,27 +17,39 @@ export interface TerminalTarget {
   ssh?: SshTarget;
 }
 
-export const terminalCommand = (
+const SHELLS = ["bash", "zsh", "sh", "fish"];
+
+export interface ExecOptions {
+  /** `-it`, or `-i` when nothing drives a terminal (a pipe). */
+  tty: boolean;
+  /** TERM in the container; only set with a TTY. */
+  term?: string;
+}
+
+/** `docker exec` of `command` in the container, through the node's ssh connection for a remote one. */
+export const execCommand = (
   target: TerminalTarget,
   directory: string,
-  shell: string
+  command: string[],
+  { tty, term }: ExecOptions
 ) => {
-  if (!["bash", "zsh", "sh", "fish"].includes(shell)) {
-    throw new Error("Unsupported shell");
+  const args = ["exec", tty ? "-it" : "-i"];
+  if (tty && term) {
+    args.push("-e", `TERM=${term}`);
   }
-  const args = ["exec", "-it", "-e", "TERM=xterm-256color", "-w", directory];
+  args.push("-w", directory);
   for (const [k, v] of Object.entries(target.env ?? {})) {
     args.push("-e", `${k}=${v}`);
   }
   if (target.user) {
     args.push("-u", target.user);
   }
-  args.push(target.containerId, shell, "-i");
+  args.push(target.containerId, ...command);
   return target.ssh
     ? {
         args: [
           ...clientArgs(target.ssh),
-          "-tt",
+          tty ? "-tt" : "-T",
           target.ssh.dest,
           remoteCommand("docker", args),
         ],
@@ -45,6 +57,55 @@ export const terminalCommand = (
       }
     : { args, file: "docker" };
 };
+
+/** The dashboard's shell: one of the allowed shells, interactive, for xterm.js. */
+export const terminalCommand = (
+  target: TerminalTarget,
+  directory: string,
+  shell: string
+) => {
+  if (!SHELLS.includes(shell)) {
+    throw new Error("Unsupported shell");
+  }
+  return execCommand(target, directory, [shell, "-i"], {
+    term: "xterm-256color",
+    tty: true,
+  });
+};
+
+/**
+ * An interactive shell for `opendevhub attach`: `shell` when given, else the host's `$SHELL` by name when the
+ * container has it, else bash, else sh.
+ */
+export const shellCommand = (
+  shell: string | undefined,
+  hostShell: string | undefined
+): string[] => {
+  if (shell !== undefined) {
+    if (!SHELLS.includes(shell)) {
+      throw new Error(`Unsupported shell ${shell}; use ${SHELLS.join(", ")}`);
+    }
+    return [shell, "-i"];
+  }
+  const name = hostShell?.split("/").at(-1) ?? "";
+  return [
+    "sh",
+    "-c",
+    'for s in "$1" bash sh; do command -v "$s" >/dev/null 2>&1 && exec "$s" -i; done; echo "no shell found" >&2; exit 127',
+    "sh",
+    SHELLS.includes(name) ? name : "bash",
+  ];
+};
+
+/** Runs `command` in `directory`, staying in the working directory when the container has no such folder. */
+export const inDirectory = (directory: string, command: string[]): string[] => [
+  "sh",
+  "-c",
+  'cd -- "$1" 2>/dev/null; shift; exec "$@"',
+  "sh",
+  directory,
+  ...command,
+];
 
 interface Session {
   pty: IPty;
