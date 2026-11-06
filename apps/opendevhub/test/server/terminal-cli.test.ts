@@ -218,6 +218,10 @@ describe(runTerminalCommand, () => {
     expect(args.slice(args.indexOf("c1") + 1)).toEqual([
       "sh",
       "-c",
+      expect.stringContaining("export TERM=xterm-256color"),
+      "sh",
+      "sh",
+      "-c",
       expect.stringContaining('cd -- "$1"'),
       "sh",
       "/workspaces/demo/ui",
@@ -254,6 +258,17 @@ describe(runTerminalCommand, () => {
     expect(await h.exec("attach", ["--shell", "bash"])).toBe(0);
     expect(h.calls).toEqual(["GET /api/cli/target?dir=%2Fsrc%2Fdemo%2Fui"]);
     expect(h.run.mock.calls[0][1].slice(-2)).toEqual(["bash", "-i"]);
+  });
+
+  it("needs no terminfo check when the terminal is already the default", async () => {
+    const h = harness(
+      { "GET /api/cli/target": [json(running)] },
+      { env: { TERM: "xterm-256color" } }
+    );
+    await h.exec("exec", ["fix", "--", "ls"]);
+    const args = h.run.mock.calls[0][1];
+    expect(args).toContain("TERM=xterm-256color");
+    expect(args.join(" ")).not.toContain("export TERM");
   });
 
   it("lists the unapproved settings and the dashboard link, and fails", async () => {

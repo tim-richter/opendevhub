@@ -88,7 +88,12 @@ Without a target argument, the CLI SHALL resolve the environment from the curren
 
 ### Requirement: Attaching opens a real shell in the user's terminal
 
-`opendevhub attach` SHALL run `docker exec` itself with an interactive TTY, as the container's remote user and with its `remoteEnv`, and SHALL wait for it to exit. For an environment on a remote node it SHALL run the same command through the node's ssh connection. The shell SHALL start in the container folder that matches the current host folder when the current folder is inside the environment's checkout, and in the checkout's root otherwise. The shell SHALL be the one given with `--shell` (bash, zsh, sh or fish). Without `--shell`, it SHALL be the host `$SHELL`'s name if that shell exists in the container, otherwise bash, otherwise sh.
+`opendevhub attach` SHALL run `docker exec` itself with an interactive TTY, as the container's remote user and with its `remoteEnv`, and SHALL wait for it to exit. For an environment on a remote node it SHALL run the same command through the node's ssh connection. The shell SHALL start in the container folder that matches the current host folder when the current folder is inside the environment's checkout, and in the checkout's root otherwise. The shell SHALL be the one given with `--shell` (bash, zsh, sh or fish). Without `--shell`, it SHALL be the host `$SHELL`'s name if that shell exists in the container, otherwise bash, otherwise sh. A session with a TTY SHALL use the host's `TERM` when the container has terminfo for it, and `xterm-256color` otherwise.
+
+#### Scenario: Terminal unknown to the container
+
+- **WHEN** the user's `TERM` is `xterm-ghostty` and the container has no terminfo entry for it
+- **THEN** the shell runs with `TERM=xterm-256color`, so line editing and backspace work
 
 #### Scenario: Subfolder carried over
 

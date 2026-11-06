@@ -9,9 +9,11 @@ import { loadConfig } from "./config";
 import type { CliEnv, CliTarget } from "./environments/environments";
 import type { TerminalTarget } from "./environments/terminals";
 import {
+  DEFAULT_TERM,
   execCommand,
   inDirectory,
   shellCommand,
+  withKnownTerm,
 } from "./environments/terminals";
 
 export const TERMINAL_COMMANDS = ["attach", "up", "exec", "ls"] as const;
@@ -382,10 +384,14 @@ class Session {
     const exec: TerminalTarget = rest;
     const wrapped =
       directory === root ? command : inDirectory(directory, command);
-    const { file, args } = execCommand(exec, root, wrapped, {
-      term: this.io.env.TERM || "xterm-256color",
-      tty,
-    });
+    const term = this.io.env.TERM || DEFAULT_TERM;
+    const checkTerm = tty && term !== DEFAULT_TERM;
+    const { file, args } = execCommand(
+      exec,
+      root,
+      checkTerm ? withKnownTerm(wrapped) : wrapped,
+      { term, tty }
+    );
     return this.deps.run(file, args);
   }
 }

@@ -30,6 +30,8 @@ The shell starts in the container folder that matches your current folder, for e
 
 Pick the shell with `--shell` (bash, zsh, sh or fish). Without it, you get your own shell (`$SHELL`) when the container has it, otherwise bash, otherwise sh.
 
+The shell keeps your `$TERM` when the container has terminfo for it. Otherwise it uses `xterm-256color`, which is common with newer terminals such as Ghostty or Kitty.
+
 ## exec
 
 `opendevhub exec -- <command…>` runs one command and exits with its exit code, so it works in scripts and pipes:

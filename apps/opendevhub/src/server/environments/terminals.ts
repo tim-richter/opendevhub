@@ -19,6 +19,9 @@ export interface TerminalTarget {
 
 const SHELLS = ["bash", "zsh", "sh", "fish"];
 
+/** A TERM practically every container has terminfo for. */
+export const DEFAULT_TERM = "xterm-256color";
+
 export interface ExecOptions {
   /** `-it`, or `-i` when nothing drives a terminal (a pipe). */
   tty: boolean;
@@ -68,7 +71,7 @@ export const terminalCommand = (
     throw new Error("Unsupported shell");
   }
   return execCommand(target, directory, [shell, "-i"], {
-    term: "xterm-256color",
+    term: DEFAULT_TERM,
     tty: true,
   });
 };
@@ -104,6 +107,18 @@ export const inDirectory = (directory: string, command: string[]): string[] => [
   'cd -- "$1" 2>/dev/null; shift; exec "$@"',
   "sh",
   directory,
+  ...command,
+];
+
+/**
+ * Runs `command` with TERM as set when the container has terminfo for it, else with `DEFAULT_TERM`: a host TERM such
+ * as `xterm-ghostty` is rarely installed in a container, and without its entry zsh's backspace prints spaces.
+ */
+export const withKnownTerm = (command: string[]): string[] => [
+  "sh",
+  "-c",
+  `for d in "\${TERMINFO:-$HOME/.terminfo}" /etc/terminfo /lib/terminfo /usr/lib/terminfo /usr/share/terminfo; do [ -e "$d/$(printf %.1s "$TERM")/$TERM" ] && exec "$@"; done; export TERM=${DEFAULT_TERM}; exec "$@"`,
+  "sh",
   ...command,
 ];
 

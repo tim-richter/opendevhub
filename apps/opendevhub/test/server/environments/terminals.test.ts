@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +15,7 @@ import {
   inDirectory,
   shellCommand,
   terminalCommand,
+  withKnownTerm,
 } from "../../../src/server/environments/terminals";
 import { startServer } from "../../../src/server/server";
 import { testAccess } from "../../helpers/access";
@@ -420,5 +424,24 @@ describe("CLI exec commands", () => {
     };
     expect(pwd("/tmp")).toBe("/tmp");
     expect(pwd("/no/such/folder")).toBe("/");
+  });
+
+  it("keeps a TERM the container has terminfo for, and falls back otherwise", () => {
+    const terminfo = fs.mkdtempSync(path.join(os.tmpdir(), "terminfo-"));
+    fs.mkdirSync(path.join(terminfo, "x"));
+    fs.writeFileSync(path.join(terminfo, "x", "xterm-known"), "");
+    const term = (value: string) => {
+      const [file, ...args] = withKnownTerm(["sh", "-c", 'echo "$TERM"']);
+      return spawnSync(file, args, {
+        encoding: "utf8",
+        env: { ...process.env, TERM: value, TERMINFO: terminfo },
+      }).stdout.trim();
+    };
+    try {
+      expect(term("xterm-known")).toBe("xterm-known");
+      expect(term("xterm-unknown")).toBe("xterm-256color");
+    } finally {
+      fs.rmSync(terminfo, { force: true, recursive: true });
+    }
   });
 });
