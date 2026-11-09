@@ -14,7 +14,7 @@ A conversation SHALL be shown as a transcript of its messages, oldest at the top
 - reasoning, collapsed to a "Thinking" row that expands to the full text
 - each tool call as one row with the tool's name, its title when opencode gives one, and its status (running, done or failed)
 
-A failed assistant message SHALL show its error inline. A compaction SHALL be shown as a divider saying the conversation was compacted. When the session has messages older than those read, the top of the transcript SHALL say so and link to the conversation in opencode.
+A failed assistant message SHALL show its error inline. A compaction SHALL be shown as a divider saying the conversation was compacted. When the session has messages older than those read, the top of the transcript SHALL say so and link to the conversation in opencode. While a revert is staged, the transcript and the Turns panel SHALL leave out the message the revert is staged at and every message after it.
 
 #### Scenario: A back-and-forth
 
@@ -35,6 +35,11 @@ A failed assistant message SHALL show its error inline. A compaction SHALL be sh
 
 - **WHEN** a session has no messages yet
 - **THEN** the transcript says the conversation hasn't been prompted yet
+
+#### Scenario: Revert staged
+
+- **WHEN** a revert is staged at the second of four user messages
+- **THEN** the transcript shows only the first user message and the agent's reply to it, and the Turns panel lists only that turn
 
 ### Requirement: Composer at the bottom
 
